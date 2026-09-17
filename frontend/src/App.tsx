@@ -1,4 +1,4 @@
-import { useHealth } from '@/api/generated'
+import { useHealth } from '@/api/health/health'
 import { Button } from '@/components/ui/button'
 
 function App() {

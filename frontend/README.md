@@ -8,8 +8,9 @@ React 19 + TypeScript + Vite 8 + Tailwind CSS 4（shadcn/ui 组件）。API 层�
 
 | 路径 | 说明 |
 | --- | --- |
-| `src/api/generated.ts` | **生成物**，每个 OpenAPI operation 一组 `useXxx` / `getXxxQueryKey` / `getXxxQueryOptions`；禁止手改 |
-| `src/api/model/` | **生成物**，请求/响应/参数 TypeScript 类型；禁止手改 |
+| `src/api/<tag>/<tag>.ts` | **生成物**，按 OpenAPI tag（`me`、`projects`、`workspaces`、`internal` …）分目录，每个 operation 一组 `useXxx` / `getXxxQueryKey` / `getXxxQueryOptions`；禁止手改 |
+| `src/api/generated.schemas.ts` | **生成物**，全部请求/响应/参数 TypeScript 类型；禁止手改 |
+| `src/api/index.ts` | **生成物**，re-export 所有 tag 目录 |
 | `src/lib/api-client.ts` | 所有生成 hook 共用的 axios 实例（`AXIOS_INSTANCE`）与 mutator；鉴权头、拦截器、`baseURL` 在这里配 |
 | `orval.config.ts` | 生成配置：输入 `../api/openapi.json`，`client: 'react-query'`，`clean: true` |
 | `vite.config.ts` | `@` → `src` 别名；dev 代理 `/api`、`/internal`、`/healthz` 到 `http://localhost:8080` |

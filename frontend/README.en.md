@@ -8,8 +8,9 @@ React 19 + TypeScript + Vite 8 + Tailwind CSS 4 (shadcn/ui components). The API 
 
 | Path | Purpose |
 | --- | --- |
-| `src/api/generated.ts` | **Generated.** One `useXxx` / `getXxxQueryKey` / `getXxxQueryOptions` set per OpenAPI operation; never edit by hand |
-| `src/api/model/` | **Generated.** Request, response, and parameter TypeScript types; never edit by hand |
+| `src/api/<tag>/<tag>.ts` | **Generated.** One directory per OpenAPI tag (`me`, `projects`, `workspaces`, `internal`, …), with a `useXxx` / `getXxxQueryKey` / `getXxxQueryOptions` set per operation; never edit by hand |
+| `src/api/generated.schemas.ts` | **Generated.** All request, response, and parameter TypeScript types; never edit by hand |
+| `src/api/index.ts` | **Generated.** Re-exports every tag directory |
 | `src/lib/api-client.ts` | The axios instance (`AXIOS_INSTANCE`) and mutator shared by every generated hook; auth headers, interceptors, and `baseURL` go here |
 | `orval.config.ts` | Generator config: input `../api/openapi.json`, `client: 'react-query'`, `clean: true` |
 | `vite.config.ts` | `@` → `src` alias; dev proxy for `/api`, `/internal`, `/healthz` to `http://localhost:8080` |

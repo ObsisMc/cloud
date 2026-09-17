@@ -6,9 +6,8 @@ export default defineConfig({
       target: '../api/openapi.json',
     },
     output: {
-      mode: 'single',
+      mode: 'tags-split',
       target: 'src/api/generated.ts',
-      schemas: 'src/api/model',
       client: 'react-query',
       httpClient: 'axios',
       baseUrl: false,

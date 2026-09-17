@@ -138,7 +138,7 @@ func Document() map[string]any {
 		for _, code := range []string{"400", "401", "403", "404", "409", "428", "500"} {
 			responses[code] = obj{"description": errorDescription(code), "content": obj{"application/json": obj{"schema": ref("Error")}}}
 		}
-		operation := obj{"operationId": strings.ToLower(r.Method) + strings.NewReplacer("/", "_", ":", "").Replace(r.Path), "summary": summary(r), "description": description, "security": security, "responses": responses}
+		operation := obj{"operationId": strings.ToLower(r.Method) + strings.NewReplacer("/", "_", ":", "").Replace(r.Path), "tags": []string{tag(r)}, "summary": summary(r), "description": description, "security": security, "responses": responses}
 		if public && (r.Method == "POST" || r.Method == "DELETE") {
 			parameters = append(parameters, obj{"name": "Idempotency-Key", "in": "header", "required": true, "schema": obj{"type": "string", "minLength": 1, "maxLength": 200}, "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409."})
 		}
@@ -164,8 +164,26 @@ func Document() map[string]any {
 		}
 		asObject(paths[path])[strings.ToLower(r.Method)] = operation
 	}
-	paths["/healthz"] = obj{"get": obj{"operationId": "health", "summary": "PostgreSQL readiness", "responses": obj{"200": obj{"description": "Database reachable", "content": obj{"application/json": obj{"schema": object(obj{"status": enumeration("ok")}, "status")}}}, "503": obj{"description": "Database unavailable", "content": obj{"application/json": obj{"schema": ref("Error")}}}}}}
+	paths["/healthz"] = obj{"get": obj{"operationId": "health", "tags": []string{"health"}, "summary": "PostgreSQL readiness", "responses": obj{"200": obj{"description": "Database reachable", "content": obj{"application/json": obj{"schema": object(obj{"status": enumeration("ok")}, "status")}}}, "503": obj{"description": "Database unavailable", "content": obj{"application/json": obj{"schema": ref("Error")}}}}}}
 	return obj{"openapi": "3.0.3", "info": obj{"title": "Ora Cloud phase one", "version": "1.0.0", "description": "Authoritative PostgreSQL core. Simulation is separate; no production Controller/Node/Kubernetes implementation is implied."}, "servers": []any{obj{"url": "http://localhost:8080"}}, "paths": paths, "components": obj{"schemas": s, "securitySchemes": obj{"serviceCredential": obj{"type": "http", "scheme": "bearer", "bearerFormat": "EdDSA JWT", "description": "Pinned issuer/kid/kind=service/role, aud=ora-cloud, exp and iat required, <=5 minute lifetime. Public API requires gateway; internal control requires controller; nodes require scoped node role."}, "userCredential": obj{"type": "apiKey", "in": "header", "name": "X-Ora-User-Token", "description": "Separately signed EdDSA JWT: kind=user, source+sub, caller must equal authenticated service sub, aud=ora-cloud. User and membership status checked in PostgreSQL."}}}}
+}
+
+func tag(r router.Route) string {
+	switch {
+	case strings.HasPrefix(r.Path, "/internal/"):
+		return "internal"
+	case strings.HasPrefix(r.Path, "/api/v1/me"):
+		return "me"
+	case strings.Contains(r.Path, "/workspaces"):
+		return "workspaces"
+	case strings.Contains(r.Path, "/projects"):
+		return "projects"
+	case strings.Contains(r.Path, "/members"):
+		return "members"
+	case strings.Contains(r.Path, "/operations"):
+		return "operations"
+	}
+	return "tenants"
 }
 
 func isList(r router.Route) bool {
