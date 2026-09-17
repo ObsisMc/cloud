@@ -4,6 +4,7 @@ import { AgentDetailPage } from '@/features/agents/agent-detail-page'
 import { AgentsPage } from '@/features/agents/agents-page'
 import { AutopilotsPage } from '@/features/autopilots/autopilots-page'
 import { LoginPage } from '@/features/auth/login-page'
+import { ChatPage } from '@/features/chat/chat-page'
 import { IssueDetailPage } from '@/features/issues/issue-detail-page'
 import { IssuesPage } from '@/features/issues/issues-page'
 import { MyIssuesPage } from '@/features/my-issues/my-issues-page'
@@ -63,6 +64,10 @@ function WorkspaceRuntimes() {
   return <RuntimesPage slug={db.workspace.slug} />
 }
 
+function WorkspaceChat() {
+  return <ChatPage slug={db.workspace.slug} />
+}
+
 export const router = createBrowserRouter([
   { path: '/', element: <Navigate to={`/${db.workspace.slug}/issues`} replace /> },
   { path: '/login', element: <LoginPage /> },
@@ -83,6 +88,8 @@ export const router = createBrowserRouter([
       { path: 'autopilots', element: <WorkspaceAutopilots /> },
       { path: 'skills', element: <WorkspaceSkills /> },
       { path: 'runtimes', element: <WorkspaceRuntimes /> },
+      { path: 'chat', element: <WorkspaceChat /> },
+      { path: 'chat/:sessionId', element: <WorkspaceChat /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

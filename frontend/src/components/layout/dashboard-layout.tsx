@@ -14,9 +14,9 @@ export function DashboardLayout() {
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className="h-svh">
       <AppSidebar slug={workspaceSlug} />
-      <SidebarInset>
+      <SidebarInset className="min-h-0 overflow-hidden">
         <Outlet />
       </SidebarInset>
     </SidebarProvider>
