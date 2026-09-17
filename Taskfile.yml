@@ -40,7 +40,11 @@ tasks:
     cmds:
       - go build -o bin/ ./cmd/server ./cmd/cloudctl ./cmd/simulator
   run:
+    desc: Go API server on :8080
     cmds: [go run ./cmd/server]
+  dev:
+    desc: Go API server and Vite dev server together; open http://localhost:5173
+    deps: [run, frontend:dev]
   migrate:
     cmds: [go run ./cmd/cloudctl -command migrate]
   simulate:
@@ -48,3 +52,22 @@ tasks:
     cmds: [go run ./cmd/simulator]
   openapi:
     cmds: [go run ./cmd/openapi]
+  frontend:install:
+    desc: Install frontend dependencies from package-lock.json
+    cmds: [npm --prefix frontend ci]
+  frontend:dev:
+    desc: Vite dev server on :5173, proxying /api, /internal and /healthz to the Go server on :8080
+    cmds: [npm --prefix frontend run dev]
+  frontend:generate:
+    desc: Regenerate api/openapi.json, then the frontend's typed react-query client from it
+    cmds:
+      - task: openapi
+      - npm --prefix frontend run api:generate
+  frontend:check:
+    desc: Same gate as CI; generated client must match the committed contract
+    cmds:
+      - npm --prefix frontend run api:generate
+      - git status --porcelain -- frontend/src/api
+      - test -z "$(git status --porcelain -- frontend/src/api)"
+      - npm --prefix frontend run lint
+      - npm --prefix frontend run build
