@@ -25,8 +25,15 @@ func boolean() obj                     { return obj{"type": "boolean"} }
 func enumeration(values ...string) obj { return obj{"type": "string", "enum": values} }
 func array(item obj) obj               { return obj{"type": "array", "items": item} }
 func optional(s obj) obj               { s["nullable"] = true; return s }
+
+// object omits "required" when empty: OpenAPI 3.0 demands at least one item when the key is
+// present, and strict downstream generators (the frontend's orval) reject null or [] there.
 func object(properties obj, required ...string) obj {
-	return obj{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
+	o := obj{"type": "object", "properties": properties, "additionalProperties": false}
+	if len(required) > 0 {
+		o["required"] = required
+	}
+	return o
 }
 func uuid() obj      { return obj{"type": "string", "format": "uuid"} }
 func timestamp() obj { return obj{"type": "string", "format": "date-time"} }

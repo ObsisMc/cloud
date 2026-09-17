@@ -448,7 +448,6 @@
             "type": "boolean"
           }
         },
-        "required": null,
         "type": "object"
       },
       "EmptyClaim": {
@@ -796,7 +795,6 @@
             "type": "object"
           }
         },
-        "required": null,
         "type": "object"
       },
       "OperationResult": {
@@ -807,7 +805,6 @@
             "type": "string"
           }
         },
-        "required": null,
         "type": "object"
       },
       "Project": {
@@ -4395,7 +4392,6 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {},
-                "required": [],
                 "type": "object"
               }
             }
