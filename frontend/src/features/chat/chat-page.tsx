@@ -100,7 +100,12 @@ export function ChatPage({ slug }: { slug: string }) {
               placeholder="Message the agent…"
               className="flex-1"
             />
-            <Button type="submit" size="icon" disabled={!draft.trim() || sendMessage.isPending}>
+            <Button
+              type="submit"
+              size="icon"
+              aria-label="Send message"
+              disabled={!draft.trim() || sendMessage.isPending}
+            >
               <Send className="size-4" />
             </Button>
           </form>
