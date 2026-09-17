@@ -4,6 +4,8 @@ import { LoginPage } from '@/features/auth/login-page'
 import { IssueDetailPage } from '@/features/issues/issue-detail-page'
 import { IssuesPage } from '@/features/issues/issues-page'
 import { MyIssuesPage } from '@/features/my-issues/my-issues-page'
+import { ProjectDetailPage } from '@/features/projects/project-detail-page'
+import { ProjectsPage } from '@/features/projects/projects-page'
 import { db } from '@/mocks/data/store'
 
 function WorkspaceIssues() {
@@ -18,6 +20,14 @@ function WorkspaceMyIssues() {
   return <MyIssuesPage slug={db.workspace.slug} />
 }
 
+function WorkspaceProjects() {
+  return <ProjectsPage slug={db.workspace.slug} />
+}
+
+function WorkspaceProjectDetail() {
+  return <ProjectDetailPage slug={db.workspace.slug} />
+}
+
 export const router = createBrowserRouter([
   { path: '/', element: <Navigate to={`/${db.workspace.slug}/issues`} replace /> },
   { path: '/login', element: <LoginPage /> },
@@ -29,6 +39,8 @@ export const router = createBrowserRouter([
       { path: 'issues', element: <WorkspaceIssues /> },
       { path: 'issues/:issueId', element: <WorkspaceIssueDetail /> },
       { path: 'my-issues', element: <WorkspaceMyIssues /> },
+      { path: 'projects', element: <WorkspaceProjects /> },
+      { path: 'projects/:projectId', element: <WorkspaceProjectDetail /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
