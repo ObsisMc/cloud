@@ -27,6 +27,9 @@ npm run build         # tsc -b && vite build
 
 仓库根目录的 Task 封装：
 
+- `task frontend:install`：`npm ci`。
+- `task frontend:dev`：只起 Vite dev server（需要另开终端 `task run` 起后端）。
+- `task dev`：同时起 Go 后端（:8080）和 Vite（:5173），日常开发的统一入口。
 - `task frontend:generate`：先 `task openapi`（Go 契约 → `api/openapi.json`），再 `npm run api:generate`。改了后端接口就跑这个，并把 `api/openapi.json` 和 `frontend/src/api` 一起提交。
 - `task frontend:check`：与 CI `frontend` job 相同的门禁：重新生成后 `git diff --exit-code -- frontend/src/api` 检测漂移，再 lint、build。
 

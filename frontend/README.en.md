@@ -27,6 +27,9 @@ npm run build         # tsc -b && vite build
 
 Task wrappers at the repository root:
 
+- `task frontend:install`: `npm ci`.
+- `task frontend:dev`: Vite dev server only (start the backend separately with `task run`).
+- `task dev`: Go backend (:8080) and Vite (:5173) together; the single entry point for day-to-day development.
 - `task frontend:generate`: runs `task openapi` (Go contract → `api/openapi.json`), then `npm run api:generate`. Run this after any backend API change and commit `api/openapi.json` together with `frontend/src/api`.
 - `task frontend:check`: the same gate as the CI `frontend` job: regenerate, `git diff --exit-code -- frontend/src/api` to detect drift, then lint and build.
 
