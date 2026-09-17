@@ -94,9 +94,13 @@ in `go.mod`, repository tasks in `Taskfile.yml`, and checks in `.golangci.yml` a
 
 ## HTTP, contracts, and security
 
-- `router.Routes`, `internal/contract`, and `api/openapi.json` describe one contract. When a route,
-  field, status, or response changes, update all three, run `task openapi`, and add contract and
-  integration coverage in the same change. Generated OpenAPI output must have no hand edits.
+- `router.Routes`, `internal/contract`, `api/openapi.json`, and `frontend/src/api` describe one
+  contract. When a route, field, status, or response changes, update the Go sources, run
+  `task frontend:generate` (which runs `task openapi` first), commit both generated artifacts, and
+  add contract and integration coverage in the same change. Generated OpenAPI and frontend client
+  output must have no hand edits; the frontend generator clears `frontend/src/api` on every run.
+- The OpenAPI document must satisfy strict validators, not only kin-openapi: emit `required` only
+  when non-empty, and keep `TestRequiredIsOmittedWhenEmpty` green when adding schema helpers.
 - Decode requests strictly: retain body limits, reject malformed JSON, extra JSON values, unknown
   fields, invalid types, and server-owned identity or scope fields. Validate at the boundary and
   pass explicit trusted values inward.
@@ -129,6 +133,12 @@ list.
 - Complete format, lint, and test gate: `task check`
 - Race-enabled full suite: `task test:race`
 - Build server and operational commands: `task build`
+- Regenerate `api/openapi.json` and the frontend client: `task frontend:generate`
+- Frontend gate (drift check, lint, build; mirrors the CI `frontend` job): `task frontend:check`
+
+`task frontend:*` needs Node 24 and `npm ci` in `frontend/`. The Go gates do not depend on it, and
+the frontend gate does not need PostgreSQL. See `frontend/README.md` for the frontend's own
+invariants.
 
 `task check`, `task test`, `task test:integration`, and `task test:race` require a real PostgreSQL
 database through `TEST_DATABASE_URL`; they must fail rather than silently skip when

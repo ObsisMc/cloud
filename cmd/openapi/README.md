@@ -17,5 +17,6 @@
   task openapi
   ```
 - **CI 验证**：CI 会检查已提交的 `api/openapi.json` 是否与 `cmd/openapi` 的输出完全一致；如果存在任何未提交的 Schema 漂移，检查将失败。
+- **下游消费者**：`frontend/src/api` 由 orval 从 `api/openapi.json` 生成。改动契约后运行 `task frontend:generate`（= `task openapi` + 前端生成）并一起提交；CI `frontend` job 会检测前端生成物漂移。
 
-参见 [cmd 入口总览](../README.md)、[契约定义包](../../internal/contract/README.md) 与 [HTTP 路由网关](../../internal/api/router/README.md)。
+参见 [cmd 入口总览](../README.md)、[契约定义包](../../internal/contract/README.md)、[HTTP 路由网关](../../internal/api/router/README.md) 与 [Web 前端](../../frontend/README.md)。

@@ -48,3 +48,16 @@ tasks:
     cmds: [go run ./cmd/simulator]
   openapi:
     cmds: [go run ./cmd/openapi]
+  frontend:generate:
+    desc: Regenerate api/openapi.json, then the frontend's typed react-query client from it
+    cmds:
+      - task: openapi
+      - npm --prefix frontend run api:generate
+  frontend:check:
+    desc: Same gate as CI; generated client must match the committed contract
+    cmds:
+      - npm --prefix frontend run api:generate
+      - git status --porcelain -- frontend/src/api
+      - test -z "$(git status --porcelain -- frontend/src/api)"
+      - npm --prefix frontend run lint
+      - npm --prefix frontend run build

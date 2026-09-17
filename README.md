@@ -72,6 +72,7 @@ go run ./cmd/simulator
 ## 契约与边界
 
 - [OpenAPI 3.0](api/openapi.json)：所有 19 个公开接口、15 个内部接口和 health。`task openapi` 重新生成，测试校验文档合法性、生成结果和实际 HTTP 响应结构。
+- [Web 前端](frontend/README.md)：`frontend/src/api` 由 orval 从同一份 `api/openapi.json` 生成带类型的 TanStack Query hooks，`task frontend:generate` 一次完成 Go 契约 → JSON → TypeScript；CI 检测生成物漂移。
 - [核心不变量与状态机](docs/core-contract.md)：身份、归属、幂等、准入、租约、恢复和清理。
 - [Substrate/Node 与阶段二边界](docs/execution-contract.md)：共享卷布局、维护 Job、容器挂载、Git 语义与迁移责任。
 - [需求—实现—验证清单](docs/acceptance.md)：本次实际证据与未完成的阶段二验证。
@@ -101,4 +102,4 @@ go run ./cmd/simulator
 
 阶段一采用数据库事务级全局 advisory lock 串行核心事务，并限制每 Project 一个未完成 operation。HTTP/Git/Substrate 调用从不持有数据库事务。此选择适用于首版单集群单活，牺牲写吞吐以降低并发不变量复杂度；后续可按租户/Project 细分锁，但必须保持现有并发测试。
 
-容器只打包 server/cloudctl，运行身份为非 root。构建用 `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`，挂载自有配置和公钥；迁移使用同镜像 `--entrypoint /app/cloudctl` 独立执行。仓库 CI 使用 PG service、格式/静态检查和 race 集成测试。Docker 镜像和真实部署不属于本地已验证结果。
+容器只打包 server/cloudctl，运行身份为非 root。构建用 `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`，挂载自有配置和公钥；迁移使用同镜像 `--entrypoint /app/cloudctl` 独立执行。仓库 CI 使用 PG service、格式/静态检查和 race 集成测试，另有独立 `frontend` job 校验生成客户端与契约一致并执行 lint/build。Docker 镜像和真实部署不属于本地已验证结果。
