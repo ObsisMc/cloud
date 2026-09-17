@@ -22,109 +22,39 @@ import { SquadDetailPage } from '@/features/squads/squad-detail-page'
 import { SquadsPage } from '@/features/squads/squads-page'
 import { db } from '@/mocks/data/store'
 
-function WorkspaceIssues() {
-  return <IssuesPage slug={db.workspace.slug} />
-}
-
-function WorkspaceIssueDetail() {
-  return <IssueDetailPage slug={db.workspace.slug} />
-}
-
-function WorkspaceMyIssues() {
-  return <MyIssuesPage slug={db.workspace.slug} />
-}
-
-function WorkspaceProjects() {
-  return <ProjectsPage slug={db.workspace.slug} />
-}
-
-function WorkspaceProjectDetail() {
-  return <ProjectDetailPage slug={db.workspace.slug} />
-}
-
-function WorkspaceSquads() {
-  return <SquadsPage slug={db.workspace.slug} />
-}
-
-function WorkspaceSquadDetail() {
-  return <SquadDetailPage slug={db.workspace.slug} />
-}
-
-function WorkspaceAgents() {
-  return <AgentsPage slug={db.workspace.slug} />
-}
-
-function WorkspaceAgentDetail() {
-  return <AgentDetailPage slug={db.workspace.slug} />
-}
-
-function WorkspaceAutopilots() {
-  return <AutopilotsPage slug={db.workspace.slug} />
-}
-
-function WorkspaceSkills() {
-  return <SkillsPage slug={db.workspace.slug} />
-}
-
-function WorkspaceRuntimes() {
-  return <RuntimesPage slug={db.workspace.slug} />
-}
-
-function WorkspaceChat() {
-  return <ChatPage slug={db.workspace.slug} />
-}
-
-function WorkspaceInbox() {
-  return <InboxPage slug={db.workspace.slug} />
-}
-
-function WorkspaceUsage() {
-  return <UsagePage slug={db.workspace.slug} />
-}
-
-function WorkspaceSettingsLayout() {
-  return <SettingsLayout slug={db.workspace.slug} />
-}
-
-function WorkspaceMembers() {
-  return <MembersPage slug={db.workspace.slug} />
-}
-
-function WorkspaceBilling() {
-  return <BillingPage slug={db.workspace.slug} />
-}
+const slug = db.workspace.slug
 
 export const router = createBrowserRouter([
-  { path: '/', element: <Navigate to={`/${db.workspace.slug}/issues`} replace /> },
+  { path: '/', element: <Navigate to={`/${slug}/issues`} replace /> },
   { path: '/login', element: <LoginPage /> },
   {
     path: '/:workspaceSlug',
     element: <DashboardLayout />,
     children: [
       { index: true, element: <Navigate to="issues" replace /> },
-      { path: 'issues', element: <WorkspaceIssues /> },
-      { path: 'issues/:issueId', element: <WorkspaceIssueDetail /> },
-      { path: 'my-issues', element: <WorkspaceMyIssues /> },
-      { path: 'projects', element: <WorkspaceProjects /> },
-      { path: 'projects/:projectId', element: <WorkspaceProjectDetail /> },
-      { path: 'squads', element: <WorkspaceSquads /> },
-      { path: 'squads/:squadId', element: <WorkspaceSquadDetail /> },
-      { path: 'agents', element: <WorkspaceAgents /> },
-      { path: 'agents/:agentId', element: <WorkspaceAgentDetail /> },
-      { path: 'autopilots', element: <WorkspaceAutopilots /> },
-      { path: 'skills', element: <WorkspaceSkills /> },
-      { path: 'runtimes', element: <WorkspaceRuntimes /> },
-      { path: 'chat', element: <WorkspaceChat /> },
-      { path: 'chat/:sessionId', element: <WorkspaceChat /> },
-      { path: 'inbox', element: <WorkspaceInbox /> },
-      { path: 'usage', element: <WorkspaceUsage /> },
+      { path: 'issues', element: <IssuesPage slug={slug} /> },
+      { path: 'issues/:issueId', element: <IssueDetailPage slug={slug} /> },
+      { path: 'my-issues', element: <MyIssuesPage slug={slug} /> },
+      { path: 'projects', element: <ProjectsPage slug={slug} /> },
+      { path: 'projects/:projectId', element: <ProjectDetailPage slug={slug} /> },
+      { path: 'squads', element: <SquadsPage slug={slug} /> },
+      { path: 'squads/:squadId', element: <SquadDetailPage slug={slug} /> },
+      { path: 'agents', element: <AgentsPage slug={slug} /> },
+      { path: 'agents/:agentId', element: <AgentDetailPage slug={slug} /> },
+      { path: 'autopilots', element: <AutopilotsPage slug={slug} /> },
+      { path: 'skills', element: <SkillsPage slug={slug} /> },
+      { path: 'runtimes', element: <RuntimesPage slug={slug} /> },
+      { path: 'chat', element: <ChatPage slug={slug} /> },
+      { path: 'chat/:sessionId', element: <ChatPage slug={slug} /> },
+      { path: 'inbox', element: <InboxPage slug={slug} /> },
+      { path: 'usage', element: <UsagePage slug={slug} /> },
       {
         path: 'settings',
-        element: <WorkspaceSettingsLayout />,
+        element: <SettingsLayout slug={slug} />,
         children: [
           { index: true, element: <GeneralSettingsPage /> },
-          { path: 'members', element: <WorkspaceMembers /> },
-          { path: 'billing', element: <WorkspaceBilling /> },
+          { path: 'members', element: <MembersPage slug={slug} /> },
+          { path: 'billing', element: <BillingPage slug={slug} /> },
         ],
       },
     ],
