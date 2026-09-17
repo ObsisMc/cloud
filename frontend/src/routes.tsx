@@ -4,13 +4,19 @@ import { AgentDetailPage } from '@/features/agents/agent-detail-page'
 import { AgentsPage } from '@/features/agents/agents-page'
 import { AutopilotsPage } from '@/features/autopilots/autopilots-page'
 import { LoginPage } from '@/features/auth/login-page'
+import { BillingPage } from '@/features/billing/billing-page'
+import { UsagePage } from '@/features/billing/usage-page'
 import { ChatPage } from '@/features/chat/chat-page'
+import { InboxPage } from '@/features/inbox/inbox-page'
 import { IssueDetailPage } from '@/features/issues/issue-detail-page'
 import { IssuesPage } from '@/features/issues/issues-page'
+import { MembersPage } from '@/features/members/members-page'
 import { MyIssuesPage } from '@/features/my-issues/my-issues-page'
 import { ProjectDetailPage } from '@/features/projects/project-detail-page'
 import { ProjectsPage } from '@/features/projects/projects-page'
 import { RuntimesPage } from '@/features/runtimes/runtimes-page'
+import { GeneralSettingsPage } from '@/features/settings/general-settings-page'
+import { SettingsLayout } from '@/features/settings/settings-layout'
 import { SkillsPage } from '@/features/skills/skills-page'
 import { SquadDetailPage } from '@/features/squads/squad-detail-page'
 import { SquadsPage } from '@/features/squads/squads-page'
@@ -68,6 +74,26 @@ function WorkspaceChat() {
   return <ChatPage slug={db.workspace.slug} />
 }
 
+function WorkspaceInbox() {
+  return <InboxPage slug={db.workspace.slug} />
+}
+
+function WorkspaceUsage() {
+  return <UsagePage slug={db.workspace.slug} />
+}
+
+function WorkspaceSettingsLayout() {
+  return <SettingsLayout slug={db.workspace.slug} />
+}
+
+function WorkspaceMembers() {
+  return <MembersPage slug={db.workspace.slug} />
+}
+
+function WorkspaceBilling() {
+  return <BillingPage slug={db.workspace.slug} />
+}
+
 export const router = createBrowserRouter([
   { path: '/', element: <Navigate to={`/${db.workspace.slug}/issues`} replace /> },
   { path: '/login', element: <LoginPage /> },
@@ -90,6 +116,17 @@ export const router = createBrowserRouter([
       { path: 'runtimes', element: <WorkspaceRuntimes /> },
       { path: 'chat', element: <WorkspaceChat /> },
       { path: 'chat/:sessionId', element: <WorkspaceChat /> },
+      { path: 'inbox', element: <WorkspaceInbox /> },
+      { path: 'usage', element: <WorkspaceUsage /> },
+      {
+        path: 'settings',
+        element: <WorkspaceSettingsLayout />,
+        children: [
+          { index: true, element: <GeneralSettingsPage /> },
+          { path: 'members', element: <WorkspaceMembers /> },
+          { path: 'billing', element: <WorkspaceBilling /> },
+        ],
+      },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
