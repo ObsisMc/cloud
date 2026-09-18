@@ -19,7 +19,10 @@ export function PageHeader({
       <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium">
         {breadcrumb && (
           <>
-            <Link to={breadcrumb.to} className="shrink-0 text-muted-foreground hover:text-foreground hover:underline">
+            <Link
+              to={breadcrumb.to}
+              className="shrink-0 text-muted-foreground hover:text-foreground hover:underline"
+            >
               {breadcrumb.label}
             </Link>
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />

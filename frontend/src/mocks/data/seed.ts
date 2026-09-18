@@ -31,12 +31,23 @@ const AVATAR_COLORS = [
   '#ec4899',
 ]
 
-const ISSUE_STATUSES: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']
+const ISSUE_STATUSES: IssueStatus[] = [
+  'backlog',
+  'todo',
+  'in_progress',
+  'in_review',
+  'blocked',
+  'done',
+]
 const ISSUE_PRIORITIES: IssuePriority[] = ['none', 'low', 'medium', 'high', 'urgent']
 const LABELS = ['缺陷', '功能', '设计', '基础设施', '文档', '性能', '安全']
 
 function pick<T>(arr: T[]): T {
-  return faker.helpers.arrayElement(arr)
+  const value = faker.helpers.arrayElement(arr)
+  if (value === undefined) {
+    throw new Error('seed data choices must not be empty')
+  }
+  return value
 }
 
 function initialsOf(name: string): string {
@@ -50,7 +61,11 @@ function initialsOf(name: string): string {
 function colorFor(seed: string): string {
   let hash = 0
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length]
+  const color = AVATAR_COLORS[hash % AVATAR_COLORS.length]
+  if (!color) {
+    throw new Error('avatar color seed data must not be empty')
+  }
+  return color
 }
 
 // --- Chinese content generators -------------------------------------------
@@ -93,8 +108,28 @@ const PROBLEM_WORDS = [
   '偶发失败',
   '权限校验失败',
 ]
-const ASPECTS = ['加载速度', '响应时间', '稳定性', '可读性', '可维护性', '安全性', '兼容性', '首屏渲染']
-const FEATURES = ['批量操作', '数据导出', '高级筛选', '自定义排序', '多语言支持', '暗色模式', '快捷键', '审计日志', '权限分组', '自动重试']
+const ASPECTS = [
+  '加载速度',
+  '响应时间',
+  '稳定性',
+  '可读性',
+  '可维护性',
+  '安全性',
+  '兼容性',
+  '首屏渲染',
+]
+const FEATURES = [
+  '批量操作',
+  '数据导出',
+  '高级筛选',
+  '自定义排序',
+  '多语言支持',
+  '暗色模式',
+  '快捷键',
+  '审计日志',
+  '权限分组',
+  '自动重试',
+]
 
 const TITLE_TEMPLATES: (() => string)[] = [
   () => `修复${pick(MODULES)}模块中的${pick(PROBLEM_WORDS)}问题`,
@@ -157,8 +192,20 @@ export const workspace: Workspace = {
 }
 
 export const otherWorkspaces: Workspace[] = [
-  { id: 'ws-2', slug: 'ora-labs', name: 'Ora 实验室', avatarColor: colorFor('Ora 实验室'), plan: 'free' },
-  { id: 'ws-3', slug: 'personal', name: '个人空间', avatarColor: colorFor('个人空间'), plan: 'free' },
+  {
+    id: 'ws-2',
+    slug: 'ora-labs',
+    name: 'Ora 实验室',
+    avatarColor: colorFor('Ora 实验室'),
+    plan: 'free',
+  },
+  {
+    id: 'ws-3',
+    slug: 'personal',
+    name: '个人空间',
+    avatarColor: colorFor('个人空间'),
+    plan: 'free',
+  },
 ]
 
 export const workspaces: Workspace[] = [workspace, ...otherWorkspaces]
@@ -239,9 +286,13 @@ export const squads: Squad[] = [
 
 export const agents: Agent[] = AGENT_ROLES.map(({ role, model }, i) => {
   const name = fakerZH_CN.person.fullName()
-  const squadId = squads[i % squads.length].id
+  const squad = squads[i % squads.length]
+  if (!squad) {
+    throw new Error('agent seed data requires a squad')
+  }
+  const squadId = squad.id
   const id = `agent-${i + 1}`
-  squads.find((s) => s.id === squadId)!.memberIds.push(id)
+  squad.memberIds.push(id)
   return {
     id,
     type: 'agent' as const,
@@ -265,25 +316,38 @@ const PROJECT_DESCRIPTIONS = [
   '为企业客户提供更灵活的计费与结算能力。',
 ]
 
-export const projects: Project[] = ['新人引导流程改版', '计费系统 v2', '移动端功能对齐', '智能体市场', '可观测性体系重构'].map(
-  (title, i) => {
-    const id = `project-${i + 1}`
-    const squad = squads[i % squads.length]
-    squad.projectIds.push(id)
-    return {
-      id,
-      workspaceId: workspace.id,
-      title,
-      description: PROJECT_DESCRIPTIONS[i % PROJECT_DESCRIPTIONS.length],
-      icon: faker.helpers.arrayElement(['Rocket', 'Layers', 'Boxes', 'GitBranch', 'Gauge']),
-      color: colorFor(title),
-      status: faker.helpers.arrayElement(['planned', 'in_progress', 'in_progress', 'completed', 'paused']),
-      leadId: faker.helpers.arrayElement(users).id,
-      targetDate: faker.date.soon({ days: 90 }).toISOString(),
-      createdAt: faker.date.past({ years: 1 }).toISOString(),
-    }
-  },
-)
+export const projects: Project[] = [
+  '新人引导流程改版',
+  '计费系统 v2',
+  '移动端功能对齐',
+  '智能体市场',
+  '可观测性体系重构',
+].map((title, i) => {
+  const id = `project-${i + 1}`
+  const squad = squads[i % squads.length]
+  if (!squad) {
+    throw new Error('project seed data requires a squad')
+  }
+  squad.projectIds.push(id)
+  return {
+    id,
+    workspaceId: workspace.id,
+    title,
+    description: pick(PROJECT_DESCRIPTIONS),
+    icon: faker.helpers.arrayElement(['Rocket', 'Layers', 'Boxes', 'GitBranch', 'Gauge']),
+    color: colorFor(title),
+    status: faker.helpers.arrayElement([
+      'planned',
+      'in_progress',
+      'in_progress',
+      'completed',
+      'paused',
+    ]),
+    leadId: faker.helpers.arrayElement(users).id,
+    targetDate: faker.date.soon({ days: 90 }).toISOString(),
+    createdAt: faker.date.past({ years: 1 }).toISOString(),
+  }
+})
 
 const allActorIds = [...users.map((u) => u.id), ...agents.map((a) => a.id)]
 
@@ -307,8 +371,12 @@ export const issues: Issue[] = Array.from({ length: 48 }, (_, i) => {
     description: randomDescription(),
     status,
     priority: faker.helpers.arrayElement(ISSUE_PRIORITIES),
-    assigneeId: faker.helpers.maybe(() => faker.helpers.arrayElement(allActorIds), { probability: 0.85 }) ?? null,
-    projectId: faker.helpers.maybe(() => faker.helpers.arrayElement(projects).id, { probability: 0.75 }) ?? null,
+    assigneeId:
+      faker.helpers.maybe(() => faker.helpers.arrayElement(allActorIds), { probability: 0.85 }) ??
+      null,
+    projectId:
+      faker.helpers.maybe(() => faker.helpers.arrayElement(projects).id, { probability: 0.75 }) ??
+      null,
     labels: faker.helpers.arrayElements(LABELS, { min: 0, max: 3 }),
     createdAt: createdAt.toISOString(),
     updatedAt: faker.date.between({ from: createdAt, to: new Date() }).toISOString(),
@@ -320,7 +388,7 @@ export const issues: Issue[] = Array.from({ length: 48 }, (_, i) => {
 export const chatSessions: ChatSession[] = agents.slice(0, 5).map((agent, i) => ({
   id: `chat-${i + 1}`,
   workspaceId: workspace.id,
-  title: `${agent.name}`,
+  title: agent.name,
   agentId: agent.id,
   updatedAt: faker.date.recent({ days: 3 }).toISOString(),
   unreadCount: faker.number.int({ min: 0, max: 4 }),
@@ -346,18 +414,15 @@ export const chatMessages: ChatMessage[] = chatSessions.flatMap((session) => {
 export const inboxItems: InboxItem[] = Array.from({ length: 20 }, (_, i) => {
   const type = faker.helpers.arrayElement(['mention', 'assignment', 'comment', 'invite'] as const)
   const issue = faker.helpers.maybe(() => faker.helpers.arrayElement(issues), { probability: 0.7 })
+  let title = '工作区邀请'
+  if (type === 'mention') title = `有人在 ${issue?.identifier ?? '一个讨论'} 中提到了你`
+  else if (type === 'assignment') title = `任务已分配给你：${issue?.identifier ?? '一个任务'}`
+  else if (type === 'comment') title = `${issue?.identifier ?? '一个任务'} 有新评论`
   return {
     id: `inbox-${i + 1}`,
     workspaceId: workspace.id,
     type,
-    title:
-      type === 'mention'
-        ? `有人在 ${issue?.identifier ?? '一个讨论'} 中提到了你`
-        : type === 'assignment'
-          ? `任务已分配给你：${issue?.identifier ?? '一个任务'}`
-          : type === 'comment'
-            ? `${issue?.identifier ?? '一个任务'} 有新评论`
-            : '工作区邀请',
+    title,
     body: pick(DESC_SENTENCES),
     actorId: faker.helpers.arrayElement(allActorIds),
     issueId: issue?.id ?? null,
@@ -382,7 +447,7 @@ export const skills: Skill[] = SKILLS_DATA.map(({ name, description }, i) => ({
   workspaceId: workspace.id,
   name,
   description,
-  category: SKILL_CATEGORIES[i % SKILL_CATEGORIES.length],
+  category: pick(SKILL_CATEGORIES),
   enabled: faker.datatype.boolean({ probability: 0.75 }),
   usageCount: faker.number.int({ min: 0, max: 2400 }),
 }))

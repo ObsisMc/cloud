@@ -7,8 +7,10 @@ import { AgentsPage } from './agents-page'
 describe('AgentsPage', () => {
   it('renders every seeded agent with its role', async () => {
     renderWithProviders(<AgentsPage slug={db.workspace.slug} />)
-    for (const agent of db.agents) {
-      expect(await screen.findByText(agent.name)).toBeInTheDocument()
-    }
+    await Promise.all(
+      db.agents.map(async (agent) => {
+        expect(await screen.findByText(agent.name)).toBeInTheDocument()
+      }),
+    )
   })
 })

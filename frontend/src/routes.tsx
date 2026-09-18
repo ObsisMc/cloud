@@ -29,7 +29,8 @@ import { db } from '@/mocks/data/store'
  */
 function WithSlug({ component: Component }: { component: ComponentType<{ slug: string }> }) {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
-  return <Component slug={workspaceSlug!} />
+  if (!workspaceSlug) throw new Error('workspace route must provide a slug')
+  return <Component slug={workspaceSlug} />
 }
 
 export const router = createBrowserRouter([

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { db } from '../data/store'
+import { db } from '@/mocks/data/store'
 
 const BASE = '/mock-api'
 const SLUG = db.workspace.slug

@@ -46,11 +46,18 @@ export function AgentDetailPage({ slug }: { slug: string }) {
         </div>
         <p className="mb-6 text-sm text-muted-foreground">{agent.description}</p>
 
-        <h2 className="mb-2 text-xs font-medium text-muted-foreground">已分配任务（{assignedIssues.length}）</h2>
+        <h2 className="mb-2 text-xs font-medium text-muted-foreground">
+          已分配任务（{assignedIssues.length}）
+        </h2>
         <div className="space-y-1.5">
-          {assignedIssues.length === 0 && <p className="text-sm text-muted-foreground">暂无已分配的任务。</p>}
+          {assignedIssues.length === 0 && (
+            <p className="text-sm text-muted-foreground">暂无已分配的任务。</p>
+          )}
           {assignedIssues.map((issue) => (
-            <div key={issue.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+            <div
+              key={issue.id}
+              className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+            >
               <span className="text-xs text-muted-foreground">{issue.identifier}</span>
               <span className="truncate">{issue.title}</span>
             </div>

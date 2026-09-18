@@ -6,6 +6,8 @@ import { useSquads } from '@/features/squads/api'
 import { workspacePaths } from '@/lib/paths'
 import { actorById } from '@/mocks/data/store'
 
+const SKELETON_KEYS = ['one', 'two', 'three', 'four']
+
 export function SquadsPage({ slug }: { slug: string }) {
   const { data: squads, isPending } = useSquads(slug)
   const p = workspacePaths(slug)
@@ -16,8 +18,8 @@ export function SquadsPage({ slug }: { slug: string }) {
       <div className="flex-1 overflow-y-auto p-4">
         {isPending && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-28 w-full" />
+            {SKELETON_KEYS.map((key) => (
+              <Skeleton key={key} className="h-28 w-full" />
             ))}
           </div>
         )}
@@ -40,7 +42,12 @@ export function SquadsPage({ slug }: { slug: string }) {
               <p className="text-xs text-muted-foreground">{squad.description}</p>
               <div className="mt-auto flex items-center -space-x-1.5">
                 {squad.memberIds.slice(0, 6).map((id) => (
-                  <ActorAvatar key={id} actor={actorById(id)} size="sm" className="ring-2 ring-background" />
+                  <ActorAvatar
+                    key={id}
+                    actor={actorById(id)}
+                    size="sm"
+                    className="ring-2 ring-background"
+                  />
                 ))}
               </div>
             </Link>

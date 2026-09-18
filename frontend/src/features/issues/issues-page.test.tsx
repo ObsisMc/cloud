@@ -9,7 +9,8 @@ describe('IssuesPage', () => {
   it('groups seeded issues by status', async () => {
     renderWithProviders(<IssuesPage slug={db.workspace.slug} />)
 
-    const backlogIssue = db.issues.find((i) => i.status === 'backlog')!
+    const backlogIssue = db.issues.find((i) => i.status === 'backlog')
+    if (!backlogIssue) throw new Error('issue seed data must contain a backlog issue')
     expect(await screen.findByText(backlogIssue.title)).toBeInTheDocument()
     expect(screen.getByText('待规划')).toBeInTheDocument()
   })

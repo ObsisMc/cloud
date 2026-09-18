@@ -2,7 +2,14 @@ import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { useBillingSummary, useInvoices } from '@/features/billing/api'
 
 const PLAN_LABELS: Record<string, string> = {
@@ -29,7 +36,9 @@ export function BillingPage({ slug }: { slug: string }) {
             <CardHeader>
               <CardTitle className="text-xs font-medium text-muted-foreground">套餐</CardTitle>
             </CardHeader>
-            <CardContent className="text-xl font-semibold">{PLAN_LABELS[summary.plan] ?? summary.plan}</CardContent>
+            <CardContent className="text-xl font-semibold">
+              {PLAN_LABELS[summary.plan] ?? summary.plan}
+            </CardContent>
           </Card>
           <Card>
             <CardHeader>

@@ -7,18 +7,26 @@ import {
   STATUS_ORDER,
   StatusIcon,
   priorityLabelText,
+  parseIssuePriority,
+  parseIssueStatus,
   statusLabelText,
 } from '@/components/common/issue-badges'
 import { PageHeader } from '@/components/layout/page-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDeleteIssue, useIssue, useUpdateIssue } from '@/features/issues/api'
 import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
-import type { IssuePriority, IssueStatus } from '@/mocks/data/types'
 
+// oxlint-disable-next-line max-lines-per-function -- the detail screen keeps its issue controls and layout transaction together.
 export function IssueDetailPage({ slug }: { slug: string }) {
   const { issueId } = useParams<{ issueId: string }>()
   const navigate = useNavigate()
@@ -73,17 +81,29 @@ export function IssueDetailPage({ slug }: { slug: string }) {
             <p className="text-xs font-medium text-muted-foreground">状态</p>
             <Select
               value={issue.status}
-              onValueChange={(v) => updateIssue.mutate({ id: issue.id, patch: { status: v as IssueStatus } })}
+              onValueChange={(v) =>
+                (() => {
+                  const status = parseIssueStatus(v)
+                  if (status) updateIssue.mutate({ id: issue.id, patch: { status } })
+                })()
+              }
             >
               <SelectTrigger className="w-full">
                 <span className="flex items-center gap-2">
                   <StatusIcon status={issue.status} />
-                  <SelectValue>{(value: unknown) => statusLabelText(value as IssueStatus)}</SelectValue>
+                  <SelectValue>
+                    {(value: unknown) => {
+                      const status = parseIssueStatus(value) ?? issue.status
+                      return statusLabelText(status)
+                    }}
+                  </SelectValue>
                 </span>
               </SelectTrigger>
               <SelectContent>
                 {STATUS_ORDER.map((s) => (
-                  <SelectItem key={s} value={s}>{statusLabelText(s)}</SelectItem>
+                  <SelectItem key={s} value={s}>
+                    {statusLabelText(s)}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -92,17 +112,29 @@ export function IssueDetailPage({ slug }: { slug: string }) {
             <p className="text-xs font-medium text-muted-foreground">优先级</p>
             <Select
               value={issue.priority}
-              onValueChange={(v) => updateIssue.mutate({ id: issue.id, patch: { priority: v as IssuePriority } })}
+              onValueChange={(v) =>
+                (() => {
+                  const priority = parseIssuePriority(v)
+                  if (priority) updateIssue.mutate({ id: issue.id, patch: { priority } })
+                })()
+              }
             >
               <SelectTrigger className="w-full">
                 <span className="flex items-center gap-2">
                   <PriorityIcon priority={issue.priority} />
-                  <SelectValue>{(value: unknown) => priorityLabelText(value as IssuePriority)}</SelectValue>
+                  <SelectValue>
+                    {(value: unknown) => {
+                      const priority = parseIssuePriority(value) ?? issue.priority
+                      return priorityLabelText(priority)
+                    }}
+                  </SelectValue>
                 </span>
               </SelectTrigger>
               <SelectContent>
                 {PRIORITY_ORDER.map((pr) => (
-                  <SelectItem key={pr} value={pr}>{priorityLabelText(pr)}</SelectItem>
+                  <SelectItem key={pr} value={pr}>
+                    {priorityLabelText(pr)}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -125,7 +157,9 @@ export function IssueDetailPage({ slug }: { slug: string }) {
               <p className="text-xs font-medium text-muted-foreground">标签</p>
               <div className="flex flex-wrap gap-1.5">
                 {issue.labels.map((l) => (
-                  <Badge key={l} variant="secondary">{l}</Badge>
+                  <Badge key={l} variant="secondary">
+                    {l}
+                  </Badge>
                 ))}
               </div>
             </div>

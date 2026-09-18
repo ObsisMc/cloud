@@ -13,10 +13,11 @@ describe('IssuesBoard', () => {
     for (const status of STATUS_ORDER) {
       const group = issues.filter((i) => i.status === status)
       expect(screen.getByText(statusLabelText(status))).toBeInTheDocument()
-      if (group.length > 0) {
-        expect(screen.getByText(group[0].identifier)).toBeInTheDocument()
-        expect(screen.getByText(group[0].title)).toBeInTheDocument()
-      }
+      if (group.length === 0) continue
+      const first = group[0]
+      if (!first) throw new Error('issue group length and first item disagree')
+      expect(screen.getByText(first.identifier)).toBeInTheDocument()
+      expect(screen.getByText(first.title)).toBeInTheDocument()
     }
 
     const total = issues.length
@@ -26,15 +27,17 @@ describe('IssuesBoard', () => {
 
 describe('resolveDrop', () => {
   // backlog: b1(0), b2(10), b3(20) — todo: t1(0)
-  const issues = [
+  const issues: Parameters<typeof resolveDrop>[0]['issues'] = [
     { id: 'b1', status: 'backlog', order: 0 },
     { id: 'b2', status: 'backlog', order: 10 },
     { id: 'b3', status: 'backlog', order: 20 },
     { id: 't1', status: 'todo', order: 0 },
-  ] as never[]
+  ]
 
   it('drops at the end of an empty column', () => {
-    expect(resolveDrop({ issues, activeId: 'b1', overId: 'in_progress', insertAfter: false })).toEqual({
+    expect(
+      resolveDrop({ issues, activeId: 'b1', overId: 'in_progress', insertAfter: false }),
+    ).toEqual({
       id: 'b1',
       status: 'in_progress',
       order: 0,
@@ -75,11 +78,15 @@ describe('resolveDrop', () => {
   })
 
   it('returns null when dropped outside any droppable', () => {
-    expect(resolveDrop({ issues, activeId: 'b1', overId: undefined, insertAfter: false })).toBeNull()
+    expect(
+      resolveDrop({ issues, activeId: 'b1', overId: undefined, insertAfter: false }),
+    ).toBeNull()
   })
 
   it('returns null for an issue id that is not in the list', () => {
-    expect(resolveDrop({ issues, activeId: 'missing-issue', overId: 'todo', insertAfter: false })).toBeNull()
+    expect(
+      resolveDrop({ issues, activeId: 'missing-issue', overId: 'todo', insertAfter: false }),
+    ).toBeNull()
   })
 
   it('returns null when dropped on itself', () => {
@@ -87,14 +94,17 @@ describe('resolveDrop', () => {
   })
 })
 
-describe('insertsAfter', () => {
-  function eventWith(activeRect: { top: number; height: number } | null, overRect: { top: number; height: number } | null) {
-    return {
-      active: { rect: { current: { translated: activeRect } } },
-      over: overRect ? { rect: overRect } : null,
-    } as never
+function eventWith(
+  activeRect: { top: number; height: number } | null,
+  overRect: { top: number; height: number } | null,
+) {
+  return {
+    active: { rect: { current: { translated: activeRect } } },
+    over: overRect ? { rect: overRect } : null,
   }
+}
 
+describe('insertsAfter', () => {
   it('is false when the dragged card center sits above the hovered card center', () => {
     expect(insertsAfter(eventWith({ top: 0, height: 40 }, { top: 100, height: 40 }))).toBe(false)
   })

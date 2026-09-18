@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import { PRIORITY_ORDER, STATUS_ORDER, priorityLabelText, statusLabelText } from '@/components/common/issue-badges'
+import {
+  PRIORITY_ORDER,
+  STATUS_ORDER,
+  priorityLabelText,
+  parseIssuePriority,
+  parseIssueStatus,
+  statusLabelText,
+} from '@/components/common/issue-badges'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -11,12 +18,19 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useCreateIssue } from '@/features/issues/api'
 import { db } from '@/mocks/data/store'
 import type { IssuePriority, IssueStatus } from '@/mocks/data/types'
 
+// oxlint-disable-next-line max-lines-per-function -- this dialog owns one cohesive create-issue form and its reset lifecycle.
 export function CreateIssueDialog({
   slug,
   defaultStatus = 'backlog',
@@ -47,7 +61,12 @@ export function CreateIssueDialog({
     if (!title.trim()) return
     createIssue.mutate(
       { title, description, status, priority, projectId: projectId === 'none' ? null : projectId },
-      { onSuccess: () => { setOpen(false); reset() } },
+      {
+        onSuccess: () => {
+          setOpen(false)
+          reset()
+        },
+      },
     )
   }
 
@@ -74,23 +93,43 @@ export function CreateIssueDialog({
               rows={3}
             />
             <div className="flex flex-wrap gap-2">
-              <Select value={status} onValueChange={(v) => setStatus(v as IssueStatus)}>
+              <Select
+                value={status}
+                onValueChange={(v) => {
+                  const nextStatus = parseIssueStatus(v)
+                  if (nextStatus) setStatus(nextStatus)
+                }}
+              >
                 <SelectTrigger className="w-36">
-                  <SelectValue>{(value: unknown) => statusLabelText(value as IssueStatus)}</SelectValue>
+                  <SelectValue>
+                    {(value: unknown) => statusLabelText(parseIssueStatus(value) ?? status)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {STATUS_ORDER.map((s) => (
-                    <SelectItem key={s} value={s}>{statusLabelText(s)}</SelectItem>
+                    <SelectItem key={s} value={s}>
+                      {statusLabelText(s)}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={priority} onValueChange={(v) => setPriority(v as IssuePriority)}>
+              <Select
+                value={priority}
+                onValueChange={(v) => {
+                  const nextPriority = parseIssuePriority(v)
+                  if (nextPriority) setPriority(nextPriority)
+                }}
+              >
                 <SelectTrigger className="w-36">
-                  <SelectValue>{(value: unknown) => priorityLabelText(value as IssuePriority)}</SelectValue>
+                  <SelectValue>
+                    {(value: unknown) => priorityLabelText(parseIssuePriority(value) ?? priority)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {PRIORITY_ORDER.map((pr) => (
-                    <SelectItem key={pr} value={pr}>{priorityLabelText(pr)}</SelectItem>
+                    <SelectItem key={pr} value={pr}>
+                      {priorityLabelText(pr)}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -98,21 +137,31 @@ export function CreateIssueDialog({
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="项目">
                     {(value: unknown) =>
-                      value === 'none' ? '无项目' : (db.projects.find((p) => p.id === value)?.title ?? '项目')
+                      value === 'none'
+                        ? '无项目'
+                        : (db.projects.find((p) => p.id === value)?.title ?? '项目')
                     }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">无项目</SelectItem>
                   {db.projects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.title}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
           <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline">取消</Button>} />
+            <DialogClose
+              render={
+                <Button type="button" variant="outline">
+                  取消
+                </Button>
+              }
+            />
             <Button type="submit" disabled={!title.trim() || createIssue.isPending}>
               {createIssue.isPending ? '创建中…' : '创建任务'}
             </Button>

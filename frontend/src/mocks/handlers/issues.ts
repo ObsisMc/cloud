@@ -1,11 +1,20 @@
 import { http, HttpResponse } from 'msw'
-import { db, nextId, nextIssueIdentifier } from '../data/store'
-import type { Issue } from '../data/types'
-import { MOCK_BASE, notFound, requireWorkspace } from './shared'
+import { db, nextId, nextIssueIdentifier } from '@/mocks/data/store'
+import type { Issue } from '@/mocks/data/types'
+import {
+  MOCK_BASE,
+  issuePriority,
+  issueStatus,
+  jsonObject,
+  notFound,
+  pathParam,
+  requireWorkspace,
+  stringField,
+} from './shared'
 
 export const issueHandlers = [
   http.get(`${MOCK_BASE}/workspaces/:slug/issues`, ({ params, request }) => {
-    const ws = requireWorkspace(params.slug as string)
+    const ws = requireWorkspace(pathParam(params, 'slug'))
     if (!ws) return notFound('workspace not found')
     const url = new URL(request.url)
     const status = url.searchParams.get('status')
@@ -15,33 +24,37 @@ export const issueHandlers = [
     if (status) list = list.filter((i) => i.status === status)
     if (projectId) list = list.filter((i) => i.projectId === projectId)
     if (assigneeId) list = list.filter((i) => i.assigneeId === assigneeId)
-    list = [...list].sort((a, b) => a.order - b.order)
+    list = list.toSorted((a, b) => a.order - b.order)
     return HttpResponse.json(list)
   }),
 
   http.get(`${MOCK_BASE}/workspaces/:slug/issues/:id`, ({ params }) => {
-    const issue = db.issues.find((i) => i.id === params.id)
+    const issue = db.issues.find((i) => i.id === pathParam(params, 'id'))
     return issue ? HttpResponse.json(issue) : notFound('issue not found')
   }),
 
   http.post(`${MOCK_BASE}/workspaces/:slug/issues`, async ({ params, request }) => {
-    const ws = requireWorkspace(params.slug as string)
+    const ws = requireWorkspace(pathParam(params, 'slug'))
     if (!ws) return notFound('workspace not found')
-    const body = (await request.json()) as Partial<Issue>
+    const body = jsonObject(await request.json())
     const now = new Date().toISOString()
-    const status = body.status ?? 'backlog'
-    const columnOrders = db.issues.filter((i) => i.workspaceId === ws.id && i.status === status).map((i) => i.order)
+    const status = issueStatus(body['status']) ?? 'backlog'
+    const columnOrders = db.issues
+      .filter((i) => i.workspaceId === ws.id && i.status === status)
+      .map((i) => i.order)
     const issue: Issue = {
       id: nextId('issue'),
       workspaceId: ws.id,
       identifier: nextIssueIdentifier(),
-      title: body.title?.trim() || 'Untitled issue',
-      description: body.description ?? '',
+      title: stringField(body['title'])?.trim() || 'Untitled issue',
+      description: stringField(body['description']) ?? '',
       status,
-      priority: body.priority ?? 'none',
-      assigneeId: body.assigneeId ?? null,
-      projectId: body.projectId ?? null,
-      labels: body.labels ?? [],
+      priority: issuePriority(body['priority']) ?? 'none',
+      assigneeId: stringField(body['assigneeId']) ?? null,
+      projectId: stringField(body['projectId']) ?? null,
+      labels: Array.isArray(body['labels'])
+        ? body['labels'].filter((label): label is string => typeof label === 'string')
+        : [],
       createdAt: now,
       updatedAt: now,
       commentCount: 0,
@@ -53,15 +66,24 @@ export const issueHandlers = [
   }),
 
   http.patch(`${MOCK_BASE}/workspaces/:slug/issues/:id`, async ({ params, request }) => {
-    const issue = db.issues.find((i) => i.id === params.id)
+    const issue = db.issues.find((i) => i.id === pathParam(params, 'id'))
     if (!issue) return notFound('issue not found')
-    const patch = (await request.json()) as Partial<Issue>
+    const body = jsonObject(await request.json())
+    const patch: Partial<Issue> = {}
+    const title = stringField(body['title'])
+    const description = stringField(body['description'])
+    const status = issueStatus(body['status'])
+    const priority = issuePriority(body['priority'])
+    if (title !== undefined) patch.title = title
+    if (description !== undefined) patch.description = description
+    if (status !== undefined) patch.status = status
+    if (priority !== undefined) patch.priority = priority
     Object.assign(issue, patch, { updatedAt: new Date().toISOString() })
     return HttpResponse.json(issue)
   }),
 
   http.delete(`${MOCK_BASE}/workspaces/:slug/issues/:id`, ({ params }) => {
-    const idx = db.issues.findIndex((i) => i.id === params.id)
+    const idx = db.issues.findIndex((i) => i.id === pathParam(params, 'id'))
     if (idx === -1) return notFound('issue not found')
     db.issues.splice(idx, 1)
     return new HttpResponse(null, { status: 204 })

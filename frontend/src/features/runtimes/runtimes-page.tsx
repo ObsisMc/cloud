@@ -23,6 +23,7 @@ const TYPE_LABELS: Record<Runtime['type'], string> = {
   container: '容器',
   vm: '虚拟机',
 }
+const SKELETON_KEYS = ['one', 'two', 'three', 'four']
 
 export function RuntimesPage({ slug }: { slug: string }) {
   const { data: runtimes, isPending } = useRuntimes(slug)
@@ -34,8 +35,8 @@ export function RuntimesPage({ slug }: { slug: string }) {
       <div className="flex-1 overflow-y-auto">
         {isPending && (
           <div className="space-y-2 p-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full" />
+            {SKELETON_KEYS.map((key) => (
+              <Skeleton key={key} className="h-16 w-full" />
             ))}
           </div>
         )}
@@ -45,7 +46,8 @@ export function RuntimesPage({ slug }: { slug: string }) {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{runtime.name}</p>
               <p className="text-xs text-muted-foreground">
-                {TYPE_LABELS[runtime.type]} · {runtime.region} · {runtime.cpu} 核 / {runtime.memoryGb}GB
+                {TYPE_LABELS[runtime.type]} · {runtime.region} · {runtime.cpu} 核 /{' '}
+                {runtime.memoryGb}GB
               </p>
             </div>
             <Badge variant={STATUS_VARIANT[runtime.status]}>{STATUS_LABELS[runtime.status]}</Badge>
@@ -54,7 +56,10 @@ export function RuntimesPage({ slug }: { slug: string }) {
               variant="outline"
               disabled={runtime.status === 'provisioning' || action.isPending}
               onClick={() =>
-                action.mutate({ id: runtime.id, action: runtime.status === 'running' ? 'stop' : 'start' })
+                action.mutate({
+                  id: runtime.id,
+                  action: runtime.status === 'running' ? 'stop' : 'start',
+                })
               }
             >
               {runtime.status === 'running' ? '停止' : '启动'}

@@ -23,7 +23,9 @@ export function SquadDetailPage({ slug }: { slug: string }) {
     )
   }
 
-  const members = squad.memberIds.map((id) => actorById(id)).filter((a): a is NonNullable<typeof a> => !!a)
+  const members = squad.memberIds
+    .map((id) => actorById(id))
+    .filter((a): a is NonNullable<typeof a> => !!a)
   const projects = db.projects.filter((proj) => squad.projectIds.includes(proj.id))
 
   return (
@@ -46,10 +48,15 @@ export function SquadDetailPage({ slug }: { slug: string }) {
         <h2 className="mb-2 text-xs font-medium text-muted-foreground">成员</h2>
         <div className="mb-6 space-y-1.5">
           {members.map((member) => (
-            <div key={member.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+            <div
+              key={member.id}
+              className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+            >
               <ActorAvatar actor={member} size="sm" />
               <span>{member.name}</span>
-              {member.type === 'agent' && <span className="text-xs text-muted-foreground">({member.role})</span>}
+              {member.type === 'agent' && (
+                <span className="text-xs text-muted-foreground">({member.role})</span>
+              )}
             </div>
           ))}
         </div>

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["scripts/*.mjs"],
+  "project": ["src/**/*.{ts,tsx,css}", "scripts/**/*.mjs"],
+  "ignore": [
+    "src/api/**",
+    "src/components/**",
+    "src/features/**",
+    "src/mocks/**"
+  ],
+  "ignoreDependencies": ["cmdk"],
+  "ignoreExportsUsedInFile": true
+}

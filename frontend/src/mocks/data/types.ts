@@ -151,4 +151,3 @@ export interface Invoice {
   amount: number
   status: 'paid' | 'pending'
 }
-

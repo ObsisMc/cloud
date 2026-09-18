@@ -10,9 +10,13 @@ describe('BillingPage', () => {
   it('renders the plan summary and every seeded invoice', async () => {
     renderWithProviders(<BillingPage slug={db.workspace.slug} />)
 
-    expect(await screen.findByText(PLAN_LABELS[db.workspace.plan])).toBeInTheDocument()
-    for (const invoice of db.invoices) {
-      expect(await screen.findByText(`¥${invoice.amount}`)).toBeInTheDocument()
-    }
+    const planLabel = PLAN_LABELS[db.workspace.plan]
+    if (!planLabel) throw new Error('billing plan must have a label')
+    expect(await screen.findByText(planLabel)).toBeInTheDocument()
+    await Promise.all(
+      db.invoices.map(async (invoice) => {
+        expect(await screen.findByText(`¥${invoice.amount}`)).toBeInTheDocument()
+      }),
+    )
   })
 })

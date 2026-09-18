@@ -28,18 +28,27 @@ describe('useUpdateIssue', () => {
     // Seed two differently-filtered list caches, mirroring how the board and
     // "My Issues" can both hold the same issue at once.
     queryClient.setQueryData(['issues', db.workspace.slug, {}], [issue])
-    queryClient.setQueryData(['issues', db.workspace.slug, { assigneeId: issue.assigneeId }], [issue])
+    queryClient.setQueryData(
+      ['issues', db.workspace.slug, { assigneeId: issue.assigneeId }],
+      [issue],
+    )
 
-    const { result } = renderHook(() => useUpdateIssue(db.workspace.slug), { wrapper: wrapper(queryClient) })
+    const { result } = renderHook(() => useUpdateIssue(db.workspace.slug), {
+      wrapper: wrapper(queryClient),
+    })
     result.current.mutate({ id: issue.id, patch: { status: 'in_progress' } })
 
     await waitFor(() => {
       const list = queryClient.getQueryData<Issue[]>(['issues', db.workspace.slug, {}])
-      expect(list?.[0].status).toBe('in_progress')
+      expect(list?.[0]?.status).toBe('in_progress')
     })
     expect(result.current.isSuccess).toBe(false)
-    const filtered = queryClient.getQueryData<Issue[]>(['issues', db.workspace.slug, { assigneeId: issue.assigneeId }])
-    expect(filtered?.[0].status).toBe('in_progress')
+    const filtered = queryClient.getQueryData<Issue[]>([
+      'issues',
+      db.workspace.slug,
+      { assigneeId: issue.assigneeId },
+    ])
+    expect(filtered?.[0]?.status).toBe('in_progress')
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
   })
@@ -54,11 +63,13 @@ describe('useUpdateIssue', () => {
     const queryClient = new QueryClient()
     queryClient.setQueryData(['issues', db.workspace.slug, {}], [issue])
 
-    const { result } = renderHook(() => useUpdateIssue(db.workspace.slug), { wrapper: wrapper(queryClient) })
+    const { result } = renderHook(() => useUpdateIssue(db.workspace.slug), {
+      wrapper: wrapper(queryClient),
+    })
     result.current.mutate({ id: issue.id, patch: { status: 'done' } })
 
     await waitFor(() => expect(result.current.isError).toBe(true))
     const list = queryClient.getQueryData<Issue[]>(['issues', db.workspace.slug, {}])
-    expect(list?.[0].status).toBe('backlog')
+    expect(list?.[0]?.status).toBe('backlog')
   })
 })

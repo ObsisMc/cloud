@@ -1,46 +1,61 @@
-import * as seed from './seed'
-import type {
-  Agent,
-  ChatMessage,
-  ChatSession,
-  InboxItem,
-  Invoice,
-  Issue,
-  Project,
-  Runtime,
-  Skill,
-  Squad,
-  User,
-  Workspace,
-  WorkspaceMember,
-} from './types'
-
+import {
+  agents,
+  chatMessages,
+  chatSessions,
+  currentUserId,
+  inboxItems,
+  invoices,
+  issues,
+  members,
+  projects,
+  runtimes,
+  skills,
+  squads,
+  users,
+  workspaces,
+} from './seed'
+import type { Workspace } from './types'
 /**
  * Mutable in-memory copies of the seed data. MSW handlers read and write
  * through this module so create/update/delete calls persist for the life
  * of the tab without a real backend.
  */
-const workspaces = seed.workspaces.map((w) => ({ ...w })) as Workspace[]
+const seededWorkspaces: Workspace[] = workspaces.map((w) => Object.assign({}, w))
+
+type NonEmpty<T> = [T, ...T[]]
+
+function asNonEmpty<T>(items: T[], name: string): NonEmpty<T> {
+  const [first, ...rest] = items
+  if (!first) {
+    throw new Error(`${name} seed data must not be empty`)
+  }
+  return [first, ...rest]
+}
+
+const defaultWorkspace = seededWorkspaces[0]
+if (!defaultWorkspace) {
+  throw new Error('workspace seed data must not be empty')
+}
 
 export const db = {
   /** The default workspace, used wherever a workspace isn't resolved from a route param. */
-  workspace: workspaces[0],
-  workspaces,
-  users: [...seed.users] as User[],
-  members: [...seed.members] as WorkspaceMember[],
-  agents: [...seed.agents] as Agent[],
-  squads: [...seed.squads] as Squad[],
-  projects: [...seed.projects] as Project[],
-  issues: [...seed.issues] as Issue[],
-  chatSessions: [...seed.chatSessions] as ChatSession[],
-  chatMessages: [...seed.chatMessages] as ChatMessage[],
-  inboxItems: [...seed.inboxItems] as InboxItem[],
-  skills: [...seed.skills] as Skill[],
-  runtimes: [...seed.runtimes] as Runtime[],
-  invoices: [...seed.invoices] as Invoice[],
+  workspace: defaultWorkspace,
+  workspaces: seededWorkspaces,
+  users: asNonEmpty([...users], 'users'),
+  members: [...members],
+  agents: asNonEmpty([...agents], 'agents'),
+  squads: asNonEmpty([...squads], 'squads'),
+  projects: asNonEmpty([...projects], 'projects'),
+  issues: asNonEmpty([...issues], 'issues'),
+  chatSessions: asNonEmpty([...chatSessions], 'chat sessions'),
+  chatMessages: [...chatMessages],
+  inboxItems: asNonEmpty([...inboxItems], 'inbox items'),
+  skills: asNonEmpty([...skills], 'skills'),
+  runtimes: asNonEmpty([...runtimes], 'runtimes'),
+  invoices: asNonEmpty([...invoices], 'invoices'),
 }
 
-export const currentUserId = seed.currentUserId
+export { currentUserId }
 
 export function actorById(id: string | null | undefined) {
   if (!id) return undefined

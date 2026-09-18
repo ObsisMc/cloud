@@ -12,7 +12,10 @@ function renderIssueDetail(issueId: string) {
   const router = createMemoryRouter(
     [
       { path: '/:workspaceSlug/issues', element: <div>Issues list screen</div> },
-      { path: '/:workspaceSlug/issues/:issueId', element: <IssueDetailPage slug={db.workspace.slug} /> },
+      {
+        path: '/:workspaceSlug/issues/:issueId',
+        element: <IssueDetailPage slug={db.workspace.slug} />,
+      },
     ],
     { initialEntries: [`/${db.workspace.slug}/issues/${issueId}`] },
   )
@@ -27,13 +30,15 @@ function renderIssueDetail(issueId: string) {
 
 describe('IssueDetailPage', () => {
   it('renders the issue title and lets the status be changed', async () => {
-    const issue = db.issues.find((i) => i.status !== 'done')!
+    const issue = db.issues.find((i) => i.status !== 'done')
+    if (!issue) throw new Error('issue seed data must contain an unfinished issue')
     const user = userEvent.setup()
     renderIssueDetail(issue.id)
 
     expect(await screen.findByText(issue.title)).toBeInTheDocument()
 
     const [statusTrigger] = screen.getAllByRole('combobox')
+    if (!statusTrigger) throw new Error('issue detail must render a status selector')
     await user.click(statusTrigger)
     await user.click(await screen.findByRole('option', { name: '已完成' }))
 
@@ -44,6 +49,7 @@ describe('IssueDetailPage', () => {
 
   it('navigates back to the issues list via the breadcrumb', async () => {
     const issue = db.issues[0]
+    if (!issue) throw new Error('issue seed data must not be empty')
     const user = userEvent.setup()
     renderIssueDetail(issue.id)
     await screen.findByText(issue.title)

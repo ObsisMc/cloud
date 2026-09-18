@@ -6,7 +6,10 @@ export function issuesKey(slug: string, filters?: Record<string, string | undefi
   return ['issues', slug, filters ?? {}] as const
 }
 
-export function useIssues(slug: string, filters?: { status?: string; projectId?: string; assigneeId?: string }) {
+export function useIssues(
+  slug: string,
+  filters?: { status?: string; projectId?: string; assigneeId?: string },
+) {
   return useQuery({
     queryKey: issuesKey(slug, filters),
     queryFn: async () => {
@@ -35,7 +38,7 @@ export function useCreateIssue(slug: string) {
       return data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', slug] })
+      void queryClient.invalidateQueries({ queryKey: ['issues', slug] })
     },
   })
 }
@@ -71,7 +74,7 @@ export function useUpdateIssue(slug: string) {
       queryClient.setQueryData(['issue', slug, data.id], data)
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', slug] })
+      void queryClient.invalidateQueries({ queryKey: ['issues', slug] })
     },
   })
 }
@@ -83,7 +86,7 @@ export function useDeleteIssue(slug: string) {
       await mockApi.delete(`/workspaces/${slug}/issues/${id}`)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', slug] })
+      void queryClient.invalidateQueries({ queryKey: ['issues', slug] })
     },
   })
 }

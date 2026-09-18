@@ -7,8 +7,10 @@ import { MembersPage } from './members-page'
 describe('MembersPage', () => {
   it('renders every seeded member with their role', async () => {
     renderWithProviders(<MembersPage slug={db.workspace.slug} />)
-    for (const user of db.users) {
-      expect(await screen.findByText(user.name)).toBeInTheDocument()
-    }
+    await Promise.all(
+      db.users.map(async (user) => {
+        expect(await screen.findByText(user.name)).toBeInTheDocument()
+      }),
+    )
   })
 })

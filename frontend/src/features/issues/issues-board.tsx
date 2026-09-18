@@ -21,6 +21,18 @@ import { useUpdateIssue } from '@/features/issues/api'
 import { cn } from '@/lib/utils'
 import type { Issue, IssueStatus } from '@/mocks/data/types'
 
+type OrderedIssue = Pick<Issue, 'id' | 'status' | 'order'>
+
+function orderBetween(before: number | undefined, after: number | undefined): number {
+  if (before == null && after == null) return 0
+  if (before == null) {
+    if (after == null) return 0
+    return after - 1
+  }
+  if (after == null) return before + 1
+  return (before + after) / 2
+}
+
 /**
  * Pure decision for what a drag-end should do, kept separate from the
  * DndContext wiring so it can be unit tested without simulating real
@@ -39,7 +51,7 @@ export function resolveDrop({
   overId,
   insertAfter,
 }: {
-  issues: Issue[]
+  issues: OrderedIssue[]
   activeId: string | number | undefined
   overId: string | number | undefined
   insertAfter: boolean
@@ -48,13 +60,15 @@ export function resolveDrop({
   const active = issues.find((i) => i.id === activeId)
   if (!active) return null
 
-  const isColumnDrop = (STATUS_ORDER as (string | number)[]).includes(overId)
-  const targetStatus = isColumnDrop ? (overId as IssueStatus) : issues.find((i) => i.id === overId)?.status
+  const isColumnDrop = STATUS_ORDER.some((status) => status === overId)
+  const targetStatus = isColumnDrop
+    ? STATUS_ORDER.find((status) => status === overId)
+    : issues.find((i) => i.id === overId)?.status
   if (!targetStatus) return null
 
   const column = issues
     .filter((i) => i.status === targetStatus && i.id !== activeId)
-    .sort((a, b) => a.order - b.order)
+    .toSorted((a, b) => a.order - b.order)
 
   let index: number
   if (isColumnDrop) {
@@ -67,7 +81,7 @@ export function resolveDrop({
 
   const before = column[index - 1]?.order
   const after = column[index]?.order
-  const newOrder = before == null ? (after == null ? 0 : after - 1) : after == null ? before + 1 : (before + after) / 2
+  const newOrder = orderBetween(before, after)
 
   if (active.status === targetStatus && active.order === newOrder) return null
   return { id: active.id, status: targetStatus, order: newOrder }
@@ -78,7 +92,12 @@ export function resolveDrop({
  * the drop and to place the live insertion-line indicator on the same
  * side while dragging.
  */
-export function insertsAfter(event: DragEndEvent | DragOverEvent): boolean {
+type DropPositionEvent = {
+  active: { rect: { current: { translated: { top: number; height: number } | null } } }
+  over: { rect: { top: number; height: number } } | null
+}
+
+export function insertsAfter(event: DropPositionEvent): boolean {
   const { active, over } = event
   const overRect = over?.rect
   const activeRect = active.rect.current.translated
@@ -110,7 +129,10 @@ function BoardColumn({
   return (
     <div
       ref={setNodeRef}
-      className={cn('flex h-full w-72 shrink-0 flex-col rounded-lg bg-muted/40', isOver && 'ring-2 ring-primary/50')}
+      className={cn(
+        'flex h-full w-72 shrink-0 flex-col rounded-lg bg-muted/40',
+        isOver && 'ring-2 ring-primary/50',
+      )}
     >
       <div className="flex items-center gap-2 px-2.5 py-2">
         <StatusIcon status={status} />
@@ -120,20 +142,31 @@ function BoardColumn({
           slug={slug}
           defaultStatus={status}
           trigger={
-            <Button variant="ghost" size="icon" className="ml-auto size-6" aria-label={`在${statusLabelText(status)}中新建任务`}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="ml-auto size-6"
+              aria-label={`在${statusLabelText(status)}中新建任务`}
+            >
               <Plus className="size-3.5" />
             </Button>
           }
         />
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
-        {issues.length === 0 && !showEndIndicator && <p className="py-6 text-center text-xs text-muted-foreground">暂无任务</p>}
+        {issues.length === 0 && !showEndIndicator && (
+          <p className="py-6 text-center text-xs text-muted-foreground">暂无任务</p>
+        )}
         <SortableContext items={issues.map((i) => i.id)} strategy={verticalListSortingStrategy}>
           {issues.map((issue) => (
             <div key={issue.id}>
-              {dropIndicator?.overId === issue.id && !dropIndicator.insertAfter && <DropIndicatorLine />}
+              {dropIndicator?.overId === issue.id && !dropIndicator.insertAfter && (
+                <DropIndicatorLine />
+              )}
               <IssueCard issue={issue} slug={slug} />
-              {dropIndicator?.overId === issue.id && dropIndicator.insertAfter && <DropIndicatorLine />}
+              {dropIndicator?.overId === issue.id && dropIndicator.insertAfter && (
+                <DropIndicatorLine />
+              )}
             </div>
           ))}
         </SortableContext>
@@ -164,7 +197,12 @@ export function IssuesBoard({ issues, slug }: { issues: Issue[]; slug: string })
     const { active, over } = event
     if (!over) return
 
-    const update = resolveDrop({ issues, activeId: active.id, overId: over.id, insertAfter: insertsAfter(event) })
+    const update = resolveDrop({
+      issues,
+      activeId: active.id,
+      overId: over.id,
+      insertAfter: insertsAfter(event),
+    })
     if (update) {
       updateIssue.mutate({ id: update.id, patch: { status: update.status, order: update.order } })
     }

@@ -10,9 +10,11 @@ describe('InboxPage', () => {
     renderWithProviders(<InboxPage slug={db.workspace.slug} />)
 
     const titles = [...new Set(db.inboxItems.map((i) => i.title))]
-    for (const title of titles) {
-      expect((await screen.findAllByText(title)).length).toBeGreaterThan(0)
-    }
+    await Promise.all(
+      titles.map(async (title) => {
+        expect((await screen.findAllByText(title)).length).toBeGreaterThan(0)
+      }),
+    )
     const byTitle = new Map<string, number>()
     for (const item of db.inboxItems) byTitle.set(item.title, (byTitle.get(item.title) ?? 0) + 1)
     for (const [title, count] of byTitle) {

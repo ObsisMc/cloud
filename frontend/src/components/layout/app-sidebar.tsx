@@ -54,8 +54,11 @@ const aiTeamNav = [
   { to: (p: ReturnType<typeof workspacePaths>) => p.runtimes, label: '运行时', icon: Server },
 ]
 
-const utilityNav = [{ to: (p: ReturnType<typeof workspacePaths>) => p.settings, label: '设置', icon: Cog }]
+const utilityNav = [
+  { to: (p: ReturnType<typeof workspacePaths>) => p.settings, label: '设置', icon: Cog },
+]
 
+// oxlint-disable-next-line max-lines-per-function -- this composition root owns the complete sidebar navigation tree.
 export function AppSidebar({ slug }: { slug: string }) {
   const p = workspacePaths(slug)
   const { pathname } = useLocation()
@@ -68,7 +71,7 @@ export function AppSidebar({ slug }: { slug: string }) {
 
   function handleLogout() {
     clear()
-    navigate('/login')
+    void navigate('/login')
   }
 
   return (
@@ -96,17 +99,21 @@ export function AppSidebar({ slug }: { slug: string }) {
                   <ActorAvatar actor={user ?? undefined} size="lg" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium leading-tight">{user?.name}</p>
-                    <p className="truncate text-xs text-muted-foreground leading-tight">{user?.email}</p>
+                    <p className="truncate text-xs text-muted-foreground leading-tight">
+                      {user?.email}
+                    </p>
                   </div>
                 </div>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">工作区</DropdownMenuLabel>
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    工作区
+                  </DropdownMenuLabel>
                   {db.workspaces.map((ws) => (
                     <DropdownMenuItem
                       key={ws.id}
                       onClick={() => {
-                        if (ws.slug !== slug) navigate(`/${ws.slug}/issues`)
+                        if (ws.slug !== slug) void navigate(`/${ws.slug}/issues`)
                       }}
                     >
                       <span
@@ -136,7 +143,10 @@ export function AppSidebar({ slug }: { slug: string }) {
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={pathname === p.inbox} render={<NavLink to={p.inbox} />}>
+                <SidebarMenuButton
+                  isActive={pathname === p.inbox}
+                  render={<NavLink to={p.inbox} />}
+                >
                   <Inbox />
                   <span>收件箱</span>
                   {unreadCount > 0 && (
@@ -147,13 +157,19 @@ export function AppSidebar({ slug }: { slug: string }) {
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={pathname === p.myIssues} render={<NavLink to={p.myIssues} />}>
+                <SidebarMenuButton
+                  isActive={pathname === p.myIssues}
+                  render={<NavLink to={p.myIssues} />}
+                >
                   <ListTodo />
                   <span>我的任务</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={pathname.startsWith(p.chat)} render={<NavLink to={p.chat} />}>
+                <SidebarMenuButton
+                  isActive={pathname.startsWith(p.chat)}
+                  render={<NavLink to={p.chat} />}
+                >
                   <MessageCircle />
                   <span>聊天</span>
                 </SidebarMenuButton>
@@ -171,7 +187,10 @@ export function AppSidebar({ slug }: { slug: string }) {
                 const Icon = item.icon
                 return (
                   <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton isActive={pathname.startsWith(href)} render={<NavLink to={href} />}>
+                    <SidebarMenuButton
+                      isActive={pathname.startsWith(href)}
+                      render={<NavLink to={href} />}
+                    >
                       <Icon />
                       <span>{item.label}</span>
                     </SidebarMenuButton>
@@ -191,7 +210,10 @@ export function AppSidebar({ slug }: { slug: string }) {
                 const Icon = item.icon
                 return (
                   <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton isActive={pathname.startsWith(href)} render={<NavLink to={href} />}>
+                    <SidebarMenuButton
+                      isActive={pathname.startsWith(href)}
+                      render={<NavLink to={href} />}
+                    >
                       <Icon />
                       <span>{item.label}</span>
                     </SidebarMenuButton>
@@ -210,7 +232,10 @@ export function AppSidebar({ slug }: { slug: string }) {
             const Icon = item.icon
             return (
               <SidebarMenuItem key={item.label}>
-                <SidebarMenuButton isActive={pathname.startsWith(href)} render={<NavLink to={href} />}>
+                <SidebarMenuButton
+                  isActive={pathname.startsWith(href)}
+                  render={<NavLink to={href} />}
+                >
                   <Icon />
                   <span>{item.label}</span>
                 </SidebarMenuButton>

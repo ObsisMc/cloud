@@ -62,7 +62,9 @@ export function IssueCard({
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
           <ActorAvatar actor={assignee} size="sm" />
-          <span className="truncate text-xs text-muted-foreground">{assignee?.name ?? '未分配'}</span>
+          <span className="truncate text-xs text-muted-foreground">
+            {assignee?.name ?? '未分配'}
+          </span>
         </div>
         <span className="shrink-0 text-[10px] text-muted-foreground">
           {formatDistanceToNow(new Date(issue.updatedAt), { addSuffix: true, locale: zhCN })}

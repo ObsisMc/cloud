@@ -37,16 +37,21 @@ describe('AppSidebar workspace switcher', () => {
     await user.click(screen.getByRole('button', { name: new RegExp(db.workspace.name) }))
 
     const menu = await screen.findByRole('menu')
-    for (const ws of db.workspaces) {
-      expect(await screen.findByRole('menuitem', { name: new RegExp(ws.name) })).toBeInTheDocument()
-    }
+    await Promise.all(
+      db.workspaces.map(async (ws) => {
+        expect(
+          await screen.findByRole('menuitem', { name: new RegExp(ws.name) }),
+        ).toBeInTheDocument()
+      }),
+    )
     expect(menu).toBeInTheDocument()
   })
 
   it('switches to a different workspace and lands on its issues page', async () => {
     useAuthStore.getState().setSession('token', db.users[0])
     const user = userEvent.setup()
-    const target = db.workspaces.filter((w) => w.id !== db.workspace.id)[0]
+    const target = db.workspaces.find((w) => w.id !== db.workspace.id)
+    if (!target) throw new Error('workspace seed data must contain a second workspace')
 
     renderDashboard(`/${db.workspace.slug}/issues`)
     await screen.findByText('Issues screen')

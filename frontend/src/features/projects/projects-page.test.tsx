@@ -8,8 +8,10 @@ describe('ProjectsPage', () => {
   it('renders every seeded project as a card', async () => {
     renderWithProviders(<ProjectsPage slug={db.workspace.slug} />)
 
-    for (const project of db.projects) {
-      expect(await screen.findByText(project.title)).toBeInTheDocument()
-    }
+    await Promise.all(
+      db.projects.map(async (project) => {
+        expect(await screen.findByText(project.title)).toBeInTheDocument()
+      }),
+    )
   })
 })

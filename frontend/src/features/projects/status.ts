@@ -9,7 +9,10 @@ export const PROJECT_STATUS_LABELS: Record<Project['status'], string> = {
   paused: '已暂停',
 }
 
-export const PROJECT_STATUS_VARIANT: Record<Project['status'], NonNullable<VariantProps<typeof badgeVariants>['variant']>> = {
+export const PROJECT_STATUS_VARIANT: Record<
+  Project['status'],
+  NonNullable<VariantProps<typeof badgeVariants>['variant']>
+> = {
   planned: 'secondary',
   in_progress: 'default',
   completed: 'secondary',

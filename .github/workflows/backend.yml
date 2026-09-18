@@ -1,8 +1,20 @@
-name: Cloud checks
+name: Backend
 on:
   push:
     branches: [main, master]
+    paths-ignore:
+      - 'frontend/**'
+      - '**.md'
+      - '.github/workflows/frontend.yml'
   pull_request:
+    paths-ignore:
+      - 'frontend/**'
+      - '**.md'
+      - '.github/workflows/frontend.yml'
+# A newer push to the same branch or pull request supersedes the running check.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -28,6 +40,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          # Caches ~/go/pkg/mod and ~/.cache/go-build keyed by go.sum.
           cache: true
       - run: go mod download
       - run: go run ./cmd/checkformat
@@ -39,24 +52,3 @@ jobs:
           golangci-lint run
       - run: go test -race -count=1 -v -coverpkg=./internal/... -coverprofile=coverage.out ./...
       - run: go build ./cmd/server ./cmd/cloudctl ./cmd/simulator
-  frontend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - name: Generated client matches api/openapi.json
-        run: |
-          npm run api:generate
-          git status --porcelain -- src/api
-          git diff -- src/api
-          test -z "$(git status --porcelain -- src/api)"
-      - run: npm run lint
-      - run: npm run build

@@ -13,7 +13,10 @@ import {
 import { cn } from '@/lib/utils'
 import type { IssuePriority, IssueStatus } from '@/mocks/data/types'
 
-const STATUS_META: Record<IssueStatus, { label: string; className: string; icon: React.ComponentType<{ className?: string }> }> = {
+const STATUS_META: Record<
+  IssueStatus,
+  { label: string; className: string; icon: React.ComponentType<{ className?: string }> }
+> = {
   backlog: { label: '待规划', className: 'text-muted-foreground', icon: CircleDashed },
   todo: { label: '待办', className: 'text-muted-foreground', icon: Circle },
   in_progress: { label: '进行中', className: 'text-amber-500', icon: CircleDot },
@@ -36,7 +39,10 @@ export function statusLabelText(status: IssueStatus): string {
   return STATUS_META[status].label
 }
 
-const PRIORITY_META: Record<IssuePriority, { label: string; icon: React.ComponentType<{ className?: string }>; className: string }> = {
+const PRIORITY_META: Record<
+  IssuePriority,
+  { label: string; icon: React.ComponentType<{ className?: string }>; className: string }
+> = {
   none: { label: '无优先级', icon: Minus, className: 'text-muted-foreground' },
   low: { label: '低', icon: SignalLow, className: 'text-muted-foreground' },
   medium: { label: '中', icon: SignalMedium, className: 'text-foreground' },
@@ -44,7 +50,13 @@ const PRIORITY_META: Record<IssuePriority, { label: string; icon: React.Componen
   urgent: { label: '紧急', icon: ArrowUp, className: 'text-orange-500' },
 }
 
-export function PriorityIcon({ priority, className }: { priority: IssuePriority; className?: string }) {
+export function PriorityIcon({
+  priority,
+  className,
+}: {
+  priority: IssuePriority
+  className?: string
+}) {
   const meta = PRIORITY_META[priority]
   const Icon = meta.icon
   return <Icon className={cn('size-4', meta.className, className)} />
@@ -58,5 +70,22 @@ export function priorityLabelText(priority: IssuePriority): string {
   return PRIORITY_META[priority].label
 }
 
-export const STATUS_ORDER: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']
+export const STATUS_ORDER: IssueStatus[] = [
+  'backlog',
+  'todo',
+  'in_progress',
+  'in_review',
+  'blocked',
+  'done',
+]
 export const PRIORITY_ORDER: IssuePriority[] = ['none', 'low', 'medium', 'high', 'urgent']
+
+/** Converts untrusted select input into a known issue status. */
+export function parseIssueStatus(value: unknown): IssueStatus | undefined {
+  return STATUS_ORDER.find((status) => status === value)
+}
+
+/** Converts untrusted select input into a known issue priority. */
+export function parseIssuePriority(value: unknown): IssuePriority | undefined {
+  return PRIORITY_ORDER.find((priority) => priority === value)
+}

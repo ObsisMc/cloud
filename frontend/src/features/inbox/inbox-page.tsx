@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils'
 import { actorById } from '@/mocks/data/store'
 import type { InboxItemType } from '@/mocks/data/types'
 
+const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six']
+
 const TYPE_ICON: Record<InboxItemType, React.ComponentType<{ className?: string }>> = {
   mention: AtSign,
   assignment: Bell,
@@ -38,12 +40,14 @@ export function InboxPage({ slug }: { slug: string }) {
       <div className="flex-1 overflow-y-auto">
         {isPending && (
           <div className="space-y-2 p-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-14 w-full" />
+            {SKELETON_KEYS.map((key) => (
+              <Skeleton key={key} className="h-14 w-full" />
             ))}
           </div>
         )}
-        {items?.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">暂无新消息。</p>}
+        {items?.length === 0 && (
+          <p className="p-8 text-center text-sm text-muted-foreground">暂无新消息。</p>
+        )}
         {items?.map((item) => {
           const Icon = TYPE_ICON[item.type]
           const actor = actorById(item.actorId)

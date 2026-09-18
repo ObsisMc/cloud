@@ -17,7 +17,9 @@ export function useChatMessages(slug: string, sessionId: string | undefined) {
   return useQuery({
     queryKey: ['chat-messages', slug, sessionId],
     queryFn: async () => {
-      const { data } = await mockApi.get<ChatMessage[]>(`/workspaces/${slug}/chat/sessions/${sessionId}/messages`)
+      const { data } = await mockApi.get<ChatMessage[]>(
+        `/workspaces/${slug}/chat/sessions/${sessionId}/messages`,
+      )
       return data
     },
     enabled: !!sessionId,
@@ -35,8 +37,8 @@ export function useSendChatMessage(slug: string, sessionId: string | undefined) 
       return data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chat-messages', slug, sessionId] })
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions', slug] })
+      void queryClient.invalidateQueries({ queryKey: ['chat-messages', slug, sessionId] })
+      void queryClient.invalidateQueries({ queryKey: ['chat-sessions', slug] })
     },
   })
 }

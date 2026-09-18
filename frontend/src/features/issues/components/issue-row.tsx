@@ -26,7 +26,9 @@ export function IssueRow({ issue, slug }: { issue: Issue; slug: string }) {
         </Badge>
       ))}
       {project && (
-        <span className="hidden shrink-0 truncate text-xs text-muted-foreground sm:inline">{project.title}</span>
+        <span className="hidden shrink-0 truncate text-xs text-muted-foreground sm:inline">
+          {project.title}
+        </span>
       )}
       <ActorAvatar actor={assignee} size="sm" className="shrink-0" />
     </Link>

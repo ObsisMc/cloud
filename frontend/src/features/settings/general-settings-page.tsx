@@ -33,7 +33,12 @@ export function GeneralSettingsPage() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="workspace-slug">工作区标识（Slug）</Label>
-            <Input id="workspace-slug" defaultValue={workspace.slug} key={`${workspace.id}-slug`} disabled />
+            <Input
+              id="workspace-slug"
+              defaultValue={workspace.slug}
+              key={`${workspace.id}-slug`}
+              disabled
+            />
           </div>
         </CardContent>
       </Card>

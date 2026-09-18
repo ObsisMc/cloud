@@ -15,7 +15,7 @@ import { actorById } from '@/mocks/data/store'
 export function ProjectDetailPage({ slug }: { slug: string }) {
   const { projectId } = useParams<{ projectId: string }>()
   const { data: project, isPending } = useProject(slug, projectId)
-  const { data: issues } = useIssues(slug, { projectId })
+  const { data: issues } = useIssues(slug, projectId === undefined ? undefined : { projectId })
   const p = workspacePaths(slug)
 
   if (isPending || !project) {
@@ -43,13 +43,17 @@ export function ProjectDetailPage({ slug }: { slug: string }) {
           </div>
           <p className="text-sm text-muted-foreground">{project.description}</p>
           <div className="flex flex-wrap items-center gap-4 pt-2 text-sm">
-            <Badge variant={PROJECT_STATUS_VARIANT[project.status]}>{PROJECT_STATUS_LABELS[project.status]}</Badge>
+            <Badge variant={PROJECT_STATUS_VARIANT[project.status]}>
+              {PROJECT_STATUS_LABELS[project.status]}
+            </Badge>
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <ActorAvatar actor={lead} size="sm" />
               {lead?.name}
             </div>
             {project.targetDate && (
-              <span className="text-muted-foreground">目标日期：{format(new Date(project.targetDate), 'yyyy年M月d日')}</span>
+              <span className="text-muted-foreground">
+                目标日期：{format(new Date(project.targetDate), 'yyyy年M月d日')}
+              </span>
             )}
           </div>
         </div>

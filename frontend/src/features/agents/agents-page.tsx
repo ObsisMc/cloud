@@ -12,6 +12,7 @@ const STATUS_DOT: Record<Agent['status'], string> = {
   idle: 'bg-muted-foreground',
   offline: 'bg-muted-foreground/40',
 }
+const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six']
 
 export function AgentsPage({ slug }: { slug: string }) {
   const { data: agents, isPending } = useAgents(slug)
@@ -23,8 +24,8 @@ export function AgentsPage({ slug }: { slug: string }) {
       <div className="flex-1 overflow-y-auto p-4">
         {isPending && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-24 w-full" />
+            {SKELETON_KEYS.map((key) => (
+              <Skeleton key={key} className="h-24 w-full" />
             ))}
           </div>
         )}
@@ -44,7 +45,9 @@ export function AgentsPage({ slug }: { slug: string }) {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{agent.name}</p>
                 <p className="truncate text-xs text-muted-foreground">{agent.role}</p>
-                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{agent.description}</p>
+                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                  {agent.description}
+                </p>
               </div>
             </Link>
           ))}

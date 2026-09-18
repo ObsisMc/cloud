@@ -7,8 +7,10 @@ import { SquadsPage } from './squads-page'
 describe('SquadsPage', () => {
   it('renders every seeded squad', async () => {
     renderWithProviders(<SquadsPage slug={db.workspace.slug} />)
-    for (const squad of db.squads) {
-      expect(await screen.findByText(squad.name)).toBeInTheDocument()
-    }
+    await Promise.all(
+      db.squads.map(async (squad) => {
+        expect(await screen.findByText(squad.name)).toBeInTheDocument()
+      }),
+    )
   })
 })

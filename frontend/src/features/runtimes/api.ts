@@ -16,7 +16,9 @@ export function useRuntimeAction(slug: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async ({ id, action }: { id: string; action: 'start' | 'stop' }) => {
-      const { data } = await mockApi.post<Runtime>(`/workspaces/${slug}/runtimes/${id}/action`, { action })
+      const { data } = await mockApi.post<Runtime>(`/workspaces/${slug}/runtimes/${id}/action`, {
+        action,
+      })
       return data
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['runtimes', slug] }),

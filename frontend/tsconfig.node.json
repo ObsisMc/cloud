@@ -13,7 +13,13 @@
     "moduleDetection": "force",
     "noEmit": true,
 
-    /* Linting */
+    /* Strictness mirrors tsconfig.app.json. */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "exactOptionalPropertyTypes": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,

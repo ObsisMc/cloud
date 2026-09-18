@@ -10,6 +10,8 @@ import { PROJECT_STATUS_LABELS, PROJECT_STATUS_VARIANT } from '@/features/projec
 import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
 
+const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six']
+
 export function ProjectsPage({ slug }: { slug: string }) {
   const { data: projects, isPending } = useProjects(slug)
   const p = workspacePaths(slug)
@@ -20,8 +22,8 @@ export function ProjectsPage({ slug }: { slug: string }) {
       <div className="flex-1 overflow-y-auto p-4">
         {isPending && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-32 w-full" />
+            {SKELETON_KEYS.map((key) => (
+              <Skeleton key={key} className="h-32 w-full" />
             ))}
           </div>
         )}
@@ -29,7 +31,9 @@ export function ProjectsPage({ slug }: { slug: string }) {
           {projects?.map((project) => {
             const lead = actorById(project.leadId)
             const issueCount = db.issues.filter((i) => i.projectId === project.id).length
-            const doneCount = db.issues.filter((i) => i.projectId === project.id && i.status === 'done').length
+            const doneCount = db.issues.filter(
+              (i) => i.projectId === project.id && i.status === 'done',
+            ).length
             return (
               <Link
                 key={project.id}
@@ -38,11 +42,15 @@ export function ProjectsPage({ slug }: { slug: string }) {
               >
                 <div className="flex items-center gap-2">
                   <ProjectIcon project={project} />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{project.title}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    {project.title}
+                  </span>
                 </div>
                 <p className="line-clamp-2 text-xs text-muted-foreground">{project.description}</p>
                 <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground">
-                  <Badge variant={PROJECT_STATUS_VARIANT[project.status]}>{PROJECT_STATUS_LABELS[project.status]}</Badge>
+                  <Badge variant={PROJECT_STATUS_VARIANT[project.status]}>
+                    {PROJECT_STATUS_LABELS[project.status]}
+                  </Badge>
                   <span>
                     {doneCount}/{issueCount} 个任务
                   </span>
@@ -50,7 +58,9 @@ export function ProjectsPage({ slug }: { slug: string }) {
                 <div className="flex items-center justify-between">
                   <ActorAvatar actor={lead} size="sm" />
                   {project.targetDate && (
-                    <span className="text-xs text-muted-foreground">{format(new Date(project.targetDate), 'M月d日')}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {format(new Date(project.targetDate), 'M月d日')}
+                    </span>
                   )}
                 </div>
               </Link>
