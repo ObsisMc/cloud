@@ -7,7 +7,8 @@ gateway service credential + a caller-bound user token, and tenant membership.
 ## Wire object `Issue`
 
 ```
-id, tenantId, creatorUserId, assigneeUserId (nullable), parentIssueId (nullable),
+id, tenantId, creatorUserId, assigneeUserId (nullable), assigneeType, assigneeId (nullable),
+parentIssueId (nullable), projectRef (nullable),
 title, description, status, priority, position, number, properties, labels,
 version, createdAt, updatedAt, deletedAt (nullable)
 ```
@@ -18,6 +19,11 @@ version, createdAt, updatedAt, deletedAt (nullable)
 - `position` is a number (float); ordering is the source of truth for the board.
 - `number` is a per-tenant integer sequence (`#1`, `#2`, …).
 - `properties` is a JSON object (arbitrary KV); `labels` is an array of `Label` objects.
+- **Polymorphic assignee** (`Wave 3A`): `assigneeType ∈ {user, agent, team}` + `assigneeId`. `user` is
+  validated against active users; `agent`/`team` are opaque UUID refs this wave (no `ActorResolver` yet).
+  `assigneeUserId` is mirror-written when `assigneeType='user'` and kept for backward compatibility.
+- `projectRef` (`Wave 3A`): a nullable `uuid`, shape-validated only (existence checked later, when
+  `ProjectContextResolver` lands).
 
 ## Endpoints
 
@@ -151,7 +157,15 @@ reads/writes their own views (`ownerUserId` mismatch → 404).
 | PUT | `/issues/{iid}/comments/{cid}` | `body`, `version`(428) | `Comment` @200 |
 | DELETE | `/issues/{iid}/comments/{cid}` | `version`(428) | `Comment` @200 (soft delete) |
 
-`Comment`: `id, tenantId, issueId, authorUserId, body, version, createdAt, updatedAt, deletedAt`.
+`Comment`: `id, tenantId, issueId, authorUserId (nullable), authorType, authorId (nullable), parentId (nullable),
+seq (number), body, version, createdAt, updatedAt, deletedAt (nullable)`.
+
+- **Threading + shared timeline** (`Wave 3A`): `parentId` roots a reply (same-issue invariant is app-layer, cross-issue
+  → 404); `seq` is the per-issue timeline position shared with `issue_activities` (one namespace — see
+  [04-database.md](04-database.md)). Comments list in `ORDER BY seq, id`.
+- **Author ActorRef** (`Wave 3A`): `authorType ∈ {user, agent, team, system}` + `authorId`. `user` is validated against
+  active users and mirror-writes `authorUserId`; `agent`/`team`/`system` leave `authorUserId` NULL (no `ActorResolver`
+  yet). `POST /comments` accepts an optional `authorType`/`authorId` (default `user`).
 
 ### Issue labels — `/issues/{iid}/labels[/{lid}]`
 
@@ -171,17 +185,62 @@ reads/writes their own views (`ownerUserId` mismatch → 404).
 
 `userId` must be an active tenant member (`404 user_not_found` otherwise).
 
+## Wave-3A endpoints (collaboration foundation)
+
+All public, tenant-scoped, dual-JWT + membership-gated, same idempotency/error conventions. Implemented in the third
+wave (first coding batch) per [12-collaboration-architecture.md](12-collaboration-architecture.md) Step 2. These expose
+the issue-owned persistence/API-contract spine only — **no** real `ActorResolver`/`ExecutionDispatcher`/`WorkflowResolver`
+yet, so `agent`/`team`/`workflow` refs are opaque UUIDs (shape-validated, not resolved).
+
+### Runs — `/issues/{iid}/runs[/{rid}]`
+
+| Method | Path | Fields | Response @status |
+| --- | --- | --- | --- |
+| GET | `/issues/{iid}/runs` | — | `{items:[IssueRun…], nextCursor:""}` @200 |
+| GET | `/issues/{iid}/runs/{rid}` | — | `IssueRun` @200 (404 if absent/foreign) |
+| POST | `/issues/{iid}/runs` | `executorType`(req, `agent\|team\|workflow`), `executorId`(req), `input`(object, optional), `parentRunId`, `retryOfRunId`, `rerunOfRunId`, `delegatedFromRunId`, `fireAt`, `externalExecutionId`, `executionContextRef`, `workflowInvocationRef` | `{resource:IssueRun}` @200 |
+
+`IssueRun`: `id, tenantId, issueId, version, executorType, executorId, externalExecutionId, executionContextRef,
+workflowInvocationRef, triggerEvidenceKind, triggerEvidenceRefId, status, parentRunId, retryOfRunId, rerunOfRunId,
+delegatedFromRunId, attempt, maxAttempts, input, result, error, failureReason, triggerSummary, queuedAt, dispatchedAt,
+startedAt, completedAt, fireAt, leaseExpiresAt, createdAt, updatedAt, deletedAt`.
+
+- `POST` enqueues a run with `status='queued'` and appends a `run.enqueued` activity to the issue timeline.
+- **Pending dedup**: a new run for the same `(issueId, executorType, executorId)` while one is `queued`/`dispatched`
+  → `409 pending_run_exists`.
+- **Terminal status ≠ deleted**: `completed`/`failed`/`cancelled` are history; there is **no** delete-run API
+  (`deleted_at` is reserved for future hide/archive). Only `queued`/`dispatched` runs may transition; the state machine
+  guard lives in SQL `WHERE`, not a central validator.
+- No `runtime_id`/`sandbox_id`/`node_id`/`model_id`/`provider_id`/`pty_session_id` columns — execution internals are
+  opaque external refs this wave.
+
+### Context refs — `/issues/{iid}/context-refs[/{crid}]`
+
+| Method | Path | Fields | Response @status |
+| --- | --- | --- | --- |
+| GET | `/issues/{iid}/context-refs` | — | `{items:[ContextRef…], nextCursor:""}` @200 |
+| POST | `/issues/{iid}/context-refs` | `refType`(req, enum), `refId`(req) | `{resource:ContextRef}` @200 |
+| DELETE | `/issues/{iid}/context-refs/{crid}` | — | `ContextRef` @200 (hard delete) |
+
+`ContextRef`: `id, tenantId, issueId, refType, refId, createdAt`.
+`refType ∈ {parent_issue, run, timeline_message, pull_request, project, workspace, acceptance_criteria}`.
+
+- **Reference, not duplicate** — "reference context, not duplicate context": the issue stores an opaque `refId` pointer,
+  never a copy of the target's payload.
+- `refId` is a plain UUID (no FK, no existence check this wave); duplicate `(issueId, refType, refId)` → `409
+  context_ref_exists`; invalid `refType`/`refId` → 400. Hard delete (join-like), no `version`.
+
 ## Errors
 
 Cloud error envelope (`application/json`): `{ "code": "…", "params": {…}, "requestId": "…" }`.
 
 | Status | Codes |
 | --- | --- |
-| 400 | `invalid_json`, `unknown_field`, `invalid_field_type`, `invalid_input`, `invalid_status`, `invalid_status_key`, `invalid_category`, `invalid_priority`, `invalid_anchor`, `invalid_parent`, `invalid_assignee`, `invalid_label`, `invalid_user`, `invalid_query`, `invalid_group`, `idempotency_key_required` |
+| 400 | `invalid_json`, `unknown_field`, `invalid_field_type`, `invalid_input`, `invalid_status`, `invalid_status_key`, `invalid_category`, `invalid_priority`, `invalid_anchor`, `invalid_parent`, `invalid_assignee`, `invalid_label`, `invalid_user`, `invalid_query`, `invalid_group`, `invalid_executor`, `invalid_ref_type`, `invalid_ref`, `idempotency_key_required` |
 | 401 | `invalid_service_credential`, `invalid_user_credential` |
 | 403 | `membership_required`, `user_disabled` |
 | 404 | `not_found`, `assignee_not_found`, `parent_not_found`, `user_not_found` |
-| 409 | `version_conflict`, `position_conflict`, `status_conflict`, `label_conflict`, `system_status_required`, `idempotency_conflict` |
+| 409 | `version_conflict`, `position_conflict`, `status_conflict`, `label_conflict`, `system_status_required`, `pending_run_exists`, `context_ref_exists`, `idempotency_conflict` |
 | 428 | `version_required` |
 | 500 | `internal_error` |
 

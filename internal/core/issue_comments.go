@@ -10,15 +10,24 @@ func comment(t *transaction, tid, cid string) Object {
 
 func commentList(t *transaction, r *PublicRequest) Object {
 	issue(t, r.TenantID, r.IssueID)
-	items := t.list("SELECT * FROM issue_comments WHERE issue_id=$1 AND tenant_id=$2 AND deleted_at IS NULL ORDER BY created_at, id", r.IssueID, r.TenantID)
+	items := t.list("SELECT * FROM issue_comments WHERE issue_id=$1 AND tenant_id=$2 AND deleted_at IS NULL ORDER BY seq, id", r.IssueID, r.TenantID)
 	return Object{"items": items, "nextCursor": ""}
 }
 
 func createComment(t *transaction, r *PublicRequest, uid string) Object {
 	i := issue(t, r.TenantID, r.IssueID)
 	body := validText(r.Body.S("body"), 20000)
+	// Thread parent must belong to the same issue and tenant (app-layer check; the self-FK cannot
+	// express the same-issue invariant). Replies to deleted comments are rejected this wave.
+	var parent any
+	if p, _ := r.Body["parentId"].(string); p != "" {
+		require(validID(p), 400, "invalid_parent")
+		require(t.one("SELECT id FROM issue_comments WHERE id=$1 AND tenant_id=$2 AND issue_id=$3 AND deleted_at IS NULL", p, r.TenantID, i.S("id")) != nil, 404, "parent_not_found")
+		parent = p
+	}
 	id := newID()
-	t.exec("INSERT INTO issue_comments(id,tenant_id,issue_id,author_user_id,body) VALUES($1,$2,$3,$4,$5)", id, r.TenantID, i.S("id"), uid, body)
+	seq := nextTimelineSeq(t, i.S("id"))
+	t.exec("INSERT INTO issue_comments(id,tenant_id,issue_id,author_type,author_id,author_user_id,parent_id,body,seq) VALUES($1,$2,$3,'user',$4,$4,$5,$6,$7)", id, r.TenantID, i.S("id"), uid, parent, body, seq)
 	return comment(t, r.TenantID, id)
 }
 

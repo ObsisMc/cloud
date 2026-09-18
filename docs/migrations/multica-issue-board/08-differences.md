@@ -23,6 +23,21 @@ reason. None of these lose board capability for the MVP.
 | 16 | Batch update may require per-issue revision checks. | Batch (`/issues/batch`) applies a patch atomically **without** per-issue `version` preconditions. | A bulk administrative action; keeps the single-issue optimistic-concurrency story intact while making batch usable. |
 | 17 | Saved views/table views apply their filter server-side. | `issue_views.filter` is stored as a JSON object but **not** applied server-side — the client interprets it (currently the demo does not execute filters). | No query-builder engine in Cloud; the filter is an opaque spec for future/consumer use. |
 
+## Wave 3A divergences (collaboration foundation)
+
+Divergences from Multica's collaboration model, and implementation notes against the frozen architecture, landed in
+Wave 3A.
+
+| # | Multica / frozen design | This migration | Reason |
+| --- | --- | --- | --- |
+| 18 | Assignee is polymorphic (`member`/`agent`/`squad`). | Polymorphic `assignee_type ∈ {user,agent,team}` + `assignee_id`, mirror-writing `assignee_user_id` when `user`. `agent`/`team` are opaque UUID refs (no `ActorResolver` yet). | Replaces wave-2's single-user assignee (diff #4) once actors exist; keeps `assignee_user_id` readable for backward compat. |
+| 19 | `issue_runs` executor is a full object. | `executor_type ∈ {agent,team,workflow}` + opaque `executor_id uuid` (no FK, unresolved); execution internals (`runtime`/`sandbox`/`node`/`model`/`pty`) are absent — only opaque external refs (`external_execution_id`, `execution_context_ref`, `workflow_invocation_ref`). | No runtime/agent subsystem in Cloud yet; the run row owns the lifecycle, the executor is a pointer. |
+| 20 | Frozen doc §11 has `issue_runs.issue_id … ON DELETE CASCADE`. | `issue_id NOT NULL REFERENCES issues(id)` with **no** cascade. | Runs are retained history; issues soft-delete anyway, so a hard cascade would be both unreachable and destructive. |
+| 21 | Comments carry reactions/mentions; activities are a separate stream. | Comments + activities share **one** per-issue timeline `seq` (`GREATEST(MAX(comments.seq), MAX(activities.seq))+1` under the advisory lock). | One merged Timeline projection with a stable order across both tables, without a `timeline_seq` column on `issues` that would leak through `SELECT *`. |
+| 22 | Comment authors are typed per-actor columns (`author_agent_id`/`author_team_id`). | A single uniform ActorRef pair `author_type ∈ {user,agent,team,system}` + `author_id`, matching `assignee_type/assignee_id` and `issue_activities.actor_type/actor_id`. `author_user_id` is kept and mirror-written for `user`. | One ActorRef shape everywhere (uniform `{type,id}`), no per-actor columns. |
+| 23 | Deleted/tampered runs are hard-erased or have a delete API. | Terminal status ≠ deleted: `completed`/`failed`/`cancelled` are history; no delete-run API; `deleted_at` is reserved for future hide/archive. | Runs are an audit/execution record; terminal states must not be silently removable. |
+| 24 | `project_ref` resolves to a real project. | `project_ref` is a nullable `uuid`, shape-validated only (no existence check). | `ProjectContextResolver` is a future port; issues only store the pointer ("reference context, not duplicate context"). |
+
 ## Behavioural parity kept
 
 - 7 canonical statuses and 5 priorities (same values); the status catalog seeds these same columns in

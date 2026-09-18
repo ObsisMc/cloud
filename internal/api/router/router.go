@@ -30,9 +30,9 @@ func Routes() []Route {
 		{"GET", "/api/v1/tenants/:tid/members", "", nil},
 		{"PUT", "/api/v1/tenants/:tid/members/:uid", "", []string{"role", "status", "version"}},
 		{"GET", "/api/v1/tenants/:tid/issues", "", nil},
-		{"POST", "/api/v1/tenants/:tid/issues", "", []string{"title", "description", "status", "priority", "assigneeUserId", "parentIssueId", "properties"}},
+		{"POST", "/api/v1/tenants/:tid/issues", "", []string{"title", "description", "status", "priority", "assigneeUserId", "assigneeType", "assigneeId", "parentIssueId", "projectRef", "properties"}},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid", "", nil},
-		{"PUT", "/api/v1/tenants/:tid/issues/:iid", "", []string{"title", "description", "status", "priority", "assigneeUserId", "parentIssueId", "properties", "version"}},
+		{"PUT", "/api/v1/tenants/:tid/issues/:iid", "", []string{"title", "description", "status", "priority", "assigneeUserId", "assigneeType", "assigneeId", "parentIssueId", "projectRef", "properties", "version"}},
 		{"DELETE", "/api/v1/tenants/:tid/issues/:iid", "", []string{"version"}},
 		{"POST", "/api/v1/tenants/:tid/issues/:iid/move", "", []string{"status", "beforeId", "afterId", "version"}},
 		{"GET", "/api/v1/tenants/:tid/issue-statuses", "", nil},
@@ -50,7 +50,7 @@ func Routes() []Route {
 		{"POST", "/api/v1/tenants/:tid/issues/batch", "", []string{"ids", "status", "priority", "assigneeUserId"}},
 		{"GET", "/api/v1/tenants/:tid/issue-groups", "", nil},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/comments", "", nil},
-		{"POST", "/api/v1/tenants/:tid/issues/:iid/comments", "", []string{"body"}},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/comments", "", []string{"body", "parentId"}},
 		{"PUT", "/api/v1/tenants/:tid/issues/:iid/comments/:cid", "", []string{"body", "version"}},
 		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/comments/:cid", "", []string{"version"}},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/labels", "", nil},
@@ -59,6 +59,12 @@ func Routes() []Route {
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/subscribers", "", nil},
 		{"POST", "/api/v1/tenants/:tid/issues/:iid/subscribers", "", []string{"userId"}},
 		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/subscribers", "", []string{"userId"}},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/runs", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/runs", "", []string{"executorType", "executorId", "input"}},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/runs/:rid", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", []string{"refType", "refId"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/context-refs/:crid", "", nil},
 		{"GET", "/api/v1/tenants/:tid/projects", "", nil},
 		{"POST", "/api/v1/tenants/:tid/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},
 		{"GET", "/api/v1/tenants/:tid/projects/:pid", "", nil},
@@ -189,7 +195,7 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger) *gin.Engi
 						return
 					}
 				}
-				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), OperationID: c.Param("oid"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user})
+				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), OperationID: c.Param("oid"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user})
 			} else {
 				out, e = store.Control(c.Request.Context(), &core.ControlRequest{Action: route.Action, OperationID: c.Param("oid"), EffectID: c.Param("eid"), TicketID: c.Param("ticket"), Body: body, Service: service, Identity: user})
 			}
@@ -236,7 +242,7 @@ func validField(name string, value any) bool {
 			}
 		}
 		return true
-	case "filter", "properties":
+	case "filter", "properties", "input":
 		_, ok := value.(map[string]any)
 		return ok
 	case "idle", "initialized":

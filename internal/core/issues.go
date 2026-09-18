@@ -63,9 +63,52 @@ func likePattern(s string) string {
 	return "%" + s + "%"
 }
 
-// resolveAssignee validates an optional assignee from the body; empty string clears it.
-func resolveAssignee(t *transaction, body Object) (assignee any, present bool) {
+// assigneeRef is the resolved polymorphic ActorRef (user|agent|team). userID mirrors the legacy
+// assignee_user_id column for user assignees and is NULL for agent/team.
+type assigneeRef struct {
+	typeVal string
+	id      any // nil => NULL
+	userID  any // nil => NULL
+}
+
+// resolveAssignee validates an assignment from the body, accepting the legacy assigneeUserId and the
+// new assigneeType/assigneeId pair (Assign does not execute — it only changes responsibility).
+// An empty id clears the assignment in both forms. User assignees are validated against active users;
+// agent/team assignees are opaque UUID refs this wave (no ActorResolver yet — recorded, temporary).
+func resolveAssignee(t *transaction, body Object) (assigneeRef, bool) {
+	if v, ok := body["assigneeType"]; ok {
+		typ, _ := v.(string)
+		require(typ == "user" || typ == "agent" || typ == "team", 400, "invalid_assignee")
+		id, _ := body["assigneeId"].(string)
+		if id == "" {
+			return assigneeRef{typeVal: "user"}, true // clear
+		}
+		require(validID(id), 400, "invalid_assignee")
+		ref := assigneeRef{typeVal: typ, id: id}
+		if typ == "user" {
+			require(t.one("SELECT id FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL", id) != nil, 404, "assignee_not_found")
+			ref.userID = id
+		}
+		return ref, true
+	}
 	v, ok := body["assigneeUserId"]
+	if !ok {
+		return assigneeRef{}, false
+	}
+	s, _ := v.(string)
+	if s == "" {
+		return assigneeRef{typeVal: "user"}, true // clear
+	}
+	require(validID(s), 400, "invalid_assignee")
+	require(t.one("SELECT id FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL", s) != nil, 404, "assignee_not_found")
+	return assigneeRef{typeVal: "user", id: s, userID: s}, true
+}
+
+// resolveProjectRef validates an optional project_ref from the body; empty string clears it. This wave
+// stores and validates the UUID shape only — existence is not checked until ProjectContextResolver
+// lands (temporary behavior, documented).
+func resolveProjectRef(t *transaction, body Object) (ref any, present bool) {
+	v, ok := body["projectRef"]
 	if !ok {
 		return nil, false
 	}
@@ -73,8 +116,7 @@ func resolveAssignee(t *transaction, body Object) (assignee any, present bool) {
 	if s == "" {
 		return nil, true
 	}
-	require(validID(s), 400, "invalid_assignee")
-	require(t.one("SELECT id FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL", s) != nil, 404, "assignee_not_found")
+	require(validID(s), 400, "invalid_project_ref")
 	return s, true
 }
 
@@ -107,11 +149,15 @@ func createIssue(t *transaction, r *PublicRequest, uid string) Object {
 	require(issuePriorities[priority], 400, "invalid_priority")
 	description := strings.TrimSpace(r.Body.S("description"))
 	require(len(description) <= 20000, 400, "invalid_input")
-	assignee, _ := resolveAssignee(t, r.Body)
+	assignee := assigneeRef{typeVal: "user"}
+	if a, present := resolveAssignee(t, r.Body); present {
+		assignee = a
+	}
 	parent, _ := resolveParent(t, r.TenantID, "", r.Body)
+	projectRef, _ := resolveProjectRef(t, r.Body)
 	id := newID()
 	number := int64(t.one("SELECT COALESCE(max(number),0)+1 AS n FROM issues WHERE tenant_id=$1", r.TenantID)["n"].(float64))
-	t.exec("INSERT INTO issues(id,tenant_id,creator_user_id,assignee_user_id,parent_issue_id,title,description,status,priority,position,number,properties) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", id, r.TenantID, uid, assignee, parent, title, description, status, priority, topPosition(t, r.TenantID, status), number, jsonText(r.Body.O("properties")))
+	t.exec("INSERT INTO issues(id,tenant_id,creator_user_id,assignee_type,assignee_id,assignee_user_id,parent_issue_id,project_ref,title,description,status,priority,position,number,properties) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)", id, r.TenantID, uid, assignee.typeVal, assignee.id, assignee.userID, parent, projectRef, title, description, status, priority, topPosition(t, r.TenantID, status), number, jsonText(r.Body.O("properties")))
 	return issue(t, r.TenantID, id)
 }
 
@@ -145,10 +191,15 @@ func updateIssue(t *transaction, r *PublicRequest) Object {
 		}
 	}
 	if assignee, present := resolveAssignee(t, r.Body); present {
-		add("assignee_user_id", assignee)
+		add("assignee_type", assignee.typeVal)
+		add("assignee_id", assignee.id)
+		add("assignee_user_id", assignee.userID)
 	}
 	if parent, present := resolveParent(t, r.TenantID, i.S("id"), r.Body); present {
 		add("parent_issue_id", parent)
+	}
+	if projectRef, present := resolveProjectRef(t, r.Body); present {
+		add("project_ref", projectRef)
 	}
 	if v, ok := r.Body["properties"]; ok {
 		props, ok := v.(map[string]any)
@@ -252,7 +303,9 @@ func batchUpdate(t *transaction, r *PublicRequest) Object {
 			add("priority", patchPriority)
 		}
 		if hasAssignee {
-			add("assignee_user_id", assignee)
+			add("assignee_type", assignee.typeVal)
+			add("assignee_id", assignee.id)
+			add("assignee_user_id", assignee.userID)
 		}
 		if len(cols) > 0 {
 			vals = append(vals, i.S("id"))

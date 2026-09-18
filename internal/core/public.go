@@ -11,10 +11,10 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // PublicRequest is populated only after service and final-user credentials are verified.
 type PublicRequest struct {
-	Method, Path, TenantID, ProjectID, WorkspaceID, OperationID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, Key, After, Query, GroupBy string
-	Limit                                                                                                                                          int
-	Body                                                                                                                                           Object
-	Identity                                                                                                                                       *Claims
+	Method, Path, TenantID, ProjectID, WorkspaceID, OperationID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, Key, After, Query, GroupBy string
+	Limit                                                                                                                                                               int
+	Body                                                                                                                                                                Object
+	Identity                                                                                                                                                            *Claims
 }
 
 // Public executes one authorized public request in a short database transaction.
@@ -92,6 +92,22 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 			}
 		case r.IssueID != "" || strings.HasSuffix(r.Path, "/issues"):
 			switch {
+			case strings.Contains(r.Path, "/runs"):
+				switch r.Method {
+				case "POST":
+					out = Object{"resource": createRun(t, r, uid)}
+				default:
+					reject(404, "not_found")
+				}
+			case strings.Contains(r.Path, "/context-refs"):
+				switch r.Method {
+				case "POST":
+					out = Object{"resource": createContextRef(t, r)}
+				case "DELETE":
+					out = deleteContextRef(t, r)
+				default:
+					reject(404, "not_found")
+				}
 			case strings.Contains(r.Path, "/comments"):
 				switch {
 				case r.Method == "POST":
@@ -204,6 +220,13 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 	switch {
 	case strings.HasSuffix(r.Path, "/members"):
 		return page(t, "SELECT m.user_id AS id,m.tenant_id,m.user_id,m.role,m.status,m.version,u.display_name FROM tenant_memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1", []any{r.TenantID}, "m.user_id", r)
+	case strings.Contains(r.Path, "/runs"):
+		if r.RunID != "" {
+			return run(t, r.TenantID, r.IssueID, r.RunID)
+		}
+		return runList(t, r)
+	case strings.Contains(r.Path, "/context-refs"):
+		return contextRefList(t, r)
 	case strings.HasSuffix(r.Path, "/comments"):
 		return commentList(t, r)
 	case strings.HasSuffix(r.Path, "/subscribers"):

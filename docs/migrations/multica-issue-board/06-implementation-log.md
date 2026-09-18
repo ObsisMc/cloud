@@ -85,3 +85,42 @@ Chronological record of the board-periphery migration. Full scope and rationale:
    upgrade test's hardcoded pre-upgrade baseline of `0001–0003` needed no change).
 5. Demo (`scripts/demo-issue-board-web.sh`) rebuilt — numbers, labels, comments, search, groups, custom columns,
    and subscribe all exercise the real HTTP API.
+
+## Third wave (3A — issue-owned foundation)
+
+First coding wave of the collaboration migration. Implements exactly **Step 2 — the issue-owned foundation** of
+[12-collaboration-architecture.md](12-collaboration-architecture.md) and stops there (no Wave 3B). Purely additive
+over `0001–0006`; edits no applied migration.
+
+### New files
+
+| File | Contents |
+| --- | --- |
+| `internal/core/migrations/0007_issue_collaboration.sql` | `issues` ALTERs (`assignee_type`/`assignee_id`/`project_ref` + backfill), `issue_comments` ALTERs (`parent_id`/`author_type`/`author_id`/`seq` + `author_user_id DROP NOT NULL` + backfill + `UNIQUE(issue_id,seq)`), and 3 new tables: `issue_runs`, `issue_activities`, `issue_context_refs`. |
+| `internal/core/issue_runs.go` | `run`, `runList`, `createRun` (enqueue `status='queued'`, pending-executor dedup → 409, appends `run.enqueued` activity). |
+| `internal/core/issue_activities.go` | `nextTimelineSeq` (Option-C: `GREATEST(MAX(comments.seq), MAX(activities.seq)) + 1`), `appendActivity`. |
+| `internal/core/issue_context_refs.go` | `contextRefList`, `createContextRef`, `deleteContextRef`. |
+| `integration/issue_collaboration_test.go` | `TestIssueCollaborationMigrationBackfills`, `TestIssueAssignmentAndProjectRef`, `TestIssueCommentThreadingAndSharedTimeline`, `TestIssueRuns`, `TestIssueContextRefsAndIsolation`. |
+
+### Modified files (additive)
+
+| File | Change |
+| --- | --- |
+| `internal/core/issues.go` | `assigneeRef` struct + `resolveAssignee`/`resolveProjectRef`; `createIssue`/`updateIssue`/`batchUpdate` write `assignee_type`/`assignee_id`/`assignee_user_id`/`project_ref`. |
+| `internal/core/issue_comments.go` | `commentList` orders `seq, id`; `createComment` validates same-issue `parent_id` + allocates timeline `seq`. |
+| `internal/core/public.go` | `PublicRequest` gained `RunID`/`ContextRefID`; write dispatch for `/runs` (POST) and `/context-refs` (POST/DELETE); `readPublic` branches for `/runs` and `/context-refs`. |
+| `internal/api/router/router.go` | +6 routes (runs GET/POST, run GET single, context-refs GET/POST/DELETE); `RunID`/`ContextRefID` param bindings; `validField` `input` (object) case. |
+| `internal/contract/openapi.go` | `IssueRun` + `ContextRef` schemas; `Issue` gained `assigneeType`/`assigneeId`/`projectRef`; `Comment` gained `authorType`/`authorId`/`parentId`/`seq`; `responseSchema`/`inputSchema`/`optionalField` branched for runs/context-refs. |
+| `api/openapi.json` | Regenerated (`go run ./cmd/openapi`). |
+
+### Verification performed
+
+1. `go build ./...` — clean.
+2. `go test ./internal/... ./cmd/...` — PASS (incl. the OpenAPI contract test after regenerating `api/openapi.json`).
+3. Full integration suite (`integration.test.exe` + `TEST_DATABASE_URL` + `REQUIRE_POSTGRES=1`) — PASS, including the
+   five new `TestIssue*` collaboration tests and all pre-existing project/identity/concurrency/board tests.
+4. `0007_issue_collaboration.sql` applies cleanly on top of `0001–0006`; `Store.Migrate()` auto-applies it. The
+   backfill test (`TestIssueCollaborationMigrationBackfills`) seeds legacy rows under a single tx (to satisfy the
+   deferred `tenant_admin` constraint trigger) and asserts assignee/author/seq backfill.
+5. Formatting: my new/edited files passed `go tool gofumpt -w -extra`. (Pre-existing CRLF-vs-LF full-file diffs on
+   `store.go`/`auth.go`/etc. are a repo-wide line-ending artifact, unrelated to Wave 3A and intentionally left alone.)

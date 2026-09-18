@@ -119,6 +119,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/demo/config", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
 		b, _ := json.Marshal(demoConfig(r.Context(), store, tid, uid, &user))
 		_, _ = w.Write(b)
 	})
@@ -132,6 +133,9 @@ func run() error {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// The embedded HTML changes between demo restarts; forbid heuristic caching so a
+		// reopened tab never runs a stale script against the new tenant.
+		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(indexHTML)
 	})
 
@@ -178,6 +182,7 @@ func openBrowser(url string) error {
 func demoConfig(ctx context.Context, store *core.Store, tid, uid string, user *core.Claims) map[string]any {
 	statuses, _, _ := store.Public(ctx, &core.PublicRequest{Method: "GET", Path: "/api/v1/tenants/" + tid + "/issue-statuses", TenantID: tid, Identity: user})
 	labels, _, _ := store.Public(ctx, &core.PublicRequest{Method: "GET", Path: "/api/v1/tenants/" + tid + "/labels", TenantID: tid, Identity: user})
+	members, _, _ := store.Public(ctx, &core.PublicRequest{Method: "GET", Path: "/api/v1/tenants/" + tid + "/members", TenantID: tid, Identity: user})
 
 	statusList := []map[string]any{}
 	if items, ok := statuses["items"].([]core.Object); ok {
@@ -196,11 +201,18 @@ func demoConfig(ctx context.Context, store *core.Store, tid, uid string, user *c
 			labelList = append(labelList, map[string]any{"id": l.S("id"), "name": l.S("name"), "color": l.S("color")})
 		}
 	}
+	memberList := []map[string]any{}
+	if items, ok := members["items"].([]core.Object); ok {
+		for _, m := range items {
+			memberList = append(memberList, map[string]any{"id": m.S("userId"), "displayName": m.S("displayName"), "role": m.S("role")})
+		}
+	}
 	return map[string]any{
 		"tenantId":   tid,
 		"user":       map[string]any{"id": uid, "subject": "alice", "displayName": "Alice"},
 		"statuses":   statusList,
 		"labels":     labelList,
+		"members":    memberList,
 		"priorities": []string{"urgent", "high", "medium", "low", "none"},
 	}
 }

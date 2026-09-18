@@ -88,6 +88,82 @@ LEFT JOIN issue_statuses s ON s.tenant_id=i.tenant_id AND s.key=i.status AND s.d
 ORDER BY COALESCE(s.position,1000), i.position, i.id
 ```
 
+## Migration 0007 — issue collaboration foundation (Wave 3A)
+
+`internal/core/migrations/0007_issue_collaboration.sql` (third wave, first coding batch). Purely additive
+over `0001–0006`; edits no applied migration. Implements **Step 2 — the issue-owned foundation** of
+[12-collaboration-architecture.md](12-collaboration-architecture.md): polymorphic assignee, comment threading +
+author ActorRef + timeline `seq`, `issue_runs`, `issue_activities`, `issue_context_refs`. **No** agent/team/
+workflow/sim/runtime/notification/websocket/PR/logs schema lives here.
+
+### `ALTER TABLE issues`
+
+1. `ADD COLUMN assignee_type text NOT NULL DEFAULT 'user' CHECK(assignee_type IN ('user','agent','team'))`.
+2. `ADD COLUMN assignee_id uuid` (no FK — resolved by type via `ActorResolver`; the resolver does not exist yet).
+3. `ADD COLUMN project_ref uuid` (nullable; shape-only this wave, no existence check until `ProjectContextResolver`).
+4. Backfill `UPDATE issues SET assignee_type='user', assignee_id=assignee_user_id WHERE assignee_user_id IS NOT NULL`.
+   `assignee_user_id` is kept readable and mirror-written when `assignee_type='user'`.
+
+### `ALTER TABLE issue_comments`
+
+1. `ADD COLUMN parent_id uuid REFERENCES issue_comments(id)` (threading; same-issue invariant is app-layer).
+2. `ADD COLUMN author_type text NOT NULL DEFAULT 'user' CHECK(author_type IN ('user','agent','team','system'))`.
+3. `ADD COLUMN author_id uuid`.
+4. `ADD COLUMN seq bigint`.
+5. `ALTER COLUMN author_user_id DROP NOT NULL` — agent/team/system authors leave it NULL; the composite
+   `FK(tenant_id, author_user_id)` skips NULLs (MATCH SIMPLE).
+6. Backfill `author_type='user', author_id=author_user_id`; then `seq = row_number() OVER (PARTITION BY
+   issue_id ORDER BY created_at, id)`; then `seq SET NOT NULL` + `UNIQUE(issue_id, seq)`.
+
+**ActorRef shape:** authors use a single `author_type`/`author_id` pair (uniform with `assignee_type`/
+`assignee_id` and `issue_activities.actor_type`/`actor_id`). The frozen design's `author_agent_id`/
+`author_team_id` per-actor columns are **not** used — one ActorRef `{type,id}` pair, no per-actor columns.
+
+### New table `issue_runs`
+
+Issue-owned AI work-lifecycle unit (**not** `operations`, **not** `execution_tickets`).
+
+| Group | Columns |
+| --- | --- |
+| identity | `id uuid PK`, `tenant_id → tenants`, `version bigint CHECK(>0)`, `created_at/updated_at/deleted_at` |
+| owner | `issue_id uuid NOT NULL REFERENCES issues(id)` (no `ON DELETE CASCADE` — runs are retained history; issues soft-delete anyway) |
+| executor | `executor_type text CHECK(IN 'agent','team','workflow')`, `executor_id uuid NOT NULL` (no FK; opaque ref) |
+| external refs | `external_execution_id text DEFAULT ''`, `execution_context_ref uuid`, `workflow_invocation_ref uuid`, `trigger_evidence_kind text DEFAULT ''`, `trigger_evidence_ref_id uuid` |
+| state | `status text CHECK(IN 'queued','dispatched','running','completed','failed','cancelled','deferred')` |
+| run chain | `parent_run_id/retry_of_run_id/rerun_of_run_id/delegated_from_run_id` self-FKs, `attempt bigint`, `max_attempts bigint` |
+| payload | `input jsonb NOT NULL '{}'`, `result jsonb`, `error text`, `failure_reason text`, `trigger_summary text` |
+| lifecycle | `queued_at`, `dispatched_at`, `started_at`, `completed_at`, `fire_at`, `lease_expires_at` |
+
+Indexes: `issue_run_list(issue_id, created_at, id)`; partial unique
+`issue_run_pending_uniq(issue_id, executor_type, executor_id) WHERE status IN ('queued','dispatched') AND
+deleted_at IS NULL` (pending dedup — at most one pending run per executor). **Terminal status ≠ deleted**
+(`completed/failed/cancelled` are history; `deleted_at` is for future hide/archive/admin cleanup; no delete-run API).
+
+### New table `issue_activities`
+
+Append-only **Timeline projection** (not an event source): `id`, `tenant_id → tenants`, `issue_id → issues`,
+`seq bigint NOT NULL`, `actor_type CHECK(IN 'user','agent','team','system')`, `actor_id uuid`,
+`action text CHECK(len 1..200)`, `details jsonb NOT NULL '{}'`, `created_at`. `UNIQUE(issue_id, seq)`;
+index `issue_activity_list(issue_id, seq)`. No `version`, no update/delete API.
+
+### New table `issue_context_refs`
+
+Issue-scoped opaque references ("reference context, not duplicate context"): `id`, `tenant_id → tenants`,
+`issue_id → issues`, `ref_type text CHECK(IN 'parent_issue','run','timeline_message','pull_request',
+'project','workspace','acceptance_criteria')`, `ref_id uuid NOT NULL` (no FK), `created_at`.
+`UNIQUE(issue_id, ref_type, ref_id)`; index `issue_context_ref_list(issue_id, ref_type, id)`. Join-like —
+hard delete, no `version`.
+
+### Timeline `seq` allocator (Option C)
+
+The next per-issue `seq` is allocated inside the advisory-locked transaction as
+`GREATEST(COALESCE(MAX(issue_comments.seq),0), COALESCE(MAX(issue_activities.seq),0)) + 1` — one namespace
+shared by comments and activities (so a single issue never reuses a `seq` across the two tables). This is
+deliberately **not** a `timeline_seq` column on `issues` (which would leak through `SELECT * FROM issues`
+into the Issue response and break the `additionalProperties:false` OpenAPI contract). See
+[issue_activities.go](../../../internal/core/issue_activities.go) for the concurrency note if the global
+advisory lock is ever removed.
+
 ## Rollback
 
 ```sql

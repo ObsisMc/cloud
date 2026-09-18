@@ -68,7 +68,9 @@ func Document() map[string]any {
 	s["Project"] = resource("id tenantId ownerUserId name repositoryUrl defaultBranch credentialRefId lifecycle version createdAt deletedAt", "credentialRefId deletedAt")
 	s["Workspace"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt", "deletedAt")
 	s["WorkspaceListItem"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt branchName baseCommitId title", "deletedAt baseCommitId title")
-	s["Comment"] = resource("id tenantId issueId authorUserId body version createdAt updatedAt deletedAt", "deletedAt")
+	s["Comment"] = resource("id tenantId issueId authorUserId authorType authorId parentId body seq version createdAt updatedAt deletedAt", "authorUserId authorId parentId deletedAt")
+	commentProps := properties(s, "Comment")
+	commentProps["seq"] = number()
 	s["Label"] = resource("id tenantId name color version createdAt updatedAt deletedAt", "deletedAt")
 	s["IssueStatus"] = resource("id tenantId key name description category color icon isSystem position version createdAt updatedAt deletedAt", "deletedAt")
 	statusProps := properties(s, "IssueStatus")
@@ -78,7 +80,7 @@ func Document() map[string]any {
 	s["IssueView"] = resource("id tenantId ownerUserId name filter version createdAt updatedAt deletedAt", "deletedAt")
 	viewProps := properties(s, "IssueView")
 	viewProps["filter"] = obj{"type": "object", "additionalProperties": true}
-	s["Issue"] = resource("id tenantId creatorUserId assigneeUserId parentIssueId title description status priority position number version createdAt updatedAt deletedAt properties labels", "assigneeUserId parentIssueId deletedAt")
+	s["Issue"] = resource("id tenantId creatorUserId assigneeUserId assigneeType assigneeId parentIssueId title description status priority position number version createdAt updatedAt deletedAt properties labels projectRef", "assigneeUserId assigneeId parentIssueId deletedAt projectRef")
 	issueProps := properties(s, "Issue")
 	issueProps["status"] = obj{"type": "string", "pattern": "^[a-z0-9][a-z0-9_]{0,31}$"}
 	issueProps["priority"] = enumeration("urgent", "high", "medium", "low", "none")
@@ -86,6 +88,21 @@ func Document() map[string]any {
 	issueProps["number"] = number()
 	issueProps["properties"] = obj{"type": "object", "additionalProperties": true}
 	issueProps["labels"] = array(ref("Label"))
+	issueProps["assigneeType"] = enumeration("user", "agent", "team")
+	s["IssueRun"] = resource("id tenantId issueId version executorType executorId externalExecutionId executionContextRef workflowInvocationRef triggerEvidenceKind triggerEvidenceRefId status parentRunId retryOfRunId rerunOfRunId delegatedFromRunId attempt maxAttempts input result error failureReason triggerSummary queuedAt dispatchedAt startedAt completedAt fireAt leaseExpiresAt createdAt updatedAt deletedAt", "executionContextRef workflowInvocationRef triggerEvidenceRefId parentRunId retryOfRunId rerunOfRunId delegatedFromRunId result dispatchedAt startedAt completedAt fireAt leaseExpiresAt deletedAt")
+	runProps := properties(s, "IssueRun")
+	runProps["executorType"] = enumeration("agent", "team", "workflow")
+	runProps["status"] = enumeration("queued", "dispatched", "running", "completed", "failed", "cancelled", "deferred")
+	runProps["attempt"] = number()
+	runProps["maxAttempts"] = number()
+	runProps["input"] = obj{"type": "object", "additionalProperties": true}
+	runProps["result"] = optional(obj{"type": "object", "additionalProperties": true})
+	runProps["externalExecutionId"] = str()
+	runProps["executionContextRef"] = optional(uuid())
+	runProps["workflowInvocationRef"] = optional(uuid())
+	s["ContextRef"] = resource("id tenantId issueId refType refId createdAt", "")
+	contextRefProps := properties(s, "ContextRef")
+	contextRefProps["refType"] = enumeration("parent_issue", "run", "timeline_message", "pull_request", "project", "workspace", "acceptance_criteria")
 	s["AdminResource"] = resource("id projectId ownerUserId kind desiredState observedState runtimeGeneration version", "")
 	s["AdminOperation"] = resource("id tenantId projectId workspaceId kind state step version createdAt updatedAt", "workspaceId")
 	s["OperationRequest"] = object(obj{"previous": obj{"type": "object", "additionalProperties": ref("Workspace")}})
@@ -256,6 +273,22 @@ func responseSchema(r router.Route) (schema obj, status string) {
 			return object(obj{"resource": ref("Label")}, "resource"), "200"
 		}
 		return ref("Label"), "200"
+	case strings.Contains(r.Path, "/runs"):
+		if r.Method == "GET" && strings.HasSuffix(r.Path, "/runs") {
+			return object(obj{"items": array(ref("IssueRun")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		if r.Method == "POST" {
+			return object(obj{"resource": ref("IssueRun")}, "resource"), "200"
+		}
+		return ref("IssueRun"), "200"
+	case strings.Contains(r.Path, "/context-refs"):
+		if r.Method == "GET" {
+			return object(obj{"items": array(ref("ContextRef")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		if r.Method == "POST" {
+			return object(obj{"resource": ref("ContextRef")}, "resource"), "200"
+		}
+		return ref("ContextRef"), "200"
 	case strings.Contains(r.Path, "/issues"):
 		if r.Method == "POST" && strings.HasSuffix(r.Path, "/issues") {
 			return object(obj{"resource": ref("Issue")}, "resource"), "200"
@@ -318,12 +351,12 @@ func optionalField(name string, r router.Route) bool {
 		switch name {
 		case "title":
 			return r.Method == "PUT"
-		case "description", "status", "priority", "assigneeUserId", "parentIssueId", "beforeId", "afterId", "properties":
+		case "description", "status", "priority", "assigneeUserId", "assigneeType", "assigneeId", "parentIssueId", "projectRef", "beforeId", "afterId", "properties":
 			return true
 		}
 	}
 	switch name {
-	case "description", "category", "color", "icon", "filter", "position":
+	case "description", "category", "color", "icon", "filter", "position", "parentId", "input":
 		return true
 	}
 	return name == "defaultBranch" || name == "credentialRefId" || name == "version" && r.Method == "PUT" || name == "epoch" && r.Action == "access" || name == "workspaceId" && r.Action == "plan" || name == "externalId" && r.Action == "effect_result"
@@ -352,6 +385,12 @@ func inputSchema(name string, r router.Route) obj {
 		return enumeration("active", "disabled")
 	case "priority":
 		return enumeration("urgent", "high", "medium", "low", "none")
+	case "assigneeType":
+		return enumeration("user", "agent", "team")
+	case "executorType":
+		return enumeration("agent", "team", "workflow")
+	case "refType":
+		return enumeration("parent_issue", "run", "timeline_message", "pull_request", "project", "workspace", "acceptance_criteria")
 	case "connectionState":
 		return enumeration("connected", "disconnected")
 	case "state":
@@ -370,11 +409,11 @@ func inputSchema(name string, r router.Route) obj {
 		return uuid()
 	case "category":
 		return enumeration("unstarted", "started", "done", "closed")
-	case "labelId", "userId":
+	case "labelId", "userId", "assigneeId", "executorId", "refId", "parentId", "projectRef":
 		return uuid()
 	case "ids":
 		return array(uuid())
-	case "filter", "properties":
+	case "filter", "properties", "input":
 		return obj{"type": "object", "additionalProperties": true}
 	case "position":
 		return number()

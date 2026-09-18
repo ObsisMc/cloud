@@ -17,7 +17,7 @@ push, bots/squad leads, Autopilot — see [00-overview.md](00-overview.md).
 | Router | `router.go` — 24 new routes, new path params, `validField` array/object/integer cases. |
 | OpenAPI | `Comment`, `Label`, `IssueStatus`, `IssueView` schemas; `Issue` gained `number`/`properties`/`labels`; regenerated `api/openapi.json`. |
 | Tests | `integration/issue_extensions_test.go` — 5 end-to-end tests. |
-| Demo | `cmd/demo-issue-board-web/` — numbers, label badges, detail drawer (comments/labels/subscribers/properties), search, group-by, custom-column entry. |
+| Demo | `cmd/demo-issue-board-web/` — Chinese UI; numbers, label badges, sub-issue hierarchy (nested cards + collapse), detail drawer (assignee, parent, description edit, comments/labels/subscribers/properties), create-issue assignee, batch mode (multi-select + bulk status/priority/assignee), saved views (apply/save), create label, search, group-by, custom-column entry. |
 
 ## 24 new endpoints
 

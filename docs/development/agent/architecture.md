@@ -111,3 +111,33 @@ Envelope `{code, params, requestId}`. Common codes by status:
 | Projects / workspaces / operations | `internal/core/{project,workspace,operation,node}.go` |
 | OpenAPI generator | `internal/contract/openapi.go` |
 | Migrations | `internal/core/migrations/NNNN_*.sql` |
+
+## Collaboration — implemented vs. planned
+
+Issue **collaboration** is **partially implemented**. Wave 3A (the "issue-owned foundation") has
+landed; the cross-module port layer and projections have not.
+
+**Implemented (Wave 3A, migration `0007`):**
+
+- Polymorphic `assignee_type/assignee_id` (user/agent/team) + `project_ref` on `issues`.
+- Comment threading (`parent_id`) + author ActorRef (`author_type/author_id`, user/agent/team/system).
+- `issue_runs` (executor `agent/team/workflow` + opaque external refs), `issue_activities` (append-only
+  timeline projection), `issue_context_refs` (reference-not-copy).
+- Shared per-issue timeline `seq` (Option-C `GREATEST(MAX,MAX)+1` under the advisory lock).
+- API/contract spine for `GET/POST /issues/{iid}/runs`, `GET /issues/{iid}/runs/{rid}`,
+  `GET/POST/DELETE /issues/{iid}/context-refs`.
+
+**Planned, not yet in code:**
+
+- **Integration ports** — the Go interfaces (`ActorResolver`, `ExecutionDispatcher`,
+  `WorkflowResolver`, `NotificationSink`, `RealtimePublisher`, `ProjectContextResolver`,
+  `PullRequestResolver`, `ExecutionLogProvider`) do **not** exist yet.
+- **Simulator adapters** (`FakeActorResolver`/`FakeTeamResolver`/`FakeWorkflowResolver`/
+  `FakeProjectContextResolver`/fake executor + no-op sinks) and the `0008` sim catalog — not started.
+- **Issue Detail** full projection + UI; Timeline pagination/truncation; execution logs; PR
+  integration; Notification; Realtime/WebSocket; real runtime/LLM/agent/team/workflow execution.
+
+Non-`user` actor refs (agent/team/system/workflow) are **opaque UUIDs** this wave — shape-validated,
+not resolved. `users` remains the only *resolved* human actor. The target contracts live in
+[`docs/migrations/multica-issue-board/12-collaboration-architecture.md`](../../migrations/multica-issue-board/12-collaboration-architecture.md);
+Wave 3A's concrete divergences from that doc are in its §36.
