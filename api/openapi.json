@@ -161,6 +161,59 @@
         ],
         "type": "object"
       },
+      "Comment": {
+        "additionalProperties": false,
+        "properties": {
+          "authorUserId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "issueId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "tenantId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "issueId",
+          "authorUserId",
+          "body",
+          "version",
+          "createdAt",
+          "updatedAt",
+          "deletedAt"
+        ],
+        "type": "object"
+      },
       "ControllerProject": {
         "additionalProperties": false,
         "properties": {
@@ -505,6 +558,286 @@
         "required": [
           "accepted",
           "errorCode"
+        ],
+        "type": "object"
+      },
+      "Issue": {
+        "additionalProperties": false,
+        "properties": {
+          "assigneeUserId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "creatorUserId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "parentIssueId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "position": {
+            "format": "double",
+            "type": "number"
+          },
+          "priority": {
+            "enum": [
+              "urgent",
+              "high",
+              "medium",
+              "low",
+              "none"
+            ],
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "pattern": "^[a-z0-9][a-z0-9_]{0,31}$",
+            "type": "string"
+          },
+          "tenantId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "creatorUserId",
+          "assigneeUserId",
+          "parentIssueId",
+          "title",
+          "description",
+          "status",
+          "priority",
+          "position",
+          "number",
+          "version",
+          "createdAt",
+          "updatedAt",
+          "deletedAt",
+          "properties",
+          "labels"
+        ],
+        "type": "object"
+      },
+      "IssueStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "enum": [
+              "unstarted",
+              "started",
+              "done",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "isSystem": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "format": "double",
+            "type": "number"
+          },
+          "tenantId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "key",
+          "name",
+          "description",
+          "category",
+          "color",
+          "icon",
+          "isSystem",
+          "position",
+          "version",
+          "createdAt",
+          "updatedAt",
+          "deletedAt"
+        ],
+        "type": "object"
+      },
+      "IssueView": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "filter": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ownerUserId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "tenantId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "ownerUserId",
+          "name",
+          "filter",
+          "version",
+          "createdAt",
+          "updatedAt",
+          "deletedAt"
+        ],
+        "type": "object"
+      },
+      "Label": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tenantId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "name",
+          "color",
+          "version",
+          "createdAt",
+          "updatedAt",
+          "deletedAt"
         ],
         "type": "object"
       },
@@ -1568,6 +1901,4457 @@
           }
         ],
         "summary": "GET /api/v1/me/tenants"
+      }
+    },
+    "/api/v1/tenants/{tid}/issue-groups": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issue-groups",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "groups": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "items": {
+                            "items": {
+                              "$ref": "#/components/schemas/Issue"
+                            },
+                            "type": "array"
+                          },
+                          "key": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "items"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "groups"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issue-groups"
+      }
+    },
+    "/api/v1/tenants/{tid}/issue-statuses": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issue-statuses",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Exclusive UUID cursor, ascending stable ordering.",
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/IssueStatus"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issue-statuses"
+      },
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issue-statuses",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "category": {
+                    "enum": [
+                      "unstarted",
+                      "started",
+                      "done",
+                      "closed"
+                    ],
+                    "type": "string"
+                  },
+                  "color": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "icon": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/IssueStatus"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issue-statuses"
+      }
+    },
+    "/api/v1/tenants/{tid}/issue-statuses/{sid}": {
+      "delete": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "delete_api_v1_tenants_tid_issue-statuses_sid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueStatus"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "DELETE /api/v1/tenants/:tid/issue-statuses/:sid"
+      },
+      "put": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "put_api_v1_tenants_tid_issue-statuses_sid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "category": {
+                    "enum": [
+                      "unstarted",
+                      "started",
+                      "done",
+                      "closed"
+                    ],
+                    "type": "string"
+                  },
+                  "color": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "icon": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "position": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueStatus"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "PUT /api/v1/tenants/:tid/issue-statuses/:sid"
+      }
+    },
+    "/api/v1/tenants/{tid}/issue-views": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issue-views",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Exclusive UUID cursor, ascending stable ordering.",
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/IssueView"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issue-views"
+      },
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issue-views",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "filter": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/IssueView"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issue-views"
+      }
+    },
+    "/api/v1/tenants/{tid}/issue-views/{vid}": {
+      "delete": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "delete_api_v1_tenants_tid_issue-views_vid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueView"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "DELETE /api/v1/tenants/:tid/issue-views/:vid"
+      },
+      "put": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "put_api_v1_tenants_tid_issue-views_vid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "filter": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueView"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "PUT /api/v1/tenants/:tid/issue-views/:vid"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issues",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/Issue"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issues"
+      },
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issues",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "assigneeUserId": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "parentIssueId": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "enum": [
+                      "urgent",
+                      "high",
+                      "medium",
+                      "low",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "properties": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "status": {
+                    "pattern": "^[a-z0-9][a-z0-9_]{0,31}$",
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/Issue"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issues"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/batch": {
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issues_batch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "assigneeUserId": {
+                    "type": "string"
+                  },
+                  "ids": {
+                    "items": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "priority": {
+                    "enum": [
+                      "urgent",
+                      "high",
+                      "medium",
+                      "low",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "pattern": "^[a-z0-9][a-z0-9_]{0,31}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ids"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/Issue"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issues/batch"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}": {
+      "delete": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "delete_api_v1_tenants_tid_issues_iid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid"
+      },
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issues_iid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid"
+      },
+      "put": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "put_api_v1_tenants_tid_issues_iid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "assigneeUserId": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "parentIssueId": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "enum": [
+                      "urgent",
+                      "high",
+                      "medium",
+                      "low",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "properties": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "status": {
+                    "pattern": "^[a-z0-9][a-z0-9_]{0,31}$",
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "PUT /api/v1/tenants/:tid/issues/:iid"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/comments": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issues_iid_comments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Exclusive UUID cursor, ascending stable ordering.",
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/Comment"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/comments"
+      },
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issues_iid_comments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "body"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/Comment"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/comments"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/comments/{cid}": {
+      "delete": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "delete_api_v1_tenants_tid_issues_iid_comments_cid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comment"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/comments/:cid"
+      },
+      "put": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "put_api_v1_tenants_tid_issues_iid_comments_cid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "body"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comment"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "PUT /api/v1/tenants/:tid/issues/:iid/comments/:cid"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/labels": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issues_iid_labels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Exclusive UUID cursor, ascending stable ordering.",
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/Label"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/labels"
+      },
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issues_iid_labels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "labelId": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "labelId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/Label"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/labels"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/labels/{lid}": {
+      "delete": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "delete_api_v1_tenants_tid_issues_iid_labels_lid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Label"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/labels/:lid"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/move": {
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issues_iid_move",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "afterId": {
+                    "type": "string"
+                  },
+                  "beforeId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "pattern": "^[a-z0-9][a-z0-9_]{0,31}$",
+                    "type": "string"
+                  },
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/move"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/subscribers": {
+      "delete": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "delete_api_v1_tenants_tid_issues_iid_subscribers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "userId": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "userId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/subscribers"
+      },
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issues_iid_subscribers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Exclusive UUID cursor, ascending stable ordering.",
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/User"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/subscribers"
+      },
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issues_iid_subscribers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "userId": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "userId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/subscribers"
+      }
+    },
+    "/api/v1/tenants/{tid}/labels": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_labels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Exclusive UUID cursor, ascending stable ordering.",
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/Label"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/labels"
+      },
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_labels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "color": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/Label"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/labels"
+      }
+    },
+    "/api/v1/tenants/{tid}/labels/{lid}": {
+      "delete": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "delete_api_v1_tenants_tid_labels_lid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Label"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "DELETE /api/v1/tenants/:tid/labels/:lid"
+      },
+      "put": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "put_api_v1_tenants_tid_labels_lid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "color": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Label"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "PUT /api/v1/tenants/:tid/labels/:lid"
       }
     },
     "/api/v1/tenants/{tid}/members": {

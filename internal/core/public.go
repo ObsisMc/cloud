@@ -11,10 +11,10 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // PublicRequest is populated only after service and final-user credentials are verified.
 type PublicRequest struct {
-	Method, Path, TenantID, ProjectID, WorkspaceID, OperationID, UserID, Key, After string
-	Limit                                                                           int
-	Body                                                                            Object
-	Identity                                                                        *Claims
+	Method, Path, TenantID, ProjectID, WorkspaceID, OperationID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, Key, After, Query, GroupBy string
+	Limit                                                                                                                                          int
+	Body                                                                                                                                           Object
+	Identity                                                                                                                                       *Claims
 }
 
 // Public executes one authorized public request in a short database transaction.
@@ -90,6 +90,83 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				out = Object{"resource": project(t, r.TenantID, uid, p.S("id")), "operation": op}
 				status = 202
 			}
+		case r.IssueID != "" || strings.HasSuffix(r.Path, "/issues"):
+			switch {
+			case strings.Contains(r.Path, "/comments"):
+				switch {
+				case r.Method == "POST":
+					out = Object{"resource": createComment(t, r, uid)}
+				case r.Method == "PUT":
+					out = updateComment(t, r)
+				case r.Method == "DELETE":
+					out = deleteComment(t, r)
+				default:
+					reject(404, "not_found")
+				}
+			case strings.Contains(r.Path, "/subscribers"):
+				switch {
+				case r.Method == "POST":
+					out = Object{"resource": subscribe(t, r)}
+				case r.Method == "DELETE":
+					out = Object{"resource": unsubscribe(t, r)}
+				default:
+					reject(404, "not_found")
+				}
+			case strings.Contains(r.Path, "/labels"):
+				switch {
+				case r.Method == "POST":
+					out = Object{"resource": attachLabel(t, r)}
+				case r.Method == "DELETE":
+					out = detachLabel(t, r)
+				default:
+					reject(404, "not_found")
+				}
+			case r.Method == "POST" && strings.HasSuffix(r.Path, "/move"):
+				out = moveIssue(t, r)
+			case r.Method == "POST":
+				out = Object{"resource": createIssue(t, r, uid)}
+			case r.Method == "PUT":
+				out = updateIssue(t, r)
+			case r.Method == "DELETE":
+				out = deleteIssue(t, r)
+			default:
+				reject(404, "not_found")
+			}
+		case strings.Contains(r.Path, "/issue-statuses"):
+			switch {
+			case r.Method == "POST":
+				out = Object{"resource": createIssueStatus(t, r)}
+			case r.Method == "PUT":
+				out = updateIssueStatus(t, r)
+			case r.Method == "DELETE":
+				out = deleteIssueStatus(t, r)
+			default:
+				reject(404, "not_found")
+			}
+		case strings.Contains(r.Path, "/issue-views"):
+			switch {
+			case r.Method == "POST":
+				out = Object{"resource": createView(t, r, uid)}
+			case r.Method == "PUT":
+				out = updateView(t, r, uid)
+			case r.Method == "DELETE":
+				out = deleteView(t, r, uid)
+			default:
+				reject(404, "not_found")
+			}
+		case r.Method == "POST" && strings.HasSuffix(r.Path, "/issues/batch"):
+			out = batchUpdate(t, r)
+		case strings.Contains(r.Path, "/labels"):
+			switch {
+			case r.Method == "POST":
+				out = Object{"resource": createLabel(t, r)}
+			case r.Method == "PUT":
+				out = updateLabel(t, r)
+			case r.Method == "DELETE":
+				out = deleteLabel(t, r)
+			default:
+				reject(404, "not_found")
+			}
 		default:
 			reject(404, "not_found")
 		}
@@ -127,6 +204,24 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 	switch {
 	case strings.HasSuffix(r.Path, "/members"):
 		return page(t, "SELECT m.user_id AS id,m.tenant_id,m.user_id,m.role,m.status,m.version,u.display_name FROM tenant_memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1", []any{r.TenantID}, "m.user_id", r)
+	case strings.HasSuffix(r.Path, "/comments"):
+		return commentList(t, r)
+	case strings.HasSuffix(r.Path, "/subscribers"):
+		return subscriberList(t, r)
+	case strings.HasSuffix(r.Path, "/labels") && r.IssueID != "":
+		return issueLabelList(t, r)
+	case r.IssueID != "":
+		return issue(t, r.TenantID, r.IssueID)
+	case strings.HasSuffix(r.Path, "/issue-statuses"):
+		return statusCatalogList(t, r)
+	case strings.HasSuffix(r.Path, "/labels"):
+		return labelList(t, r)
+	case strings.HasSuffix(r.Path, "/issue-views"):
+		return viewList(t, r, uid)
+	case strings.HasSuffix(r.Path, "/issue-groups"):
+		return issueGroups(t, r)
+	case strings.HasSuffix(r.Path, "/issues"):
+		return issueList(t, r)
 	case strings.HasSuffix(r.Path, "/resource-status"):
 		return page(t, "SELECT w.id,w.project_id,w.owner_user_id,w.kind,w.desired_state,w.observed_state,w.runtime_generation,w.version FROM workspaces w WHERE w.tenant_id=$1 AND w.deleted_at IS NULL", []any{r.TenantID}, "w.id", r)
 	case r.OperationID != "":

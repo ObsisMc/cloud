@@ -29,6 +29,36 @@ func Routes() []Route {
 		{"GET", "/api/v1/me/tenants", "", nil},
 		{"GET", "/api/v1/tenants/:tid/members", "", nil},
 		{"PUT", "/api/v1/tenants/:tid/members/:uid", "", []string{"role", "status", "version"}},
+		{"GET", "/api/v1/tenants/:tid/issues", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues", "", []string{"title", "description", "status", "priority", "assigneeUserId", "parentIssueId", "properties"}},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid", "", nil},
+		{"PUT", "/api/v1/tenants/:tid/issues/:iid", "", []string{"title", "description", "status", "priority", "assigneeUserId", "parentIssueId", "properties", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid", "", []string{"version"}},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/move", "", []string{"status", "beforeId", "afterId", "version"}},
+		{"GET", "/api/v1/tenants/:tid/issue-statuses", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issue-statuses", "", []string{"key", "name", "description", "category", "color", "icon"}},
+		{"PUT", "/api/v1/tenants/:tid/issue-statuses/:sid", "", []string{"name", "description", "category", "color", "icon", "position", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/issue-statuses/:sid", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/labels", "", nil},
+		{"POST", "/api/v1/tenants/:tid/labels", "", []string{"name", "color"}},
+		{"PUT", "/api/v1/tenants/:tid/labels/:lid", "", []string{"name", "color", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/labels/:lid", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/issue-views", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issue-views", "", []string{"name", "filter"}},
+		{"PUT", "/api/v1/tenants/:tid/issue-views/:vid", "", []string{"name", "filter", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/issue-views/:vid", "", []string{"version"}},
+		{"POST", "/api/v1/tenants/:tid/issues/batch", "", []string{"ids", "status", "priority", "assigneeUserId"}},
+		{"GET", "/api/v1/tenants/:tid/issue-groups", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/comments", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/comments", "", []string{"body"}},
+		{"PUT", "/api/v1/tenants/:tid/issues/:iid/comments/:cid", "", []string{"body", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/comments/:cid", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/labels", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/labels", "", []string{"labelId"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/labels/:lid", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/subscribers", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/subscribers", "", []string{"userId"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/subscribers", "", []string{"userId"}},
 		{"GET", "/api/v1/tenants/:tid/projects", "", nil},
 		{"POST", "/api/v1/tenants/:tid/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},
 		{"GET", "/api/v1/tenants/:tid/projects/:pid", "", nil},
@@ -159,7 +189,7 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger) *gin.Engi
 						return
 					}
 				}
-				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), OperationID: c.Param("oid"), UserID: c.Param("uid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Body: body, Identity: user})
+				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), OperationID: c.Param("oid"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user})
 			} else {
 				out, e = store.Control(c.Request.Context(), &core.ControlRequest{Action: route.Action, OperationID: c.Param("oid"), EffectID: c.Param("eid"), TicketID: c.Param("ticket"), Body: body, Service: service, Identity: user})
 			}
@@ -188,13 +218,27 @@ func bearerToken(header string) (string, bool) {
 
 func validField(name string, value any) bool {
 	switch name {
-	case "version", "epoch", "admissionEpoch", "protocolVersion", "retrySeconds":
+	case "version", "epoch", "admissionEpoch", "protocolVersion", "retrySeconds", "position":
 		n, ok := value.(json.Number)
 		if !ok {
 			return false
 		}
 		_, e := n.Int64()
 		return e == nil
+	case "ids":
+		arr, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, v := range arr {
+			if _, ok := v.(string); !ok {
+				return false
+			}
+		}
+		return true
+	case "filter", "properties":
+		_, ok := value.(map[string]any)
+		return ok
 	case "idle", "initialized":
 		_, ok := value.(bool)
 		return ok

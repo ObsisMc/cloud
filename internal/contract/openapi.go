@@ -68,6 +68,24 @@ func Document() map[string]any {
 	s["Project"] = resource("id tenantId ownerUserId name repositoryUrl defaultBranch credentialRefId lifecycle version createdAt deletedAt", "credentialRefId deletedAt")
 	s["Workspace"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt", "deletedAt")
 	s["WorkspaceListItem"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt branchName baseCommitId title", "deletedAt baseCommitId title")
+	s["Comment"] = resource("id tenantId issueId authorUserId body version createdAt updatedAt deletedAt", "deletedAt")
+	s["Label"] = resource("id tenantId name color version createdAt updatedAt deletedAt", "deletedAt")
+	s["IssueStatus"] = resource("id tenantId key name description category color icon isSystem position version createdAt updatedAt deletedAt", "deletedAt")
+	statusProps := properties(s, "IssueStatus")
+	statusProps["isSystem"] = boolean()
+	statusProps["category"] = enumeration("unstarted", "started", "done", "closed")
+	statusProps["position"] = obj{"type": "number", "format": "double"}
+	s["IssueView"] = resource("id tenantId ownerUserId name filter version createdAt updatedAt deletedAt", "deletedAt")
+	viewProps := properties(s, "IssueView")
+	viewProps["filter"] = obj{"type": "object", "additionalProperties": true}
+	s["Issue"] = resource("id tenantId creatorUserId assigneeUserId parentIssueId title description status priority position number version createdAt updatedAt deletedAt properties labels", "assigneeUserId parentIssueId deletedAt")
+	issueProps := properties(s, "Issue")
+	issueProps["status"] = obj{"type": "string", "pattern": "^[a-z0-9][a-z0-9_]{0,31}$"}
+	issueProps["priority"] = enumeration("urgent", "high", "medium", "low", "none")
+	issueProps["position"] = obj{"type": "number", "format": "double"}
+	issueProps["number"] = number()
+	issueProps["properties"] = obj{"type": "object", "additionalProperties": true}
+	issueProps["labels"] = array(ref("Label"))
 	s["AdminResource"] = resource("id projectId ownerUserId kind desiredState observedState runtimeGeneration version", "")
 	s["AdminOperation"] = resource("id tenantId projectId workspaceId kind state step version createdAt updatedAt", "workspaceId")
 	s["OperationRequest"] = object(obj{"previous": obj{"type": "object", "additionalProperties": ref("Workspace")}})
@@ -162,7 +180,7 @@ func Document() map[string]any {
 }
 
 func isList(r router.Route) bool {
-	return r.Method == "GET" && (strings.HasSuffix(r.Path, "/tenants") || strings.HasSuffix(r.Path, "/members") || strings.HasSuffix(r.Path, "/projects") || strings.HasSuffix(r.Path, "/workspaces") || strings.HasSuffix(r.Path, "/resource-status"))
+	return r.Method == "GET" && (strings.HasSuffix(r.Path, "/tenants") || strings.HasSuffix(r.Path, "/members") || strings.HasSuffix(r.Path, "/projects") || strings.HasSuffix(r.Path, "/workspaces") || strings.HasSuffix(r.Path, "/resource-status") || strings.HasSuffix(r.Path, "/issue-statuses") || strings.HasSuffix(r.Path, "/labels") || strings.HasSuffix(r.Path, "/issue-views") || strings.HasSuffix(r.Path, "/comments") || strings.HasSuffix(r.Path, "/subscribers"))
 }
 
 func responseSchema(r router.Route) (schema obj, status string) {
@@ -187,6 +205,65 @@ func responseSchema(r router.Route) (schema obj, status string) {
 		default:
 			return ref("Operation"), "200"
 		}
+	}
+	switch {
+	case strings.Contains(r.Path, "/comments"):
+		if r.Method == "GET" {
+			return object(obj{"items": array(ref("Comment")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		if r.Method == "POST" {
+			return object(obj{"resource": ref("Comment")}, "resource"), "200"
+		}
+		return ref("Comment"), "200"
+	case strings.Contains(r.Path, "/subscribers"):
+		if r.Method == "GET" {
+			return object(obj{"items": array(ref("User")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		return object(obj{"resource": ref("User")}, "resource"), "200"
+	case strings.Contains(r.Path, "/issues") && strings.Contains(r.Path, "/labels"):
+		if r.Method == "GET" {
+			return object(obj{"items": array(ref("Label")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		if r.Method == "POST" {
+			return object(obj{"resource": ref("Label")}, "resource"), "200"
+		}
+		return ref("Label"), "200"
+	case strings.HasSuffix(r.Path, "/issues/batch"):
+		return object(obj{"items": array(ref("Issue")), "nextCursor": str()}, "items", "nextCursor"), "200"
+	case strings.Contains(r.Path, "/issue-statuses"):
+		if r.Method == "GET" {
+			return object(obj{"items": array(ref("IssueStatus")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		if r.Method == "POST" {
+			return object(obj{"resource": ref("IssueStatus")}, "resource"), "200"
+		}
+		return ref("IssueStatus"), "200"
+	case strings.Contains(r.Path, "/issue-views"):
+		if r.Method == "GET" {
+			return object(obj{"items": array(ref("IssueView")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		if r.Method == "POST" {
+			return object(obj{"resource": ref("IssueView")}, "resource"), "200"
+		}
+		return ref("IssueView"), "200"
+	case strings.Contains(r.Path, "/issue-groups"):
+		return object(obj{"groups": array(object(obj{"key": str(), "items": array(ref("Issue"))}, "key", "items"))}, "groups"), "200"
+	case strings.Contains(r.Path, "/labels"):
+		if r.Method == "GET" {
+			return object(obj{"items": array(ref("Label")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		if r.Method == "POST" {
+			return object(obj{"resource": ref("Label")}, "resource"), "200"
+		}
+		return ref("Label"), "200"
+	case strings.Contains(r.Path, "/issues"):
+		if r.Method == "POST" && strings.HasSuffix(r.Path, "/issues") {
+			return object(obj{"resource": ref("Issue")}, "resource"), "200"
+		}
+		if r.Method == "GET" && strings.HasSuffix(r.Path, "/issues") {
+			return object(obj{"items": array(ref("Issue")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		return ref("Issue"), "200"
 	}
 	name := "Project"
 	switch {
@@ -237,6 +314,18 @@ func responseSchema(r router.Route) (schema obj, status string) {
 }
 
 func optionalField(name string, r router.Route) bool {
+	if strings.Contains(r.Path, "/issues") {
+		switch name {
+		case "title":
+			return r.Method == "PUT"
+		case "description", "status", "priority", "assigneeUserId", "parentIssueId", "beforeId", "afterId", "properties":
+			return true
+		}
+	}
+	switch name {
+	case "description", "category", "color", "icon", "filter", "position":
+		return true
+	}
 	return name == "defaultBranch" || name == "credentialRefId" || name == "version" && r.Method == "PUT" || name == "epoch" && r.Action == "access" || name == "workspaceId" && r.Action == "plan" || name == "externalId" && r.Action == "effect_result"
 }
 
@@ -257,7 +346,12 @@ func inputSchema(name string, r router.Route) obj {
 	case "role":
 		return enumeration("admin", "member")
 	case "status":
+		if strings.Contains(r.Path, "/issues") {
+			return obj{"type": "string", "pattern": "^[a-z0-9][a-z0-9_]{0,31}$"}
+		}
 		return enumeration("active", "disabled")
+	case "priority":
+		return enumeration("urgent", "high", "medium", "low", "none")
 	case "connectionState":
 		return enumeration("connected", "disconnected")
 	case "state":
@@ -274,6 +368,16 @@ func inputSchema(name string, r router.Route) obj {
 		return enumeration("substrate_timeout", "termination_unconfirmed", "git_cleanup_failed", "node_unavailable", "external_failure")
 	case "tenantId", "operationId", "ticketId", "credentialRefId":
 		return uuid()
+	case "category":
+		return enumeration("unstarted", "started", "done", "closed")
+	case "labelId", "userId":
+		return uuid()
+	case "ids":
+		return array(uuid())
+	case "filter", "properties":
+		return obj{"type": "object", "additionalProperties": true}
+	case "position":
+		return number()
 	case "workspaceId":
 		if r.Action == "plan" {
 			return str()
