@@ -32,7 +32,7 @@ const AVATAR_COLORS = [
   '#ec4899',
 ]
 
-const ISSUE_STATUSES: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
+const ISSUE_STATUSES: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']
 const ISSUE_PRIORITIES: IssuePriority[] = ['none', 'low', 'medium', 'high', 'urgent']
 const LABELS = ['bug', 'feature', 'design', 'infra', 'docs', 'perf', 'security']
 

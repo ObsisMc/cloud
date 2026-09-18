@@ -1,4 +1,4 @@
-export type IssueStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
+export type IssueStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done'
 export type IssuePriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
 export type ActorType = 'user' | 'agent'
 

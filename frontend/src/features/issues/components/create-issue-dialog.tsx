@@ -16,14 +16,22 @@ import { useCreateIssue } from '@/features/issues/api'
 import { db } from '@/mocks/data/store'
 import type { IssuePriority, IssueStatus } from '@/mocks/data/types'
 
-const STATUS_OPTIONS: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
+const STATUS_OPTIONS: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']
 const PRIORITY_OPTIONS: IssuePriority[] = ['none', 'low', 'medium', 'high', 'urgent']
 
-export function CreateIssueDialog({ slug }: { slug: string }) {
+export function CreateIssueDialog({
+  slug,
+  defaultStatus = 'backlog',
+  trigger,
+}: {
+  slug: string
+  defaultStatus?: IssueStatus
+  trigger?: React.ReactElement
+}) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [status, setStatus] = useState<IssueStatus>('backlog')
+  const [status, setStatus] = useState<IssueStatus>(defaultStatus)
   const [priority, setPriority] = useState<IssuePriority>('none')
   const [projectId, setProjectId] = useState<string>('none')
   const createIssue = useCreateIssue(slug)
@@ -31,7 +39,7 @@ export function CreateIssueDialog({ slug }: { slug: string }) {
   function reset() {
     setTitle('')
     setDescription('')
-    setStatus('backlog')
+    setStatus(defaultStatus)
     setPriority('none')
     setProjectId('none')
   }
@@ -47,7 +55,7 @@ export function CreateIssueDialog({ slug }: { slug: string }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm">New issue</Button>} />
+      <DialogTrigger render={trigger ?? <Button size="sm">New issue</Button>} />
       <DialogContent className="sm:max-w-lg">
         <form onSubmit={handleSubmit}>
           <DialogHeader>

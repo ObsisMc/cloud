@@ -18,8 +18,8 @@ const STATUS_META: Record<IssueStatus, { label: string; className: string; icon:
   todo: { label: 'Todo', className: 'text-muted-foreground', icon: Circle },
   in_progress: { label: 'In Progress', className: 'text-amber-500', icon: CircleDot },
   in_review: { label: 'In Review', className: 'text-violet-500', icon: CircleDot },
+  blocked: { label: 'Blocked', className: 'text-red-500', icon: Ban },
   done: { label: 'Done', className: 'text-emerald-500', icon: CircleCheck },
-  cancelled: { label: 'Cancelled', className: 'text-muted-foreground', icon: Ban },
 }
 
 export function StatusIcon({ status, className }: { status: IssueStatus; className?: string }) {
@@ -50,4 +50,4 @@ export function PriorityLabel({ priority }: { priority: IssuePriority }) {
   return <span className="text-sm">{PRIORITY_META[priority].label}</span>
 }
 
-export const STATUS_ORDER: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
+export const STATUS_ORDER: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']

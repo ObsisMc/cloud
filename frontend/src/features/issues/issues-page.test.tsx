@@ -19,7 +19,7 @@ describe('IssuesPage', () => {
     renderWithProviders(<IssuesPage slug={db.workspace.slug} />)
     await screen.findByText('Backlog')
 
-    await user.click(screen.getByRole('button', { name: /new issue/i }))
+    await user.click(screen.getByRole('button', { name: 'New issue' }))
     const dialog = await screen.findByRole('dialog')
     await user.type(within(dialog).getByPlaceholderText(/issue title/i), 'A brand new mock issue')
     await user.click(within(dialog).getByRole('button', { name: /create issue/i }))

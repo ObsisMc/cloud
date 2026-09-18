@@ -12,7 +12,7 @@ import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
 import type { IssuePriority, IssueStatus } from '@/mocks/data/types'
 
-const STATUS_OPTIONS: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
+const STATUS_OPTIONS: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']
 const PRIORITY_OPTIONS: IssuePriority[] = ['none', 'low', 'medium', 'high', 'urgent']
 
 export function IssueDetailPage({ slug }: { slug: string }) {
