@@ -1,7 +1,11 @@
 import { useHealth } from '@/api/health/health'
 import { Button } from '@/components/ui/button'
 
-function App() {
+/**
+ * Root screen. Shows backend reachability so a broken dev proxy or API
+ * outage is visible before any feature work starts.
+ */
+export function App() {
   const { data: health, isPending, isError } = useHealth()
 
   return (
@@ -16,5 +20,3 @@ function App() {
     </div>
   )
 }
-
-export default App

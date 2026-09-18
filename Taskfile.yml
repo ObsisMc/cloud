@@ -63,11 +63,22 @@ tasks:
     cmds:
       - task: openapi
       - npm --prefix frontend run api:generate
+  frontend:format:
+    desc: Format frontend sources with prettier
+    cmds: [npm --prefix frontend run format]
+  frontend:test:
+    desc: Frontend unit tests with coverage thresholds
+    cmds: [npm --prefix frontend run test]
   frontend:check:
-    desc: Same gate as CI; generated client must match the committed contract
+    desc: Same gate as CI; generated client must match the committed contract, then format/lint/types/tests/docs/dead-code/duplication/build
     cmds:
       - npm --prefix frontend run api:generate
       - git status --porcelain -- frontend/src/api
       - test -z "$(git status --porcelain -- frontend/src/api)"
-      - npm --prefix frontend run lint
-      - npm --prefix frontend run build
+      - npm --prefix frontend run check
+  frontend:check:diff:
+    desc: Modules changed since BASE (default origin/main) must also update their READMEs and tests
+    vars:
+      BASE: '{{.BASE | default "origin/main"}}'
+    cmds:
+      - npm --prefix frontend run check:modules -- --base {{.BASE}}

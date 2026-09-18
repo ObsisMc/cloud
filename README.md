@@ -102,4 +102,4 @@ go run ./cmd/simulator
 
 阶段一采用数据库事务级全局 advisory lock 串行核心事务，并限制每 Project 一个未完成 operation。HTTP/Git/Substrate 调用从不持有数据库事务。此选择适用于首版单集群单活，牺牲写吞吐以降低并发不变量复杂度；后续可按租户/Project 细分锁，但必须保持现有并发测试。
 
-容器只打包 server/cloudctl，运行身份为非 root。构建用 `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`，挂载自有配置和公钥；迁移使用同镜像 `--entrypoint /app/cloudctl` 独立执行。仓库 CI 使用 PG service、格式/静态检查和 race 集成测试，另有独立 `frontend` job 校验生成客户端与契约一致并执行 lint/build。Docker 镜像和真实部署不属于本地已验证结果。
+容器只打包 server/cloudctl，运行身份为非 root。构建用 `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`，挂载自有配置和公钥；迁移使用同镜像 `--entrypoint /app/cloudctl` 独立执行。仓库 CI 使用 PG service、格式/静态检查和 race 集成测试，另有独立 `frontend` job 校验生成客户端与契约一致，并执行格式、lint、类型、测试覆盖率、模块文档/测试、死代码、重复代码与构建门禁（见 `frontend/AGENTS.md`）。Docker 镜像和真实部署不属于本地已验证结果。
