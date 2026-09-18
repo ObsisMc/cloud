@@ -47,9 +47,31 @@ export function useUpdateIssue(slug: string) {
       const { data } = await mockApi.patch<Issue>(`/workspaces/${slug}/issues/${id}`, patch)
       return data
     },
+    // Applied synchronously so e.g. a board drag moves the card immediately
+    // instead of snapping back to its old column until the refetch lands.
+    onMutate: async ({ id, patch }) => {
+      await queryClient.cancelQueries({ queryKey: ['issues', slug] })
+      const previousLists = queryClient.getQueriesData<Issue[]>({ queryKey: ['issues', slug] })
+      queryClient.setQueriesData<Issue[]>({ queryKey: ['issues', slug] }, (issues) =>
+        issues?.map((issue) => (issue.id === id ? { ...issue, ...patch } : issue)),
+      )
+      const previousDetail = queryClient.getQueryData<Issue>(['issue', slug, id])
+      if (previousDetail) {
+        queryClient.setQueryData<Issue>(['issue', slug, id], { ...previousDetail, ...patch })
+      }
+      return { previousLists, previousDetail, id }
+    },
+    onError: (_err, _vars, context) => {
+      context?.previousLists.forEach(([key, data]) => queryClient.setQueryData(key, data))
+      if (context?.previousDetail) {
+        queryClient.setQueryData(['issue', slug, context.id], context.previousDetail)
+      }
+    },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['issues', slug] })
       queryClient.setQueryData(['issue', slug, data.id], data)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues', slug] })
     },
   })
 }

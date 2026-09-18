@@ -1,5 +1,4 @@
 import { useDraggable } from '@dnd-kit/core'
-import { CSS } from '@dnd-kit/utilities'
 import { formatDistanceToNow } from 'date-fns'
 import { FolderClosed } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -23,7 +22,7 @@ export function IssueCard({
   const p = workspacePaths(slug)
   const assignee = actorById(issue.assigneeId)
   const project = db.projects.find((pr) => pr.id === issue.projectId)
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: issue.id,
     disabled: !draggable,
     // The card is a real <a href>, not a button — keep that semantic instead
@@ -35,10 +34,12 @@ export function IssueCard({
     <Link
       ref={setNodeRef}
       to={p.issueDetail(issue.id)}
-      style={transform ? { transform: CSS.Translate.toString(transform) } : undefined}
       className={cn(
+        // Left in place while dragging (just dimmed) — the DragOverlay is the
+        // only thing that follows the pointer. Transforming this element too
+        // used to fight the overlay's own transform and read as jittery.
         'block rounded-md border bg-card p-2.5 text-sm shadow-xs touch-none hover:border-ring/50 hover:shadow-sm',
-        isDragging && 'z-10 opacity-40',
+        isDragging && 'opacity-40',
       )}
       {...attributes}
       {...listeners}
