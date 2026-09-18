@@ -9,6 +9,7 @@ import { ProjectIcon } from '@/features/projects/components/project-icon'
 import { useProject } from '@/features/projects/api'
 import { useIssues } from '@/features/issues/api'
 import { IssueRow } from '@/features/issues/components/issue-row'
+import { workspacePaths } from '@/lib/paths'
 import { actorById } from '@/mocks/data/store'
 import type { Project } from '@/mocks/data/types'
 
@@ -23,11 +24,12 @@ export function ProjectDetailPage({ slug }: { slug: string }) {
   const { projectId } = useParams<{ projectId: string }>()
   const { data: project, isPending } = useProject(slug, projectId)
   const { data: issues } = useIssues(slug, { projectId })
+  const p = workspacePaths(slug)
 
   if (isPending || !project) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Project" />
+        <PageHeader title="Project" breadcrumb={{ label: 'Projects', to: p.projects }} />
         <div className="space-y-3 p-6">
           <Skeleton className="h-6 w-1/2" />
           <Skeleton className="h-20 w-full" />
@@ -40,7 +42,7 @@ export function ProjectDetailPage({ slug }: { slug: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title={project.title} />
+      <PageHeader title={project.title} breadcrumb={{ label: 'Projects', to: p.projects }} />
       <div className="flex-1 overflow-y-auto">
         <div className="space-y-3 border-b p-6">
           <div className="flex items-center gap-2">

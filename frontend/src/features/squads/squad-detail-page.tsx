@@ -3,16 +3,18 @@ import { ActorAvatar } from '@/components/common/actor-avatar'
 import { PageHeader } from '@/components/layout/page-header'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSquad } from '@/features/squads/api'
+import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
 
 export function SquadDetailPage({ slug }: { slug: string }) {
   const { squadId } = useParams<{ squadId: string }>()
   const { data: squad, isPending } = useSquad(slug, squadId)
+  const p = workspacePaths(slug)
 
   if (isPending || !squad) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Squad" />
+        <PageHeader title="Squad" breadcrumb={{ label: 'Squads', to: p.squads }} />
         <div className="space-y-3 p-6">
           <Skeleton className="h-6 w-1/2" />
           <Skeleton className="h-20 w-full" />
@@ -22,11 +24,11 @@ export function SquadDetailPage({ slug }: { slug: string }) {
   }
 
   const members = squad.memberIds.map((id) => actorById(id)).filter((a): a is NonNullable<typeof a> => !!a)
-  const projects = db.projects.filter((p) => squad.projectIds.includes(p.id))
+  const projects = db.projects.filter((proj) => squad.projectIds.includes(proj.id))
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title={squad.name} />
+      <PageHeader title={squad.name} breadcrumb={{ label: 'Squads', to: p.squads }} />
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mb-6 flex items-center gap-3">
           <span

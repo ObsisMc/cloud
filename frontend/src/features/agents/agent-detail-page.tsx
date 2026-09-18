@@ -4,16 +4,18 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAgent } from '@/features/agents/api'
+import { workspacePaths } from '@/lib/paths'
 import { db } from '@/mocks/data/store'
 
 export function AgentDetailPage({ slug }: { slug: string }) {
   const { agentId } = useParams<{ agentId: string }>()
   const { data: agent, isPending } = useAgent(slug, agentId)
+  const p = workspacePaths(slug)
 
   if (isPending || !agent) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Agent" />
+        <PageHeader title="Agent" breadcrumb={{ label: 'Agents', to: p.agents }} />
         <div className="space-y-3 p-6">
           <Skeleton className="h-6 w-1/2" />
           <Skeleton className="h-20 w-full" />
@@ -27,7 +29,7 @@ export function AgentDetailPage({ slug }: { slug: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title={agent.name} />
+      <PageHeader title={agent.name} breadcrumb={{ label: 'Agents', to: p.agents }} />
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mb-6 flex items-start gap-3">
           <ActorAvatar actor={agent} size="lg" />

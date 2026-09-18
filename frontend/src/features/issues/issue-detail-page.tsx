@@ -26,7 +26,7 @@ export function IssueDetailPage({ slug }: { slug: string }) {
   if (isPending || !issue) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Issue" />
+        <PageHeader title="Issue" breadcrumb={{ label: 'Issues', to: p.issues }} />
         <div className="space-y-3 p-6">
           <Skeleton className="h-6 w-2/3" />
           <Skeleton className="h-24 w-full" />
@@ -42,6 +42,7 @@ export function IssueDetailPage({ slug }: { slug: string }) {
     <div className="flex h-full flex-col">
       <PageHeader
         title={issue.identifier}
+        breadcrumb={{ label: 'Issues', to: p.issues }}
         actions={
           <Button
             variant="ghost"
