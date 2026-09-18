@@ -25,24 +25,64 @@ describe('IssuesBoard', () => {
 })
 
 describe('resolveDrop', () => {
+  // backlog: b1(0), b2(10), b3(20) — todo: t1(0)
   const issues = [
-    { id: 'issue-1', status: 'backlog' } as never,
-    { id: 'issue-2', status: 'done' } as never,
-  ]
+    { id: 'b1', status: 'backlog', order: 0 },
+    { id: 'b2', status: 'backlog', order: 10 },
+    { id: 'b3', status: 'backlog', order: 20 },
+    { id: 't1', status: 'todo', order: 0 },
+  ] as never[]
 
-  it('returns a status update when dropped on a different column', () => {
-    expect(resolveDrop(issues, 'issue-1', 'in_progress')).toEqual({ id: 'issue-1', status: 'in_progress' })
+  it('drops at the end of an empty column', () => {
+    expect(resolveDrop({ issues, activeId: 'b1', overId: 'in_progress', insertAfter: false })).toEqual({
+      id: 'b1',
+      status: 'in_progress',
+      order: 0,
+    })
   })
 
-  it('returns null when dropped back on its own column', () => {
-    expect(resolveDrop(issues, 'issue-1', 'backlog')).toBeNull()
+  it('drops at the end of a column via the column background, after its last card', () => {
+    expect(resolveDrop({ issues, activeId: 't1', overId: 'backlog', insertAfter: false })).toEqual({
+      id: 't1',
+      status: 'backlog',
+      order: 21, // after b3 (order 20), no upper neighbor
+    })
+  })
+
+  it('inserts before the hovered card', () => {
+    expect(resolveDrop({ issues, activeId: 't1', overId: 'b2', insertAfter: false })).toEqual({
+      id: 't1',
+      status: 'backlog',
+      order: 5, // midpoint of b1 (0) and b2 (10)
+    })
+  })
+
+  it('inserts after the hovered card', () => {
+    expect(resolveDrop({ issues, activeId: 't1', overId: 'b2', insertAfter: true })).toEqual({
+      id: 't1',
+      status: 'backlog',
+      order: 15, // midpoint of b2 (10) and b3 (20)
+    })
+  })
+
+  it('reorders within the same column without renumbering the rest', () => {
+    // Move b3 to just before b2.
+    expect(resolveDrop({ issues, activeId: 'b3', overId: 'b2', insertAfter: false })).toEqual({
+      id: 'b3',
+      status: 'backlog',
+      order: 5, // midpoint of b1 (0) and b2 (10) — b1/b2 untouched
+    })
   })
 
   it('returns null when dropped outside any droppable', () => {
-    expect(resolveDrop(issues, 'issue-1', undefined)).toBeNull()
+    expect(resolveDrop({ issues, activeId: 'b1', overId: undefined, insertAfter: false })).toBeNull()
   })
 
   it('returns null for an issue id that is not in the list', () => {
-    expect(resolveDrop(issues, 'missing-issue', 'todo')).toBeNull()
+    expect(resolveDrop({ issues, activeId: 'missing-issue', overId: 'todo', insertAfter: false })).toBeNull()
+  })
+
+  it('returns null when dropped on itself', () => {
+    expect(resolveDrop({ issues, activeId: 'b1', overId: 'b1', insertAfter: false })).toBeNull()
   })
 })
