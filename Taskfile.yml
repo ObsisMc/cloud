@@ -57,6 +57,7 @@ tasks:
     cmds: [npm --prefix frontend ci]
   frontend:dev:
     desc: Vite dev server on :5173, proxying /api, /internal and /healthz to the Go server on :8080
+    deps: [frontend:install]
     cmds: [npm --prefix frontend run dev]
   frontend:generate:
     desc: Regenerate api/openapi.json, then the frontend's typed react-query client from it
