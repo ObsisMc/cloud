@@ -1,0 +1,54 @@
+name: Backend
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - 'frontend/**'
+      - '**.md'
+      - '.github/workflows/frontend.yml'
+  pull_request:
+    paths-ignore:
+      - 'frontend/**'
+      - '**.md'
+      - '.github/workflows/frontend.yml'
+# A newer push to the same branch or pull request supersedes the running check.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ora_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: 'host=127.0.0.1 port=5432 user=postgres password=postgres dbname=ora_test sslmode=disable'
+      REQUIRE_POSTGRES: '1'
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          # Caches ~/go/pkg/mod and ~/.cache/go-build keyed by go.sum.
+          cache: true
+      - run: go mod download
+      - run: go run ./cmd/checkformat
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+      - name: Run golangci-lint
+        run: |
+          golangci-lint migrate --skip-validation || true
+          golangci-lint run
+      - run: go test -race -count=1 -v -coverpkg=./internal/... -coverprofile=coverage.out ./...
+      - run: go build ./cmd/server ./cmd/cloudctl ./cmd/simulator
