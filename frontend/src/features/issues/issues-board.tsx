@@ -7,6 +7,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -72,16 +73,39 @@ export function resolveDrop({
   return { id: active.id, status: targetStatus, order: newOrder }
 }
 
+/**
+ * Which side of `over` the pointer is currently on, used both to resolve
+ * the drop and to place the live insertion-line indicator on the same
+ * side while dragging.
+ */
+export function insertsAfter(event: DragEndEvent | DragOverEvent): boolean {
+  const { active, over } = event
+  const overRect = over?.rect
+  const activeRect = active.rect.current.translated
+  if (!overRect || !activeRect) return false
+  return activeRect.top + activeRect.height / 2 > overRect.top + overRect.height / 2
+}
+
+/** Where the insertion line renders: relative to a card, or at a column's end. */
+type DropIndicator = { overId: string | number; insertAfter: boolean }
+
+function DropIndicatorLine() {
+  return <div className="h-0.5 rounded-full bg-primary" />
+}
+
 function BoardColumn({
   status,
   issues,
   slug,
+  dropIndicator,
 }: {
   status: IssueStatus
   issues: Issue[]
   slug: string
+  dropIndicator: DropIndicator | null
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status })
+  const showEndIndicator = dropIndicator?.overId === status
 
   return (
     <div
@@ -103,12 +127,17 @@ function BoardColumn({
         />
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
-        {issues.length === 0 && <p className="py-6 text-center text-xs text-muted-foreground">暂无任务</p>}
+        {issues.length === 0 && !showEndIndicator && <p className="py-6 text-center text-xs text-muted-foreground">暂无任务</p>}
         <SortableContext items={issues.map((i) => i.id)} strategy={verticalListSortingStrategy}>
           {issues.map((issue) => (
-            <IssueCard key={issue.id} issue={issue} slug={slug} />
+            <div key={issue.id}>
+              {dropIndicator?.overId === issue.id && !dropIndicator.insertAfter && <DropIndicatorLine />}
+              <IssueCard issue={issue} slug={slug} />
+              {dropIndicator?.overId === issue.id && dropIndicator.insertAfter && <DropIndicatorLine />}
+            </div>
           ))}
         </SortableContext>
+        {showEndIndicator && <DropIndicatorLine />}
       </div>
     </div>
   )
@@ -117,28 +146,25 @@ function BoardColumn({
 export function IssuesBoard({ issues, slug }: { issues: Issue[]; slug: string }) {
   const updateIssue = useUpdateIssue(slug)
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null)
+  const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   function handleDragStart(event: DragStartEvent) {
     setActiveIssue(issues.find((i) => i.id === event.active.id) ?? null)
   }
 
+  function handleDragOver(event: DragOverEvent) {
+    const { over } = event
+    setDropIndicator(over ? { overId: over.id, insertAfter: insertsAfter(event) } : null)
+  }
+
   function handleDragEnd(event: DragEndEvent) {
     setActiveIssue(null)
+    setDropIndicator(null)
     const { active, over } = event
     if (!over) return
 
-    // Which side of the hovered card the pointer is on decides insert
-    // before/after it; a drop directly on a column (no card underneath)
-    // has no "side" to compare, so it always lands at the end.
-    let insertAfter = false
-    const overRect = over.rect
-    const activeRect = active.rect.current.translated
-    if (overRect && activeRect) {
-      insertAfter = activeRect.top + activeRect.height / 2 > overRect.top + overRect.height / 2
-    }
-
-    const update = resolveDrop({ issues, activeId: active.id, overId: over.id, insertAfter })
+    const update = resolveDrop({ issues, activeId: active.id, overId: over.id, insertAfter: insertsAfter(event) })
     if (update) {
       updateIssue.mutate({ id: update.id, patch: { status: update.status, order: update.order } })
     }
@@ -149,12 +175,22 @@ export function IssuesBoard({ issues, slug }: { issues: Issue[]; slug: string })
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
-      onDragCancel={() => setActiveIssue(null)}
+      onDragCancel={() => {
+        setActiveIssue(null)
+        setDropIndicator(null)
+      }}
     >
       <div className="flex h-full min-h-0 gap-3 overflow-x-auto p-3">
         {STATUS_ORDER.map((status) => (
-          <BoardColumn key={status} status={status} issues={issues.filter((i) => i.status === status)} slug={slug} />
+          <BoardColumn
+            key={status}
+            status={status}
+            issues={issues.filter((i) => i.status === status)}
+            slug={slug}
+            dropIndicator={dropIndicator}
+          />
         ))}
       </div>
       {/*
