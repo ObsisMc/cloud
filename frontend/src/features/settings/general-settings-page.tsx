@@ -1,9 +1,13 @@
+import { useOutletContext } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { db } from '@/mocks/data/store'
+import { db, workspaceBySlug } from '@/mocks/data/store'
 
 export function GeneralSettingsPage() {
+  const slug = useOutletContext<string>()
+  const workspace = workspaceBySlug(slug) ?? db.workspace
+
   return (
     <div className="max-w-lg space-y-4 p-4">
       <Card>
@@ -14,22 +18,22 @@ export function GeneralSettingsPage() {
           <div className="flex items-center gap-3">
             <span
               className="flex size-10 items-center justify-center rounded-lg text-sm font-semibold text-white"
-              style={{ backgroundColor: db.workspace.avatarColor }}
+              style={{ backgroundColor: workspace.avatarColor }}
             >
-              {db.workspace.name.charAt(0)}
+              {workspace.name.charAt(0)}
             </span>
             <div>
-              <p className="text-sm font-medium">{db.workspace.name}</p>
-              <p className="text-xs text-muted-foreground">/{db.workspace.slug}</p>
+              <p className="text-sm font-medium">{workspace.name}</p>
+              <p className="text-xs text-muted-foreground">/{workspace.slug}</p>
             </div>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="workspace-name">Workspace name</Label>
-            <Input id="workspace-name" defaultValue={db.workspace.name} />
+            <Input id="workspace-name" defaultValue={workspace.name} key={workspace.id} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="workspace-slug">Slug</Label>
-            <Input id="workspace-slug" defaultValue={db.workspace.slug} disabled />
+            <Input id="workspace-slug" defaultValue={workspace.slug} key={`${workspace.id}-slug`} disabled />
           </div>
         </CardContent>
       </Card>

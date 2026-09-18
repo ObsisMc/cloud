@@ -12,7 +12,7 @@ describe('LoginPage', () => {
 
   it('renders the sign-in form', () => {
     renderWithProviders(<LoginPage />, { route: '/login' })
-    expect(screen.getByRole('heading', { name: /sign in to multica/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /sign in to ora/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
   })
 

@@ -17,6 +17,6 @@ export const useAuthStore = create<AuthState>()(
       setSession: (token, user) => set({ token, user }),
       clear: () => set({ token: null, user: null }),
     }),
-    { name: 'multica-mock-auth' },
+    { name: 'ora-mock-auth' },
   ),
 )

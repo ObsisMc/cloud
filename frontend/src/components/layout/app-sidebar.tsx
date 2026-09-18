@@ -19,6 +19,7 @@ import { ActorAvatar } from '@/components/common/actor-avatar'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -39,7 +40,7 @@ import {
 } from '@/components/ui/sidebar'
 import { useInboxItems } from '@/features/inbox/api'
 import { workspacePaths } from '@/lib/paths'
-import { db } from '@/mocks/data/store'
+import { db, workspaceBySlug } from '@/mocks/data/store'
 import { useAuthStore } from '@/state/auth-store'
 
 const workNav = [
@@ -68,6 +69,7 @@ export function AppSidebar({ slug }: { slug: string }) {
   const clear = useAuthStore((s) => s.clear)
   const { data: inboxItems = [] } = useInboxItems(slug)
   const unreadCount = inboxItems.filter((i) => !i.read).length
+  const activeWorkspace = workspaceBySlug(slug) ?? db.workspace
 
   function handleLogout() {
     clear()
@@ -85,11 +87,11 @@ export function AppSidebar({ slug }: { slug: string }) {
                   <SidebarMenuButton>
                     <span
                       className="flex size-5 items-center justify-center rounded-sm text-[11px] font-semibold text-white"
-                      style={{ backgroundColor: db.workspace.avatarColor }}
+                      style={{ backgroundColor: activeWorkspace.avatarColor }}
                     >
-                      {db.workspace.name.charAt(0)}
+                      {activeWorkspace.name.charAt(0)}
                     </span>
-                    <span className="flex-1 truncate font-medium">{db.workspace.name}</span>
+                    <span className="flex-1 truncate font-medium">{activeWorkspace.name}</span>
                     <ChevronDown className="size-3 text-muted-foreground" />
                   </SidebarMenuButton>
                 }
@@ -103,17 +105,26 @@ export function AppSidebar({ slug }: { slug: string }) {
                   </div>
                 </div>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs text-muted-foreground">Workspaces</DropdownMenuLabel>
-                <DropdownMenuItem>
-                  <span
-                    className="flex size-5 items-center justify-center rounded-sm text-[10px] font-semibold text-white"
-                    style={{ backgroundColor: db.workspace.avatarColor }}
-                  >
-                    {db.workspace.name.charAt(0)}
-                  </span>
-                  <span className="flex-1 truncate">{db.workspace.name}</span>
-                  <Check className="size-3.5" />
-                </DropdownMenuItem>
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">Workspaces</DropdownMenuLabel>
+                  {db.workspaces.map((ws) => (
+                    <DropdownMenuItem
+                      key={ws.id}
+                      onClick={() => {
+                        if (ws.slug !== slug) navigate(`/${ws.slug}/issues`)
+                      }}
+                    >
+                      <span
+                        className="flex size-5 items-center justify-center rounded-sm text-[10px] font-semibold text-white"
+                        style={{ backgroundColor: ws.avatarColor }}
+                      >
+                        {ws.name.charAt(0)}
+                      </span>
+                      <span className="flex-1 truncate">{ws.name}</span>
+                      {ws.id === activeWorkspace.id && <Check className="size-3.5" />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={handleLogout}>
                   <LogOut className="size-3.5" />

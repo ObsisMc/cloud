@@ -9,8 +9,8 @@ describe('mock API handlers', () => {
     const res = await fetch(`${BASE}/workspaces`)
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body).toHaveLength(1)
-    expect(body[0].slug).toBe(SLUG)
+    expect(body.length).toBeGreaterThan(0)
+    expect(body.some((w: { slug: string }) => w.slug === SLUG)).toBe(true)
   })
 
   it('404s for an unknown workspace slug', async () => {
@@ -27,7 +27,7 @@ describe('mock API handlers', () => {
     expect(createRes.status).toBe(201)
     const created = await createRes.json()
     expect(created.title).toBe('Fix the flaky test')
-    expect(created.identifier).toMatch(/^MUL-\d+$/)
+    expect(created.identifier).toMatch(/^ORA-\d+$/)
 
     const getRes = await fetch(`${BASE}/workspaces/${SLUG}/issues/${created.id}`)
     expect(getRes.status).toBe(200)

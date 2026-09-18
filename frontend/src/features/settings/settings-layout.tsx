@@ -36,7 +36,7 @@ export function SettingsLayout({ slug }: { slug: string }) {
           </ul>
         </nav>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <Outlet />
+          <Outlet context={slug} />
         </div>
       </div>
     </div>

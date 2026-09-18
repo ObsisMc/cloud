@@ -18,6 +18,7 @@ export interface User extends Actor {
 
 export interface Agent extends Actor {
   type: 'agent'
+  workspaceId: string
   role: string
   model: string
   status: 'online' | 'busy' | 'idle' | 'offline'

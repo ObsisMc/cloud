@@ -22,8 +22,12 @@ import type {
  * through this module so create/update/delete calls persist for the life
  * of the tab without a real backend.
  */
+const workspaces = seed.workspaces.map((w) => ({ ...w })) as Workspace[]
+
 export const db = {
-  workspace: { ...seed.workspace } as Workspace,
+  /** The default workspace, used wherever a workspace isn't resolved from a route param. */
+  workspace: workspaces[0],
+  workspaces,
   users: [...seed.users] as User[],
   members: [...seed.members] as WorkspaceMember[],
   agents: [...seed.agents] as Agent[],
@@ -49,7 +53,11 @@ export function actorById(id: string | null | undefined) {
 
 let nextIssueSeq = db.issues.length + 1
 export function nextIssueIdentifier(): string {
-  return `MUL-${100 + nextIssueSeq++}`
+  return `ORA-${100 + nextIssueSeq++}`
+}
+
+export function workspaceBySlug(slug: string | undefined): Workspace | undefined {
+  return db.workspaces.find((w) => w.slug === slug)
 }
 
 let idCounter = 1

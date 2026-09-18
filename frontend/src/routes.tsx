@@ -1,4 +1,5 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom'
+import type { ComponentType } from 'react'
+import { createBrowserRouter, Navigate, useParams } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import { AgentDetailPage } from '@/features/agents/agent-detail-page'
 import { AgentsPage } from '@/features/agents/agents-page'
@@ -22,39 +23,48 @@ import { SquadDetailPage } from '@/features/squads/squad-detail-page'
 import { SquadsPage } from '@/features/squads/squads-page'
 import { db } from '@/mocks/data/store'
 
-const slug = db.workspace.slug
+/**
+ * DashboardLayout only renders its children once :workspaceSlug matches a
+ * real workspace, so every page under it can trust the param and doesn't
+ * need to re-validate it — this just forwards it as the `slug` prop each
+ * page already expects.
+ */
+function WithSlug({ component: Component }: { component: ComponentType<{ slug: string }> }) {
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
+  return <Component slug={workspaceSlug!} />
+}
 
 export const router = createBrowserRouter([
-  { path: '/', element: <Navigate to={`/${slug}/issues`} replace /> },
+  { path: '/', element: <Navigate to={`/${db.workspace.slug}/issues`} replace /> },
   { path: '/login', element: <LoginPage /> },
   {
     path: '/:workspaceSlug',
     element: <DashboardLayout />,
     children: [
       { index: true, element: <Navigate to="issues" replace /> },
-      { path: 'issues', element: <IssuesPage slug={slug} /> },
-      { path: 'issues/:issueId', element: <IssueDetailPage slug={slug} /> },
-      { path: 'my-issues', element: <MyIssuesPage slug={slug} /> },
-      { path: 'projects', element: <ProjectsPage slug={slug} /> },
-      { path: 'projects/:projectId', element: <ProjectDetailPage slug={slug} /> },
-      { path: 'squads', element: <SquadsPage slug={slug} /> },
-      { path: 'squads/:squadId', element: <SquadDetailPage slug={slug} /> },
-      { path: 'agents', element: <AgentsPage slug={slug} /> },
-      { path: 'agents/:agentId', element: <AgentDetailPage slug={slug} /> },
-      { path: 'autopilots', element: <AutopilotsPage slug={slug} /> },
-      { path: 'skills', element: <SkillsPage slug={slug} /> },
-      { path: 'runtimes', element: <RuntimesPage slug={slug} /> },
-      { path: 'chat', element: <ChatPage slug={slug} /> },
-      { path: 'chat/:sessionId', element: <ChatPage slug={slug} /> },
-      { path: 'inbox', element: <InboxPage slug={slug} /> },
-      { path: 'usage', element: <UsagePage slug={slug} /> },
+      { path: 'issues', element: <WithSlug component={IssuesPage} /> },
+      { path: 'issues/:issueId', element: <WithSlug component={IssueDetailPage} /> },
+      { path: 'my-issues', element: <WithSlug component={MyIssuesPage} /> },
+      { path: 'projects', element: <WithSlug component={ProjectsPage} /> },
+      { path: 'projects/:projectId', element: <WithSlug component={ProjectDetailPage} /> },
+      { path: 'squads', element: <WithSlug component={SquadsPage} /> },
+      { path: 'squads/:squadId', element: <WithSlug component={SquadDetailPage} /> },
+      { path: 'agents', element: <WithSlug component={AgentsPage} /> },
+      { path: 'agents/:agentId', element: <WithSlug component={AgentDetailPage} /> },
+      { path: 'autopilots', element: <WithSlug component={AutopilotsPage} /> },
+      { path: 'skills', element: <WithSlug component={SkillsPage} /> },
+      { path: 'runtimes', element: <WithSlug component={RuntimesPage} /> },
+      { path: 'chat', element: <WithSlug component={ChatPage} /> },
+      { path: 'chat/:sessionId', element: <WithSlug component={ChatPage} /> },
+      { path: 'inbox', element: <WithSlug component={InboxPage} /> },
+      { path: 'usage', element: <WithSlug component={UsagePage} /> },
       {
         path: 'settings',
-        element: <SettingsLayout slug={slug} />,
+        element: <WithSlug component={SettingsLayout} />,
         children: [
           { index: true, element: <GeneralSettingsPage /> },
-          { path: 'members', element: <MembersPage slug={slug} /> },
-          { path: 'billing', element: <BillingPage slug={slug} /> },
+          { path: 'members', element: <WithSlug component={MembersPage} /> },
+          { path: 'billing', element: <WithSlug component={BillingPage} /> },
         ],
       },
     ],

@@ -6,7 +6,7 @@ export const agentHandlers = [
   http.get(`${MOCK_BASE}/workspaces/:slug/agents`, ({ params }) => {
     const ws = requireWorkspace(params.slug as string)
     if (!ws) return notFound('workspace not found')
-    return HttpResponse.json(db.agents)
+    return HttpResponse.json(db.agents.filter((a) => a.workspaceId === ws.id))
   }),
 
   http.get(`${MOCK_BASE}/workspaces/:slug/agents/:id`, ({ params }) => {

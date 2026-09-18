@@ -9,7 +9,7 @@ export function notFound(message = 'not found') {
 }
 
 export function requireWorkspace(slug: string) {
-  return db.workspace.slug === slug ? db.workspace : null
+  return db.workspaces.find((w) => w.slug === slug) ?? null
 }
 
 export function withMember(userId: string) {

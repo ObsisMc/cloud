@@ -3,7 +3,7 @@ import { actorById, currentUserId, db, nextId, nextIssueIdentifier } from './sto
 
 describe('mock store seed data', () => {
   it('seeds a single workspace with a matching slug', () => {
-    expect(db.workspace.slug).toBe('multica-demo')
+    expect(db.workspace.slug).toBe('ora-demo')
   })
 
   it('seeds the demo user as a workspace member', () => {

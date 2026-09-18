@@ -54,11 +54,18 @@ export const currentUserId = 'user-you'
 
 export const workspace: Workspace = {
   id: 'ws-1',
-  slug: 'multica-demo',
-  name: 'Multica Demo',
-  avatarColor: colorFor('Multica Demo'),
+  slug: 'ora-demo',
+  name: 'Ora Demo',
+  avatarColor: colorFor('Ora Demo'),
   plan: 'pro',
 }
+
+export const otherWorkspaces: Workspace[] = [
+  { id: 'ws-2', slug: 'ora-labs', name: 'Ora Labs', avatarColor: colorFor('Ora Labs'), plan: 'free' },
+  { id: 'ws-3', slug: 'personal', name: 'Personal', avatarColor: colorFor('Personal'), plan: 'free' },
+]
+
+export const workspaces: Workspace[] = [workspace, ...otherWorkspaces]
 
 export const users: User[] = [
   {
@@ -84,13 +91,22 @@ export const users: User[] = [
   }),
 ]
 
-export const members: WorkspaceMember[] = users.map((u) => ({
-  userId: u.id,
-  workspaceId: workspace.id,
-  role: u.role,
-  status: 'active',
-  joinedAt: faker.date.past({ years: 1 }).toISOString(),
-}))
+export const members: WorkspaceMember[] = [
+  ...users.map((u) => ({
+    userId: u.id,
+    workspaceId: workspace.id,
+    role: u.role,
+    status: 'active' as const,
+    joinedAt: faker.date.past({ years: 1 }).toISOString(),
+  })),
+  ...otherWorkspaces.map((ws) => ({
+    userId: currentUserId,
+    workspaceId: ws.id,
+    role: 'owner' as const,
+    status: 'active' as const,
+    joinedAt: faker.date.past({ years: 1 }).toISOString(),
+  })),
+]
 
 const AGENT_ROLES = [
   { role: 'Backend Engineer', model: 'claude-sonnet-5' },
@@ -132,6 +148,7 @@ export const agents: Agent[] = AGENT_ROLES.map(({ role, model }, i) => {
   return {
     id,
     type: 'agent' as const,
+    workspaceId: workspace.id,
     name,
     avatarColor: colorFor(name),
     initials: initialsOf(name),
@@ -175,7 +192,7 @@ export const issues: Issue[] = Array.from({ length: 48 }, (_, i) => {
   return {
     id: `issue-${i + 1}`,
     workspaceId: workspace.id,
-    identifier: `MUL-${100 + i}`,
+    identifier: `ORA-${100 + i}`,
     title: faker.hacker.phrase().replace(/^./, (c) => c.toUpperCase()),
     description: faker.lorem.paragraphs({ min: 1, max: 3 }, '\n\n'),
     status,

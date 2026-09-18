@@ -27,9 +27,9 @@ export function LoginPage() {
       <div className="w-full max-w-sm space-y-6">
         <div className="space-y-1 text-center">
           <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground font-semibold">
-            M
+            O
           </div>
-          <h1 className="text-lg font-semibold">Sign in to Multica</h1>
+          <h1 className="text-lg font-semibold">Sign in to Ora</h1>
           <p className="text-sm text-muted-foreground">
             Mock environment — any email signs you in as the demo owner.
           </p>
