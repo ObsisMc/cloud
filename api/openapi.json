@@ -448,7 +448,6 @@
             "type": "boolean"
           }
         },
-        "required": null,
         "type": "object"
       },
       "EmptyClaim": {
@@ -796,7 +795,6 @@
             "type": "object"
           }
         },
-        "required": null,
         "type": "object"
       },
       "OperationResult": {
@@ -807,7 +805,6 @@
             "type": "string"
           }
         },
-        "required": null,
         "type": "object"
       },
       "Project": {
@@ -1435,7 +1432,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/me"
+        "summary": "GET /api/v1/me",
+        "tags": [
+          "me"
+        ]
       }
     },
     "/api/v1/me/tenants": {
@@ -1567,7 +1567,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/me/tenants"
+        "summary": "GET /api/v1/me/tenants",
+        "tags": [
+          "me"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/members": {
@@ -1708,7 +1711,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/members"
+        "summary": "GET /api/v1/tenants/:tid/members",
+        "tags": [
+          "members"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/members/{uid}": {
@@ -1859,7 +1865,10 @@
             "userCredential": []
           }
         ],
-        "summary": "PUT /api/v1/tenants/:tid/members/:uid"
+        "summary": "PUT /api/v1/tenants/:tid/members/:uid",
+        "tags": [
+          "members"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/operations/{oid}": {
@@ -1981,7 +1990,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/operations/:oid"
+        "summary": "GET /api/v1/tenants/:tid/operations/:oid",
+        "tags": [
+          "operations"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/operations/{oid}/retry": {
@@ -2144,7 +2156,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/operations/:oid/retry"
+        "summary": "POST /api/v1/tenants/:tid/operations/:oid/retry",
+        "tags": [
+          "operations"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/projects": {
@@ -2285,7 +2300,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/projects"
+        "summary": "GET /api/v1/tenants/:tid/projects",
+        "tags": [
+          "projects"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Creates Project/storage/main Workspace/operation atomically. repositoryUrl allows HTTPS or SSH with no password/query/fragment. defaultBranch defaults to HEAD; credentialRefId must belong to tenant and owner. Storage/worktree/sandbox initialization is asynchronous. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -2447,7 +2465,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/projects"
+        "summary": "POST /api/v1/tenants/:tid/projects",
+        "tags": [
+          "projects"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/projects/{pid}": {
@@ -2607,7 +2628,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/projects/:pid"
+        "summary": "DELETE /api/v1/tenants/:tid/projects/:pid",
+        "tags": [
+          "projects"
+        ]
       },
       "get": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -2720,7 +2744,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/projects/:pid"
+        "summary": "GET /api/v1/tenants/:tid/projects/:pid",
+        "tags": [
+          "projects"
+        ]
       },
       "patch": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Only project name may change; version must match. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -2858,7 +2885,10 @@
             "userCredential": []
           }
         ],
-        "summary": "PATCH /api/v1/tenants/:tid/projects/:pid"
+        "summary": "PATCH /api/v1/tenants/:tid/projects/:pid",
+        "tags": [
+          "projects"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/projects/{pid}/workspaces": {
@@ -3008,7 +3038,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/projects/:pid/workspaces"
+        "summary": "GET /api/v1/tenants/:tid/projects/:pid/workspaces",
+        "tags": [
+          "workspaces"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Creates one isolated Workspace and Task display identity. title/baseRef required; branch and relative path are server-generated. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -3168,7 +3201,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/projects/:pid/workspaces"
+        "summary": "POST /api/v1/tenants/:tid/projects/:pid/workspaces",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/resource-status": {
@@ -3309,7 +3345,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/resource-status"
+        "summary": "GET /api/v1/tenants/:tid/resource-status",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/workspaces/{wid}": {
@@ -3469,7 +3508,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/workspaces/:wid"
+        "summary": "DELETE /api/v1/tenants/:tid/workspaces/:wid",
+        "tags": [
+          "workspaces"
+        ]
       },
       "get": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -3582,7 +3624,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/workspaces/:wid"
+        "summary": "GET /api/v1/tenants/:tid/workspaces/:wid",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/workspaces/{wid}/administrative-stop": {
@@ -3742,7 +3787,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/administrative-stop"
+        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/administrative-stop",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/workspaces/{wid}/start": {
@@ -3902,7 +3950,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/start"
+        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/start",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/workspaces/{wid}/stop": {
@@ -4062,7 +4113,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/stop"
+        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/stop",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/healthz": {
@@ -4102,7 +4156,10 @@
             "description": "Database unavailable"
           }
         },
-        "summary": "PostgreSQL readiness"
+        "summary": "PostgreSQL readiness",
+        "tags": [
+          "health"
+        ]
       }
     },
     "/internal/v1/access": {
@@ -4235,7 +4292,10 @@
             "userCredential": []
           }
         ],
-        "summary": "access"
+        "summary": "access",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/admissions": {
@@ -4382,7 +4442,10 @@
             "userCredential": []
           }
         ],
-        "summary": "admit"
+        "summary": "admit",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/controller-lease/acquire": {
@@ -4395,7 +4458,6 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {},
-                "required": [],
                 "type": "object"
               }
             }
@@ -4489,7 +4551,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "lease acquire"
+        "summary": "lease acquire",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/controller-lease/release": {
@@ -4604,7 +4669,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "lease release"
+        "summary": "lease release",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/controller-lease/renew": {
@@ -4719,7 +4787,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "lease renew"
+        "summary": "lease renew",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/nodes/idle": {
@@ -4856,7 +4927,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "node idle"
+        "summary": "node idle",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/nodes/register": {
@@ -4972,7 +5046,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "node register"
+        "summary": "node register",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/nodes/status": {
@@ -5099,7 +5176,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "node status"
+        "summary": "node status",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/nodes/tickets/{ticket}/finish": {
@@ -5225,7 +5305,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "node finish"
+        "summary": "node finish",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/claim": {
@@ -5347,7 +5430,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "claim"
+        "summary": "claim",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/advance": {
@@ -5479,7 +5565,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "advance"
+        "summary": "advance",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/defer": {
@@ -5636,7 +5725,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "defer"
+        "summary": "defer",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/effects": {
@@ -5796,7 +5888,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "plan"
+        "summary": "plan",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/effects/{eid}/result": {
@@ -5967,7 +6062,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "effect result"
+        "summary": "effect result",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/snapshot": {
@@ -6099,7 +6197,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "snapshot"
+        "summary": "snapshot",
+        "tags": [
+          "internal"
+        ]
       }
     }
   },
