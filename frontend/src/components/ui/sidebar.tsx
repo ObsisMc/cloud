@@ -1,6 +1,6 @@
 'use client'
 
-import * as React from 'react'
+import React from 'react'
 import { mergeProps } from '@base-ui/react/merge-props'
 import { useRender } from '@base-ui/react/use-render'
 import { cva, type VariantProps } from 'class-variance-authority'
@@ -86,7 +86,9 @@ function SidebarProvider({
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
+    return isMobile
+      ? setOpenMobile((currentOpen) => !currentOpen)
+      : setOpen((currentOpen) => !currentOpen)
   }, [isMobile, setOpen, setOpenMobile])
 
   // Adds a keyboard shortcut to toggle the sidebar.
@@ -123,13 +125,13 @@ function SidebarProvider({
     <SidebarContext.Provider value={contextValue}>
       <div
         data-slot="sidebar-wrapper"
-        style={
+        style={Object.assign(
           {
             '--sidebar-width': SIDEBAR_WIDTH,
             '--sidebar-width-icon': SIDEBAR_WIDTH_ICON,
-            ...style,
-          } as React.CSSProperties
-        }
+          },
+          style,
+        )}
         className={cn(
           'group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar',
           className,
@@ -182,9 +184,8 @@ function Sidebar({
           data-mobile="true"
           className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
           style={
-            {
-              '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
-            } as React.CSSProperties
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Base UI's style type omits supported CSS custom properties.
+            { '--sidebar-width': SIDEBAR_WIDTH_MOBILE } as React.CSSProperties
           }
           side={side}
         >
@@ -598,9 +599,8 @@ function SidebarMenuSkeleton({
         className="h-4 max-w-(--skeleton-width) flex-1"
         data-sidebar="menu-skeleton-text"
         style={
-          {
-            '--skeleton-width': width,
-          } as React.CSSProperties
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- CSS custom properties are intentionally passed to the style boundary.
+          { '--skeleton-width': width } as React.CSSProperties
         }
       />
     </div>

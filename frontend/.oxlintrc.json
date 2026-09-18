@@ -6,7 +6,7 @@
     "suspicious": "error",
     "perf": "error"
   },
-  "ignorePatterns": ["src/api/**", "dist/**", "coverage/**"],
+  "ignorePatterns": ["src/api/**", "dist/**", "coverage/**", "public/mockServiceWorker.js"],
   "rules": {
     "react/react-in-jsx-scope": "off",
     "react/only-export-components": "off",
@@ -77,6 +77,12 @@
         "vitest/expect-expect": "error",
         "vitest/no-identical-title": "error",
         "vitest/valid-expect": "error"
+      }
+    },
+    {
+      "files": ["src/test/setup.ts"],
+      "rules": {
+        "import/no-unassigned-import": "off"
       }
     }
   ]

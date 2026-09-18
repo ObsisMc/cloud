@@ -17,17 +17,20 @@ function renderChat(sessionId?: string) {
 describe('ChatPage', () => {
   it('lists every seeded session and shows the most recently updated one selected by default', async () => {
     renderChat()
-    for (const session of db.chatSessions) {
-      expect(await screen.findAllByText(session.title)).not.toHaveLength(0)
-    }
+    await Promise.all(
+      db.chatSessions.map(async (session) => {
+        expect(await screen.findAllByText(session.title)).not.toHaveLength(0)
+      }),
+    )
     // The API sorts sessions by updatedAt desc, same as the component's default pick.
-    const defaultSession = [...db.chatSessions].sort((a, b) =>
+    const defaultSession = db.chatSessions.toSorted((a, b) =>
       b.updatedAt.localeCompare(a.updatedAt),
     )[0]
     if (!defaultSession) throw new Error('chat seed data must contain a session')
     const firstMessage = db.chatMessages
       .filter((m) => m.sessionId === defaultSession.id)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]!
+      .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
+    if (!firstMessage) throw new Error('chat seed data must contain a message')
     // The filler phrase bank is small and can repeat within a session, so
     // assert presence rather than a single unique match.
     expect(await screen.findAllByText(firstMessage.content)).not.toHaveLength(0)

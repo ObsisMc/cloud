@@ -5,6 +5,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { useSkills, useToggleSkill } from '@/features/skills/api'
 
+const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five']
+
 export function SkillsPage({ slug }: { slug: string }) {
   const { data: skills, isPending } = useSkills(slug)
   const toggle = useToggleSkill(slug)
@@ -15,8 +17,8 @@ export function SkillsPage({ slug }: { slug: string }) {
       <div className="flex-1 overflow-y-auto">
         {isPending && (
           <div className="space-y-2 p-4">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full" />
+            {SKELETON_KEYS.map((key) => (
+              <Skeleton key={key} className="h-16 w-full" />
             ))}
           </div>
         )}

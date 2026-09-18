@@ -7,6 +7,7 @@ import { ProjectDetailPage } from './project-detail-page'
 describe('ProjectDetailPage', () => {
   it('renders the project header and its issues', async () => {
     const project = db.projects[0]
+    if (!project) throw new Error('project seed data must not be empty')
     renderAtRoute(
       '/:workspaceSlug/projects/:projectId',
       <ProjectDetailPage slug={db.workspace.slug} />,
@@ -16,8 +17,7 @@ describe('ProjectDetailPage', () => {
     expect(await screen.findAllByText(project.title)).not.toHaveLength(0)
 
     const projectIssue = db.issues.find((i) => i.projectId === project.id)
-    if (projectIssue) {
-      expect(await screen.findByText(projectIssue.title)).toBeInTheDocument()
-    }
+    if (!projectIssue) throw new Error('project seed data must contain an issue')
+    expect(await screen.findByText(projectIssue.title)).toBeInTheDocument()
   })
 })

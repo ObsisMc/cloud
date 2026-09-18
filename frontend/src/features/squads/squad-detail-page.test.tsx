@@ -7,6 +7,7 @@ import { SquadDetailPage } from './squad-detail-page'
 describe('SquadDetailPage', () => {
   it('renders the squad name and its members', async () => {
     const squad = db.squads[0]
+    if (!squad) throw new Error('squad seed data must not be empty')
     renderAtRoute(
       '/:workspaceSlug/squads/:squadId',
       <SquadDetailPage slug={db.workspace.slug} />,
@@ -14,7 +15,8 @@ describe('SquadDetailPage', () => {
     )
 
     expect(await screen.findAllByText(squad.name)).not.toHaveLength(0)
-    const member = actorById(squad.memberIds[0])!
+    const member = actorById(squad.memberIds[0])
+    if (!member) throw new Error('squad seed data must contain a member')
     expect(await screen.findByText(member.name)).toBeInTheDocument()
   })
 })

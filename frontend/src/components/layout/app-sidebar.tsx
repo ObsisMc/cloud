@@ -58,6 +58,7 @@ const utilityNav = [
   { to: (p: ReturnType<typeof workspacePaths>) => p.settings, label: '设置', icon: Cog },
 ]
 
+// oxlint-disable-next-line max-lines-per-function -- this composition root owns the complete sidebar navigation tree.
 export function AppSidebar({ slug }: { slug: string }) {
   const p = workspacePaths(slug)
   const { pathname } = useLocation()
@@ -70,7 +71,7 @@ export function AppSidebar({ slug }: { slug: string }) {
 
   function handleLogout() {
     clear()
-    navigate('/login')
+    void navigate('/login')
   }
 
   return (
@@ -112,7 +113,7 @@ export function AppSidebar({ slug }: { slug: string }) {
                     <DropdownMenuItem
                       key={ws.id}
                       onClick={() => {
-                        if (ws.slug !== slug) navigate(`/${ws.slug}/issues`)
+                        if (ws.slug !== slug) void navigate(`/${ws.slug}/issues`)
                       }}
                     >
                       <span

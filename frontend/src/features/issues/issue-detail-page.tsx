@@ -7,6 +7,8 @@ import {
   STATUS_ORDER,
   StatusIcon,
   priorityLabelText,
+  parseIssuePriority,
+  parseIssueStatus,
   statusLabelText,
 } from '@/components/common/issue-badges'
 import { PageHeader } from '@/components/layout/page-header'
@@ -23,8 +25,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useDeleteIssue, useIssue, useUpdateIssue } from '@/features/issues/api'
 import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
-import type { IssuePriority, IssueStatus } from '@/mocks/data/types'
 
+// oxlint-disable-next-line max-lines-per-function -- the detail screen keeps its issue controls and layout transaction together.
 export function IssueDetailPage({ slug }: { slug: string }) {
   const { issueId } = useParams<{ issueId: string }>()
   const navigate = useNavigate()
@@ -80,14 +82,20 @@ export function IssueDetailPage({ slug }: { slug: string }) {
             <Select
               value={issue.status}
               onValueChange={(v) =>
-                updateIssue.mutate({ id: issue.id, patch: { status: v as IssueStatus } })
+                (() => {
+                  const status = parseIssueStatus(v)
+                  if (status) updateIssue.mutate({ id: issue.id, patch: { status } })
+                })()
               }
             >
               <SelectTrigger className="w-full">
                 <span className="flex items-center gap-2">
                   <StatusIcon status={issue.status} />
                   <SelectValue>
-                    {(value: unknown) => statusLabelText(value as IssueStatus)}
+                    {(value: unknown) => {
+                      const status = parseIssueStatus(value) ?? issue.status
+                      return statusLabelText(status)
+                    }}
                   </SelectValue>
                 </span>
               </SelectTrigger>
@@ -105,14 +113,20 @@ export function IssueDetailPage({ slug }: { slug: string }) {
             <Select
               value={issue.priority}
               onValueChange={(v) =>
-                updateIssue.mutate({ id: issue.id, patch: { priority: v as IssuePriority } })
+                (() => {
+                  const priority = parseIssuePriority(v)
+                  if (priority) updateIssue.mutate({ id: issue.id, patch: { priority } })
+                })()
               }
             >
               <SelectTrigger className="w-full">
                 <span className="flex items-center gap-2">
                   <PriorityIcon priority={issue.priority} />
                   <SelectValue>
-                    {(value: unknown) => priorityLabelText(value as IssuePriority)}
+                    {(value: unknown) => {
+                      const priority = parseIssuePriority(value) ?? issue.priority
+                      return priorityLabelText(priority)
+                    }}
                   </SelectValue>
                 </span>
               </SelectTrigger>

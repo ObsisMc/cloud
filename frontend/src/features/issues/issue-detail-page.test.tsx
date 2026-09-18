@@ -30,7 +30,8 @@ function renderIssueDetail(issueId: string) {
 
 describe('IssueDetailPage', () => {
   it('renders the issue title and lets the status be changed', async () => {
-    const issue = db.issues.find((i) => i.status !== 'done')!
+    const issue = db.issues.find((i) => i.status !== 'done')
+    if (!issue) throw new Error('issue seed data must contain an unfinished issue')
     const user = userEvent.setup()
     renderIssueDetail(issue.id)
 

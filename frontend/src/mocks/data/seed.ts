@@ -388,7 +388,7 @@ export const issues: Issue[] = Array.from({ length: 48 }, (_, i) => {
 export const chatSessions: ChatSession[] = agents.slice(0, 5).map((agent, i) => ({
   id: `chat-${i + 1}`,
   workspaceId: workspace.id,
-  title: `${agent.name}`,
+  title: agent.name,
   agentId: agent.id,
   updatedAt: faker.date.recent({ days: 3 }).toISOString(),
   unreadCount: faker.number.int({ min: 0, max: 4 }),
@@ -414,18 +414,15 @@ export const chatMessages: ChatMessage[] = chatSessions.flatMap((session) => {
 export const inboxItems: InboxItem[] = Array.from({ length: 20 }, (_, i) => {
   const type = faker.helpers.arrayElement(['mention', 'assignment', 'comment', 'invite'] as const)
   const issue = faker.helpers.maybe(() => faker.helpers.arrayElement(issues), { probability: 0.7 })
+  let title = '工作区邀请'
+  if (type === 'mention') title = `有人在 ${issue?.identifier ?? '一个讨论'} 中提到了你`
+  else if (type === 'assignment') title = `任务已分配给你：${issue?.identifier ?? '一个任务'}`
+  else if (type === 'comment') title = `${issue?.identifier ?? '一个任务'} 有新评论`
   return {
     id: `inbox-${i + 1}`,
     workspaceId: workspace.id,
     type,
-    title:
-      type === 'mention'
-        ? `有人在 ${issue?.identifier ?? '一个讨论'} 中提到了你`
-        : type === 'assignment'
-          ? `任务已分配给你：${issue?.identifier ?? '一个任务'}`
-          : type === 'comment'
-            ? `${issue?.identifier ?? '一个任务'} 有新评论`
-            : '工作区邀请',
+    title,
     body: pick(DESC_SENTENCES),
     actorId: faker.helpers.arrayElement(allActorIds),
     issueId: issue?.id ?? null,

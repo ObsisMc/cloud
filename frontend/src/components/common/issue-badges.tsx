@@ -79,3 +79,13 @@ export const STATUS_ORDER: IssueStatus[] = [
   'done',
 ]
 export const PRIORITY_ORDER: IssuePriority[] = ['none', 'low', 'medium', 'high', 'urgent']
+
+/** Converts untrusted select input into a known issue status. */
+export function parseIssueStatus(value: unknown): IssueStatus | undefined {
+  return STATUS_ORDER.find((status) => status === value)
+}
+
+/** Converts untrusted select input into a known issue priority. */
+export function parseIssuePriority(value: unknown): IssuePriority | undefined {
+  return PRIORITY_ORDER.find((priority) => priority === value)
+}

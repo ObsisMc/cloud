@@ -1,16 +1,17 @@
 import { http, HttpResponse } from 'msw'
-import { currentUserId, db } from '../data/store'
-import { MOCK_BASE } from './shared'
+import { currentUserId, db } from '@/mocks/data/store'
+import { MOCK_BASE, jsonObject, stringField } from './shared'
 
 const MOCK_TOKEN = 'mock-session-token'
 
 export const authHandlers = [
   http.post(`${MOCK_BASE}/auth/login`, async ({ request }) => {
-    const body = (await request.json()) as { email?: string }
-    const user = db.users.find((u) => u.id === currentUserId)!
+    const body = jsonObject(await request.json())
+    const user = db.users.find((u) => u.id === currentUserId)
+    if (!user) return HttpResponse.json({ message: 'user not found' }, { status: 404 })
     return HttpResponse.json({
       token: MOCK_TOKEN,
-      user: { ...user, email: body?.email || user.email },
+      user: { ...user, email: stringField(body['email']) || user.email },
     })
   }),
 
@@ -19,7 +20,8 @@ export const authHandlers = [
     if (auth !== `Bearer ${MOCK_TOKEN}`) {
       return HttpResponse.json({ message: 'unauthenticated' }, { status: 401 })
     }
-    const user = db.users.find((u) => u.id === currentUserId)!
+    const user = db.users.find((u) => u.id === currentUserId)
+    if (!user) return HttpResponse.json({ message: 'user not found' }, { status: 404 })
     return HttpResponse.json({ user })
   }),
 

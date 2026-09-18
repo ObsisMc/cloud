@@ -12,6 +12,7 @@ import { workspacePaths } from '@/lib/paths'
 import { useChatMessages, useChatSessions, useSendChatMessage } from '@/features/chat/api'
 import { actorById, currentUserId } from '@/mocks/data/store'
 
+// oxlint-disable-next-line max-lines-per-function -- the page coordinates the session list, message stream, and composer.
 export function ChatPage({ slug }: { slug: string }) {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
@@ -24,7 +25,7 @@ export function ChatPage({ slug }: { slug: string }) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' })
+    if (messages !== undefined) bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [messages])
 
   function handleSend(e: React.FormEvent) {

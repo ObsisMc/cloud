@@ -8,9 +8,11 @@ import { SkillsPage } from './skills-page'
 describe('SkillsPage', () => {
   it('renders every seeded skill', async () => {
     renderWithProviders(<SkillsPage slug={db.workspace.slug} />)
-    for (const skill of db.skills) {
-      expect(await screen.findByText(skill.name)).toBeInTheDocument()
-    }
+    await Promise.all(
+      db.skills.map(async (skill) => {
+        expect(await screen.findByText(skill.name)).toBeInTheDocument()
+      }),
+    )
   })
 
   it('flips a skill from disabled to enabled', async () => {

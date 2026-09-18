@@ -11,6 +11,7 @@ import { useIssues } from '@/features/issues/api'
 import { cn } from '@/lib/utils'
 
 type ViewMode = 'board' | 'list'
+const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']
 
 export function IssuesList({
   slug,
@@ -56,8 +57,8 @@ export function IssuesList({
       />
       {isPending && (
         <div className="space-y-2 p-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <Skeleton key={i} className="h-9 w-full" />
+          {SKELETON_KEYS.map((key) => (
+            <Skeleton key={key} className="h-9 w-full" />
           ))}
         </div>
       )}

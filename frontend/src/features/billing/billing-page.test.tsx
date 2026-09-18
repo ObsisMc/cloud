@@ -13,8 +13,10 @@ describe('BillingPage', () => {
     const planLabel = PLAN_LABELS[db.workspace.plan]
     if (!planLabel) throw new Error('billing plan must have a label')
     expect(await screen.findByText(planLabel)).toBeInTheDocument()
-    for (const invoice of db.invoices) {
-      expect(await screen.findByText(`¥${invoice.amount}`)).toBeInTheDocument()
-    }
+    await Promise.all(
+      db.invoices.map(async (invoice) => {
+        expect(await screen.findByText(`¥${invoice.amount}`)).toBeInTheDocument()
+      }),
+    )
   })
 })

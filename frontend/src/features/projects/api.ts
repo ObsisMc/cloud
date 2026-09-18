@@ -30,7 +30,7 @@ export function useCreateProject(slug: string) {
       const { data } = await mockApi.post<Project>(`/workspaces/${slug}/projects`, input)
       return data
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects', slug] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['projects', slug] }),
   })
 }
 
@@ -42,7 +42,7 @@ export function useUpdateProject(slug: string) {
       return data
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['projects', slug] })
+      void queryClient.invalidateQueries({ queryKey: ['projects', slug] })
       queryClient.setQueryData(['project', slug, data.id], data)
     },
   })

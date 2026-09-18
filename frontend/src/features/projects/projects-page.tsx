@@ -10,6 +10,8 @@ import { PROJECT_STATUS_LABELS, PROJECT_STATUS_VARIANT } from '@/features/projec
 import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
 
+const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six']
+
 export function ProjectsPage({ slug }: { slug: string }) {
   const { data: projects, isPending } = useProjects(slug)
   const p = workspacePaths(slug)
@@ -20,8 +22,8 @@ export function ProjectsPage({ slug }: { slug: string }) {
       <div className="flex-1 overflow-y-auto p-4">
         {isPending && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-32 w-full" />
+            {SKELETON_KEYS.map((key) => (
+              <Skeleton key={key} className="h-32 w-full" />
             ))}
           </div>
         )}

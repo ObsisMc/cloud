@@ -23,6 +23,7 @@ const TYPE_LABELS: Record<Runtime['type'], string> = {
   container: '容器',
   vm: '虚拟机',
 }
+const SKELETON_KEYS = ['one', 'two', 'three', 'four']
 
 export function RuntimesPage({ slug }: { slug: string }) {
   const { data: runtimes, isPending } = useRuntimes(slug)
@@ -34,8 +35,8 @@ export function RuntimesPage({ slug }: { slug: string }) {
       <div className="flex-1 overflow-y-auto">
         {isPending && (
           <div className="space-y-2 p-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full" />
+            {SKELETON_KEYS.map((key) => (
+              <Skeleton key={key} className="h-16 w-full" />
             ))}
           </div>
         )}

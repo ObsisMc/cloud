@@ -3,6 +3,8 @@ import {
   PRIORITY_ORDER,
   STATUS_ORDER,
   priorityLabelText,
+  parseIssuePriority,
+  parseIssueStatus,
   statusLabelText,
 } from '@/components/common/issue-badges'
 import { Button } from '@/components/ui/button'
@@ -28,6 +30,7 @@ import { useCreateIssue } from '@/features/issues/api'
 import { db } from '@/mocks/data/store'
 import type { IssuePriority, IssueStatus } from '@/mocks/data/types'
 
+// oxlint-disable-next-line max-lines-per-function -- this dialog owns one cohesive create-issue form and its reset lifecycle.
 export function CreateIssueDialog({
   slug,
   defaultStatus = 'backlog',
@@ -90,10 +93,16 @@ export function CreateIssueDialog({
               rows={3}
             />
             <div className="flex flex-wrap gap-2">
-              <Select value={status} onValueChange={(v) => setStatus(v as IssueStatus)}>
+              <Select
+                value={status}
+                onValueChange={(v) => {
+                  const nextStatus = parseIssueStatus(v)
+                  if (nextStatus) setStatus(nextStatus)
+                }}
+              >
                 <SelectTrigger className="w-36">
                   <SelectValue>
-                    {(value: unknown) => statusLabelText(value as IssueStatus)}
+                    {(value: unknown) => statusLabelText(parseIssueStatus(value) ?? status)}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -104,10 +113,16 @@ export function CreateIssueDialog({
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={priority} onValueChange={(v) => setPriority(v as IssuePriority)}>
+              <Select
+                value={priority}
+                onValueChange={(v) => {
+                  const nextPriority = parseIssuePriority(v)
+                  if (nextPriority) setPriority(nextPriority)
+                }}
+              >
                 <SelectTrigger className="w-36">
                   <SelectValue>
-                    {(value: unknown) => priorityLabelText(value as IssuePriority)}
+                    {(value: unknown) => priorityLabelText(parseIssuePriority(value) ?? priority)}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>

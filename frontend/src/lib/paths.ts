@@ -1,3 +1,9 @@
+/**
+ * Builds the workspace-scoped routes used by the application.
+ *
+ * @param slug - Workspace slug included in every route.
+ * @returns Route strings and builders for workspace resources.
+ */
 export function workspacePaths(slug: string) {
   const base = `/${slug}`
   return {

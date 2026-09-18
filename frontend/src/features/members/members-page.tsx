@@ -22,6 +22,7 @@ const STATUS_LABELS: Record<string, string> = {
   active: '已加入',
   invited: '待加入',
 }
+const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five']
 
 export function MembersPage({ slug }: { slug: string }) {
   const { data: members, isPending } = useMembers(slug)
@@ -30,8 +31,8 @@ export function MembersPage({ slug }: { slug: string }) {
     <div className="p-4">
       {isPending && (
         <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
+          {SKELETON_KEYS.map((key) => (
+            <Skeleton key={key} className="h-10 w-full" />
           ))}
         </div>
       )}

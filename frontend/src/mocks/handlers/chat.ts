@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw'
-import { db, nextId } from '../data/store'
-import { MOCK_BASE, notFound, requireWorkspace } from './shared'
+import { db, nextId } from '@/mocks/data/store'
+import { MOCK_BASE, jsonObject, notFound, pathParam, requireWorkspace, stringField } from './shared'
 
 const CANNED_REPLIES = [
   '收到，我这边看一下情况，稍后同步给你。',
@@ -12,34 +12,36 @@ const CANNED_REPLIES = [
 
 export const chatHandlers = [
   http.get(`${MOCK_BASE}/workspaces/:slug/chat/sessions`, ({ params }) => {
-    const ws = requireWorkspace(params['slug'] as string)
+    const ws = requireWorkspace(pathParam(params, 'slug'))
     if (!ws) return notFound('workspace not found')
-    const list = [...db.chatSessions.filter((s) => s.workspaceId === ws.id)].sort((a, b) =>
-      b.updatedAt.localeCompare(a.updatedAt),
-    )
+    const list = db.chatSessions
+      .filter((s) => s.workspaceId === ws.id)
+      .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     return HttpResponse.json(list)
   }),
 
   http.get(`${MOCK_BASE}/workspaces/:slug/chat/sessions/:id/messages`, ({ params }) => {
     const list = db.chatMessages
-      .filter((m) => m.sessionId === params['id'])
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .filter((m) => m.sessionId === pathParam(params, 'id'))
+      .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
     return HttpResponse.json(list)
   }),
 
   http.post(
     `${MOCK_BASE}/workspaces/:slug/chat/sessions/:id/messages`,
     async ({ params, request }) => {
-      const session = db.chatSessions.find((s) => s.id === params['id'])
+      const session = db.chatSessions.find((s) => s.id === pathParam(params, 'id'))
       if (!session) return notFound('session not found')
-      const body = (await request.json()) as { content: string }
+      const body = jsonObject(await request.json())
+      const content = stringField(body['content'])
+      if (!content) return notFound('message content is required')
       const now = new Date()
       const userMessage = {
         id: nextId('msg'),
         sessionId: session.id,
         authorId: db.users[0].id,
         authorType: 'user' as const,
-        content: body.content,
+        content,
         createdAt: now.toISOString(),
       }
       db.chatMessages.push(userMessage)

@@ -37,8 +37,8 @@ export function useSendChatMessage(slug: string, sessionId: string | undefined) 
       return data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chat-messages', slug, sessionId] })
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions', slug] })
+      void queryClient.invalidateQueries({ queryKey: ['chat-messages', slug, sessionId] })
+      void queryClient.invalidateQueries({ queryKey: ['chat-sessions', slug] })
     },
   })
 }

@@ -38,7 +38,7 @@ export function useCreateIssue(slug: string) {
       return data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', slug] })
+      void queryClient.invalidateQueries({ queryKey: ['issues', slug] })
     },
   })
 }
@@ -74,7 +74,7 @@ export function useUpdateIssue(slug: string) {
       queryClient.setQueryData(['issue', slug, data.id], data)
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', slug] })
+      void queryClient.invalidateQueries({ queryKey: ['issues', slug] })
     },
   })
 }
@@ -86,7 +86,7 @@ export function useDeleteIssue(slug: string) {
       await mockApi.delete(`/workspaces/${slug}/issues/${id}`)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', slug] })
+      void queryClient.invalidateQueries({ queryKey: ['issues', slug] })
     },
   })
 }

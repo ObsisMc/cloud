@@ -21,6 +21,18 @@ import { useUpdateIssue } from '@/features/issues/api'
 import { cn } from '@/lib/utils'
 import type { Issue, IssueStatus } from '@/mocks/data/types'
 
+type OrderedIssue = Pick<Issue, 'id' | 'status' | 'order'>
+
+function orderBetween(before: number | undefined, after: number | undefined): number {
+  if (before == null && after == null) return 0
+  if (before == null) {
+    if (after == null) return 0
+    return after - 1
+  }
+  if (after == null) return before + 1
+  return (before + after) / 2
+}
+
 /**
  * Pure decision for what a drag-end should do, kept separate from the
  * DndContext wiring so it can be unit tested without simulating real
@@ -39,7 +51,7 @@ export function resolveDrop({
   overId,
   insertAfter,
 }: {
-  issues: Issue[]
+  issues: OrderedIssue[]
   activeId: string | number | undefined
   overId: string | number | undefined
   insertAfter: boolean
@@ -48,15 +60,15 @@ export function resolveDrop({
   const active = issues.find((i) => i.id === activeId)
   if (!active) return null
 
-  const isColumnDrop = (STATUS_ORDER as (string | number)[]).includes(overId)
+  const isColumnDrop = STATUS_ORDER.some((status) => status === overId)
   const targetStatus = isColumnDrop
-    ? (overId as IssueStatus)
+    ? STATUS_ORDER.find((status) => status === overId)
     : issues.find((i) => i.id === overId)?.status
   if (!targetStatus) return null
 
   const column = issues
     .filter((i) => i.status === targetStatus && i.id !== activeId)
-    .sort((a, b) => a.order - b.order)
+    .toSorted((a, b) => a.order - b.order)
 
   let index: number
   if (isColumnDrop) {
@@ -69,14 +81,7 @@ export function resolveDrop({
 
   const before = column[index - 1]?.order
   const after = column[index]?.order
-  const newOrder =
-    before == null
-      ? after == null
-        ? 0
-        : after - 1
-      : after == null
-        ? before + 1
-        : (before + after) / 2
+  const newOrder = orderBetween(before, after)
 
   if (active.status === targetStatus && active.order === newOrder) return null
   return { id: active.id, status: targetStatus, order: newOrder }
@@ -87,7 +92,12 @@ export function resolveDrop({
  * the drop and to place the live insertion-line indicator on the same
  * side while dragging.
  */
-export function insertsAfter(event: DragEndEvent | DragOverEvent): boolean {
+type DropPositionEvent = {
+  active: { rect: { current: { translated: { top: number; height: number } | null } } }
+  over: { rect: { top: number; height: number } } | null
+}
+
+export function insertsAfter(event: DropPositionEvent): boolean {
   const { active, over } = event
   const overRect = over?.rect
   const activeRect = active.rect.current.translated
