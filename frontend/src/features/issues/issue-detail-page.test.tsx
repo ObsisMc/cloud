@@ -10,7 +10,10 @@ import { IssueDetailPage } from './issue-detail-page'
 function renderIssueDetail(issueId: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const router = createMemoryRouter(
-    [{ path: '/:workspaceSlug/issues/:issueId', element: <IssueDetailPage slug={db.workspace.slug} /> }],
+    [
+      { path: '/:workspaceSlug/issues', element: <div>Issues list screen</div> },
+      { path: '/:workspaceSlug/issues/:issueId', element: <IssueDetailPage slug={db.workspace.slug} /> },
+    ],
     { initialEntries: [`/${db.workspace.slug}/issues/${issueId}`] },
   )
   return render(
@@ -37,5 +40,16 @@ describe('IssueDetailPage', () => {
     await waitFor(() => {
       expect(within(statusTrigger).getByText(/^done$/i)).toBeInTheDocument()
     })
+  })
+
+  it('navigates back to the issues list via the breadcrumb', async () => {
+    const issue = db.issues[0]
+    const user = userEvent.setup()
+    renderIssueDetail(issue.id)
+    await screen.findByText(issue.title)
+
+    await user.click(screen.getByRole('link', { name: 'Issues' }))
+
+    expect(await screen.findByText('Issues list screen')).toBeInTheDocument()
   })
 })
