@@ -6,14 +6,14 @@ import { workspacePaths } from '@/lib/paths'
 export function SettingsLayout({ slug }: { slug: string }) {
   const p = workspacePaths(slug)
   const tabs = [
-    { to: p.settings, label: 'General', end: true },
-    { to: p.members, label: 'Members', end: false },
-    { to: p.billing, label: 'Billing', end: false },
+    { to: p.settings, label: '通用', end: true },
+    { to: p.members, label: '成员', end: false },
+    { to: p.billing, label: '账单', end: false },
   ]
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title="Settings" />
+      <PageHeader title="设置" />
       <div className="flex min-h-0 flex-1">
         <nav className="w-48 shrink-0 border-r p-3">
           <ul className="space-y-0.5">

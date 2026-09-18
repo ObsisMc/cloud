@@ -4,7 +4,6 @@ import {
   ChevronDown,
   CircuitBoard,
   Cog,
-  Gauge,
   Inbox,
   Layers,
   ListTodo,
@@ -44,22 +43,18 @@ import { db, workspaceBySlug } from '@/mocks/data/store'
 import { useAuthStore } from '@/state/auth-store'
 
 const workNav = [
-  { to: (p: ReturnType<typeof workspacePaths>) => p.issues, label: 'Issues', icon: Layers },
-  { to: (p: ReturnType<typeof workspacePaths>) => p.projects, label: 'Projects', icon: CircuitBoard },
-  { to: (p: ReturnType<typeof workspacePaths>) => p.autopilots, label: 'Autopilots', icon: Sparkles },
+  { to: (p: ReturnType<typeof workspacePaths>) => p.issues, label: '任务', icon: Layers },
+  { to: (p: ReturnType<typeof workspacePaths>) => p.projects, label: '项目', icon: CircuitBoard },
 ]
 
 const aiTeamNav = [
-  { to: (p: ReturnType<typeof workspacePaths>) => p.agents, label: 'Agents', icon: Bot },
-  { to: (p: ReturnType<typeof workspacePaths>) => p.squads, label: 'Squads', icon: Users },
-  { to: (p: ReturnType<typeof workspacePaths>) => p.skills, label: 'Skills', icon: Sparkles },
-  { to: (p: ReturnType<typeof workspacePaths>) => p.runtimes, label: 'Runtimes', icon: Server },
+  { to: (p: ReturnType<typeof workspacePaths>) => p.agents, label: '智能体', icon: Bot },
+  { to: (p: ReturnType<typeof workspacePaths>) => p.squads, label: '小队', icon: Users },
+  { to: (p: ReturnType<typeof workspacePaths>) => p.skills, label: '技能', icon: Sparkles },
+  { to: (p: ReturnType<typeof workspacePaths>) => p.runtimes, label: '运行时', icon: Server },
 ]
 
-const utilityNav = [
-  { to: (p: ReturnType<typeof workspacePaths>) => p.usage, label: 'Usage', icon: Gauge },
-  { to: (p: ReturnType<typeof workspacePaths>) => p.settings, label: 'Settings', icon: Cog },
-]
+const utilityNav = [{ to: (p: ReturnType<typeof workspacePaths>) => p.settings, label: '设置', icon: Cog }]
 
 export function AppSidebar({ slug }: { slug: string }) {
   const p = workspacePaths(slug)
@@ -106,7 +101,7 @@ export function AppSidebar({ slug }: { slug: string }) {
                 </div>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">Workspaces</DropdownMenuLabel>
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">工作区</DropdownMenuLabel>
                   {db.workspaces.map((ws) => (
                     <DropdownMenuItem
                       key={ws.id}
@@ -128,7 +123,7 @@ export function AppSidebar({ slug }: { slug: string }) {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={handleLogout}>
                   <LogOut className="size-3.5" />
-                  Log out
+                  退出登录
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -143,7 +138,7 @@ export function AppSidebar({ slug }: { slug: string }) {
               <SidebarMenuItem>
                 <SidebarMenuButton isActive={pathname === p.inbox} render={<NavLink to={p.inbox} />}>
                   <Inbox />
-                  <span>Inbox</span>
+                  <span>收件箱</span>
                   {unreadCount > 0 && (
                     <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">
                       {unreadCount}
@@ -154,13 +149,13 @@ export function AppSidebar({ slug }: { slug: string }) {
               <SidebarMenuItem>
                 <SidebarMenuButton isActive={pathname === p.myIssues} render={<NavLink to={p.myIssues} />}>
                   <ListTodo />
-                  <span>My Issues</span>
+                  <span>我的任务</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton isActive={pathname.startsWith(p.chat)} render={<NavLink to={p.chat} />}>
                   <MessageCircle />
-                  <span>Chat</span>
+                  <span>聊天</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -168,7 +163,7 @@ export function AppSidebar({ slug }: { slug: string }) {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Work</SidebarGroupLabel>
+          <SidebarGroupLabel>工作</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
               {workNav.map((item) => {
@@ -188,7 +183,7 @@ export function AppSidebar({ slug }: { slug: string }) {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>AI Team</SidebarGroupLabel>
+          <SidebarGroupLabel>AI 团队</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
               {aiTeamNav.map((item) => {

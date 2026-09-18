@@ -3,11 +3,11 @@ import { db, nextId } from '../data/store'
 import { MOCK_BASE, notFound, requireWorkspace } from './shared'
 
 const CANNED_REPLIES = [
-  "On it — I'll pull the details and get back to you shortly.",
-  "Got it. I've queued that up and will report back once it's done.",
-  'Looked into this: everything checks out, no action needed.',
-  "I found the issue and opened a fix — you'll see it in the next run.",
-  'Good question — let me dig a bit deeper before I answer that.',
+  '收到，我这边看一下情况，稍后同步给你。',
+  '好的，已经安排上了，完成后会通知你。',
+  '看了一下，目前一切正常，无需处理。',
+  '找到问题了，已经修复，下一次运行就能看到。',
+  '这个问题我需要再确认一下，稍等。',
 ]
 
 export const chatHandlers = [

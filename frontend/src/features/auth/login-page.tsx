@@ -29,14 +29,14 @@ export function LoginPage() {
           <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground font-semibold">
             O
           </div>
-          <h1 className="text-lg font-semibold">Sign in to Ora</h1>
+          <h1 className="text-lg font-semibold">登录 Ora</h1>
           <p className="text-sm text-muted-foreground">
-            Mock environment — any email signs you in as the demo owner.
+            模拟环境 — 输入任意邮箱即可以演示账号身份登录。
           </p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="email">邮箱</Label>
             <Input
               id="email"
               type="email"
@@ -47,7 +47,7 @@ export function LoginPage() {
             />
           </div>
           <Button type="submit" className="w-full" disabled={login.isPending}>
-            {login.isPending ? 'Signing in…' : 'Continue'}
+            {login.isPending ? '登录中…' : '继续'}
           </Button>
         </form>
       </div>

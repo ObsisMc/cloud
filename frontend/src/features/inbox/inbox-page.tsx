@@ -1,5 +1,6 @@
 import { formatDistanceToNow } from 'date-fns'
-import { AtSign, Bell, MessageCircle, Sparkles, UserPlus } from 'lucide-react'
+import { zhCN } from 'date-fns/locale'
+import { AtSign, Bell, MessageCircle, UserPlus } from 'lucide-react'
 import { ActorAvatar } from '@/components/common/actor-avatar'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
@@ -14,7 +15,6 @@ const TYPE_ICON: Record<InboxItemType, React.ComponentType<{ className?: string 
   assignment: Bell,
   comment: MessageCircle,
   invite: UserPlus,
-  run_complete: Sparkles,
 }
 
 export function InboxPage({ slug }: { slug: string }) {
@@ -26,11 +26,11 @@ export function InboxPage({ slug }: { slug: string }) {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Inbox"
+        title="收件箱"
         actions={
           unreadCount > 0 && (
             <Button variant="outline" size="sm" onClick={() => markAllRead.mutate()}>
-              Mark all read
+              全部标记为已读
             </Button>
           )
         }
@@ -43,7 +43,7 @@ export function InboxPage({ slug }: { slug: string }) {
             ))}
           </div>
         )}
-        {items?.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">You're all caught up.</p>}
+        {items?.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">暂无新消息。</p>}
         {items?.map((item) => {
           const Icon = TYPE_ICON[item.type]
           const actor = actorById(item.actorId)
@@ -64,7 +64,7 @@ export function InboxPage({ slug }: { slug: string }) {
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-xs text-muted-foreground">
-                  {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
+                  {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true, locale: zhCN })}
                 </span>
                 {!item.read && <span className="size-2 rounded-full bg-primary" />}
               </div>

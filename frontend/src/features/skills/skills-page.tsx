@@ -11,7 +11,7 @@ export function SkillsPage({ slug }: { slug: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title="Skills" />
+      <PageHeader title="技能" />
       <div className="flex-1 overflow-y-auto">
         {isPending && (
           <div className="space-y-2 p-4">
@@ -31,7 +31,7 @@ export function SkillsPage({ slug }: { slug: string }) {
               <p className="truncate text-xs text-muted-foreground">{skill.description}</p>
             </div>
             <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-              {skill.usageCount.toLocaleString()} uses
+              已使用 {skill.usageCount.toLocaleString()} 次
             </span>
             <Switch
               checked={skill.enabled}

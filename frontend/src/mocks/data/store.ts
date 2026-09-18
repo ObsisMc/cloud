@@ -1,7 +1,6 @@
 import * as seed from './seed'
 import type {
   Agent,
-  Autopilot,
   ChatMessage,
   ChatSession,
   InboxItem,
@@ -12,7 +11,6 @@ import type {
   Skill,
   Squad,
   User,
-  UsagePoint,
   Workspace,
   WorkspaceMember,
 } from './types'
@@ -34,14 +32,12 @@ export const db = {
   squads: [...seed.squads] as Squad[],
   projects: [...seed.projects] as Project[],
   issues: [...seed.issues] as Issue[],
-  autopilots: [...seed.autopilots] as Autopilot[],
   chatSessions: [...seed.chatSessions] as ChatSession[],
   chatMessages: [...seed.chatMessages] as ChatMessage[],
   inboxItems: [...seed.inboxItems] as InboxItem[],
   skills: [...seed.skills] as Skill[],
   runtimes: [...seed.runtimes] as Runtime[],
   invoices: [...seed.invoices] as Invoice[],
-  usageSeries: [...seed.usageSeries] as UsagePoint[],
 }
 
 export const currentUserId = seed.currentUserId

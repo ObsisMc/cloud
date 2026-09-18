@@ -19,10 +19,4 @@ export const billingHandlers = [
     if (!ws) return notFound('workspace not found')
     return HttpResponse.json(db.invoices.filter((i) => i.workspaceId === ws.id))
   }),
-
-  http.get(`${MOCK_BASE}/workspaces/:slug/usage`, ({ params }) => {
-    const ws = requireWorkspace(params.slug as string)
-    if (!ws) return notFound('workspace not found')
-    return HttpResponse.json(db.usageSeries)
-  }),
 ]

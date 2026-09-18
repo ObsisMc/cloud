@@ -14,7 +14,7 @@ export function SquadDetailPage({ slug }: { slug: string }) {
   if (isPending || !squad) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="Squad" breadcrumb={{ label: 'Squads', to: p.squads }} />
+        <PageHeader title="小队" breadcrumb={{ label: '小队', to: p.squads }} />
         <div className="space-y-3 p-6">
           <Skeleton className="h-6 w-1/2" />
           <Skeleton className="h-20 w-full" />
@@ -28,7 +28,7 @@ export function SquadDetailPage({ slug }: { slug: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title={squad.name} breadcrumb={{ label: 'Squads', to: p.squads }} />
+      <PageHeader title={squad.name} breadcrumb={{ label: '小队', to: p.squads }} />
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mb-6 flex items-center gap-3">
           <span
@@ -43,7 +43,7 @@ export function SquadDetailPage({ slug }: { slug: string }) {
           </div>
         </div>
 
-        <h2 className="mb-2 text-xs font-medium text-muted-foreground">Members</h2>
+        <h2 className="mb-2 text-xs font-medium text-muted-foreground">成员</h2>
         <div className="mb-6 space-y-1.5">
           {members.map((member) => (
             <div key={member.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
@@ -56,7 +56,7 @@ export function SquadDetailPage({ slug }: { slug: string }) {
 
         {projects.length > 0 && (
           <>
-            <h2 className="mb-2 text-xs font-medium text-muted-foreground">Projects</h2>
+            <h2 className="mb-2 text-xs font-medium text-muted-foreground">项目</h2>
             <div className="space-y-1.5">
               {projects.map((project) => (
                 <div key={project.id} className="rounded-md border px-3 py-2 text-sm">

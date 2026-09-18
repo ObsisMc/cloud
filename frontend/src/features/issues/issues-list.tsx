@@ -3,22 +3,12 @@ import { useState } from 'react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { STATUS_ORDER } from '@/components/common/issue-badges'
+import { STATUS_ORDER, statusLabelText } from '@/components/common/issue-badges'
 import { CreateIssueDialog } from '@/features/issues/components/create-issue-dialog'
 import { IssueRow } from '@/features/issues/components/issue-row'
 import { IssuesBoard } from '@/features/issues/issues-board'
 import { useIssues } from '@/features/issues/api'
 import { cn } from '@/lib/utils'
-import type { Issue } from '@/mocks/data/types'
-
-const STATUS_LABELS: Record<Issue['status'], string> = {
-  backlog: 'Backlog',
-  todo: 'Todo',
-  in_progress: 'In Progress',
-  in_review: 'In Review',
-  blocked: 'Blocked',
-  done: 'Done',
-}
 
 type ViewMode = 'board' | 'list'
 
@@ -45,7 +35,7 @@ export function IssuesList({
                 variant={view === 'board' ? 'secondary' : 'ghost'}
                 size="icon"
                 className="size-6"
-                aria-label="Board view"
+                aria-label="看板视图"
                 onClick={() => setView('board')}
               >
                 <LayoutGrid className="size-3.5" />
@@ -54,7 +44,7 @@ export function IssuesList({
                 variant={view === 'list' ? 'secondary' : 'ghost'}
                 size="icon"
                 className="size-6"
-                aria-label="List view"
+                aria-label="列表视图"
                 onClick={() => setView('list')}
               >
                 <ListIcon className="size-3.5" />
@@ -72,7 +62,7 @@ export function IssuesList({
         </div>
       )}
       {issues && issues.length === 0 && (
-        <p className="p-8 text-center text-sm text-muted-foreground">No issues here yet.</p>
+        <p className="p-8 text-center text-sm text-muted-foreground">暂无任务。</p>
       )}
       {issues && issues.length > 0 && view === 'board' && (
         <div className="min-h-0 flex-1">
@@ -87,7 +77,7 @@ export function IssuesList({
             return (
               <div key={status}>
                 <div className="sticky top-0 flex items-center gap-2 border-b bg-background px-4 py-1.5 text-xs font-medium text-muted-foreground">
-                  {STATUS_LABELS[status]}
+                  {statusLabelText(status)}
                   <span className="text-muted-foreground/70">{group.length}</span>
                 </div>
                 {group.map((issue) => (

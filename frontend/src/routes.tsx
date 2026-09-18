@@ -3,10 +3,8 @@ import { createBrowserRouter, Navigate, useParams } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import { AgentDetailPage } from '@/features/agents/agent-detail-page'
 import { AgentsPage } from '@/features/agents/agents-page'
-import { AutopilotsPage } from '@/features/autopilots/autopilots-page'
 import { LoginPage } from '@/features/auth/login-page'
 import { BillingPage } from '@/features/billing/billing-page'
-import { UsagePage } from '@/features/billing/usage-page'
 import { ChatPage } from '@/features/chat/chat-page'
 import { InboxPage } from '@/features/inbox/inbox-page'
 import { IssueDetailPage } from '@/features/issues/issue-detail-page'
@@ -51,13 +49,11 @@ export const router = createBrowserRouter([
       { path: 'squads/:squadId', element: <WithSlug component={SquadDetailPage} /> },
       { path: 'agents', element: <WithSlug component={AgentsPage} /> },
       { path: 'agents/:agentId', element: <WithSlug component={AgentDetailPage} /> },
-      { path: 'autopilots', element: <WithSlug component={AutopilotsPage} /> },
       { path: 'skills', element: <WithSlug component={SkillsPage} /> },
       { path: 'runtimes', element: <WithSlug component={RuntimesPage} /> },
       { path: 'chat', element: <WithSlug component={ChatPage} /> },
       { path: 'chat/:sessionId', element: <WithSlug component={ChatPage} /> },
       { path: 'inbox', element: <WithSlug component={InboxPage} /> },
-      { path: 'usage', element: <WithSlug component={UsagePage} /> },
       {
         path: 'settings',
         element: <WithSlug component={SettingsLayout} />,

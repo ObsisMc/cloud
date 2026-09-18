@@ -1,5 +1,6 @@
 import { useDraggable } from '@dnd-kit/core'
 import { formatDistanceToNow } from 'date-fns'
+import { zhCN } from 'date-fns/locale'
 import { FolderClosed } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ActorAvatar } from '@/components/common/actor-avatar'
@@ -58,10 +59,10 @@ export function IssueCard({
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
           <ActorAvatar actor={assignee} size="sm" />
-          <span className="truncate text-xs text-muted-foreground">{assignee?.name ?? 'Unassigned'}</span>
+          <span className="truncate text-xs text-muted-foreground">{assignee?.name ?? '未分配'}</span>
         </div>
         <span className="shrink-0 text-[10px] text-muted-foreground">
-          {formatDistanceToNow(new Date(issue.updatedAt), { addSuffix: true })}
+          {formatDistanceToNow(new Date(issue.updatedAt), { addSuffix: true, locale: zhCN })}
         </span>
       </div>
     </Link>

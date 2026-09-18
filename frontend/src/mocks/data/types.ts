@@ -82,19 +82,6 @@ export interface Issue {
   commentCount: number
 }
 
-export interface Autopilot {
-  id: string
-  workspaceId: string
-  name: string
-  description: string
-  trigger: string
-  status: 'active' | 'paused' | 'draft'
-  schedule: string
-  lastRunAt: string | null
-  successRate: number
-  runsCount: number
-}
-
 export interface ChatMessage {
   id: string
   sessionId: string
@@ -113,7 +100,7 @@ export interface ChatSession {
   unreadCount: number
 }
 
-export type InboxItemType = 'mention' | 'assignment' | 'comment' | 'invite' | 'run_complete'
+export type InboxItemType = 'mention' | 'assignment' | 'comment' | 'invite'
 
 export interface InboxItem {
   id: string
@@ -157,9 +144,3 @@ export interface Invoice {
   status: 'paid' | 'pending'
 }
 
-export interface UsagePoint {
-  date: string
-  agentMinutes: number
-  apiCalls: number
-  storageGb: number
-}

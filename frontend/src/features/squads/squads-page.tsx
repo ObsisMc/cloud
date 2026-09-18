@@ -12,7 +12,7 @@ export function SquadsPage({ slug }: { slug: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title="Squads" />
+      <PageHeader title="小队" />
       <div className="flex-1 overflow-y-auto p-4">
         {isPending && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

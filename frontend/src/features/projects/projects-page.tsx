@@ -2,21 +2,13 @@ import { format } from 'date-fns'
 import { Link } from 'react-router-dom'
 import { ActorAvatar } from '@/components/common/actor-avatar'
 import { PageHeader } from '@/components/layout/page-header'
-import { Badge, badgeVariants } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { VariantProps } from 'class-variance-authority'
 import { ProjectIcon } from '@/features/projects/components/project-icon'
 import { useProjects } from '@/features/projects/api'
+import { PROJECT_STATUS_LABELS, PROJECT_STATUS_VARIANT } from '@/features/projects/status'
 import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
-import type { Project } from '@/mocks/data/types'
-
-const STATUS_VARIANT: Record<Project['status'], NonNullable<VariantProps<typeof badgeVariants>['variant']>> = {
-  planned: 'secondary',
-  in_progress: 'default',
-  completed: 'secondary',
-  paused: 'outline',
-}
 
 export function ProjectsPage({ slug }: { slug: string }) {
   const { data: projects, isPending } = useProjects(slug)
@@ -24,7 +16,7 @@ export function ProjectsPage({ slug }: { slug: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title="Projects" />
+      <PageHeader title="项目" />
       <div className="flex-1 overflow-y-auto p-4">
         {isPending && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -50,15 +42,15 @@ export function ProjectsPage({ slug }: { slug: string }) {
                 </div>
                 <p className="line-clamp-2 text-xs text-muted-foreground">{project.description}</p>
                 <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground">
-                  <Badge variant={STATUS_VARIANT[project.status]}>{project.status.replace('_', ' ')}</Badge>
+                  <Badge variant={PROJECT_STATUS_VARIANT[project.status]}>{PROJECT_STATUS_LABELS[project.status]}</Badge>
                   <span>
-                    {doneCount}/{issueCount} issues
+                    {doneCount}/{issueCount} 个任务
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <ActorAvatar actor={lead} size="sm" />
                   {project.targetDate && (
-                    <span className="text-xs text-muted-foreground">{format(new Date(project.targetDate), 'MMM d')}</span>
+                    <span className="text-xs text-muted-foreground">{format(new Date(project.targetDate), 'M月d日')}</span>
                   )}
                 </div>
               </Link>

@@ -12,7 +12,7 @@ export function GeneralSettingsPage() {
     <div className="max-w-lg space-y-4 p-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Workspace</CardTitle>
+          <CardTitle className="text-sm">工作区</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-3">
@@ -28,11 +28,11 @@ export function GeneralSettingsPage() {
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="workspace-name">Workspace name</Label>
+            <Label htmlFor="workspace-name">工作区名称</Label>
             <Input id="workspace-name" defaultValue={workspace.name} key={workspace.id} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="workspace-slug">Slug</Label>
+            <Label htmlFor="workspace-slug">工作区标识（Slug）</Label>
             <Input id="workspace-slug" defaultValue={workspace.slug} key={`${workspace.id}-slug`} disabled />
           </div>
         </CardContent>

@@ -1,4 +1,5 @@
 import { formatDistanceToNow } from 'date-fns'
+import { zhCN } from 'date-fns/locale'
 import { Send } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -39,7 +40,7 @@ export function ChatPage({ slug }: { slug: string }) {
   return (
     <div className="flex h-full min-h-0">
       <div className="flex w-64 shrink-0 flex-col border-r">
-        <PageHeader title="Chat" />
+        <PageHeader title="聊天" />
         <div className="min-h-0 flex-1 overflow-y-auto">
           {sessions?.map((session) => {
             const agent = actorById(session.agentId)
@@ -66,7 +67,7 @@ export function ChatPage({ slug }: { slug: string }) {
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <PageHeader title={activeSession?.title ?? 'Select a conversation'} />
+        <PageHeader title={activeSession?.title ?? '请选择一个会话'} />
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           {messages?.map((message) => {
             const isUser = message.authorType === 'user'
@@ -84,7 +85,7 @@ export function ChatPage({ slug }: { slug: string }) {
                     {message.content}
                   </div>
                   <p className="text-[10px] text-muted-foreground">
-                    {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}
+                    {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true, locale: zhCN })}
                   </p>
                 </div>
               </div>
@@ -97,13 +98,13 @@ export function ChatPage({ slug }: { slug: string }) {
             <Input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Message the agent…"
+              placeholder="给智能体发消息…"
               className="flex-1"
             />
             <Button
               type="submit"
               size="icon"
-              aria-label="Send message"
+              aria-label="发送消息"
               disabled={!draft.trim() || sendMessage.isPending}
             >
               <Send className="size-4" />
