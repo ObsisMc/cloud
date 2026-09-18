@@ -109,7 +109,15 @@ export function IssuesBoard({ issues, slug }: { issues: Issue[]; slug: string })
           <BoardColumn key={status} status={status} issues={issues.filter((i) => i.status === status)} slug={slug} />
         ))}
       </div>
-      <DragOverlay>
+      {/*
+        dropAnimation defaults to animating the overlay back to wherever the
+        source node currently sits in the DOM — for a same-column reorder
+        that's the right place, but here the source has just moved to a
+        different column, so the default animation flies to the *old*
+        column before the re-rendered board snaps it into the new one.
+        Disabling it lets the drop resolve instantly, in the new column.
+      */}
+      <DragOverlay dropAnimation={null}>
         {activeIssue && (
           <div className="w-72 rotate-2 opacity-90">
             <IssueCard issue={activeIssue} slug={slug} draggable={false} />
