@@ -2,6 +2,7 @@
 src/api/
 dist/
 node_modules/
+public/mockServiceWorker.js
 # Prose and JSON keep their hand-written layout (tables, alignment).
 *.md
 *.json
