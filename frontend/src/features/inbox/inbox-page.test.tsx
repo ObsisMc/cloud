@@ -20,12 +20,12 @@ describe('InboxPage', () => {
     }
   })
 
-  it('marks every item read via "Mark all read"', async () => {
+  it('marks every item read via the mark-all-read button', async () => {
     const user = userEvent.setup()
     renderWithProviders(<InboxPage slug={db.workspace.slug} />)
-    await screen.findByText(db.inboxItems[0].title)
+    await screen.findAllByText(db.inboxItems[0].title)
 
-    await user.click(screen.getByRole('button', { name: /mark all read/i }))
+    await user.click(screen.getByRole('button', { name: '全部标记为已读' }))
 
     await waitFor(() => {
       expect(db.inboxItems.every((i) => i.read)).toBe(true)

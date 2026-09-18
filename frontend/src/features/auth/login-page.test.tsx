@@ -12,15 +12,15 @@ describe('LoginPage', () => {
 
   it('renders the sign-in form', () => {
     renderWithProviders(<LoginPage />, { route: '/login' })
-    expect(screen.getByRole('heading', { name: /sign in to ora/i })).toBeInTheDocument()
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '登录 Ora' })).toBeInTheDocument()
+    expect(screen.getByLabelText('邮箱')).toBeInTheDocument()
   })
 
   it('signs the user in and stores the session on submit', async () => {
     const user = userEvent.setup()
     renderWithProviders(<LoginPage />, { route: '/login' })
 
-    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await user.click(screen.getByRole('button', { name: '继续' }))
 
     await waitFor(() => {
       expect(useAuthStore.getState().token).toBeTruthy()

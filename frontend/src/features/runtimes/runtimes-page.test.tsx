@@ -19,7 +19,7 @@ describe('RuntimesPage', () => {
     renderWithProviders(<RuntimesPage slug={db.workspace.slug} />)
     const row = (await screen.findByText(runtime.name)).closest('div')!.parentElement!
 
-    await user.click(within(row).getByRole('button', { name: /stop/i }))
+    await user.click(within(row).getByRole('button', { name: '停止' }))
 
     await waitFor(() => {
       expect(db.runtimes.find((r) => r.id === runtime.id)?.status).toBe('stopped')

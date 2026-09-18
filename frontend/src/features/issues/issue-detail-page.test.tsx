@@ -35,10 +35,10 @@ describe('IssueDetailPage', () => {
 
     const [statusTrigger] = screen.getAllByRole('combobox')
     await user.click(statusTrigger)
-    await user.click(await screen.findByRole('option', { name: /^done$/i }))
+    await user.click(await screen.findByRole('option', { name: '已完成' }))
 
     await waitFor(() => {
-      expect(within(statusTrigger).getByText(/^done$/i)).toBeInTheDocument()
+      expect(within(statusTrigger).getByText('已完成')).toBeInTheDocument()
     })
   })
 
@@ -48,7 +48,7 @@ describe('IssueDetailPage', () => {
     renderIssueDetail(issue.id)
     await screen.findByText(issue.title)
 
-    await user.click(screen.getByRole('link', { name: 'Issues' }))
+    await user.click(screen.getByRole('link', { name: '任务' }))
 
     expect(await screen.findByText('Issues list screen')).toBeInTheDocument()
   })

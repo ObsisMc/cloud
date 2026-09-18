@@ -39,7 +39,7 @@ describe('SettingsLayout', () => {
 
     expect(await screen.findByText(db.workspace.name)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('link', { name: 'Members' }))
+    await user.click(screen.getByRole('link', { name: '成员' }))
     expect(await screen.findByText('Members screen')).toBeInTheDocument()
   })
 })

@@ -11,18 +11,18 @@ describe('IssuesPage', () => {
 
     const backlogIssue = db.issues.find((i) => i.status === 'backlog')!
     expect(await screen.findByText(backlogIssue.title)).toBeInTheDocument()
-    expect(screen.getByText('Backlog')).toBeInTheDocument()
+    expect(screen.getByText('待规划')).toBeInTheDocument()
   })
 
   it('creates a new issue through the dialog and lists it in Backlog', async () => {
     const user = userEvent.setup()
     renderWithProviders(<IssuesPage slug={db.workspace.slug} />)
-    await screen.findByText('Backlog')
+    await screen.findByText('待规划')
 
-    await user.click(screen.getByRole('button', { name: 'New issue' }))
+    await user.click(screen.getByRole('button', { name: '新建任务' }))
     const dialog = await screen.findByRole('dialog')
-    await user.type(within(dialog).getByPlaceholderText(/issue title/i), 'A brand new mock issue')
-    await user.click(within(dialog).getByRole('button', { name: /create issue/i }))
+    await user.type(within(dialog).getByPlaceholderText('任务标题'), 'A brand new mock issue')
+    await user.click(within(dialog).getByRole('button', { name: '创建任务' }))
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()

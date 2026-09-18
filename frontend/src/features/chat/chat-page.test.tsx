@@ -15,13 +15,19 @@ function renderChat(sessionId?: string) {
 }
 
 describe('ChatPage', () => {
-  it('lists every seeded session and shows the first session selected by default', async () => {
+  it('lists every seeded session and shows the most recently updated one selected by default', async () => {
     renderChat()
     for (const session of db.chatSessions) {
       expect(await screen.findAllByText(session.title)).not.toHaveLength(0)
     }
-    const firstMessage = db.chatMessages.find((m) => m.sessionId === db.chatSessions[0].id)!
-    expect(await screen.findByText(firstMessage.content)).toBeInTheDocument()
+    // The API sorts sessions by updatedAt desc, same as the component's default pick.
+    const defaultSession = [...db.chatSessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+    const firstMessage = db.chatMessages
+      .filter((m) => m.sessionId === defaultSession.id)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]!
+    // The filler phrase bank is small and can repeat within a session, so
+    // assert presence rather than a single unique match.
+    expect(await screen.findAllByText(firstMessage.content)).not.toHaveLength(0)
   })
 
   it('sends a message and receives a canned agent reply', async () => {
@@ -32,8 +38,8 @@ describe('ChatPage', () => {
 
     const beforeCount = db.chatMessages.filter((m) => m.sessionId === session.id).length
 
-    await user.type(screen.getByPlaceholderText(/message the agent/i), 'Ping!')
-    await user.click(screen.getByRole('button', { name: /send message/i }))
+    await user.type(screen.getByPlaceholderText(/给智能体发消息/), 'Ping!')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     await waitFor(() => {
       const afterCount = db.chatMessages.filter((m) => m.sessionId === session.id).length

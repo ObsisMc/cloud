@@ -17,6 +17,6 @@ describe('AgentDetailPage', () => {
     expect(screen.getByText(agent.role)).toBeInTheDocument()
 
     const assigned = db.issues.filter((i) => i.assigneeId === agent.id)
-    expect(await screen.findByText(new RegExp(`Assigned issues \\(${assigned.length}\\)`))).toBeInTheDocument()
+    expect(await screen.findByText(new RegExp(`已分配任务（${assigned.length}）`))).toBeInTheDocument()
   })
 })
