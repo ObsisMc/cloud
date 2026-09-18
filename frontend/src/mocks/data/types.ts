@@ -80,6 +80,14 @@ export interface Issue {
   createdAt: string
   updatedAt: string
   commentCount: number
+  /**
+   * Manual position within its status column on the board. Drag-and-drop
+   * writes a fractional value between its new neighbors so reordering never
+   * needs to renumber the rest of the column; sorting by this (not
+   * updatedAt) is what makes a dropped card land exactly where the user put
+   * it instead of jumping to wherever a recency sort would place it.
+   */
+  order: number
 }
 
 export interface ChatMessage {

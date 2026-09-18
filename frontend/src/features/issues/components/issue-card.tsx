@@ -1,4 +1,5 @@
-import { useDraggable } from '@dnd-kit/core'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { FolderClosed } from 'lucide-react'
@@ -23,7 +24,7 @@ export function IssueCard({
   const p = workspacePaths(slug)
   const assignee = actorById(issue.assigneeId)
   const project = db.projects.find((pr) => pr.id === issue.projectId)
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: issue.id,
     disabled: !draggable,
     // The card is a real <a href>, not a button — keep that semantic instead
@@ -35,10 +36,12 @@ export function IssueCard({
     <Link
       ref={setNodeRef}
       to={p.issueDetail(issue.id)}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
-        // Left in place while dragging (just dimmed) — the DragOverlay is the
-        // only thing that follows the pointer. Transforming this element too
-        // used to fight the overlay's own transform and read as jittery.
+        // The dragged card itself just dims in place (the DragOverlay is what
+        // follows the pointer); other cards in the column still get their
+        // sortable transform so they slide aside to open a gap at the drop
+        // target while a drag is in progress.
         'block rounded-md border bg-card p-2.5 text-sm shadow-xs touch-none hover:border-ring/50 hover:shadow-sm',
         isDragging && 'opacity-40',
       )}

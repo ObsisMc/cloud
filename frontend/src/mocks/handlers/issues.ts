@@ -15,7 +15,7 @@ export const issueHandlers = [
     if (status) list = list.filter((i) => i.status === status)
     if (projectId) list = list.filter((i) => i.projectId === projectId)
     if (assigneeId) list = list.filter((i) => i.assigneeId === assigneeId)
-    list = [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    list = [...list].sort((a, b) => a.order - b.order)
     return HttpResponse.json(list)
   }),
 
@@ -29,13 +29,15 @@ export const issueHandlers = [
     if (!ws) return notFound('workspace not found')
     const body = (await request.json()) as Partial<Issue>
     const now = new Date().toISOString()
+    const status = body.status ?? 'backlog'
+    const columnOrders = db.issues.filter((i) => i.workspaceId === ws.id && i.status === status).map((i) => i.order)
     const issue: Issue = {
       id: nextId('issue'),
       workspaceId: ws.id,
       identifier: nextIssueIdentifier(),
       title: body.title?.trim() || 'Untitled issue',
       description: body.description ?? '',
-      status: body.status ?? 'backlog',
+      status,
       priority: body.priority ?? 'none',
       assigneeId: body.assigneeId ?? null,
       projectId: body.projectId ?? null,
@@ -43,6 +45,8 @@ export const issueHandlers = [
       createdAt: now,
       updatedAt: now,
       commentCount: 0,
+      // New issues land at the top of their column, same as before.
+      order: columnOrders.length > 0 ? Math.min(...columnOrders) - 1 : 0,
     }
     db.issues.unshift(issue)
     return HttpResponse.json(issue, { status: 201 })

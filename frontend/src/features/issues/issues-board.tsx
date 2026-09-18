@@ -2,12 +2,14 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  closestCenter,
   useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import { STATUS_ORDER, StatusIcon, statusLabelText } from '@/components/common/issue-badges'
@@ -22,18 +24,52 @@ import type { Issue, IssueStatus } from '@/mocks/data/types'
  * Pure decision for what a drag-end should do, kept separate from the
  * DndContext wiring so it can be unit tested without simulating real
  * pointer drags (dnd-kit needs real layout measurements jsdom can't give it).
+ *
+ * `overId` is either a column's status (dropped on empty space) or another
+ * issue's id (dropped near a card); `insertAfter` says which side of that
+ * card the drop lands on. The returned `order` is a fractional value
+ * between its new neighbors, so this never needs to renumber the rest of
+ * the column — the card lands exactly where it was dropped instead of
+ * wherever a recency sort would put it.
  */
-export function resolveDrop(
-  issues: Issue[],
-  activeId: string | number | undefined,
-  overId: string | number | undefined,
-): { id: string; status: IssueStatus } | null {
+export function resolveDrop({
+  issues,
+  activeId,
+  overId,
+  insertAfter,
+}: {
+  issues: Issue[]
+  activeId: string | number | undefined
+  overId: string | number | undefined
+  insertAfter: boolean
+}): { id: string; status: IssueStatus; order: number } | null {
   if (activeId == null || overId == null) return null
-  const issue = issues.find((i) => i.id === activeId)
-  if (!issue) return null
-  const newStatus = overId as IssueStatus
-  if (issue.status === newStatus) return null
-  return { id: issue.id, status: newStatus }
+  const active = issues.find((i) => i.id === activeId)
+  if (!active) return null
+
+  const isColumnDrop = (STATUS_ORDER as (string | number)[]).includes(overId)
+  const targetStatus = isColumnDrop ? (overId as IssueStatus) : issues.find((i) => i.id === overId)?.status
+  if (!targetStatus) return null
+
+  const column = issues
+    .filter((i) => i.status === targetStatus && i.id !== activeId)
+    .sort((a, b) => a.order - b.order)
+
+  let index: number
+  if (isColumnDrop) {
+    index = column.length
+  } else {
+    const overIndex = column.findIndex((i) => i.id === overId)
+    if (overIndex === -1) return null
+    index = insertAfter ? overIndex + 1 : overIndex
+  }
+
+  const before = column[index - 1]?.order
+  const after = column[index]?.order
+  const newOrder = before == null ? (after == null ? 0 : after - 1) : after == null ? before + 1 : (before + after) / 2
+
+  if (active.status === targetStatus && active.order === newOrder) return null
+  return { id: active.id, status: targetStatus, order: newOrder }
 }
 
 function BoardColumn({
@@ -68,9 +104,11 @@ function BoardColumn({
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
         {issues.length === 0 && <p className="py-6 text-center text-xs text-muted-foreground">暂无任务</p>}
-        {issues.map((issue) => (
-          <IssueCard key={issue.id} issue={issue} slug={slug} />
-        ))}
+        <SortableContext items={issues.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+          {issues.map((issue) => (
+            <IssueCard key={issue.id} issue={issue} slug={slug} />
+          ))}
+        </SortableContext>
       </div>
     </div>
   )
@@ -87,14 +125,33 @@ export function IssuesBoard({ issues, slug }: { issues: Issue[]; slug: string })
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveIssue(null)
-    const update = resolveDrop(issues, event.active.id, event.over?.id)
+    const { active, over } = event
+    if (!over) return
+
+    // Which side of the hovered card the pointer is on decides insert
+    // before/after it; a drop directly on a column (no card underneath)
+    // has no "side" to compare, so it always lands at the end.
+    let insertAfter = false
+    const overRect = over.rect
+    const activeRect = active.rect.current.translated
+    if (overRect && activeRect) {
+      insertAfter = activeRect.top + activeRect.height / 2 > overRect.top + overRect.height / 2
+    }
+
+    const update = resolveDrop({ issues, activeId: active.id, overId: over.id, insertAfter })
     if (update) {
-      updateIssue.mutate({ id: update.id, patch: { status: update.status } })
+      updateIssue.mutate({ id: update.id, patch: { status: update.status, order: update.order } })
     }
   }
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveIssue(null)}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={() => setActiveIssue(null)}
+    >
       <div className="flex h-full min-h-0 gap-3 overflow-x-auto p-3">
         {STATUS_ORDER.map((status) => (
           <BoardColumn key={status} status={status} issues={issues.filter((i) => i.status === status)} slug={slug} />

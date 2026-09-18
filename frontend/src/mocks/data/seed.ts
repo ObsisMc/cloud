@@ -287,6 +287,15 @@ export const projects: Project[] = ['新人引导流程改版', '计费系统 v2
 
 const allActorIds = [...users.map((u) => u.id), ...agents.map((a) => a.id)]
 
+const orderByStatus: Record<IssueStatus, number> = {
+  backlog: 0,
+  todo: 0,
+  in_progress: 0,
+  in_review: 0,
+  blocked: 0,
+  done: 0,
+}
+
 export const issues: Issue[] = Array.from({ length: 48 }, (_, i) => {
   const createdAt = faker.date.past({ years: 1 })
   const status = faker.helpers.arrayElement(ISSUE_STATUSES)
@@ -304,6 +313,7 @@ export const issues: Issue[] = Array.from({ length: 48 }, (_, i) => {
     createdAt: createdAt.toISOString(),
     updatedAt: faker.date.between({ from: createdAt, to: new Date() }).toISOString(),
     commentCount: faker.number.int({ min: 0, max: 12 }),
+    order: orderByStatus[status]++,
   }
 })
 
