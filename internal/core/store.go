@@ -70,7 +70,10 @@ func require(ok bool, status int, code string) {
 type databaseFailure struct{ err error }
 
 // Store is injected; there is no global database handle.
-type Store struct{ Pool *sql.DB }
+type Store struct {
+	Pool   *sql.DB
+	Events *SpaceHub
+}
 
 // NewStore obtains the injected SQL pool without creating or migrating schema.
 func NewStore(db *gorm.DB) (*Store, error) {
@@ -81,7 +84,7 @@ func NewStore(db *gorm.DB) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get database pool: %w", err)
 	}
-	return &Store{Pool: pool}, nil
+	return &Store{Pool: pool, Events: NewSpaceHub()}, nil
 }
 
 type transaction struct {
@@ -276,7 +279,8 @@ func identity(t *transaction, source, subject, name string) Object {
 	return u
 }
 
-// Bootstrap atomically provisions a tenant and its initial administrator from a deployment command.
+// Bootstrap atomically provisions a tenant, its initial administrator, and the
+// tenant's default collaboration space from a deployment command.
 func (s *Store) Bootstrap(ctx context.Context, name, source, subject, display string) (Object, error) {
 	return s.transact(ctx, func(t *transaction) Object {
 		require(name != "" && len(name) <= 200, 400, "invalid_name")
@@ -284,7 +288,10 @@ func (s *Store) Bootstrap(ctx context.Context, name, source, subject, display st
 		id := newID()
 		t.exec("INSERT INTO tenants(id,name,status) VALUES($1,$2,'active')", id, name)
 		t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'admin','active')", id, u.S("id"))
-		return Object{"tenantId": id, "userId": u.S("id")}
+		wid := newID()
+		t.exec("INSERT INTO collab_workspaces(id,tenant_id,name,slug,created_by) VALUES($1,$2,'Default','default',$3)", wid, id, u.S("id"))
+		t.exec("INSERT INTO collab_workspace_members(workspace_id,user_id,role,status,created_by) VALUES($1,$2,'owner','active',$2)", wid, u.S("id"))
+		return Object{"tenantId": id, "userId": u.S("id"), "spaceId": wid}
 	})
 }
 
@@ -307,23 +314,28 @@ func membership(t *transaction, tid, uid string, admin bool) Object {
 	return m
 }
 
+// project loads a live project in the tenant and requires the caller's active
+// collaboration-space membership; individual ownership is no longer the
+// visibility boundary.
 func project(t *transaction, tid, uid, pid string) Object {
-	require(validID(pid), 404, "not_found")
-	p := t.one("SELECT * FROM projects WHERE id=$1 AND tenant_id=$2 AND owner_user_id=$3 AND deleted_at IS NULL", pid, tid, uid)
-	require(p != nil, 404, "not_found")
+	p, _ := projectInSpace(t, tid, uid, pid)
 	return p
 }
 
+// workspace loads a live runtime workspace in the tenant. Non-admin callers
+// must hold a membership in the collaboration space that owns its project;
+// the admin form (administrative-stop) requires tenant administration.
 func workspace(t *transaction, tid, uid, wid string, admin bool) Object {
 	require(validID(wid), 404, "not_found")
-	q := "SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL"
-	args := []any{wid, tid}
-	if !admin {
-		q += " AND owner_user_id=$3"
-		args = append(args, uid)
-	}
-	w := t.one(q, args...)
+	w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
 	require(w != nil, 404, "not_found")
+	if admin {
+		membership(t, tid, uid, true)
+		return w
+	}
+	p := t.one("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", w.S("projectId"))
+	require(p != nil, 404, "not_found")
+	spaceMember(t, p.S("spaceId"), uid)
 	return w
 }
 
