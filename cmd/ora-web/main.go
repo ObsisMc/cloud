@@ -33,6 +33,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/wanglongan587/cloud/internal/api/router"
+	"github.com/wanglongan587/cloud/internal/collab"
 	"github.com/wanglongan587/cloud/internal/core"
 	"github.com/wanglongan587/cloud/internal/simulator"
 )
@@ -79,6 +80,12 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	// Dev/demo collaboration fixtures (production leaves these nil -> Unavailable).
+	store.Directory = collab.FixtureCollaborationDirectory{}
+	store.Context = collab.DeterministicContextBuilder{}
+	store.Dispatcher = collab.MockExecutionDispatcher{}
+	store.Forms = collab.FixtureFormDescriptorProvider{}
+	store.Assist = collab.MockInputAssistProvider{}
 	if e = store.Migrate(ctx); e != nil {
 		return fmt.Errorf("migrate: %w", e)
 	}

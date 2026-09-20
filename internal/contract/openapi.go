@@ -24,7 +24,13 @@ func number() obj                      { return obj{"type": "integer", "format":
 func boolean() obj                     { return obj{"type": "boolean"} }
 func enumeration(values ...string) obj { return obj{"type": "string", "enum": values} }
 func array(item obj) obj               { return obj{"type": "array", "items": item} }
-func optional(s obj) obj               { s["nullable"] = true; return s }
+
+// contextRefTypeEnum is the closed set of issue context-ref types, shared by the ContextRef resource
+// and by the applied-suggestion refs a confirm/assist body may carry.
+func contextRefTypeEnum() obj {
+	return enumeration("parent_issue", "run", "timeline_message", "pull_request", "project", "workspace", "acceptance_criteria")
+}
+func optional(s obj) obj { s["nullable"] = true; return s }
 func object(properties obj, required ...string) obj {
 	return obj{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
 }
@@ -102,7 +108,28 @@ func Document() map[string]any {
 	runProps["workflowInvocationRef"] = optional(uuid())
 	s["ContextRef"] = resource("id tenantId issueId refType refId createdAt", "")
 	contextRefProps := properties(s, "ContextRef")
-	contextRefProps["refType"] = enumeration("parent_issue", "run", "timeline_message", "pull_request", "project", "workspace", "acceptance_criteria")
+	contextRefProps["refType"] = contextRefTypeEnum()
+	s["InteractionDescriptor"] = object(obj{"mode": enumeration("mention", "task", "form"), "requiresTask": boolean(), "formRef": optional(str())}, "mode", "requiresTask")
+	s["FormOption"] = object(obj{"value": str(), "label": str()}, "value", "label")
+	s["FormField"] = object(obj{
+		"key": str(), "label": str(),
+		"type":         enumeration("text", "textarea", "number", "boolean", "select", "multi_select"),
+		"required":     boolean(),
+		"description":  optional(str()),
+		"placeholder":  optional(str()),
+		"defaultValue": optional(obj{"nullable": true, "description": "Type-consistent with `type`; an array of strings for multi_select."}),
+		"options":      optional(array(ref("FormOption"))),
+	}, "key", "label", "type", "required")
+	s["FormDescriptor"] = object(obj{"formRef": str(), "title": optional(str()), "description": optional(str()), "fields": array(ref("FormField"))}, "formRef", "fields")
+	s["AssistSuggestion"] = object(obj{
+		"suggestedValues":      obj{"type": "object", "additionalProperties": true},
+		"suggestedContextRefs": array(ref("ContextRefRef")),
+		"explanations":         optional(obj{"type": "object", "additionalProperties": true}),
+	}, "suggestedValues", "suggestedContextRefs")
+	s["ContextRefRef"] = object(obj{"refType": contextRefTypeEnum(), "refId": uuid()}, "refType", "refId")
+	s["CollaborationTarget"] = object(obj{"type": enumeration("user", "agent", "team", "workflow"), "id": uuid(), "displayName": str(), "description": str(), "interactionDescriptor": ref("InteractionDescriptor")}, "type", "id", "displayName", "description", "interactionDescriptor")
+	s["IssueInteraction"] = object(obj{"id": uuid(), "tenantId": uuid(), "issueId": uuid(), "commentId": uuid(), "targetType": enumeration("user", "agent", "team", "workflow"), "targetId": uuid(), "mode": enumeration("mention", "task", "form"), "task": str(), "runId": optional(uuid()), "input": obj{"type": "object", "additionalProperties": true}, "createdAt": timestamp()}, "id", "tenantId", "issueId", "commentId", "targetType", "targetId", "mode", "task", "runId", "input", "createdAt")
+	s["TimelineEntry"] = object(obj{"kind": enumeration("comment", "activity"), "id": uuid(), "seq": number(), "createdAt": timestamp(), "authorType": enumeration("user", "agent", "team", "system"), "authorId": optional(uuid()), "authorUserId": optional(uuid()), "body": optional(str()), "parentId": optional(uuid()), "action": optional(str()), "details": optional(obj{"type": "object", "additionalProperties": true})}, "kind", "id", "seq", "createdAt", "authorType", "authorId", "authorUserId", "body", "parentId", "action", "details")
 	s["AdminResource"] = resource("id projectId ownerUserId kind desiredState observedState runtimeGeneration version", "")
 	s["AdminOperation"] = resource("id tenantId projectId workspaceId kind state step version createdAt updatedAt", "workspaceId")
 	s["OperationRequest"] = object(obj{"previous": obj{"type": "object", "additionalProperties": ref("Workspace")}})
@@ -152,7 +179,7 @@ func Document() map[string]any {
 			if strings.HasPrefix(p, ":") {
 				name := p[1:]
 				path = strings.ReplaceAll(path, p, "{"+name+"}")
-				parameters = append(parameters, obj{"name": name, "in": "path", "required": true, "schema": uuid()})
+				parameters = append(parameters, obj{"name": name, "in": "path", "required": true, "schema": pathParamSchema(name)})
 			}
 		}
 		public := r.Action == ""
@@ -163,7 +190,7 @@ func Document() map[string]any {
 		description := description(r)
 		response, status := responseSchema(r)
 		responses := obj{status: obj{"description": "Successful command or resource response", "content": obj{"application/json": obj{"schema": response}}}}
-		for _, code := range []string{"400", "401", "403", "404", "409", "428", "500"} {
+		for _, code := range []string{"400", "401", "403", "404", "409", "428", "500", "503"} {
 			responses[code] = obj{"description": errorDescription(code), "content": obj{"application/json": obj{"schema": ref("Error")}}}
 		}
 		operation := obj{"operationId": strings.ToLower(r.Method) + strings.NewReplacer("/", "_", ":", "").Replace(r.Path), "summary": summary(r), "description": description, "security": security, "responses": responses}
@@ -196,6 +223,16 @@ func Document() map[string]any {
 	return obj{"openapi": "3.0.3", "info": obj{"title": "Ora Cloud phase one", "version": "1.0.0", "description": "Authoritative PostgreSQL core. Simulation is separate; no production Controller/Node/Kubernetes implementation is implied."}, "servers": []any{obj{"url": "http://localhost:8080"}}, "paths": paths, "components": obj{"schemas": s, "securitySchemes": obj{"serviceCredential": obj{"type": "http", "scheme": "bearer", "bearerFormat": "EdDSA JWT", "description": "Pinned issuer/kid/kind=service/role, aud=ora-cloud, exp and iat required, <=5 minute lifetime. Public API requires gateway; internal control requires controller; nodes require scoped node role."}, "userCredential": obj{"type": "apiKey", "in": "header", "name": "X-Ora-User-Token", "description": "Separately signed EdDSA JWT: kind=user, source+sub, caller must equal authenticated service sub, aud=ora-cloud. User and membership status checked in PostgreSQL."}}}}
 }
 
+// pathParamSchema types a path parameter. `formRef` is deliberately NOT a UUID: it is an opaque
+// provider-scoped token that Issues never parses (§38.17), constrained only by the grammar that keeps
+// it safe in a path segment.
+func pathParamSchema(name string) obj {
+	if name == "formRef" {
+		return obj{"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9._:@-]+$"}
+	}
+	return uuid()
+}
+
 func isList(r router.Route) bool {
 	return r.Method == "GET" && (strings.HasSuffix(r.Path, "/tenants") || strings.HasSuffix(r.Path, "/members") || strings.HasSuffix(r.Path, "/projects") || strings.HasSuffix(r.Path, "/workspaces") || strings.HasSuffix(r.Path, "/resource-status") || strings.HasSuffix(r.Path, "/issue-statuses") || strings.HasSuffix(r.Path, "/labels") || strings.HasSuffix(r.Path, "/issue-views") || strings.HasSuffix(r.Path, "/comments") || strings.HasSuffix(r.Path, "/subscribers"))
 }
@@ -224,6 +261,19 @@ func responseSchema(r router.Route) (schema obj, status string) {
 		}
 	}
 	switch {
+	case strings.HasSuffix(r.Path, "/collaboration/targets"):
+		return object(obj{"items": array(ref("CollaborationTarget")), "nextCursor": str()}, "items", "nextCursor"), "200"
+	case strings.Contains(r.Path, "/collaboration/forms/"):
+		return ref("FormDescriptor"), "200"
+	case strings.HasSuffix(r.Path, "/timeline"):
+		return object(obj{"items": array(ref("TimelineEntry")), "nextCursor": str()}, "items", "nextCursor"), "200"
+	case strings.Contains(r.Path, "/collaboration/assist"):
+		return ref("AssistSuggestion"), "200"
+	case strings.Contains(r.Path, "/interactions"):
+		if r.Method == "POST" {
+			return object(obj{"resource": ref("IssueRun")}, "resource"), "200"
+		}
+		return object(obj{"items": array(ref("IssueInteraction")), "nextCursor": str()}, "items", "nextCursor"), "200"
 	case strings.Contains(r.Path, "/comments"):
 		if r.Method == "GET" {
 			return object(obj{"items": array(ref("Comment")), "nextCursor": str()}, "items", "nextCursor"), "200"
@@ -356,8 +406,11 @@ func optionalField(name string, r router.Route) bool {
 		}
 	}
 	switch name {
-	case "description", "category", "color", "icon", "filter", "position", "parentId", "input":
+	case "description", "category", "color", "icon", "filter", "position", "parentId", "input", "targets", "contextRefs":
 		return true
+	case "values":
+		// Confirm must state what it is confirming; assist may be asked with a still-empty form.
+		return strings.HasSuffix(r.Path, "/assist")
 	}
 	return name == "defaultBranch" || name == "credentialRefId" || name == "version" && r.Method == "PUT" || name == "epoch" && r.Action == "access" || name == "workspaceId" && r.Action == "plan" || name == "externalId" && r.Action == "effect_result"
 }
@@ -390,7 +443,7 @@ func inputSchema(name string, r router.Route) obj {
 	case "executorType":
 		return enumeration("agent", "team", "workflow")
 	case "refType":
-		return enumeration("parent_issue", "run", "timeline_message", "pull_request", "project", "workspace", "acceptance_criteria")
+		return contextRefTypeEnum()
 	case "connectionState":
 		return enumeration("connected", "disconnected")
 	case "state":
@@ -409,12 +462,14 @@ func inputSchema(name string, r router.Route) obj {
 		return uuid()
 	case "category":
 		return enumeration("unstarted", "started", "done", "closed")
-	case "labelId", "userId", "assigneeId", "executorId", "refId", "parentId", "projectRef":
+	case "labelId", "userId", "assigneeId", "executorId", "refId", "parentId", "projectRef", "targetId":
 		return uuid()
 	case "ids":
 		return array(uuid())
-	case "filter", "properties", "input":
+	case "filter", "properties", "input", "values":
 		return obj{"type": "object", "additionalProperties": true}
+	case "contextRefs":
+		return array(ref("ContextRefRef"))
 	case "position":
 		return number()
 	case "workspaceId":
@@ -422,6 +477,8 @@ func inputSchema(name string, r router.Route) obj {
 			return str()
 		}
 		return uuid()
+	case "targets":
+		return array(object(obj{"type": enumeration("user", "agent", "team", "workflow"), "id": uuid(), "task": str()}, "type", "id"))
 	}
 	return str()
 }
@@ -496,6 +553,8 @@ func errorDescription(code string) string {
 		return "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
 	case "428":
 		return "Version precondition required"
+	case "503":
+		return "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
 	default:
 		return "Internal error; no SQL or secret details are exposed"
 	}

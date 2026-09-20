@@ -127,6 +127,127 @@ export interface Tenant {
   role: string
 }
 
+/**
+ * Collaboration target modes, the frozen §4 wire contract. The mode is derived
+ * server-side from the target type: user -> mention, agent/team -> task, workflow -> form.
+ */
+export type InteractionMode = 'mention' | 'task' | 'form'
+
+/** Descriptor attached to every collaboration target; drives the picker UI. */
+export interface InteractionDescriptor {
+  mode: InteractionMode
+  requiresTask: boolean
+  /** Form Mode only: opaque token used to load the FormDescriptor. Never parsed by the frontend. */
+  formRef?: string | null
+}
+
+/** Comment/Collaboration target kinds recognized by the interaction spine. */
+export type CollaborationTargetType = 'user' | 'agent' | 'team' | 'workflow'
+
+/** Read-only projection from `GET /collaboration/targets` (humans + directory fixtures). */
+export interface CollaborationTargetSummary {
+  type: CollaborationTargetType
+  id: string
+  displayName: string
+  description: string
+  interactionDescriptor: InteractionDescriptor
+}
+
+/** One persisted `@` interaction (the spine), linked to its comment and optional run. */
+export interface IssueInteraction {
+  id: string
+  tenantId: string
+  issueId: string
+  commentId: string
+  targetType: CollaborationTargetType
+  targetId: string
+  mode: InteractionMode
+  task: string
+  runId: string | null
+  /** Confirmed form values (Form Mode). Empty until the interaction is confirmed. */
+  input: Record<string, unknown>
+  createdAt: string
+}
+
+/**
+ * Field types the Issues frontend can render. The set is closed: an unknown type is a descriptor bug
+ * and is surfaced as an error state, never guessed at (§38.4).
+ */
+export type FormFieldType = 'text' | 'textarea' | 'number' | 'boolean' | 'select' | 'multi_select'
+
+/** One allowed value for a select / multi_select field. */
+export interface FormOption {
+  value: string
+  label: string
+}
+
+/** One rendered control, declared entirely by the provider. */
+export interface FormField {
+  key: string
+  label: string
+  type: FormFieldType
+  required: boolean
+  description?: string | null
+  placeholder?: string | null
+  defaultValue?: unknown
+  options?: FormOption[] | null
+}
+
+/**
+ * The Issues-facing rendering descriptor for a Workflow interaction. It is NOT the Workflow schema —
+ * the frontend renders exactly what this declares and never branches on a workflow id (§38.2, §38.27).
+ */
+export interface FormDescriptor {
+  formRef: string
+  title?: string | null
+  description?: string | null
+  fields: FormField[]
+}
+
+/** A form-value map keyed by field key. */
+export type FormValues = Record<string, unknown>
+
+/** A suggested context ref. Applying one only affects the confirm payload, never persistent refs. */
+export interface ContextRefRef {
+  refType: ContextRef['refType']
+  refId: string
+}
+
+/** AI Assist output: a field-level patch plus suggested refs. Suggest only — never applied server-side. */
+export interface AssistSuggestion {
+  suggestedValues: FormValues
+  suggestedContextRefs: ContextRefRef[]
+  explanations?: Record<string, string> | null
+}
+
+export type TimelineEntryKind = 'comment' | 'activity'
+
+/**
+ * A merged Timeline entry (comment + activity by shared per-issue seq). Every entry
+ * carries the author ActorRef; only comments have a body/parent, only activities have
+ * an action/details. Nullable either/or fields satisfy the closed OpenAPI contract.
+ */
+export interface TimelineEntry {
+  kind: TimelineEntryKind
+  id: string
+  seq: number
+  createdAt: string
+  authorType: 'user' | 'agent' | 'team' | 'system'
+  authorId: string | null
+  authorUserId: string | null
+  body: string | null
+  parentId: string | null
+  action: string | null
+  details: Record<string, unknown> | null
+}
+
+/** A `@` target attached to a comment being composed. Task mode targets carry a task. */
+export interface CommentTargetInput {
+  type: CollaborationTargetType
+  id: string
+  task?: string
+}
+
 /** Paginated list envelope the public API returns for `items` endpoints. */
 export interface Page<T> {
   items: T[]

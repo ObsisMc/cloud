@@ -34,10 +34,12 @@ docs/
 | Topic | Where | Notes |
 | --- | --- | --- |
 | **Project status / roadmap** | [progress.md](development/onboarding/progress.md) | done / in-progress / planned / deferred / blocked |
-| **Issue architecture** | [agent/architecture.md](development/agent/architecture.md) + [12-collaboration-architecture.md](migrations/multica-issue-board/12-collaboration-architecture.md) | the latter is the frozen Wave-3 design (rev. 2) |
+| **Issue architecture** | [agent/architecture.md](development/agent/architecture.md) + [12-collaboration-architecture.md](migrations/multica-issue-board/12-collaboration-architecture.md) | the latter is the frozen Wave-3 design (rev. 2, plus §36/§37 revisions) |
 | **API** | [agent/api-reference.md](development/agent/api-reference.md) | live endpoint/field reference; `api/openapi.json` is the machine truth |
 | **Database** | [agent/database.md](development/agent/database.md) | live table + migration inventory |
-| **Collaboration / integration contract** | [12-collaboration-architecture.md](migrations/multica-issue-board/12-collaboration-architecture.md) §6.2 | consuming-side seams (ports); all planned |
+| **Collaboration interaction model** | [12-collaboration-architecture.md §37](migrations/multica-issue-board/12-collaboration-architecture.md#37-wave-3b-0--collaboration-interaction-model-frozen) | **authoritative product semantics** — `@`, the four target modes, cardinality, context, timeline, fixtures. Frozen by Wave 3B-0 |
+| **Collaboration / integration ports** | [12-collaboration-architecture.md §6.4](migrations/multica-issue-board/12-collaboration-architecture.md#64-canonical-port-inventory-unified-by-wave-3b-0) | the **single** canonical port inventory (15 ports; `FormDescriptorProvider` added by 3B-2). Other docs must point here, not repeat a list |
+| **Workflow interaction (Issues-facing)** | [12-collaboration-architecture.md §38](migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen) | the **contract** (`FormDescriptor`, single Confirm boundary, AI Assist authority, draft decision, API surface, `0009`) + **§38.37** implementation record |
 | **How to add code** | [agent/adding-features.md](development/agent/adding-features.md) | endpoint / sub-resource how-to + verify |
 
 ## Repo layout (one glance)
@@ -59,12 +61,33 @@ docs/
 - ✅ **Issue Board** — wave 1 (core Kanban), wave 2 (status catalog, comments, labels, subscribers,
   numbers, properties, search, batch, saved views, groups) and **Wave 3A** (collaboration
   foundation: polymorphic assignee, comment author actors, IssueRun, timeline projection, context
-  refs). Migrations 0005–0007; the formal React frontend in `frontend/` is migrated and speaks to
+  refs). Migrations 0005–0009; the formal React frontend in `frontend/` is migrated and speaks to
   the real API.
-- 🧭 Planned — **Wave 3B** (Collaboration Integration Shell: ports → in-memory dev fixtures) and
-  **Wave 3C** (Issue Detail & Collaboration UI). Real Agent/Team/Workflow modules are **blocked on
-  external design**.
+- ✅ **Wave 3B-0** — Collaboration Architecture Alignment (docs only): the interaction model is frozen
+  in [§37](migrations/multica-issue-board/12-collaboration-architecture.md#37-wave-3b-0--collaboration-interaction-model-frozen)
+  and the 14 integration ports are unified in
+  [§6.4](migrations/multica-issue-board/12-collaboration-architecture.md#64-canonical-port-inventory-unified-by-wave-3b-0).
+- ✅ **Wave 3B-1** — Collaboration Interaction Foundation (migration `0008`): the first real end-to-end
+  `@` collaboration chain — `GET /collaboration/targets` → `@` picker → Human Mention / Agent & Team
+  Task → deterministic context → mock execution → IssueRun lifecycle / Activity / reply Comment →
+  `GET /issues/{iid}/timeline` — with no real Agent/Team/Workflow/Runtime modules.
+- ✅ **Wave 3B-2 — Workflow Interaction Shell** (migration `0009`): `@Workflow` → `FormDescriptor` →
+  dynamic form → optional AI Assist → **Review → Confirm** → `IssueRun` → mock execution → Timeline.
+  New ports `FormDescriptorProvider` / `InputAssistProvider`; workflow output lands as a `system`
+  activity. Real Workflow / AI providers remain **blocked on external design**
+  ([§38.37](migrations/multica-issue-board/12-collaboration-architecture.md#3837-implementation-record-2026-09-20--implemented--verified)).
+- 🧭 Planned — **Wave 3C** (Issue Detail & Collaboration UI). Real Agent/Team/Workflow modules are
+  **blocked on external design**.
 - ⏸️ Deferred: attachments, issue↔project binding, PR links, realtime, bots/squads, Autopilot.
+
+## ⚠️ Repository governance follow-up (unresolved)
+
+`AGENTS.md` states that `specs/` is an independent Git repository reachable via `git -C specs`, and the
+ADR-first rule requires an approved ADR before coding. **In the current working copy that does not
+hold**: `cloud/specs` does not exist, `mor/specs` has no `.git`, and `mor/.gitignore` ignores `/specs/`
+— so the ADR deliverable has **no version-controlled home**. Recorded by Wave 3B-0; **not** fixed
+(no `git init`, no `.gitignore` change, no restructuring). It needs an owner decision before the next
+ADR is written.
 
 ## Golden rules (both audiences)
 

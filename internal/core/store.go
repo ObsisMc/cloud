@@ -70,7 +70,17 @@ func require(ok bool, status int, code string) {
 type databaseFailure struct{ err error }
 
 // Store is injected; there is no global database handle.
-type Store struct{ Pool *sql.DB }
+type Store struct {
+	Pool *sql.DB
+
+	// Collaboration ports (consuming-side seams; see collaboration.go). Each is nil by default
+	// ("Unavailable"); dev/demo/integration wire the in-memory fixtures, production real adapters.
+	Directory  CollaborationDirectory
+	Context    ContextBuilder
+	Dispatcher ExecutionDispatcher
+	Forms      FormDescriptorProvider
+	Assist     InputAssistProvider
+}
 
 // NewStore obtains the injected SQL pool without creating or migrating schema.
 func NewStore(db *gorm.DB) (*Store, error) {
@@ -87,12 +97,31 @@ func NewStore(db *gorm.DB) (*Store, error) {
 type transaction struct {
 	tx  *sql.Tx
 	ctx context.Context
+	// collaboration ports shadowed from the Store so transaction-scoped helpers can use them.
+	directory      CollaborationDirectory
+	contextBuilder ContextBuilder
+	forms          FormDescriptorProvider
+	assist         InputAssistProvider
 }
 
 func (t *transaction) exec(q string, args ...any) {
 	if _, e := t.tx.ExecContext(t.ctx, q, args...); e != nil {
 		panic(databaseFailure{e})
 	}
+}
+
+// execRows runs a statement and returns the number of rows affected, for compare-and-set guards that
+// must distinguish "claimed it" from "someone else already did".
+func (t *transaction) execRows(q string, args ...any) int64 {
+	res, e := t.tx.ExecContext(t.ctx, q, args...)
+	if e != nil {
+		panic(databaseFailure{e})
+	}
+	n, e := res.RowsAffected()
+	if e != nil {
+		panic(databaseFailure{e})
+	}
+	return n
 }
 
 func (t *transaction) list(q string, args ...any) []Object {
@@ -173,7 +202,7 @@ func (s *Store) transact(ctx context.Context, fn func(*transaction) Object) (out
 			}
 		}
 	}()
-	t := &transaction{tx: tx, ctx: ctx}
+	t := &transaction{tx: tx, ctx: ctx, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist}
 	t.exec("SELECT pg_advisory_xact_lock(67420911)")
 	out = fn(t)
 	err = tx.Commit()

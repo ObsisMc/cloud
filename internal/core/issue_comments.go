@@ -14,7 +14,7 @@ func commentList(t *transaction, r *PublicRequest) Object {
 	return Object{"items": items, "nextCursor": ""}
 }
 
-func createComment(t *transaction, r *PublicRequest, uid string) Object {
+func createComment(t *transaction, r *PublicRequest, uid string, dispatches *[]dispatchTarget) Object {
 	i := issue(t, r.TenantID, r.IssueID)
 	body := validText(r.Body.S("body"), 20000)
 	// Thread parent must belong to the same issue and tenant (app-layer check; the self-FK cannot
@@ -28,6 +28,8 @@ func createComment(t *transaction, r *PublicRequest, uid string) Object {
 	id := newID()
 	seq := nextTimelineSeq(t, i.S("id"))
 	t.exec("INSERT INTO issue_comments(id,tenant_id,issue_id,author_type,author_id,author_user_id,parent_id,body,seq) VALUES($1,$2,$3,'user',$4,$4,$5,$6,$7)", id, r.TenantID, i.S("id"), uid, parent, body, seq)
+	// Collaboration targets (@): persist the typed interaction spine and enqueue Task Mode runs.
+	applyCommentTargets(t, i, r, uid, id, dispatches)
 	return comment(t, r.TenantID, id)
 }
 

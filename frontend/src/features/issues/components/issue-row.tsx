@@ -32,7 +32,11 @@ export function IssueRow({
           {label.name}
         </Badge>
       ))}
-      <ActorAvatar actor={{ name: assigneeName(issue, members), type: type ?? 'user' }} size="sm" className="shrink-0" />
+      <ActorAvatar
+        actor={{ name: assigneeName(issue, members), type: type ?? 'user' }}
+        size="sm"
+        className="shrink-0"
+      />
     </Link>
   )
 }

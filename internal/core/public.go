@@ -11,15 +11,16 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // PublicRequest is populated only after service and final-user credentials are verified.
 type PublicRequest struct {
-	Method, Path, TenantID, ProjectID, WorkspaceID, OperationID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, Key, After, Query, GroupBy string
-	Limit                                                                                                                                                               int
-	Body                                                                                                                                                                Object
-	Identity                                                                                                                                                            *Claims
+	Method, Path, TenantID, ProjectID, WorkspaceID, OperationID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, InteractionID, FormRef, Key, After, Query, GroupBy string
+	Limit                                                                                                                                                                                       int
+	Body                                                                                                                                                                                        Object
+	Identity                                                                                                                                                                                    *Claims
 }
 
 // Public executes one authorized public request in a short database transaction.
 func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, error) {
 	status := 200
+	var dispatches []dispatchTarget
 	result, e := s.transact(ctx, func(t *transaction) Object {
 		u := identity(t, r.Identity.Source, r.Identity.Subject, r.Identity.DisplayName)
 		uid := u.S("id")
@@ -108,10 +109,16 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				default:
 					reject(404, "not_found")
 				}
+			case strings.Contains(r.Path, "/collaboration/assist"):
+				require(r.Method == "POST", 404, "not_found")
+				out = assistWorkflow(t, r)
+			case strings.Contains(r.Path, "/interactions"):
+				require(r.Method == "POST" && strings.HasSuffix(r.Path, "/confirm"), 404, "not_found")
+				out = confirmInteraction(t, r, uid, &dispatches)
 			case strings.Contains(r.Path, "/comments"):
 				switch {
 				case r.Method == "POST":
-					out = Object{"resource": createComment(t, r, uid)}
+					out = Object{"resource": createComment(t, r, uid, &dispatches)}
 				case r.Method == "PUT":
 					out = updateComment(t, r)
 				case r.Method == "DELETE":
@@ -191,6 +198,14 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 		}
 		return out
 	})
+	if e == nil {
+		for _, d := range dispatches {
+			// Task Mode runs are dispatched after the comment transaction commits (the advisory
+			// lock must not span external/observer writes). Best-effort: a failure leaves the run
+			// queued, which is the correct "Unavailable" degradation.
+			_ = s.dispatchRun(ctx, d.tenantID, d.runID)
+		}
+	}
 	return result, status, e
 }
 
@@ -227,6 +242,14 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 		return runList(t, r)
 	case strings.Contains(r.Path, "/context-refs"):
 		return contextRefList(t, r)
+	case strings.HasSuffix(r.Path, "/timeline"):
+		return timelineList(t, r)
+	case strings.Contains(r.Path, "/interactions"):
+		return interactionList(t, r)
+	case strings.HasSuffix(r.Path, "/collaboration/targets"):
+		return collaborationTargetList(t, r)
+	case strings.Contains(r.Path, "/collaboration/forms/"):
+		return formDescriptorByRef(t, r)
 	case strings.HasSuffix(r.Path, "/comments"):
 		return commentList(t, r)
 	case strings.HasSuffix(r.Path, "/subscribers"):

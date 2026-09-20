@@ -90,6 +90,9 @@ Envelope `{code, params, requestId}`. Common codes by status:
    `:iid`); `c.Param("iid")` is empty there.
 6. **Migrations can't seed runtime entities** — tenants exist only at runtime; seed per-tenant rows
    lazily (`ON CONFLICT DO NOTHING`) on first read/write.
+7. **Don't couple Comment to Run.** A comment is not an interaction and not a run. Adding a
+   `run_id`/`interaction_id` column to `issue_comments` breaks the frozen cardinality
+   (1 comment → 0..N runs) — use `issue_runs.trigger_evidence_*` for provenance instead (§37.8).
 
 ## Auth model (summary — see ../../authentication.md)
 
@@ -114,8 +117,10 @@ Envelope `{code, params, requestId}`. Common codes by status:
 
 ## Collaboration — implemented vs. planned
 
-Issue **collaboration** is **partially implemented**. Wave 3A (the "issue-owned foundation") has
-landed; the cross-module port layer and projections have not.
+Issue **collaboration** is **partially implemented**. Wave 3A (the "issue-owned foundation"),
+Wave 3B-1 (the "collaboration interaction foundation") and Wave 3B-2 (the "workflow interaction
+shell") are **IMPLEMENTED + VERIFIED**; the full Issue Detail projection and real Agent/Team/Workflow
+execution have not.
 
 **Implemented (Wave 3A, migration `0007`):**
 
@@ -127,21 +132,84 @@ landed; the cross-module port layer and projections have not.
 - API/contract spine for `GET/POST /issues/{iid}/runs`, `GET /issues/{iid}/runs/{rid}`,
   `GET/POST/DELETE /issues/{iid}/context-refs`.
 
-**Planned, not yet in code:**
+**Implemented (Wave 3B-1, migration `0008`):**
 
-- **Integration ports** — the Go interfaces (`ActorResolver`, `ExecutionDispatcher`,
-  `WorkflowResolver`, `NotificationSink`, `RealtimePublisher`, `ProjectContextResolver`,
-  `PullRequestResolver`, `ExecutionLogProvider`) do **not** exist yet.
-- **Simulator adapters** (`FakeActorResolver`/`FakeWorkflowResolver`/`FakeProjectContextResolver`/
-  fake executor + no-op sinks) as **in-memory dev fixtures** — not started. The rev.-2
-  `0008_sim_collaboration_catalog.sql` relational `sim_agents`/`sim_teams` catalog is **superseded**:
-  no `sim_*` tables are created; dev fixtures implement the same ports in memory.
+- The interaction spine table `issue_interactions` (one row per selected `@` target) + the first real
+  end-to-end collaboration chain: directory → picker → mention/task → deterministic context → mock
+  execution → run lifecycle → activity → reply comment → timeline. No real Agent/Team/Workflow/Runtime.
+- The consuming-side **ports** now exist as Go interfaces — `CollaborationDirectory`, `ContextBuilder`,
+  `ExecutionDispatcher`, `ExecutionObserver` (canonical list still in
+  [§6.4](../../migrations/multica-issue-board/12-collaboration-architecture.md#64-canonical-port-inventory-unified-by-wave-3b-0);
+  do not trust a partial list elsewhere).
+- **Fixture/mock adapters** `FixtureCollaborationDirectory` (in-memory, stable UUIDs),
+  `DeterministicContextBuilder` (bounded recent comments ≤10, no AI), and `MockExecutionDispatcher`
+  (fixed outputs, behaviour all in the adapter) — wired only in development/demo config, **production
+  default off**. The rev.-2 `0008_sim_collaboration_catalog.sql` relational catalog is **superseded**:
+  no `sim_*` tables are created and no mock domain tables will be.
+- `GET /collaboration/targets?q=` (read-only target projection), `GET /issues/{iid}/timeline` (Comment
+  + Activity by shared `seq`), `GET /issues/{iid}/interactions`, and `targets[]` on comment create.
+  Run lifecycle `queued→dispatched→running→completed(/failed)`; provenance via
+  `trigger_evidence_kind`/`ref_id`; agent/team replies land as `author_type='agent'/'team'` comments.
+
+**Still schema-ready / not API-implemented:**
+
+- `issue_comments.author_type = system` is CHECK-allowed but nothing writes a `system` comment yet.
+- `ConversationTarget` remains **not implemented** (left open in §37.17).
+
+**Implemented (Wave 3B-2, migration `0009`):**
+
+- Workflow Form Mode end-to-end: `@Workflow` → `GET /collaboration/forms/{formRef}` → dynamic form →
+  optional AI Assist → **explicit Confirm** → `IssueRun` → mock execution → Timeline.
+- New ports `FormDescriptorProvider` + `InputAssistProvider` (both nil ⇒ 503); fixtures
+  `FixtureFormDescriptorProvider` + `MockInputAssistProvider` (deterministic, no LLM).
+- `issue_interactions.input jsonb` holds the confirmed form values; the run's effective snapshot stays
+  in `issue_runs.input`. `ObserveProgress` → `run.progress`; a workflow's human-readable output is a
+  `system` activity, never a `workflow`-authored comment.
+- `409 workflow_not_available` is **superseded** — a workflow target records a `mode='form'`,
+  `runId=NULL` interaction. Real Workflow / AI providers remain **blocked on external design**.
 - **Wave 3C Issue Detail** full projection + UI; Timeline pagination/truncation; execution logs; PR
   integration; Notification; Realtime/WebSocket; real runtime/LLM/agent/team/workflow execution — all
   **blocked on external design** (Agent/Team/Workflow internal design = UNKNOWN; Issues constrains only
   the consuming-side contract).
 
-Non-`user` actor refs (agent/team/system/workflow) are **opaque UUIDs** this wave — shape-validated,
-not resolved. `users` remains the only *resolved* human actor. The target contracts live in
+Non-`user` actor refs (`agent`/`team`/`system`) are **opaque UUIDs** this wave — shape-validated, not
+resolved. `users` remains the only *resolved* human actor. **`workflow` is not an actor at all**: it
+exists only on the collaboration-*target* side (`CollaborationTargetRef`), which is why workflow output
+lands as a `system`-authored activity rather than a workflow-authored comment (§8, §38.26). The target
+contracts live in
 [`docs/migrations/multica-issue-board/12-collaboration-architecture.md`](../../migrations/multica-issue-board/12-collaboration-architecture.md);
 Wave 3A's concrete divergences from that doc are in its §36.
+
+### Collaboration interaction model — quick reference (frozen in §37)
+
+Read the full section before implementing anything collaborative. The short version:
+
+| Rule | Statement |
+| --- | --- |
+| `@` means | **Collaboration Target Selection** — never execution. |
+| Mention text | Markdown `@x` / `mention://type/id` is **display only**, never a routing protocol. |
+| `user` target | **Mention Mode** — produces **no** `IssueRun`. `@Human → IssueRun` is forbidden. |
+| `agent` target | **Task Mode** — needs an explicit task. `Comment.body != Interaction.task`. |
+| `team` target | **Task Mode** — same Issues-facing contract as an agent; no leader/member/delegation assumptions. |
+| `workflow` target | **Configure / Form Mode** — dynamic form from a descriptor; never auto-executed. |
+| AI Assist | Suggest → Review → Apply → Confirm → Execute. Never auto-executes. |
+| Cardinality | `Comment` ≠ `Interaction` ≠ `IssueRun`; 1 comment → 0..N interactions → 0..N runs. **Never add `Comment.run_id`.** |
+| Provenance | Use the existing `trigger_evidence_kind`/`trigger_evidence_ref_id` pair. |
+| Timeline | `Comment` + `IssueActivity` in one per-issue `seq` namespace; **strictly separate** from Execution Logs. |
+| Fixtures | dev/demo config only, production default off, **no mock domain tables**. |
+
+### Workflow interaction — quick reference (frozen in §38, implemented by 3B-2)
+
+| Rule | Statement |
+| --- | --- |
+| Selecting a Workflow | Loads a `FormDescriptor` and renders a form — **never** executes. |
+| `FormDescriptor` | An **Issues-facing rendering descriptor** (`formRef/title/description/fields[]`). It is **not** the Workflow schema and binds to no schema technology. |
+| Execution boundary | Exactly one: an explicit **Confirm**. Editing, AI Assist, applying suggestions and draft saves create **no** run. |
+| AI Assist | `InputAssistProvider` returns a **field-level patch** + suggested refs. Suggest only — never creates a run, never writes a persistent `IssueContextRef`. |
+| Form values | A plain `{fieldKey: value}` object. **Never** Workflow-specific columns. |
+| Validation | The frontend is UX only; the Issues API **re-validates on Confirm** against the current descriptor. |
+| Interaction state | No status column: `run_id IS NULL` = unconfirmed, `run_id != NULL` = confirmed. |
+| Workflow output | An **`IssueActivity`** (`actor_type='system'` + run/executor in `details`). **`workflow` is not an `ActorRef`.** |
+| Execution ports | Reuse `ExecutionDispatcher` / `ExecutionObserver`; no `WorkflowDispatcher`, no second lifecycle. |
+| API surface | `/collaboration/forms/{formRef}`, `/issues/{iid}/interactions/{ixid}/assist`, `.../confirm`. **Never** `/workflows/*`. |
+| Extra error | `409 interaction_not_confirmable` — confirm/assist called on a non-`form` interaction. |

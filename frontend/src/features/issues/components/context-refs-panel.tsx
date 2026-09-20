@@ -9,11 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  useCreateContextRef,
-  useDeleteContextRef,
-  useContextRefs,
-} from '@/features/issues/api'
+import { useCreateContextRef, useDeleteContextRef, useContextRefs } from '@/features/issues/api'
 import type { ContextRef } from '@/features/issues/types'
 
 const REF_TYPE_OPTIONS: { value: ContextRef['refType']; label: string }[] = [
@@ -84,7 +80,9 @@ export function ContextRefsPanel({ slug, issueId }: { slug: string; issueId: str
       {refs && refs.length === 0 && <p className="text-xs text-muted-foreground">无上下文引用。</p>}
       {refs?.map((ref) => (
         <div key={ref.id} className="flex items-center gap-2 text-sm">
-          <span className="shrink-0 text-xs text-muted-foreground">{refTypeLabel(ref.refType)}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {refTypeLabel(ref.refType)}
+          </span>
           <span className="min-w-0 flex-1 truncate font-mono text-xs">{ref.refId}</span>
           <Button
             size="icon"

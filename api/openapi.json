@@ -161,6 +161,66 @@
         ],
         "type": "object"
       },
+      "AssistSuggestion": {
+        "additionalProperties": false,
+        "properties": {
+          "explanations": {
+            "additionalProperties": true,
+            "nullable": true,
+            "type": "object"
+          },
+          "suggestedContextRefs": {
+            "items": {
+              "$ref": "#/components/schemas/ContextRefRef"
+            },
+            "type": "array"
+          },
+          "suggestedValues": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "suggestedValues",
+          "suggestedContextRefs"
+        ],
+        "type": "object"
+      },
+      "CollaborationTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "interactionDescriptor": {
+            "$ref": "#/components/schemas/InteractionDescriptor"
+          },
+          "type": {
+            "enum": [
+              "user",
+              "agent",
+              "team",
+              "workflow"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "displayName",
+          "description",
+          "interactionDescriptor"
+        ],
+        "type": "object"
+      },
       "Comment": {
         "additionalProperties": false,
         "properties": {
@@ -279,6 +339,32 @@
           "refType",
           "refId",
           "createdAt"
+        ],
+        "type": "object"
+      },
+      "ContextRefRef": {
+        "additionalProperties": false,
+        "properties": {
+          "refId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "refType": {
+            "enum": [
+              "parent_issue",
+              "run",
+              "timeline_message",
+              "pull_request",
+              "project",
+              "workspace",
+              "acceptance_criteria"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "refType",
+          "refId"
         ],
         "type": "object"
       },
@@ -610,6 +696,100 @@
         ],
         "type": "object"
       },
+      "FormDescriptor": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FormField"
+            },
+            "type": "array"
+          },
+          "formRef": {
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "formRef",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "FormField": {
+        "additionalProperties": false,
+        "properties": {
+          "defaultValue": {
+            "description": "Type-consistent with `type`; an array of strings for multi_select.",
+            "nullable": true
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/FormOption"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "placeholder": {
+            "nullable": true,
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "text",
+              "textarea",
+              "number",
+              "boolean",
+              "select",
+              "multi_select"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type",
+          "required"
+        ],
+        "type": "object"
+      },
+      "FormOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "type": "object"
+      },
       "IdleRefusal": {
         "additionalProperties": false,
         "properties": {
@@ -626,6 +806,31 @@
         "required": [
           "accepted",
           "errorCode"
+        ],
+        "type": "object"
+      },
+      "InteractionDescriptor": {
+        "additionalProperties": false,
+        "properties": {
+          "formRef": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "mention",
+              "task",
+              "form"
+            ],
+            "type": "string"
+          },
+          "requiresTask": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "requiresTask"
         ],
         "type": "object"
       },
@@ -748,6 +953,78 @@
           "properties",
           "labels",
           "projectRef"
+        ],
+        "type": "object"
+      },
+      "IssueInteraction": {
+        "additionalProperties": false,
+        "properties": {
+          "commentId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "issueId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "mention",
+              "task",
+              "form"
+            ],
+            "type": "string"
+          },
+          "runId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "targetId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "targetType": {
+            "enum": [
+              "user",
+              "agent",
+              "team",
+              "workflow"
+            ],
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "tenantId": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "issueId",
+          "commentId",
+          "targetType",
+          "targetId",
+          "mode",
+          "task",
+          "runId",
+          "input",
+          "createdAt"
         ],
         "type": "object"
       },
@@ -1700,6 +1977,81 @@
         ],
         "type": "object"
       },
+      "TimelineEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "nullable": true,
+            "type": "string"
+          },
+          "authorId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "authorType": {
+            "enum": [
+              "user",
+              "agent",
+              "team",
+              "system"
+            ],
+            "type": "string"
+          },
+          "authorUserId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "body": {
+            "nullable": true,
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "nullable": true,
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "comment",
+              "activity"
+            ],
+            "type": "string"
+          },
+          "parentId": {
+            "format": "uuid",
+            "nullable": true,
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "seq",
+          "createdAt",
+          "authorType",
+          "authorId",
+          "authorUserId",
+          "body",
+          "parentId",
+          "action",
+          "details"
+        ],
+        "type": "object"
+      },
       "User": {
         "additionalProperties": false,
         "properties": {
@@ -2037,6 +2389,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -2169,6 +2531,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -2178,6 +2550,265 @@
           }
         ],
         "summary": "GET /api/v1/me/tenants"
+      }
+    },
+    "/api/v1/tenants/{tid}/collaboration/forms/{formRef}": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_collaboration_forms_formRef",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "formRef",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:@-]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormDescriptor"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/collaboration/forms/:formRef"
+      }
+    },
+    "/api/v1/tenants/{tid}/collaboration/targets": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_collaboration_targets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/CollaborationTarget"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/collaboration/targets"
       }
     },
     "/api/v1/tenants/{tid}/issue-groups": {
@@ -2303,6 +2934,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -2444,6 +3085,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -2609,6 +3260,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -2756,6 +3417,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -2915,6 +3586,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -3056,6 +3737,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -3203,6 +3894,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -3350,6 +4051,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -3491,6 +4202,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -3613,6 +4334,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -3799,6 +4530,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -3972,6 +4713,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -4119,6 +4870,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -4232,6 +4993,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -4410,6 +5181,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -4419,6 +5200,166 @@
           }
         ],
         "summary": "PUT /api/v1/tenants/:tid/issues/:iid"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/collaboration/assist": {
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issues_iid_collaboration_assist",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "targetId": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "values": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "targetId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistSuggestion"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/collaboration/assist"
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/comments": {
@@ -4560,6 +5501,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -4616,6 +5567,35 @@
                   "parentId": {
                     "format": "uuid",
                     "type": "string"
+                  },
+                  "targets": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "format": "uuid",
+                          "type": "string"
+                        },
+                        "task": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "enum": [
+                            "user",
+                            "agent",
+                            "team",
+                            "workflow"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "id"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
                   }
                 },
                 "required": [
@@ -4716,6 +5696,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -4872,6 +5862,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -5018,6 +6018,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -5149,6 +6159,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -5315,6 +6335,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -5463,6 +6493,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -5472,6 +6512,327 @@
           }
         ],
         "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/context-refs/:crid"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/interactions": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issues_iid_interactions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/IssueInteraction"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/interactions"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/interactions/{ixid}/confirm": {
+      "post": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "post_api_v1_tenants_tid_issues_iid_interactions_ixid_confirm",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ixid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scoped to tenant and user. Same key and canonical method/path/body returns the original response before version validation; changed request is 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "contextRefs": {
+                    "items": {
+                      "$ref": "#/components/schemas/ContextRefRef"
+                    },
+                    "type": "array"
+                  },
+                  "values": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "values"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/IssueRun"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/interactions/:ixid/confirm"
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/labels": {
@@ -5613,6 +6974,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -5766,6 +7137,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -5914,6 +7295,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -6071,6 +7462,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -6202,6 +7603,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -6368,6 +7779,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -6492,6 +7913,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -6647,6 +8078,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -6795,6 +8236,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -6948,6 +8399,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -6957,6 +8418,147 @@
           }
         ],
         "summary": "POST /api/v1/tenants/:tid/issues/:iid/subscribers"
+      }
+    },
+    "/api/v1/tenants/{tid}/issues/{iid}/timeline": {
+      "get": {
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "operationId": "get_api_v1_tenants_tid_issues_iid_timeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "iid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/TimelineEntry"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful command or resource response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid JSON/field/input, missing idempotency key, invalid pagination or evidence"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid, forged, expired, wrong-audience, untrusted, or caller-mismatched credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Disabled user, inactive/missing membership, wrong service role, or admin required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Resource absent or outside authorized tenant/owner scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Version precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": [],
+            "userCredential": []
+          }
+        ],
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/timeline"
       }
     },
     "/api/v1/tenants/{tid}/labels": {
@@ -7089,6 +8691,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -7235,6 +8847,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -7382,6 +9004,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -7522,6 +9154,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -7663,6 +9305,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -7814,6 +9466,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -7936,6 +9598,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -8099,6 +9771,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -8240,6 +9922,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -8402,6 +10094,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -8562,6 +10264,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -8675,6 +10387,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -8813,6 +10535,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -8963,6 +10695,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -9123,6 +10865,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -9264,6 +11016,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -9424,6 +11186,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -9537,6 +11309,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -9697,6 +11479,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -9857,6 +11649,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -10017,6 +11819,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -10190,6 +12002,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -10337,6 +12159,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -10445,6 +12277,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -10560,6 +12402,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -10675,6 +12527,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -10812,6 +12674,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -10928,6 +12800,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -11055,6 +12937,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -11181,6 +13073,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -11303,6 +13205,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -11435,6 +13347,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -11592,6 +13514,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -11752,6 +13684,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -11923,6 +13865,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [
@@ -12055,6 +14007,16 @@
               }
             },
             "description": "Internal error; no SQL or secret details are exposed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "External capability not wired in this deployment (a port is Unavailable), e.g. form_descriptor_unavailable or assist_unavailable"
           }
         },
         "security": [

@@ -27,10 +27,10 @@ function serveDetail(issue: Issue, allIssues: Issue[] = [issue]) {
       HttpResponse.json({ items: statuses, nextCursor: '' }),
     ),
     http.get('/api/v1/tenants/t1/members', () => HttpResponse.json({ items: [], nextCursor: '' })),
-    http.get('/api/v1/tenants/t1/issues/i1/comments', () =>
+    http.get('/api/v1/tenants/t1/collaboration/targets', () =>
       HttpResponse.json({ items: [], nextCursor: '' }),
     ),
-    http.get('/api/v1/tenants/t1/issues/i1/runs', () =>
+    http.get('/api/v1/tenants/t1/issues/i1/timeline', () =>
       HttpResponse.json({ items: [], nextCursor: '' }),
     ),
     http.get('/api/v1/tenants/t1/issues/i1/context-refs', () =>

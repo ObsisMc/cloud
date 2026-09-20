@@ -76,6 +76,26 @@ unresolved); `status` is an SQL-WHERE-guarded 7-state machine
 Wave 3A also extended `Comment` with `authorType`/`authorId`/`parentId`/`seq` (uniform author ActorRef,
 threading, shared per-issue timeline `seq`).
 
+**Still schema-ready / not API-implemented** (the DB accepts, the HTTP surface does not):
+
+| Capability | State |
+| --- | --- |
+| `issue_comments.author_type = system` | CHECK allows `system`, but **no** code path writes a `system` comment yet (agent/team replies now go through the internal run-reply path, §Interaction). |
+| `ConversationTarget` | **Not implemented** — out of scope this wave, left open in §37.17. |
+
+**Implemented by Wave 3B-1** (migration `0008`, semantics frozen in
+[12-collaboration-architecture.md §37](../../migrations/multica-issue-board/12-collaboration-architecture.md#37-wave-3b-0--collaboration-interaction-model-frozen)):
+
+- `Comment.authorType` is no longer hard-coded `user`: mock agent/team runs post a reply comment with
+  `author_type='agent'`/`'team'` through an **internal** path (no public impersonation — clients cannot
+  set `authorType`).
+- `issue_activities` is now readable: `GET /issues/{iid}/timeline` returns Comment + Activity merged in
+  one shared per-issue `seq` order.
+- `Comment.targets[]` is implemented on comment create (see the Interaction section below).
+- `GET /collaboration/targets` exposes the `@`-picker projection (*not* an Agent/Team/Workflow API).
+
+The 14 integration ports are inventoried in that doc's §6.4.
+
 | Method | Path | Body fields | Response |
 | --- | --- | --- | --- |
 | GET | `/issues/{iid}/runs` | — | `{items:[IssueRun]}` |
@@ -86,6 +106,54 @@ threading, shared per-issue timeline `seq`).
 | DELETE 🔑 | `/issues/{iid}/context-refs/{crid}` | — | ContextRef (hard delete) |
 
 There is **no** `DELETE /issues/{iid}/runs/{rid}` — terminal runs are history, not deletable.
+
+## Issue collaboration interactions (Wave 3B-1)
+
+The `@` collaboration spine. `POST /comments` now accepts an optional `targets[]` array of
+`{type, id, task?}`; each target becomes one persisted `Interaction` row and, for `agent`/`team`,
+drives a mock `IssueRun` via the ExecutionDispatcher port. `user` = **Mention Mode** (no run);
+`agent`/`team` = **Task Mode** (`task` required → 400 `task_required`); `workflow` = **Form Mode**
+(rejected with 409 `workflow_not_available` this wave). Clients **cannot** set `authorType`.
+
+| Method | Path | Body fields | Response |
+| --- | --- | --- | --- |
+| GET | `/collaboration/targets` | query `?q=` | `{items:[CollaborationTargetSummary]}` (`{type,id,displayName,description,interactionDescriptor}`) |
+| GET | `/issues/{iid}/timeline` | — | `{items:[TimelineEntry]}` (Comment + Activity merged by shared `seq`) |
+| GET | `/issues/{iid}/interactions` | — | `{items:[Interaction]}` (`{id,commentId,targetType,targetId,mode,task,runId,input,createdAt}`) |
+| POST 🔑 | `/issues/{iid}/comments` | `body`*, `parentId`?, `targets[]`? (`{type,id,task?}[]`) | `{resource: Comment}` (creates interactions + mock runs as a side effect) |
+
+Consumers today: `/collaboration/targets` feeds the frontend `@` picker; `/timeline` feeds the
+frontend Activity panel; `/interactions` has **no UI consumer yet** — its current callers are the
+integration tests (they assert the comment→interaction→run cardinality) plus debugging. It is kept
+because it is the read surface for the spine table; the frontend hook `useInteractions` exists but is
+unused. Widening it later must stay additive.
+
+### Workflow interaction (Wave 3B-2, migration `0009`)
+
+Form Mode. `POST /comments` with `targets:[{type:"workflow", id}]` now records a `mode='form'`,
+`runId=null` interaction and **creates no run**; only an explicit confirm does. `409
+workflow_not_available` (3B-1) is **SUPERSEDED**.
+
+| Method | Path | Body fields | Response |
+| --- | --- | --- | --- |
+| GET | `/collaboration/forms/{formRef}` | — | `FormDescriptor` (`{formRef,title?,description?,fields[]}`) |
+| POST 🔑 | `/issues/{iid}/collaboration/assist` | `targetId`*, `values`(object) | `{suggestedValues, suggestedContextRefs, explanations?}` — **stateless, suggest only, no side effects** |
+| POST 🔑 | `/issues/{iid}/interactions/{ixid}/confirm` | `values`(object)*, `contextRefs`(array of `{refType,refId}`) | `{resource: IssueRun}` (the initial run, `status=queued`; dispatch is post-commit) |
+
+- `formRef` is an **opaque** provider token (not a UUID) and appears in a path segment.
+- `values` is a plain `{fieldKey: value}` map, re-validated server-side against the **current**
+  descriptor: unknown key / wrong type / value outside `options` → 400 `invalid_field_value`; missing
+  required → 400 `required_field_missing`.
+- Confirm claims the interaction with a compare-and-set on `run_id IS NULL`: a second confirm (different
+  key) → 409 `interaction_already_confirmed`; the same key + same body replays the stored response.
+- Confirm on a non-`form` interaction → 409 `interaction_not_confirmable`.
+- **Assist is stateless and takes a `targetId`, not an interaction**: the form is a *draft* until the
+  user confirms it, so assist must work before any interaction exists and must write nothing. An
+  unknown/non-workflow target → 404 `target_not_found`.
+- Capability states: `503 form_descriptor_unavailable` / `503 assist_unavailable` (port not wired);
+  `404 form_descriptor_not_found` (unknown `formRef`); `500 invalid_form_descriptor` (provider bug).
+- The confirmed values land in `issue_interactions.input`; the effective execution snapshot in
+  `issue_runs.input`; a workflow run's message is a `system` **activity**, never a `workflow` comment.
 
 ## Projects / workspaces / operations
 

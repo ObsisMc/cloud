@@ -19,15 +19,24 @@
 > Source-truth rule: where a Multica detail below differs from its current source, the source wins and
 > the difference is recorded here with its rationale — never a silent design change.
 
-## 0. Current status (post-Wave 3A)
+## 0. Current status (post-Wave 3B-1)
 
-> Added after Wave 3A landed; kept here so readers reconcile the frozen design with what actually
-> happened. The sections below are the **frozen rev. 2 design** — see §36 for what diverged.
+> Added after Wave 3A landed; updated after Wave 3B-1. Kept here so readers reconcile the frozen design
+> with what actually happened. The sections below are the **frozen rev. 2 design** — see §36 for what
+> diverged.
 
 - **Wave 3A** (Step 2 — issue-owned foundation) is **IMPLEMENTED / REVIEWED** (migration `0007`).
-- **Wave 3B — Collaboration Integration Shell** (Steps 3–4: integration ports + in-memory dev fixtures)
-  is **PLANNED**.
-- **Wave 3C — Issue Detail & Collaboration UI** (Steps 5–9: projections + UI) is **PLANNED**.
+- **Wave 3B-0 — Collaboration Architecture Alignment** is **DONE (docs only)**: the interaction model is
+  frozen in **§37**, and the integration-port inventory is unified in **§6.4**. No code, no migration.
+- **Wave 3B-1 — Collaboration Interaction Foundation** is **IMPLEMENTED** (migration `0008`): the
+  consuming-side ports + in-memory fixtures + the first real end-to-end `@` Mention/Task/mock-execution/
+  Timeline chain — no real Agent/Team/Workflow/Runtime.
+- **Wave 3B-2 — Workflow Interaction Shell** (`FormDescriptor`, dynamic form, mock AI Assist) is
+  **IMPLEMENTED + VERIFIED** (migration `0009`) — see **§38** (contract) and **§38.37** (what landed).
+  `409 workflow_not_available` is **superseded**: a workflow target now records a `mode='form'`,
+  `run_id=NULL` interaction, and only an explicit Confirm creates the run.
+- **Wave 3C — Issue Detail & Collaboration UI** (Steps 5–9: projections + UI) is **PLANNED**; 3B-1
+  delivered the first frontend slice (`@` picker, Mention Mode, Task Mode) — §37.14.
 - **Real Agent/Team/Workflow integration is BLOCKED ON EXTERNAL DESIGN.** Issues does not define their
   internal design — Agent/Team/Workflow internal design = **UNKNOWN** — it only constrains the
   consuming-side contract (§6.2).
@@ -248,8 +257,51 @@ consuming boundary") during implementation. A future package layout is sketched 
   orchestration.
 - States:
   - `Unavailable` → capability_unavailable (resolve returns unavailable)
-  - `Simulator` → FakeActorResolver over a dev catalog (§9)
+  - `Simulator` → FakeActorResolver over in-memory dev fixtures (§9; the `sim_*` catalog is superseded)
   - `Real` → Agent/Team modules' resolver
+
+**CollaborationTargetResolver**
+
+- Issues needs (per target): is this a valid `CollaborationTargetRef` for this actor/tenant, and is it
+  invocable at all? Returns a per-target outcome (`queued`/`blocked`/…) rather than a boolean.
+- Issues must NOT know: how a target would be executed, what its internal model is, whether a team has
+  a leader.
+- This port was referenced by §9/§16 from rev. 2 onward but was missing from this catalogue; it is
+  listed here so the inventory is complete (§6.4).
+- States: `Unavailable` → every non-`user` target resolves `blocked`; `Simulator` → fixture directory
+  answers; `Real` → Agent/Team/Workflow modules' resolvers.
+
+**CollaborationDirectory** *(added by Wave 3B-0)*
+
+- Answers one question for the Issues UI: **which collaboration targets may I select right now?**
+- Returns a uniform `CollaborationTargetSummary[]`: `{type ∈ user|agent|team|workflow, id, displayName,
+  description?, interactionDescriptor}`.
+- It is a **consuming-side projection**, not a domain API: it never exposes Agent/Team/Workflow
+  internals and Issues never takes ownership of them (§37.11, §25).
+- States: `Unavailable` → the picker offers only `user` targets; `Simulator` → fixture directory;
+  `Real` → aggregates the real User/Agent/Team/Workflow modules' adapters.
+
+**InteractionDescriptor** *(added by Wave 3B-0)*
+
+- Answers: **once this target is selected, what interaction mode does the Issues UI enter, and what
+  input does it need?**
+- Minimal shape: `{mode ∈ mention|task|form, requiresTask, formRef?}` — deliberately *not* a capability
+  DSL (§37.6).
+- Sourced per target, carried on `CollaborationTargetSummary`; the Issues UI never hard-codes a mode
+  per target type beyond the defaults in §37.2.
+- States: `Unavailable` → defaults derived from `target.type`; `Simulator` → fixture descriptors;
+  `Real` → the owning module's descriptor.
+
+**ContextBuilder** *(added by Wave 3B-0)*
+
+- Builds the **invocation-time** execution context from `Issue + task + selected ContextRefs + target
+  capability` (§37.11).
+- Deterministic first implementation: issue title, description, recent comments, explicit context refs,
+  task. Later replacements (relevance selection, summarization, retrieval, token budgeting) are
+  internal to the port and do not change Issues.
+- Issues does **not** implement a real AI context engine.
+- States: `Unavailable` → raw refs are passed through unresolved; `Simulator` → deterministic builder;
+  `Real` → future context/AI module.
 
 **ExecutionDispatcher**
 
@@ -264,6 +316,18 @@ consuming boundary") during implementation. A future package layout is sketched 
   - `Simulator` → deterministic fake execution (§22)
   - `Real` → actual runtime implementation
 
+**ExecutionObserver** *(added by Wave 3B-0; the inbound half of the execution seam)*
+
+- Owns the **inbound** direction that `ExecutionDispatcher` deliberately does not: mapping an external
+  execution's high-level lifecycle back onto Issues —
+  `started / progress / waiting / message / completed / failed / cancelled` → `issue_runs` state +
+  Timeline activities (+ a reply `Comment` for `message`, §37.4).
+- Split from `ExecutionDispatcher` so the outbound "hand this request over" contract stays one-way and
+  testable, and so a future real runtime can implement observation without owning dispatch.
+- Issues core never polls runtime internals; observation enters only through this port (§12).
+- States: `Unavailable` → runs stay `queued` (the Wave 3A behaviour); `Simulator` → mock adapter drives
+  a deterministic lifecycle; `Real` → execution module callbacks/events.
+
 **WorkflowResolver**
 
 - Issues needs: `WorkflowSummary{id,name,description,inputSchema}`, `validateInputs`,
@@ -271,6 +335,20 @@ consuming boundary") during implementation. A future package layout is sketched 
 - Issues does NOT own workflow definitions or their execution logic.
 - States: `Unavailable` → capability_unavailable; `Simulator` → FakeWorkflowResolver with canned
   schemas; `Real` → Workflow module.
+- **Not used by Issues in Wave 3B-2.** The Issues-facing descriptor projection is
+  `FormDescriptorProvider` (§38.17) and the execution handoff is `ExecutionDispatcher` (§38.24);
+  `WorkflowResolver` remains the future *domain* port for schema/validate/invoke.
+
+**InputAssistProvider** *(added by Wave 3B-0)*
+
+- Serves **AI Assist** on a Workflow form: given `current form values + issue context + selected
+  context refs + workflow target/descriptor`, return `suggested values` and `suggested context refs`.
+- It may **only suggest**. Applying suggestions is a user action; execution stays a separate, explicit
+  confirm (§37.7).
+- Which module eventually owns it (Workflow, an AI service, Runtime, or another) is deliberately left
+  open — this is a future integration concern, not an Issues concern (§37.17 Q6).
+- States: `Unavailable` → no assist affordance in the form; `Simulator` → deterministic mock
+  suggestions; `Real` → whatever module is chosen later.
 
 **NotificationSink**
 
@@ -323,6 +401,43 @@ Real         →  actual module implements the same port; Issues core, IssueRun,
 Adapters are swapped at the wiring boundary (router/simulator construction), never in issue-domain
 code.
 
+### 6.4 Canonical port inventory (unified by Wave 3B-0)
+
+This is the **single authoritative list** of integration ports. Other docs (`docs/development/agent/
+architecture.md`, `docs/development/onboarding/progress.md`) must reference this table instead of
+repeating their own list — the three lists had drifted (some omitted `PullRequestResolver`, others
+added `ExecutionObserver`/`CapabilityDescriptor`, and `CollaborationTargetResolver` was missing from
+this document's own catalogues).
+
+| Port | Direction | Responsibility (one line) | Added by |
+| --- | --- | --- | --- |
+| `ActorResolver` | out | Resolve an author/assignee/activity `ActorRef` → `ActorSummary{displayName, active, executable?}`. | rev. 2 |
+| `CollaborationTargetResolver` | out | Validate a `CollaborationTargetRef` for this tenant/actor → per-target outcome, never a raw boolean. | rev. 2 (§9/§16); catalogued in 3B-0 |
+| `CollaborationDirectory` | out | List the targets the Issues UI may currently select → `CollaborationTargetSummary[]`. | 3B-0 |
+| `FormDescriptorProvider` | out | Resolve the Issues-facing `FormDescriptor` for a `formRef` (rendering projection only — never a Workflow schema). **Implemented (3B-2).** | 3B-2 (§38.2/§38.17) |
+| `InteractionDescriptor` | out | Tell the UI which mode a selected target enters (`mention`/`task`/`form`) and what input it needs. | 3B-0 |
+| `ContextBuilder` | out | Build the invocation-time execution context from issue + task + selected context refs. | 3B-0 |
+| `ExecutionDispatcher` | out | Hand a prepared execution request to an external executor → `{accepted, externalExecutionId}`. | rev. 2 |
+| `ExecutionObserver` | in | Map external execution lifecycle/result/reply back onto run state + Timeline. | 3B-0 |
+| `WorkflowResolver` | out | `WorkflowSummary` + `validateInputs` + `invoke`. **Future domain port — not used by Issues in 3B-2** (§38.24). | rev. 2 |
+| `InputAssistProvider` | out | Suggest (never apply) form values / context refs for AI Assist. **Implemented (3B-2); a real provider stays BLOCKED ON EXTERNAL DESIGN.** | 3B-0 |
+| `NotificationSink` | out | Accept `{recipientRef, eventType, resourceRef, payload}`; delivery is not Issues'. | rev. 2 |
+| `RealtimePublisher` | out | Emit stable domain events; transport is not Issues'. | rev. 2 |
+| `ProjectContextResolver` | out | Resolve `project`/`workspace`/`repository`/`branch`/execution-context summaries. | rev. 2 |
+| `PullRequestResolver` | out | PR summary/URL/state/provider ref only. | rev. 2 |
+| `ExecutionLogProvider` | out | `{executionId → logAvailability, logLink/ref, summary}`; raw logs are not Issues'. | rev. 2 |
+
+**`CapabilityDescriptor`** appears only in `progress.md` (line 69) and **is not a port in this
+design** — Workflow capability is expressed by `WorkflowSummary` + `InteractionDescriptor`. Treat the
+`progress.md` mention as a stale synonym and remove it there.
+
+Every port carries the same `Unavailable / Simulator / Real` triple (§6.3). **Status:** Wave 3B-1
+landed the Go interfaces for `CollaborationDirectory`, `ContextBuilder`, `ExecutionDispatcher` and
+`ExecutionObserver`; Wave 3B-2 added `FormDescriptorProvider` and `InputAssistProvider`
+(`internal/core/collaboration.go`, §38.37). The remaining ports (`ActorResolver`,
+`CollaborationTargetResolver`, `WorkflowResolver`, `NotificationSink`, `RealtimePublisher`,
+`ProjectContextResolver`, `PullRequestResolver`, `ExecutionLogProvider`) are still concepts, not code.
+
 ## 7. External capability states
 
 See §6.3 for the model and per-port tables. The rule is restated here as an architectural invariant:
@@ -355,7 +470,7 @@ ActorRef                    CollaborationTargetRef
 
 Storage: both are `type` + `id` pairs, validated through the relevant resolver. No FK (spans modules).
 
-## 9. Agent / Team references — ownership boundary & temporary dev catalog
+## 9. Agent / Team references — ownership boundary (dev fixtures supersede the sim catalog)
 
 **Rev. 1 planned `agents` / `teams` / `team_members` as issue-owned tables. Rev. 2 does not.** The
 issue schema stores **references only**:
@@ -385,7 +500,7 @@ in issue core.
 
 | Concern | Statement |
 | --- | --- |
-| Temporary ownership | `sim_*` catalog belongs to the simulator/dev adapter, not Issues. |
+| Fixture ownership | The dev fixture set (in-memory `CollaborationDirectory`/`ExecutionDispatcher`/`ContextBuilder` adapters, §37.13) belongs to the simulator/dev adapter, not Issues. **No `sim_*` tables exist or will exist.** |
 | Migration strategy | ~~Landed in its own migration `0008`~~ — **SUPERSEDED**: no `sim_*` migration; in-memory fixtures implement the same ports instead. |
 | Replacement boundary | Real Agent/Team modules land; they own their tables; fake resolvers are swapped at wiring; no `sim_*` tables to drop. |
 | What remains stable | Issue columns (`assignee_type/assignee_id`), `issue_runs.executor_ref`, Timeline, UI contract. |
@@ -642,6 +757,14 @@ Additional instructions [ ... ]
 - Issue core does not own workflow definitions/execution; it calls `WorkflowResolver.invoke` and
   projects the result back onto the run + Timeline.
 
+> **Reconciled by Wave 3B-2 (§38).** The `WorkflowSummary.inputSchema` above is the *provider-side*
+> schema; Issues never consumes it — the adapter projects it into an Issues-facing `FormDescriptor`
+> (§38.2/§38.5), served by the new **`FormDescriptorProvider`** port (§6.4). And the handoff to
+> execution is **not** a separate `WorkflowResolver.invoke` call in the first version: it goes through
+> the unified `ExecutionDispatcher` with `executor_type='workflow'` (§38.24). `WorkflowResolver`
+> therefore stays a **future domain port**; Issues' 3B-2 contract needs only
+> `FormDescriptorProvider` + `ExecutionDispatcher` + `ExecutionObserver`.
+
 ## 19. Workflow Input Assistance
 
 Three layers (this wave: **contract only**, no intelligent assistance):
@@ -770,6 +893,18 @@ insert resource branches before `Contains(path,"/issues")`, and add any non-stri
 modules. Issue Detail's agent/team/workflow data is rendered from `executor_ref`/`workflow_invocation`
 resolved via ports, not from issue-owned CRUD.
 
+> **Clarified by Wave 3B-0 — these are two different things and must not be conflated:**
+>
+> | | Verdict |
+> | --- | --- |
+> | Agent / Team / Workflow **domain APIs** (`GET /agents`, `POST /teams`, workflow CRUD…) | **Never** in the issue API. Not planned, not deferred — simply not ours. |
+> | Issues-facing **unified collaboration projection** (`CollaborationDirectory` → "which targets may I `@`?", served to the `@` picker) | **Planned**, as a read-only projection over ports. |
+>
+> The projection is *not* an Agent API, a Team API, or a Workflow API: it exposes only
+> `CollaborationTargetSummary{type, id, displayName, description?, interactionDescriptor}` (§6.2) and
+> carries no domain fields, no CRUD, and no mutation. Today a fixture adapter can serve it; later it
+> aggregates the real modules' adapters. See §37.11.
+
 OpenAPI: add `IssueRun`, `IssueActivity`, `TimelineEntry`, `ContextRef`, `CollaborationTarget`,
 `TriggerOutcome`, `WorkflowInvocationRef` schemas; extend `Issue` (`assigneeType`/`assigneeId`/
 `projectRef`), `Comment` (`parentId`, `targets`, author-actor fields, `seq`). Regenerate
@@ -779,7 +914,8 @@ OpenAPI: add `IssueRun`, `IssueActivity`, `TimelineEntry`, `ContextRef`, `Collab
 
 - Existing issue/comment endpoints keep their shapes; new fields/routes are additive.
 - `assigneeUserId` keeps working; `author_user_id` keeps working for human authors.
-- No applied migration edited; `0007`/`0008` purely additive; no existing route removed/re-tokenized.
+- No applied migration edited; `0007` purely additive (the `0008` sim catalog is superseded — §0); no
+  existing route removed/re-tokenized.
 - `operations`/`execution_tickets`/simulator unchanged.
 - Contract test keeps `additionalProperties:false`; only new/extended resources add fields.
 
@@ -792,7 +928,9 @@ OpenAPI: add `IssueRun`, `IssueActivity`, `TimelineEntry`, `ContextRef`, `Collab
   (`role=node/controller`).
 - **Resolver validation is authoritative**: every `assignee_ref`/`executor_ref`/`target` is resolved
   through the port and fail-closed (typed 404/`blocked`), never trusted raw.
-- Catalog mutation (`sim_*`) is admin-only (mirrors Multica's owner/admin guard).
+- **No target-catalogue mutation route exists.** The `sim_*` catalog is superseded (§0), so there is no
+  catalog to guard; dev fixtures are wired, not mutated over HTTP. When real Agent/Team modules land
+  they own their own authorization, and the Issues-facing `CollaborationDirectory` stays read-only.
 
 ## 28. Idempotency / version / soft-delete rules
 
@@ -804,7 +942,7 @@ OpenAPI: add `IssueRun`, `IssueActivity`, `TimelineEntry`, `ContextRef`, `Collab
 - **Soft delete:**
   - `comments` soft-delete with tombstone for replies (thread completeness).
   - `issue_activities` append-only (no delete).
-  - `agents`/`teams` (future modules) soft-delete; `sim_*` catalog rows soft-delete.
+  - `agents`/`teams` (future modules) soft-delete; **no `sim_*` catalog rows exist** (§0).
   - **`issue_runs.deleted_at` — terminal status ≠ deleted (final).** `completed`/`failed`/`cancelled`
     are **normal history records**. `deleted_at` exists only for explicit **hide/archive/admin
     cleanup** and there is **no delete-Run API this wave**. The rev. 1 phrase "terminal status =
@@ -821,7 +959,8 @@ OpenAPI: add `IssueRun`, `IssueActivity`, `TimelineEntry`, `ContextRef`, `Collab
   boundary and the Unavailable/Simulator/Real switching.
 - **Contract:** regenerated `api/openapi.json` byte-verified.
 - **Regression:** `go test ./internal/... ./cmd/...` + full integration suite green; migration list
-  in `integration/cloud_test.go` bumped to include `0007` (+`0008` when the sim catalog lands).
+  in `integration/cloud_test.go` bumped to include `0007` (**no `0008`** — the sim catalog is
+  superseded, §0).
 
 ## 30. Demo plan
 
@@ -882,6 +1021,10 @@ Extend `cmd/demo-issue-board-web/` to the **Issue Detail surface** (§13):
 4. **Timeline truncation UX.** With two capped lists, where the truncated marker appears and how the
    UI loads earlier pages is unspecified (design in Step 5, not this wave).
 
+**Added by Wave 3B-0** — the interaction-model questions are tracked separately in **§37.17**; Q1
+above (port wiring) is answered as "config-flag + fixture adapters, production default off" in §37.13
+but the concrete mechanism is still chosen in 3B-1.
+
 ## 34. Acceptance criteria
 
 This wave (rev. 2) is complete when:
@@ -929,6 +1072,17 @@ them immediately); the ordering rule that must hold is: **issue-owned domain fir
 fake external adapters, then projections/UI** — never a real external module shipped by this team,
 and never `agents`/`teams` CRUD pretending to be issue domain.
 
+### 35.1 Mapping to the Wave 3B sub-waves (added by Wave 3B-0)
+
+The 10 steps above stay the frozen order; the remaining ones are grouped into shippable sub-waves so
+each can be reviewed and verified on its own (§37.16):
+
+| Sub-wave | Steps | Contents |
+| --- | --- | --- |
+| **3B-1** — Collaboration Interaction Foundation | 3 (part), 4 (part), 5 (part), 6 | `CollaborationTargetRef`, `CollaborationDirectory`, `InteractionDescriptor`, `ContextBuilder` interface + deterministic impl, `ExecutionDispatcher` interface + mock adapter, `ExecutionObserver`, collaboration-target projection API, interaction API spine, Mention Mode, Agent/Team Task Mode, IssueRun lifecycle, fixed reply → `Comment`, Timeline read API, `@` picker + Mention/Task Mode UI. |
+| **3B-2** — Workflow Interaction Shell | 3 (rest), 4 (rest), 5 (rest), 7 | `FormDescriptor`, dynamic form renderer, `InputAssistProvider`, mock AI Assist, context suggestions, review/apply/confirm, mock workflow execution. |
+| **3B-3 / later** | 8, 9, 10 and the deferred table (§32) | Real Agent/Team/Workflow/Runtime/Notification/Realtime, integrated through the same adapters when the external designs land. |
+
 ## 36. Wave 3A implementation notes (Step 2 landed)
 
 The rev. 2 design is frozen. Step 2 (Issue-owned foundation) has now been implemented as **Wave 3A**
@@ -957,3 +1111,1084 @@ code, not from a stale §.
 6. **Scope held.** No `agents`/`teams`/`workflows`/`sim_*`/`runtime`/`notifications`/`websocket`/PR/logs
    schema or code landed. No `ActorResolver`/`ExecutionDispatcher`/port interfaces yet — those are
    Step 3. This wave is the issue-owned persistence + contract spine only, and it stops here.
+
+---
+
+## 37. Wave 3B-0 — Collaboration Interaction Model (frozen)
+
+> **Status: FROZEN product semantics, added by Wave 3B-0 (docs only — no code, no migration).**
+>
+> This section is the authoritative statement of *how collaboration interactions work* in Issues. A
+> coding agent implementing Wave 3B-1 must implement **from this section** and must not re-derive
+> product semantics from scratch, from Multica's behaviour, or from any earlier sketch. Where this
+> section and an earlier section of this document disagree about interaction semantics, **§37 wins**;
+> the port *contracts* remain §6.2 + the inventory in §6.4.
+>
+> Everything here is a **contract for the consuming side**. Issues still does not define the internal
+> design of Agent, Team, Workflow, Runtime, Notification, or Realtime — those remain
+> **BLOCKED ON EXTERNAL DESIGN**.
+
+### 37.1 `@` is collaboration target selection — never execution
+
+```
+@  =  Collaboration Target Selection
+```
+
+`@` selects **who/what the interaction is addressed to**. `@` itself is **not** an execution trigger.
+
+Once a target is selected, the target's **interaction descriptor / capability** decides what happens
+next (§6.2 `InteractionDescriptor`). Execution — if any — is a separate, explicit act (§10,
+`Assign ≠ Execute`).
+
+**Markdown `@xxx` / `mention://type/id` is display/compatibility only.** It is *not* an authoritative
+business routing protocol: business semantics come from the typed target + the interaction request,
+never from parsing body text (§16). A body containing `@BackendAgent` with no `targets` entry triggers
+nothing.
+
+### 37.2 The four target modes
+
+| Target type | Mode | Produces an `IssueRun`? |
+| --- | --- | --- |
+| `user` | **Mention Mode** | **No** |
+| `agent` | **Task Mode** | Yes — an executable interaction |
+| `team` | **Task Mode** | Yes — an executable interaction |
+| `workflow` | **Configure / Form Mode** | Yes — but only after a confirmed form submission |
+
+`@Alice @BackendAgent @SecurityTeam` in one comment is therefore a **mixed-mode** request: one mention,
+two task interactions, zero or more runs (§37.8).
+
+### 37.3 Human Mention Mode
+
+```
+@Human → Mention Mode
+```
+
+- The user explicitly marks that a person should **look at / handle** this piece of content.
+- The mentioned human is **visibly shown** in the Timeline/Comment (rendered from the typed target,
+  not from body text).
+- **A human mention produces no `IssueRun`.** `@Human → IssueRun` is **forbidden**.
+- Notification is a **future module**'s responsibility (via `NotificationSink`, §6.2); a future
+  notification must be able to **deep-link back to this issue + context**.
+- **Notification is not implemented today.** Mention Mode in 3B-1 persists the typed target and
+  renders it; it does not deliver anything.
+
+### 37.4 Agent Task Mode
+
+```
+@Agent → Task Mode
+```
+
+- An agent interaction **must carry an explicit task**. The conceptual request is:
+
+  ```
+  target
+  task
+  context
+  ```
+
+- **`Comment.body` and the interaction's `task` are two different protocol fields.**
+
+  ```
+  Comment.body  !=  Interaction.task
+  ```
+
+  The UI may *initialize* the task from the user's natural-language input, but the task is an
+  independent **execution intent** — it is the thing the executor is asked to do, and it survives
+  independently of how the comment body is later rendered or edited.
+
+- The agent's **internal model, database, runtime, LLM, and execution architecture are UNKNOWN**.
+  Issues makes **no assumption** about any of them; it sends `target + task + context` and receives
+  lifecycle/result back through `ExecutionObserver` (§6.2).
+- A fixed/mock agent reply arrives as an **`IssueComment`** with `author_type='agent'` — never a chat
+  row (§17).
+
+### 37.5 Team Task Mode
+
+```
+@Team → Task Mode
+```
+
+- The Issues-facing interaction for a Team is **identical to Agent Task Mode**: `target + task +
+  context`.
+- Issues **must not assume** any of: leader, member model, delegation, fan-out, internal
+  orchestration, runtime topology. A Team is, in the current Issues contract, **just a task-capable
+  collaboration target**.
+- The future real Team design plugs in behind the same `CollaborationDirectory` /
+  `ExecutionDispatcher` / `ExecutionObserver` adapters without changing the Issues contract.
+
+### 37.6 Workflow Configure / Form Mode
+
+```
+@Workflow → Configure / Form Mode
+```
+
+> **Extended by Wave 3B-2 → see §38 (IMPLEMENTED + VERIFIED, §38.37).** §38 freezes the Issues-facing
+> contract: the `FormDescriptor` shape, field types, `formRef` loading, the Confirm boundary, draft
+> persistence, AI Assist authority, validation layering, the API surface, the `0009` migration, and the
+> workflow Timeline/actor representation. This subsection keeps only the boundary statement.
+
+- Workflow is **not** an agent: it can require **structured inputs**, so it cannot be blindly executed
+  on `@` (§18).
+- The frontend will render a **dynamic form** from an `InteractionDescriptor` / `FormDescriptor`
+  (§6.2). It must **not** hard-code any workflow's fields into the Issues domain schema.
+- Issues **does not prescribe** how a workflow's schema is expressed internally — JSON Schema, a DSL,
+  protobuf, a database schema, or code-defined schema are all acceptable to the Workflow module.
+- The **Workflow adapter's only obligation** is to convert whatever it uses into an **Issues-facing
+  `FormDescriptor`**.
+
+### 37.7 AI Assist
+
+A Workflow form may offer **AI Assist**.
+
+```
+input   : current form values, issue context, selected context refs, workflow target/descriptor
+output  : suggested values, suggested context refs
+```
+
+The required flow is:
+
+```
+AI Assist → Suggest → User Review → Apply → Confirm → Execute
+```
+
+**`AI Assist → automatically execute workflow` is forbidden.** Assist may only propose; applying is a
+user action and execution stays a separate explicit confirm.
+
+3B-0 records the contract/design only. **No AI is implemented.**
+
+### 37.8 `Comment` ≠ `Interaction` ≠ `IssueRun`
+
+```
+Comment      ≠   Interaction   ≠   IssueRun
+```
+
+| Cardinality | Rule |
+| --- | --- |
+| one `Comment` → interactions | **0..N** |
+| one executable interaction → `IssueRun` | **0..1** initial run |
+| therefore one `Comment` → `IssueRun`s | **0..N** |
+
+Worked example — `@Alice @BackendAgent @SecurityTeam` in a single comment:
+
+```
+Alice          → Mention interaction      → no Run
+BackendAgent   → Task interaction         → Run A
+SecurityTeam   → Task interaction         → Run B
+```
+
+**Do not introduce `Comment.run_id`.** A 1:1 comment↔run column is explicitly rejected: it cannot
+express a mention (0 runs), cannot express two targets in one comment (2 runs), and would freeze the
+interaction model into the comment table.
+
+The existing `issue_runs.trigger_evidence_kind` + `trigger_evidence_ref_id` pair (§11, and already in
+migration `0007`) is the **provenance seam** for `Comment → Run`: it is a free pair with no FK, so
+recording `kind='comment'` + the comment id needs **no migration**. If the interaction itself ever
+needs to be a first-class row, it is added additively next to the comment — never by widening
+`issue_comments`.
+
+### 37.9 Timeline
+
+```
+Timeline  =  Comment + IssueActivity, as one high-level projection
+```
+
+- Timeline is the **high-level, human-readable projection** over `issue_comments` +
+  `issue_activities`. It stays **strictly separate** from **Execution Logs** (§15): PTY/stdout/tool
+  logs belong to the execution module and are reached only through `ExecutionLogProvider`.
+- Wave 3B-1 **may add a public Timeline read API** (`GET /issues/:iid/timeline`, §25). Today the
+  projection is persisted but **not exposed**: `issue_activities` has **no public read endpoint** and
+  there is no `/timeline` route.
+- The target interleaving — all sharing the **one per-issue `seq` namespace** (§14) — is:
+
+```
+User Comment
+Run Enqueued Activity
+Run Started Activity
+Agent Reply Comment
+Run Completed Activity
+```
+
+- Ordering is `ORDER BY seq`; `created_at` is display-only. An agent/team reply is a **Comment row**
+  with `author_type ∈ agent|team` (§37.4), so it participates in the same ordering instead of needing
+  a separate stream.
+
+### 37.10 Pending-run constraint (current implementation fact)
+
+Recorded here because it bounds multi-target interactions (§37.8):
+
+```
+at most ONE pending Run per (issue_id, executor_type, executor_id)
+while status ∈ ('queued','dispatched')
+```
+
+- Enforced today by the partial unique index `issue_run_pending_uniq` in migration `0007`, surfaced as
+  `409 pending_run_exists`.
+- **Wave 3B keeps this constraint unchanged. Do not modify the migration.** Two targets in one comment
+  produce two runs because they differ in `executor_id`; the *same* target twice does not produce two
+  concurrent runs.
+- If a future real executor needs several concurrent tasks on the same Issue + executor, that is a
+  **separate forward migration** with its own decision — not a Wave 3B change.
+
+### 37.11 CollaborationDirectory and the target API boundary
+
+`CollaborationDirectory` answers one question for the Issues UI:
+
+> Which collaboration targets may I select right now?
+
+It returns a uniform **`CollaborationTargetSummary`**, minimally expressing:
+
+```
+type                 user | agent | team | workflow
+id
+displayName
+description          (optional)
+interaction/capability descriptor
+```
+
+It defines **no** Agent/Team/Workflow internal schema.
+
+**Boundary (resolves the §25 tension):**
+
+| | Verdict |
+| --- | --- |
+| Agent / Team / Workflow **domain APIs** | Still **not** provided. Issues does not expose `GET /agents`, `POST /teams`, workflow CRUD, etc. (§25.) |
+| **Issues-facing unified collaboration projection** — conceptually `GET collaboration targets` | **Allowed and planned.** It is `CollaborationDirectory → Issues-facing target projection → @ Picker`. |
+
+The projection is a **read-only view over ports**, not a domain API: it carries no domain fields and
+offers no mutation. Today it can be served by a **fixture adapter**; later it aggregates the real
+Agent/Team/Workflow/User adapters. Any doc wording that conflates "Issues exposes a target picker"
+with "Issues exposes Agent/Team/Workflow APIs" is wrong and has been corrected (§25).
+
+### 37.12 Context persistence
+
+Three distinct things, deliberately not merged:
+
+```
+IssueContextRef  =  a stable explicit reference          (persisted, issue-owned)
+ContextBuilder   =  invocation-time context construction (not persisted)
+IssueRun.input   =  the effective execution-time input/context snapshot (persisted on the run)
+```
+
+Purpose: it must later be possible to understand **what a given run actually received as input**.
+
+`ContextBundle` must **not** become a new permanent external-domain object. The first
+`ContextBuilder` implementation is deterministic and may use only:
+
+```
+issue title
+issue description
+recent comments
+explicit context refs
+task
+```
+
+Later it may be replaced by AI relevance selection / summarization / retrieval / token budgeting —
+that is an internal change behind the port. **Issues does not implement a real AI context engine.**
+
+### 37.13 Fixture / mock strategy
+
+The next step is **not** a relational simulator. The following are **deleted from the active design**
+and remain only as history:
+
+```
+0008_sim_collaboration_catalog.sql   ·  sim_agents  ·  sim_teams  ·  sim_team_members
+```
+
+The current direction is a **fixture/mock adapter set**:
+
+```
+FixtureCollaborationDirectory
+MockExecutionDispatcher
+Deterministic ContextBuilder
+Mock InputAssistProvider
+```
+
+Wave 3B-2 adds `FixtureFormDescriptorProvider` and `MockInputAssistProvider` to this set (§38.32,
+landed) and reuses `MockExecutionDispatcher` with `executor_type="workflow"`.
+
+Constraints on this set:
+
+| Constraint | Rule |
+| --- | --- |
+| Where it lives | **development/demo configuration only** |
+| Production | **default OFF** |
+| Domain tables | **none** — no mock domain tables, no `sim_*` tables (§0, §9) |
+| Issue core | no `if fixtureExists…` branch; the adapter is chosen at wiring (§6.3) |
+| Removability | deleting the fixture wiring + adapters must leave Issues core untouched |
+
+### 37.14 Frontend interaction model
+
+```
+Composer
+   ↓  @
+Target Picker            (fed by CollaborationDirectory)
+   ↓
+Interaction Mode         (from InteractionDescriptor)
+   ├── Human     → Mention Composer
+   ├── Agent     → Task Composer
+   ├── Team      → Task Composer
+   └── Workflow  → Dynamic Form Composer
+```
+
+- **Agent/Team Task Composer** supports: `Task`, `Context`.
+- **Workflow Dynamic Form Composer** supports: `AI Assist`, `Context refs`, `Review`, `Confirm`.
+- The frontend must **not** encode assumptions about real Agent/Team/Workflow implementations — it
+  renders whatever the descriptor declares and sends `target + task/form values + context refs`.
+
+Current frontend reality (Wave 3A state, for the implementer): the comment composer posts
+`{body}` only, has no `@` affordance and does not even send `parentId`; there is no search UI; runs
+are list-only and the create-run button is **disabled** ([13-frontend-migration.md](13-frontend-migration.md)).
+
+### 37.15 ConversationTarget — design only
+
+`ConversationTarget` (§17) stays **DESIGN ONLY / OPEN QUESTION**. 3B-0 deliberately does **not**
+freeze:
+
+```
+per issue · per user · per session · server persisted · client derived
+```
+
+Wave 3B-1's first version triggers a new interaction only via an **explicit `@`**. **Implicit
+continuation is not implemented.** The no-`targets` "continue with the current target" behaviour
+described in §17 is deferred until this is decided.
+
+### 37.16 Wave 3B roadmap
+
+**Wave 3B-1 — Collaboration Interaction Foundation**
+
+```
+CollaborationTargetRef
+CollaborationDirectory
+InteractionDescriptor
+fixture directory adapter
+collaboration target API
+interaction API spine
+Human Mention Mode
+Agent/Team Task Mode
+ContextBuilder interface
+deterministic context builder
+ExecutionDispatcher interface
+mock execution adapter
+IssueRun lifecycle
+fixed Agent/Team reply → IssueComment
+Timeline read API
+frontend @ Picker
+frontend Mention Mode
+frontend Task Mode
+```
+
+**Wave 3B-2 — Workflow Interaction Shell**
+
+```
+FormDescriptor
+Dynamic Form Renderer
+InputAssistProvider
+Mock AI Assist
+Context suggestions
+Review / Apply / Confirm
+Mock Workflow execution
+```
+
+> **Implemented 2026-09-20 → §38 / §38.37.** The contract (descriptor shape, Confirm boundary, AI
+> Assist authority, draft decision, API surface, `0009`) is settled and the shell has landed, been
+> tested and been verified end-to-end. Real Workflow / AI providers remain BLOCKED ON EXTERNAL DESIGN.
+
+**Wave 3B-3 / later** — real `Agent`, `Team`, `Workflow`, `Runtime`, `Notification`, `Realtime`,
+integrated through the same adapters once their external designs are approved.
+
+### 37.17 Open questions left by Wave 3B-0
+
+| # | Question | Why it is still open |
+| --- | --- | --- |
+| Q1 | Where do mention candidates come from if `/agents` etc. stay forbidden? | §37.11 fixes the *boundary* (a read-only Issues-facing projection) but not the *source*: an in-Cloud fixture, or supplied by the desktop/agent modules. |
+| Q2 | Is a Team a target with its own `executor_id`, or a fan-out to members? | Explicitly **not** assumed (§37.5). Resolved only when the real Team design lands. |
+| Q3 | Is `Interaction.task` a new field/row, or does it ride on `issue_runs.input`? | §37.8 forbids `Comment.run_id` but does not yet fix where the interaction record lives. |
+| Q4 | Is "one pending run per `(issue_id, executor_type, executor_id)`" the intended cap for multi-target interactions? | Current DB fact (§37.10 / migration `0007` partial unique index); retained as-is for 3B. |
+| Q5 | Who owns the authoritative workflow input schema? | Desktop has `WorkflowSummary.inputSchema`; Cloud has no workflow module (§37.6). |
+| Q6 | Who computes AI Assist suggestions, given Cloud has no LLM/runtime? | `InputAssistProvider` ownership is deliberately undecided (§6.2). |
+| Q7 | Is `ContextBundle` computed on demand or snapshotted? | §37.12 fixes that `IssueRun.input` is the snapshot, but not the bundle's own lifecycle. |
+| Q8 | `ConversationTarget` scope and persistence. | Deliberately unfrozen (§37.15). |
+
+**Partially resolved by the Wave 3B-2 design pass (§38):** Q5 stays OPEN for the *canonical* schema
+owner but the Issues-facing contract is now frozen — Issues consumes a `FormDescriptor` and never the
+Workflow schema (§38.2/§38.5). Q6 stays OPEN for *ownership* but the port contract and its
+suggest-only authority are frozen (§38.11/§38.12). Q7 stays OPEN for the `ContextBundle` lifecycle but
+§38.9 fixes that the Confirm-time snapshot lands in `IssueRun.input` and the descriptor is never run
+input. Q3 is resolved: the interaction record lives in `issue_interactions` with a generic `input`
+column (§38.30).
+
+---
+
+## 38. Wave 3B-2 — Workflow Interaction Design (FROZEN → IMPLEMENTED)
+
+> **Status: IMPLEMENTED + VERIFIED (2026-09-20).** Design frozen earlier the same day; the shell was
+> then implemented, tested and verified end-to-end. See **§38.37** for what landed, the deviations, and
+> the verification evidence. Everything below (38.1–38.36) remains the authoritative contract.
+>
+> This section is the authoritative **Issues-facing** contract for Workflow interaction. A coding agent
+> implementing Wave 3B-2 implements **from this section**; it must not re-derive product semantics and
+> must not design Workflow internals. Where this section and an earlier section disagree about
+> interaction semantics, **§38 wins**; port *contracts* remain §6.2 + the inventory in §6.4.
+>
+> **Workflow internal architecture stays UNKNOWN and BLOCKED ON EXTERNAL DESIGN** (§0, §9). Issues
+> defines only *what it needs from* the Workflow capability, never how a workflow is stored, versioned,
+> or executed.
+
+### 38.1 Top-level UX (frozen)
+
+```
+@Workflow
+  → select CollaborationTarget            (Issues: CollaborationDirectory)
+  → InteractionDescriptor.mode = form
+  → load FormDescriptor                   (Issues-facing projection)
+  → render dynamic form
+  → user fills / edits fields
+  → optional AI Assist                    (suggestions only)
+  → user reviews / applies suggestions
+  → user explicitly Confirms              ← the ONLY execution boundary
+  → IssueRun                              (ExecutionDispatcher → ExecutionObserver)
+```
+
+Two equivalences are **frozen and must not be collapsed**:
+
+```
+selecting a Workflow  ≠  executing a Workflow
+AI Assist             ≠  execution
+```
+
+There is exactly **one** execution boundary: an explicit human **Confirm** (§38.7, §38.22).
+
+### 38.2 `FormDescriptor` — responsibility
+
+`FormDescriptor` answers one question, and only this one:
+
+> What input controls should the Issues frontend render for this Workflow interaction, and what is the
+> most basic client-side interaction/validation for them?
+
+It is an **Issues-facing rendering descriptor**, carried over a port. It is **not** a Workflow schema.
+
+### 38.3 Proposed minimal `FormDescriptor` shape
+
+```
+FormDescriptor
+  formRef      string        opaque, provider-scoped, stable identifier (echoed from formRef)
+  title        string?       optional heading
+  description  string?       optional helper text
+  fields       FormField[]   ordered; array order IS the display order
+
+FormField
+  key          string        stable machine key — the key in the form-value map
+  label        string
+  type         FieldType     see §38.4
+  required     bool
+  description  string?       optional per-field help
+  defaultValue Value?        optional; MUST match `type` (and be within `options` for select/multi_select)
+  placeholder  string?       optional
+  options      Option[]?     REQUIRED for select / multi_select; each {value, label}
+```
+
+Invariants on a descriptor: `key` is unique within `fields`; `options` present iff the type needs them;
+`defaultValue` is type-consistent. A descriptor violating these is **invalid** and surfaces as
+`invalid_form_descriptor` (§38.18) — Issues never renders a partially-valid form.
+
+### 38.4 Supported initial field types
+
+| `type` | Value shape | Client validation |
+| --- | --- | --- |
+| `text` | string | required, max length |
+| `textarea` | string | required, max length |
+| `number` | number | required, numeric, optional min/max via `options`-free bounds |
+| `boolean` | boolean | required |
+| `select` | string ∈ `options` | required, value ∈ `options` |
+| `multi_select` | string[] ⊆ `options` | required, each ∈ `options` |
+
+**Deferred (OPEN QUESTION, §38.31):** a dedicated `context_ref` / repository / branch *selector* field
+type. First version represents such inputs as `text` (optionally autofilled from issue context, §19).
+Adding a field type later is an **additive** descriptor change.
+
+### 38.5 What `FormDescriptor` is NOT
+
+**Not** a Workflow canonical schema, and **not** bound to any schema technology (§6, §37.6). The future
+Workflow module may express its schema as JSON Schema, a DSL, protobuf, a database schema, a
+code-defined schema, or an external service contract. Issues **does not decide** this. The adapter's
+only obligation:
+
+```
+Workflow internal schema  ──adapter──▶  Issues-facing FormDescriptor
+```
+
+`FormDescriptor` therefore carries **no** schema-technology constructs: no `$ref`, no `oneOf`/`allOf`,
+no JSON-Schema keywords, no protobuf descriptors, no expression syntax.
+
+**Not a capability DSL** (§7). The following are explicitly **FUTURE / OPEN**, not frozen now:
+
+```
+conditional visibility (visibleIf / dependsOn)
+computed or derived fields
+cross-field expressions / validation expressions
+repeating or nested field groups
+arbitrary JSON Schema semantics
+form scripting / expression evaluation
+```
+
+If a real Workflow needs one of these, that is a **new decision with its own ADR**, not a 3B-2
+extension.
+
+### 38.6 Interaction lifecycle & Issue-owned state
+
+```
+Comment ──▶ Workflow Interaction ──▶ configuration (form values) ──▶ Confirm ──▶ IssueRun
+```
+
+**Decision — no new interaction status column.** The Issue-owned lifecycle is expressed with what
+already exists:
+
+| Situation | Issue-owned representation |
+| --- | --- |
+| Workflow addressed, not yet confirmed | interaction row exists, `mode='form'`, `run_id IS NULL` |
+| Confirmed | `run_id IS NOT NULL` — the initial run exists |
+| Executing / done / failed | `issue_runs.status` (the run owns its own state machine, §12) |
+
+Explicitly **not** added: `draft` / `ready` / `confirmed` / `executing` enum column. Rationale:
+`run_id IS NULL` already separates "not executable" from "executable", and `issue_runs.status` already
+owns execution progress. A parallel interaction state machine would duplicate both and could drift.
+
+`run_id` is therefore overloaded deliberately and is documented as: **the interaction's confirm
+marker + initial-run reference** (§38.14).
+
+### 38.7 Confirm boundary (frozen)
+
+```
+Confirm = the user accepts the current effective workflow input and authorizes creating
+          an execution intent (IssueRun).
+```
+
+- `form editing`, `AI Assist`, `apply suggestions`, `draft save` **never** create a Run.
+- Only an explicit `Confirm` may reach `ExecutionDispatcher`.
+- Confirm re-validates server-side (§38.14) and is the **only** transition that sets
+  `issue_interactions.run_id`.
+
+### 38.8 Draft persistence — decision
+
+**Decision: Option A — frontend-only draft.** Unconfirmed form values are **not** persisted
+server-side in the first version.
+
+| Option | Verdict |
+| --- | --- |
+| **A — frontend-only draft** | **CHOSEN.** No server state, no endpoint, no migration; refresh loses the draft. |
+| B — draft on `issue_interactions` | Rejected for v1: every keystroke would need a persisted PATCH + version column, for a value the user may abandon. |
+| C — dedicated draft resource | Rejected: a new resource for a transient value; violates "no new resource by default". |
+
+Why A is acceptable: the interaction itself is already persisted (the comment + interaction row exist),
+so *what was addressed* survives a refresh; only *unsaved field values* are lost. Refresh → the form
+re-renders from the descriptor's `defaultValue`s and the user re-enters. Multi-device / partial
+completion / audit are explicitly **not** requirements for the first version.
+
+Recorded as **technical debt** (OPEN QUESTION §38.31): if partial-completion becomes a product
+requirement, Option B (an `input` PATCH + `version` guard on the interaction) is the additive path —
+the `input` column in §38.29 is already the natural carrier.
+
+### 38.9 Effective execution input (frozen)
+
+At Confirm, the effective input is built and snapshotted. It is **not** the `FormDescriptor`:
+
+```
+effective input  =  target + form values + Issue context + selected ContextRefs + trigger provenance
+```
+
+`IssueRun.input` remains the **execution-time snapshot** (§37.12) — "what this run actually received".
+`FormDescriptor` is never persisted as run input.
+
+### 38.10 `ContextBuilder` relationship
+
+**Reuse the existing single `ContextBuilder` seam.** Do **not** create `WorkflowContextBuilder` /
+`AgentContextBuilder` / `TeamContextBuilder` — that would fork one abstraction into parallel systems.
+
+The existing `ContextInput` concept is extended additively with the interaction's form values:
+
+```
+ContextInput
+  IssueTitle, IssueDescription
+  Task                 (Task Mode)
+  InteractionValues    (Form Mode — NEW, empty for mention/task)
+  TargetType, TargetID
+  RecentComments
+  ContextRefs
+```
+
+One invocation-time seam, one builder, one snapshot location. A Workflow-specific adapter, if ever
+needed, lives **in the adapter layer** (`internal/collab` / a future workflow adapter), never in issue
+core.
+
+### 38.11 `InputAssistProvider` contract (consuming-side)
+
+```
+InputAssistProvider
+  Build(ctx, AssistInput) (AssistSuggestion, error)
+
+AssistInput
+  Target        {type, id}
+  FormDescriptor
+  CurrentValues   form-value map (§38.15)
+  IssueContext    title / description / recent comments
+  ContextRefs     the issue's selected refs
+
+AssistSuggestion
+  Values          partial map: field key → suggested value   (field-level patch, §38.12)
+  ContextRefs     suggested refs                              (suggestions only, §38.13)
+  Explanations?   optional per-key rationale (human-readable)
+```
+
+It is a **suggestion-only** port (§37.7). Ownership of a real implementation stays OPEN (§38.31).
+
+### 38.12 AI Assist authority boundary (frozen)
+
+```
+AI Assist → suggest → user review → apply → confirm → execute
+```
+
+**Forbidden for AI Assist:** creating an `IssueRun`; dispatching execution; changing issue/run status;
+sending a notification; mutating any external system. The provider returns data; it has no side
+effects on Issues.
+
+### 38.13 Suggestion merge semantics (frozen)
+
+Assist returns a **field-level patch**, not a full form:
+
+```
+{ "values": { "scope": "current-issue", "severity": "high" } }
+```
+
+Rules:
+
+- Fields **not** present in the patch keep the user's current value — untouched.
+- Assist must **not** clear a user-entered value unless it explicitly suggests an empty value for that
+  key (and the UI shows that as a change).
+- The user sees **current vs suggested** before applying (§38.26).
+- Applying is a user action; `Ignore` leaves the current value.
+
+### 38.14 Suggested context refs (frozen)
+
+```
+suggested context ref  ≠  automatically persisted context ref
+```
+
+- Applying a suggested ref makes it part of **this interaction's confirm payload** → it lands in the
+  run's effective input snapshot.
+- AI Assist must **not** create a permanent `IssueContextRef` row. Creating an issue-level ref stays an
+  explicit user action through the existing context-refs API.
+- This is why `Confirm` may carry `contextRefs[]` (§38.19): it is how "applied suggestion" is expressed
+  without polluting the persistent ref table.
+
+### 38.15 Validation responsibilities (layered)
+
+| Layer | Validates |
+| --- | --- |
+| Frontend | `required`, basic type, value ∈ `options`, basic length/range — **UX only** |
+| **Issues API (authoritative)** | `required`, known field keys, basic types, allowed values — re-validated on Confirm against the **current** descriptor |
+| Future Workflow service | its own domain-level validation (semantics only it knows) |
+
+The frontend is never trusted. Issues validation is *interaction* validation, not *domain* validation —
+Issues does not know whether a given scope string is meaningful to the workflow.
+
+### 38.16 Form value representation (frozen)
+
+A plain **object keyed by field `key`**:
+
+```json
+{
+  "repository": "ora-space/cloud",
+  "branch": "main",
+  "scope": "current-issue",
+  "severity": "high",
+  "includeDependencies": true
+}
+```
+
+- Values are JSON scalars or string arrays — never nested objects.
+- **No Workflow-specific columns.** `security_review_scope` / `security_review_severity` must **never**
+  appear as Issue-domain columns; they exist only as keys inside this map.
+- Unknown keys are rejected (§38.18).
+
+### 38.17 FormDescriptor loading — decision
+
+**Decision: Option B — `formRef` on the descriptor, fetched separately.**
+
+```
+InteractionDescriptor { mode: "form", requiresTask: false, formRef: "<opaque>" }
+                                   ↓ (on selection)
+GET /api/v1/tenants/{tid}/collaboration/forms/{formRef}   →  FormDescriptor
+```
+
+| | Verdict |
+| --- | --- |
+| A — embed the full `FormDescriptor` in every `CollaborationTargetSummary` | Rejected: forces the directory to resolve **every** workflow's schema on **every** picker open (a real Workflow module may be remote/slow), and bloats the uniform target projection. |
+| **B — `formRef` + a dedicated read-only fetch** | **CHOSEN.** Keeps the picker projection thin and uniform, defers descriptor cost to selection time, gives a natural cache/refresh point, and matches §6.2, which already freezes `InteractionDescriptor{..., formRef?}`. |
+
+`formRef` is **opaque** to Issues, tenant-scoped, and must be resolved server-side through the
+provider (§38.30). It appears in a path segment, so it is constrained to a safe token pattern.
+
+### 38.18 Descriptor versioning — decision
+
+**Decision: no `descriptorVersion` field in the first version.**
+
+- `formRef` is opaque and **may** encode a provider-side version (e.g. `security-review@3`); Issues
+  never interprets it.
+- On Confirm, Issues re-resolves the descriptor and validates against the **current** descriptor. If
+  the provider changed it incompatibly, the user gets a validation error and re-configures.
+- Recorded as **technical debt** (§38.31): a stale-form optimistic guard would need a provider-supplied
+  version token compared at Confirm. Not designed now — Issues will not build a Workflow versioning
+  system (§38.5).
+
+### 38.19 Unavailable / error semantics (minimal)
+
+Distinguish the four failure kinds without proliferating codes:
+
+| Situation | Surface |
+| --- | --- |
+| Workflow capability not wired in this deployment | picker offers no workflow targets; a workflow interaction cannot be created |
+| Provider wired but temporarily failing | `503 form_descriptor_unavailable` |
+| `formRef` unknown to the provider | `404 form_descriptor_not_found` |
+| Provider returned a malformed descriptor | `500 invalid_form_descriptor` (provider bug, fail closed) |
+
+**`workflow_not_available` (409, shipped by 3B-1) is SUPERSEDED by this section — and is now gone.**
+The target became configurable when 3B-2 landed; the unwired case is expressed by the table above
+(`form_descriptor_unavailable`).
+
+### 38.20 Interaction API surface (design only — do not implement this round)
+
+Three new routes, all under the existing collaboration projection / issue-interaction boundary:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/tenants/{tid}/collaboration/forms/{formRef}` | Load the `FormDescriptor` projection |
+| POST 🔑 | `/api/v1/tenants/{tid}/issues/{iid}/interactions/{ixid}/assist` | Request AI Assist suggestions for the interaction's current values |
+| POST 🔑 | `/api/v1/tenants/{tid}/issues/{iid}/interactions/{ixid}/confirm` | Confirm → validate → build input → enqueue + dispatch the run |
+
+Plus one **behaviour change** on an existing route: `POST /issues/{iid}/comments` with
+`targets:[{type:"workflow", id}]` now **creates** the `mode='form'`, `run_id=NULL` interaction instead
+of returning `409 workflow_not_available`.
+
+Notes for the implementer (Cloud conventions that will bite):
+
+- `values` / `contextRefs` are new **non-string** body fields → they must be added to `validField`
+  (object / array-of-object arms) or they 400.
+- `ixid` and `formRef` are **new path params** → add to `Route` + `PublicRequest` (`router.go` +
+  `public.go`) in the same change.
+- `/collaboration/forms/…` must be dispatched **before** the `Contains(path, "/issues")` /
+  `/collaboration/targets` branches in `readPublic`/`openapi.go` (the two known traps, §25).
+- No `/workflows/*` route may be added (§38.21).
+
+### 38.21 Public API ownership boundary (frozen)
+
+Issues **may** expose: collaboration target projection · interaction descriptor projection · form
+descriptor projection · Issue interaction state · assist suggestions · confirm execution.
+
+Issues **must never** expose: Workflow CRUD · Workflow publish · Workflow version management ·
+Workflow graph/DAG · Workflow node mutation · Workflow execution internals.
+
+### 38.22 Idempotency & concurrency (frozen design)
+
+**Idempotency** (Cloud rules, §28):
+
+```
+POST /interactions/{ixid}/confirm   requires Idempotency-Key
+same key + same request   → replay the stored response (no second run)
+same key + different body → 409 idempotency_conflict
+```
+
+**Concurrent confirm** — two tabs confirming the same interaction must not create two initial runs.
+Resolution reuses the existing transaction convention; **no distributed lock**:
+
+1. The global advisory-locked transaction already serializes the two confirms.
+2. Confirm performs a **compare-and-set**: `UPDATE issue_interactions SET run_id=$1 WHERE id=$2 AND
+   run_id IS NULL`; **0 rows affected ⇒ already confirmed ⇒ `409 interaction_already_confirmed`.**
+3. The existing `issue_run_pending_uniq` partial index (§37.10) remains a second layer for the same
+   executor.
+
+Because step 2 keys on `run_id IS NULL`, no interaction `version` column is required (§38.29).
+
+### 38.23 Run creation timing (frozen)
+
+```
+Run is created ONLY after explicit Confirm.
+```
+
+Not on target selection. Not on AI Assist. Not on draft save. Not on form edit.
+
+### 38.24 `ExecutionDispatcher` / `ExecutionObserver` reuse (frozen)
+
+**Reuse both — do not create `WorkflowDispatcher` or a workflow-specific lifecycle.**
+`executor_type='workflow'` already exists (§11); a future real adapter switches on
+`target.type='workflow'` and forwards to the Workflow service. Issues core never learns the execution
+mechanism (§29, §30).
+
+Observer mapping for workflow:
+
+```
+started    → run.status=running          + activity run.started
+progress   → activity run.progress       (message in details)   ← additive, §38.25
+message    → activity run.message        (NOT a comment, §38.26)
+completed  → run.status=completed        + activity run.completed
+failed     → run.status=failed           + activity run.failed
+cancelled  → run.status=cancelled        + activity run.cancelled
+```
+
+`ObserveProgress` is an **additive** method on `ExecutionObserver` (FROZEN DESIGN, implemented in 3B-2);
+the existing methods and their 3B-1 semantics are unchanged.
+
+### 38.25 Workflow result in the Timeline (frozen)
+
+Timeline shows **coarse, human-readable** entries only:
+
+```
+Comment (user)  @Security Review Workflow
+Activity        run.enqueued     — workflow queued
+Activity        run.started      — workflow started
+Activity        run.progress     — high-level progress (optional, may repeat)
+Activity        run.message      — human-readable result / note
+Activity        run.completed    — workflow completed
+```
+
+**Never** in the Timeline: node-by-node logs, raw execution logs, runtime stdout/stderr, tool debug
+output. Those stay behind `ExecutionLogProvider` (§15). The Timeline/Logs boundary is unchanged.
+
+### 38.26 Workflow message ActorRef (frozen)
+
+**A Workflow is not an Actor** (§8: `ActorRef ∈ user|agent|team|system`; workflow exists only on the
+*CollaborationTargetRef* side). Two candidates were compared:
+
+| | A — reply `IssueComment` with `author_type='system'` | B — `IssueActivity` with `actor_type='system'` + workflow provenance in `details` |
+| --- | --- | --- |
+| ActorRef integrity | OK (system is a valid actor) | OK |
+| Provenance | A comment has **no metadata field** → cannot record *which workflow* produced it without a migration | `details{runId, executorType:"workflow", executorId, message}` carries it natively |
+| Schema change | needs a comment metadata carrier | **none** |
+| Product framing | implies the workflow is a chat participant | keeps the workflow a capability, not a collaborator (§33) |
+
+**CHOSEN: B.** Workflow human-readable output lands as an **`IssueActivity`** (`run.message` /
+`run.result`) authored by `actor_type='system'`, with the workflow identity in `details`. **`workflow`
+is NOT added to `ActorRef`.** Agent/Team replies stay `IssueComment` rows — the asymmetry is
+intentional: an agent/team is a conversational collaborator, a workflow is not.
+
+If a future product decision wants workflows to appear as conversational participants, Option A is the
+additive path and requires a comment-provenance carrier first — recorded as OPEN (§38.31).
+
+### 38.27 Frontend component architecture (frozen)
+
+```
+TargetPicker
+   ↓ mode = form
+WorkflowInteractionComposer
+   ├── DynamicFormRenderer      ← renders from FormDescriptor ONLY
+   │      └── FormFieldRenderer ← one control per field type
+   ├── AssistSuggestions        ← current vs suggested, Apply / Ignore
+   ├── ContextSelector          ← REUSE the existing issue context-refs UI
+   └── ConfirmReview            ← target + values + context → Back / Confirm
+```
+
+**Hard rule:** `DynamicFormRenderer` renders **only** what the descriptor declares. This is forbidden:
+
+```
+if (workflow.id === "security-review") render <SecurityReviewForm/>
+```
+
+Minimal component boundary: `WorkflowInteractionComposer`, `DynamicFormRenderer`,
+`FormFieldRenderer`, `AssistSuggestions`, `ConfirmReview`. No further decomposition in v1.
+
+### 38.28 Review / Confirm UI behavior (frozen)
+
+- A distinct **Review** step precedes Confirm. It shows: the workflow target, the effective form
+  values, the selected context refs, and which values came from applied suggestions.
+- Actions: **Back / Edit** and **Confirm**. Nothing else commits.
+- A field change is **never** treated as an execution trigger — not even the last field's change.
+
+### 38.29 Persistence map (frozen)
+
+| Artifact | Where |
+| --- | --- |
+| `FormDescriptor` | **Not persisted** — provider projection, fetched per selection (§38.17) |
+| Draft form values | **Not persisted** — frontend-only (§38.8) |
+| Applied suggestions | **Not persisted separately** — merged into the confirmed values / confirm payload |
+| Confirmed form values | `issue_interactions.input` (new generic jsonb column, §38.30) |
+| Effective execution snapshot | `issue_runs.input` (existing, §37.12) |
+| Persistent issue context | `issue_context_refs` (existing; **not** written by AI Assist) |
+
+### 38.30 Does 3B-2 need a migration? — yes, one additive column
+
+**Yes — a minimal additive `0009_issue_interaction_input.sql`:**
+
+```sql
+ALTER TABLE issue_interactions
+  ADD COLUMN input jsonb NOT NULL DEFAULT '{}'
+  CHECK (jsonb_typeof(input) = 'object');
+```
+
+That is the whole migration. Deliberately **not** included:
+
+| Rejected | Why |
+| --- | --- |
+| interaction `version` | Confirm is a compare-and-set on `run_id IS NULL` (§38.22); no other mutation exists. |
+| interaction `status` enum | Derivable from `run_id` + `issue_runs.status` (§38.6). |
+| `confirmed_at` | Duplicates the run's `queued_at`. |
+| a separate `interaction_inputs` table | 1:1 with the interaction — an extra table and join for no benefit. |
+| Workflow-specific columns | Forbidden (§38.16). |
+
+**`0008_issue_interactions.sql` is not modified.** The column is **generic** (any interaction mode may
+carry configuration), so it is not a Workflow-only field.
+
+### 38.31 Security invariants (frozen)
+
+1. A client **cannot invent target capabilities** — every target/descriptor/mode is resolved
+   server-side through `CollaborationDirectory` / the descriptor provider.
+2. A client **cannot set `mode`** — it is derived server-side (§37.2 `modeForType` + the descriptor);
+   the client never sends it.
+3. A client **cannot bypass form validation** — Confirm re-validates against the current descriptor.
+4. A client **cannot confirm another tenant's interaction** — interaction lookup is tenant- and
+   issue-scoped; foreign/missing → 404.
+5. A client **cannot forge an external execution result** — `ExecutionObserver` is not an HTTP route
+   (verified in 3B-1: no `Observe*` route is registered).
+6. A client **cannot forge a Workflow descriptor** — descriptors come only from the provider; the
+   frontend descriptor is a **rendering hint, never an authorization source**.
+7. `formRef` resolution is tenant-scoped and provider-backed; an unknown ref is a 404, never a leak.
+
+### 38.32 Fixture / mock strategy (extends §37.13)
+
+Additions to the existing fixture set — same constraints (dev/demo only, production default OFF, no
+`sim_*` tables, no mock domain tables, removable without touching issue core):
+
+```
+FixtureFormDescriptorProvider   → the Security Review Workflow's demo descriptor
+MockInputAssistProvider         → deterministic suggestions (no LLM, no AI)
+MockExecutionDispatcher         → REUSED unchanged, executor_type="workflow"
+```
+
+The mock workflow must still travel the real chain:
+
+```
+interaction → Confirm → IssueRun → ExecutionDispatcher → ExecutionObserver → Timeline
+```
+
+### 38.33 Example fixture (demo only — NOT a real Workflow schema)
+
+The `Security Review Workflow` fixture's descriptor may declare, for demo purposes:
+
+| key | type | required |
+| --- | --- | --- |
+| `repository` | `text` | yes |
+| `branch` | `text` | no |
+| `scope` | `select` (`current-issue` / `full-repo` / `changed-files`) | yes |
+| `severity` | `select` (`low` / `medium` / `high`) | yes |
+| `includeDependencies` | `boolean` | no |
+| `additionalInstructions` | `textarea` | no |
+
+These field names live **only** in the fixture adapter. The frontend must not hard-code them (§38.27).
+
+### 38.34 Open questions left by Wave 3B-2
+
+| # | Question | Why still open |
+| --- | --- | --- |
+| W1 | Who owns the real `InputAssistProvider` implementation? | Cloud has no LLM/runtime (§37.17 Q6). Unchanged. |
+| W2 | Who owns the real Workflow service behind the descriptor provider? | BLOCKED ON EXTERNAL DESIGN (§0, §9). |
+| W3 | Is draft persistence ever needed? | v1 chooses frontend-only (§38.8); the `input` column is the additive path. |
+| W4 | Should the descriptor carry a version token for stale-form detection? | v1 has no versioning (§38.18); `formRef` may encode a provider-side version. |
+| W5 | Is a per-interaction context-ref *subset* selection needed? | v1 uses the issue's `issue_context_refs` wholesale, exactly like Task Mode. |
+| W6 | Do workflows ever need to author conversational `Comment`s? | v1 uses activities (§38.26); Option A needs a comment-provenance carrier. |
+| W7 | A `context_ref` field type (repository/branch picker)? | Deferred; `text` + autofill covers v1 (§38.4). |
+| W8 | Conditional/computed/repeating form semantics? | Explicitly out of scope; a future ADR, not a 3B-2 extension (§38.5). |
+
+### 38.35 Out of scope for Wave 3B-2
+
+Real Workflow engine · Workflow database/domain model · Workflow versioning · execution engine · DAG ·
+nodes · scheduler · real AI Assist / LLM calls · real Runtime · Notification · Realtime · PR
+integration · Execution logs · `ConversationTarget` persistence · implicit continuation · any
+`/workflows/*` API.
+
+### 38.36 Recommended implementation order (3B-2)
+
+| Step | Focus |
+| --- | --- |
+| 1 | `FormDescriptor` types + `FormDescriptorProvider` port (+ fixture) in `internal/core` / `internal/collab`. |
+| 2 | Migration `0009` (one column) + `ContextInput.InteractionValues`. |
+| 3 | `GET /collaboration/forms/{formRef}` (+ `validField`/`PublicRequest`/OpenAPI branches). |
+| 4 | Comment path: workflow target creates a `mode='form'`, `run_id=NULL` interaction (supersedes `workflow_not_available`). |
+| 5 | `POST /interactions/{ixid}/confirm` — validate → build input → CAS `run_id` → enqueue → dispatch. |
+| 6 | `InputAssistProvider` port + `POST /interactions/{ixid}/assist` (+ mock). |
+| 7 | `ObserveProgress` + `run.message`/`run.progress` activities (workflow output, system actor). |
+| 8 | Frontend: `WorkflowInteractionComposer` → `DynamicFormRenderer` → `AssistSuggestions` → `ConfirmReview`. |
+| 9 | Demo + integration tests + docs sync (this section → IMPLEMENTED). |
+
+### 38.37 Implementation record (2026-09-20) — IMPLEMENTED + VERIFIED
+
+All nine steps landed. Migration `0009_issue_interaction_input.sql` added the single generic
+`issue_interactions.input jsonb NOT NULL DEFAULT '{}'` column exactly as designed; `0007`/`0008` were
+not touched.
+
+| Area | What landed |
+| --- | --- |
+| Ports | `FormDescriptorProvider` + `InputAssistProvider` (new, `internal/core/collaboration.go`); `Store.Forms` / `Store.Assist` (nil = Unavailable, 503). |
+| Descriptor | `FormDescriptor`/`FormField`/`FormOption` + `validateFormDescriptor` + `validFieldValue` + `formDescriptorObject` (`internal/core/form_descriptor.go`). Field types: `text`/`textarea`/`number`/`boolean`/`select`/`multi_select`. |
+| Interaction descriptor | `InteractionDescriptor.FormRef` (additive); the picker projection carries it, never the descriptor itself. |
+| API | `GET /collaboration/forms/{formRef}`; `POST /issues/{iid}/interactions/{ixid}/assist`; `POST /issues/{iid}/interactions/{ixid}/confirm`. New path params `:formRef` (non-UUID, token-constrained) and `:ixid`; `values`/`contextRefs` added to `validField`. |
+| Comment path | A `workflow` target now inserts a `mode='form'`, `run_id=NULL` interaction; **no run, no dispatch** — `409 workflow_not_available` is gone. |
+| Confirm | Re-resolves target + descriptor, re-validates values, persists `interaction.input`, enqueues the run with `trigger_evidence_kind='interaction'`, then claims via `UPDATE … WHERE run_id IS NULL` (0 rows ⇒ `409 interaction_already_confirmed`). Dispatch stays post-commit. |
+| Assist | Side-effect free: never writes `interaction.input`, never creates a run, never persists a context ref. Suggestions are filtered against the current descriptor before leaving the server. |
+| Observer | `ObserveProgress` added → `run.progress` activity (no status change). `ObserveMessage` branches: a workflow run's message becomes a `system` activity with `details{runId,executorType,executorId,message}`; agent/team replies remain comments. |
+| Run activities | `activityActor()` maps a workflow run's activities to `system` (a workflow is not an ActorRef); `runActivityDetails()` carries the executor identity in `details`. |
+| Fixtures | `FixtureFormDescriptorProvider` (Security Review, 6 fields) + `MockInputAssistProvider` (deterministic, no LLM, no randomness); `MockExecutionDispatcher` gained the workflow branch (progress + simulated result that states no real scan ran). Wired only in `cmd/ora-web` + the integration harness. |
+| Frontend | `WorkflowInteractionComposer`, `DynamicFormRenderer`, `FormFieldRenderer`, `AssistSuggestions`, `ConfirmReview`; the `@` picker now offers workflow targets (the 3B-1 "本阶段不可用" state is gone); the Activity panel opens the composer for the newest unconfirmed form interaction and shows confirmed ones as `已确认 · 运行 <status>`. |
+
+**Revision — the form is a draft (§38.37a).** The first shipped build created the comment + interaction
+the moment a workflow target was selected, and hung Assist/Confirm off that interaction. Product review
+rejected that: selecting a workflow must leave **no trace** in the Timeline, and each target needs its
+own message box and its own submit button. The shipped model is therefore:
+
+| | Shipped behaviour |
+| --- | --- |
+| Selection | Stages the target **client-side only** — no comment, no interaction, no run. |
+| Form | A **draft**: descriptor + values + suggestions live in React state. |
+| AI Assist | `POST /issues/{iid}/collaboration/assist` — **stateless**, keyed by `targetId`; works with no interaction and writes nothing. |
+| Confirm | The first write: posts the comment (creating the `mode='form'`, `run_id=NULL` interaction) and immediately confirms it → run. |
+| Abandoning | Removes the draft; nothing was ever sent. |
+| Per-target submit | Human mention / Agent task / Team task each carry their own message box + 提交 button; only that button records the comment + interaction. |
+
+Consequence: a `mode='form'`, `run_id=NULL` interaction now exists only transiently (between the
+comment POST and the confirm POST), so it is **not** a durable "continue later" state — §38.6's
+`run_id IS NULL` marker remains the schema semantics, but the UI no longer surfaces it. The
+interaction-scoped `POST /interactions/{ixid}/assist` route was removed with this revision.
+
+**Deviations from the approved §38 design — two, both additive:**
+
+1. **`409 interaction_not_confirmable`** was added to the error set (§38.19 listed nine codes). Confirming
+   or assisting a non-`form` interaction (e.g. a mention) is a distinct resource-state conflict, not an
+   input error, so it needed its own code rather than being folded into `invalid_interaction_input`.
+2. **503 responses are now declared in the OpenAPI contract for every route.** The document previously
+   listed only 400/401/403/404/409/428/500; a port-backed route can legitimately answer 503
+   (`form_descriptor_unavailable`, `assist_unavailable`), and the integration contract-validating
+   transport rejects undeclared statuses.
+
+Nothing else diverged: the descriptor is never persisted, drafts stay frontend-only, no
+`WorkflowDispatcher`/`WorkflowContextBuilder` was created, no `/workflows/*` route exists, and
+`ActorRef` was not widened.
+
+**Verification evidence:**
+
+- `go build ./...`, `go vet ./...`, `go test ./internal/... ./cmd/...` — PASS; `go run ./cmd/openapi`
+  idempotent + `internal/contract` byte-check PASS; `gofumpt -l -extra` clean on every touched file.
+- Full integration suite against real PostgreSQL — PASS, including the 8 new
+  `integration/workflow_interaction_test.go` tests (unconfirmed interaction/no run; descriptor
+  projection + 404s; provider 503 / malformed 500; assist determinism + zero side effects; confirm
+  validation ×5, exactly one run, `interaction.input`, run snapshot, provenance, timeline shape,
+  strictly increasing `seq`; idempotent replay + `409`; scope/mode guards; assist unavailable) and the
+  updated 3B-1 `TestCollaborationTargetValidation`.
+- Frontend under Node 24.21.0: `typecheck` PASS, `test` PASS (29 files / 85 tests, incl. 6 new
+  composer tests and 4 new Activity-panel workflow tests), `build` PASS, `check:modules` / `check:docs`
+  / `check:dead` / `check:dup` PASS. `lint` and `format:check` remain red **only** on the pre-existing
+  debt in untouched files — this wave adds **zero** new lint/prettier violations.
+- Live demo smoke through `cmd/ora-web` + real PostgreSQL: target advertises `formRef` → descriptor
+  loads → comment creates the interaction with **0 runs** → assist returns deterministic suggestions
+  with **no** run/input/ref side effects → three invalid confirms rejected 400 → confirm creates
+  **exactly one** completed run with `provenance=interaction:<ixid>` and a full `interactionValues`
+  snapshot → timeline `comment, run.enqueued(user), run.started/progress/message/completed(system)` →
+  double confirm `409` → same-key replay returns the same run → 0 workflow-authored entries. Foundation
+  regression re-checked live: mention produces no run, agent/team tasks still produce comments, shared
+  `seq` ordering intact, `authorType` impersonation still 400.

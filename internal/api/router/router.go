@@ -29,6 +29,8 @@ func Routes() []Route {
 		{"GET", "/api/v1/me/tenants", "", nil},
 		{"GET", "/api/v1/tenants/:tid/members", "", nil},
 		{"PUT", "/api/v1/tenants/:tid/members/:uid", "", []string{"role", "status", "version"}},
+		{"GET", "/api/v1/tenants/:tid/collaboration/targets", "", nil},
+		{"GET", "/api/v1/tenants/:tid/collaboration/forms/:formRef", "", nil},
 		{"GET", "/api/v1/tenants/:tid/issues", "", nil},
 		{"POST", "/api/v1/tenants/:tid/issues", "", []string{"title", "description", "status", "priority", "assigneeUserId", "assigneeType", "assigneeId", "parentIssueId", "projectRef", "properties"}},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid", "", nil},
@@ -50,7 +52,7 @@ func Routes() []Route {
 		{"POST", "/api/v1/tenants/:tid/issues/batch", "", []string{"ids", "status", "priority", "assigneeUserId"}},
 		{"GET", "/api/v1/tenants/:tid/issue-groups", "", nil},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/comments", "", nil},
-		{"POST", "/api/v1/tenants/:tid/issues/:iid/comments", "", []string{"body", "parentId"}},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/comments", "", []string{"body", "parentId", "targets"}},
 		{"PUT", "/api/v1/tenants/:tid/issues/:iid/comments/:cid", "", []string{"body", "version"}},
 		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/comments/:cid", "", []string{"version"}},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/labels", "", nil},
@@ -65,6 +67,10 @@ func Routes() []Route {
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", nil},
 		{"POST", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", []string{"refType", "refId"}},
 		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/context-refs/:crid", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/timeline", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/interactions", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/collaboration/assist", "", []string{"targetId", "values"}},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/interactions/:ixid/confirm", "", []string{"values", "contextRefs"}},
 		{"GET", "/api/v1/tenants/:tid/projects", "", nil},
 		{"POST", "/api/v1/tenants/:tid/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},
 		{"GET", "/api/v1/tenants/:tid/projects/:pid", "", nil},
@@ -195,7 +201,7 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger) *gin.Engi
 						return
 					}
 				}
-				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), OperationID: c.Param("oid"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user})
+				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), OperationID: c.Param("oid"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), InteractionID: c.Param("ixid"), FormRef: c.Param("formRef"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user})
 			} else {
 				out, e = store.Control(c.Request.Context(), &core.ControlRequest{Action: route.Action, OperationID: c.Param("oid"), EffectID: c.Param("eid"), TicketID: c.Param("ticket"), Body: body, Service: service, Identity: user})
 			}
@@ -242,9 +248,56 @@ func validField(name string, value any) bool {
 			}
 		}
 		return true
-	case "filter", "properties", "input":
+	case "targets":
+		arr, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, v := range arr {
+			m, ok := v.(map[string]any)
+			if !ok {
+				return false
+			}
+			for k, fv := range m {
+				switch k {
+				case "type", "id", "task":
+					if _, ok := fv.(string); !ok {
+						return false
+					}
+				default:
+					return false
+				}
+			}
+		}
+		return true
+	case "filter", "properties", "input", "values":
 		_, ok := value.(map[string]any)
 		return ok
+	case "targetId":
+		_, ok := value.(string)
+		return ok
+	case "contextRefs":
+		arr, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, v := range arr {
+			m, ok := v.(map[string]any)
+			if !ok {
+				return false
+			}
+			for k, fv := range m {
+				switch k {
+				case "refType", "refId":
+					if _, ok := fv.(string); !ok {
+						return false
+					}
+				default:
+					return false
+				}
+			}
+		}
+		return true
 	case "idle", "initialized":
 		_, ok := value.(bool)
 		return ok

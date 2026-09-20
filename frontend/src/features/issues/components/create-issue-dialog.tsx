@@ -29,7 +29,15 @@ import { columnLabel, issueNumber } from '@/features/issues/present'
 import type { IssuePriority, IssueStatusColumn, TenantMember } from '@/features/issues/types'
 
 /** Canonical status keys used before the catalog loads (or when it is empty). */
-const FALLBACK_STATUS_KEYS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled']
+const FALLBACK_STATUS_KEYS = [
+  'backlog',
+  'todo',
+  'in_progress',
+  'in_review',
+  'blocked',
+  'done',
+  'cancelled',
+]
 
 // oxlint-disable-next-line max-lines-per-function -- this dialog owns one cohesive create-issue form and its reset lifecycle.
 export function CreateIssueDialog({

@@ -10,12 +10,15 @@ per-tenant numbers, custom `properties`, search, batch update, saved views, and 
 unit and integration tests pass, the migrations run on PostgreSQL 17 via Docker, everything is verified over HTTP,
 and the schema/data persist across a container restart.
 
-**Subsequent waves (see their own docs):** Wave 3 migrated the formal React frontend into
+**Subsequent waves (see their own docs):** the **frontend wave** migrated the formal React frontend into
 [`frontend/`](../../../frontend/README.md) ([13-frontend-migration.md](13-frontend-migration.md)); **Wave 3A**
 landed the issue-owned collaboration foundation (migration `0007` — polymorphic assignee, comment author actors,
-`issue_runs`, `issue_activities`, `issue_context_refs`). Wave 3A's divergences and the 3B/3C plan are the source of
-truth in [12-collaboration-architecture.md](12-collaboration-architecture.md) (§36 + §0) and
-[06-implementation-log.md](06-implementation-log.md); the record below describes waves 1–2 in detail.
+`issue_runs`, `issue_activities`, `issue_context_refs`); **Wave 3B-0** (docs only) froze the collaboration
+interaction model; **Wave 3B-1** landed the collaboration interaction foundation (migration `0008` —
+`issue_interactions` spine + the first real end-to-end `@` Mention/Task/mock-execution/Timeline chain, with no
+real Agent/Team/Workflow/Runtime). Wave 3A's divergences, the frozen interaction model, and the 3B-1/3B-2/3C plan
+are the source of truth in [12-collaboration-architecture.md](12-collaboration-architecture.md) (§36, §37, §6.4,
+§0) and [06-implementation-log.md](06-implementation-log.md); the record below describes waves 1–2 in detail.
 
 ## Architecture
 

@@ -29,6 +29,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/wanglongan587/cloud/internal/api/router"
+	"github.com/wanglongan587/cloud/internal/collab"
 	"github.com/wanglongan587/cloud/internal/core"
 	"github.com/wanglongan587/cloud/internal/simulator"
 )
@@ -68,6 +69,12 @@ func setup(t *testing.T) *fixture {
 	must(t, e)
 	store, e := core.NewStore(db)
 	must(t, e)
+	// Wire the dev/demo collaboration fixtures so the mock execution path is exercised.
+	store.Directory = collab.FixtureCollaborationDirectory{}
+	store.Context = collab.DeterministicContextBuilder{}
+	store.Dispatcher = collab.MockExecutionDispatcher{}
+	store.Forms = collab.FixtureFormDescriptorProvider{}
+	store.Assist = collab.MockInputAssistProvider{}
 	t.Cleanup(func() {
 		pool.Close()
 		_, err := admin.Exec("DROP SCHEMA " + schema + " CASCADE")

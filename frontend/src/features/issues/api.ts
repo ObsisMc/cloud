@@ -1,15 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AXIOS_INSTANCE } from '@/lib/api-client'
 import type {
+  AssistSuggestion,
+  CollaborationTargetSummary,
+  CommentTargetInput,
   ContextRef,
+  ContextRefRef,
+  FormDescriptor,
+  FormValues,
   Issue,
   IssueComment,
+  IssueInteraction,
   IssuePriority,
   IssueRun,
   IssueStatusColumn,
   Label,
   Page,
   TenantMember,
+  TimelineEntry,
 } from './types'
 
 /**
@@ -113,8 +121,7 @@ export function useMembers(tid: string) {
 export function useCreateIssue(tid: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: CreateIssueInput) =>
-      created<Issue>(`/api/v1/tenants/${tid}/issues`, input),
+    mutationFn: (input: CreateIssueInput) => created<Issue>(`/api/v1/tenants/${tid}/issues`, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: issuesKey(tid) })
     },
@@ -124,11 +131,19 @@ export function useCreateIssue(tid: string) {
 export function useUpdateIssue(tid: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({ id, version, patch }: { id: string; version: number; patch: UpdateIssueInput }) => {
-      const { data } = await AXIOS_INSTANCE.put<Issue>(
-        `/api/v1/tenants/${tid}/issues/${id}`,
-        { ...patch, version },
-      )
+    mutationFn: async ({
+      id,
+      version,
+      patch,
+    }: {
+      id: string
+      version: number
+      patch: UpdateIssueInput
+    }) => {
+      const { data } = await AXIOS_INSTANCE.put<Issue>(`/api/v1/tenants/${tid}/issues/${id}`, {
+        ...patch,
+        version,
+      })
       return data
     },
     onSuccess: (data) => {
@@ -141,7 +156,15 @@ export function useUpdateIssue(tid: string) {
 export function useMoveIssue(tid: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({ id, version, move }: { id: string; version: number; move: MoveIssueInput }) => {
+    mutationFn: async ({
+      id,
+      version,
+      move,
+    }: {
+      id: string
+      version: number
+      move: MoveIssueInput
+    }) => {
       const { data } = await AXIOS_INSTANCE.post<Issue>(
         `/api/v1/tenants/${tid}/issues/${id}/move`,
         { ...move, version },
@@ -182,10 +205,13 @@ export function useComments(tid: string, issueId: string) {
 export function useCreateComment(tid: string, issueId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: { body: string; parentId?: string }) =>
-      created<IssueComment>(`/api/v1/tenants/${tid}/issues/${issueId}/comments`, body),
+    mutationFn: (input: { body: string; parentId?: string; targets?: CommentTargetInput[] }) =>
+      created<IssueComment>(`/api/v1/tenants/${tid}/issues/${issueId}/comments`, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['issue-comments', tid, issueId] })
+      void queryClient.invalidateQueries({ queryKey: ['issue-timeline', tid, issueId] })
+      void queryClient.invalidateQueries({ queryKey: ['issue-interactions', tid, issueId] })
+      void queryClient.invalidateQueries({ queryKey: ['issue-runs', tid, issueId] })
     },
   })
 }
@@ -201,12 +227,134 @@ export function useRuns(tid: string, issueId: string) {
 export function useCreateRun(tid: string, issueId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { executorType: 'agent' | 'team' | 'workflow'; executorId: string; input?: Record<string, unknown> }) =>
-      created<IssueRun>(`/api/v1/tenants/${tid}/issues/${issueId}/runs`, input),
+    mutationFn: (input: {
+      executorType: 'agent' | 'team' | 'workflow'
+      executorId: string
+      input?: Record<string, unknown>
+    }) => created<IssueRun>(`/api/v1/tenants/${tid}/issues/${issueId}/runs`, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['issue-runs', tid, issueId] })
     },
   })
+}
+
+/** Lists collaboration targets for the @ picker (members + directory fixtures), optional `q`. */
+export function useCollaborationTargets(tid: string, q?: string) {
+  return useQuery({
+    queryKey: ['collaboration-targets', tid, q ?? ''],
+    queryFn: () =>
+      listPage<CollaborationTargetSummary>(
+        `/api/v1/tenants/${tid}/collaboration/targets`,
+        q ? { q } : undefined,
+      ),
+    enabled: !!tid,
+  })
+}
+
+/** The issue Timeline: comments and activities merged into one seq-ordered stream. */
+export function useTimeline(tid: string, issueId: string) {
+  return useQuery({
+    queryKey: ['issue-timeline', tid, issueId],
+    queryFn: () => listPage<TimelineEntry>(`/api/v1/tenants/${tid}/issues/${issueId}/timeline`),
+    enabled: !!tid && !!issueId,
+  })
+}
+
+/** The persisted @ interaction spine for an issue (one row per selected target). */
+export function useInteractions(tid: string, issueId: string) {
+  return useQuery({
+    queryKey: ['issue-interactions', tid, issueId],
+    queryFn: () =>
+      listPage<IssueInteraction>(`/api/v1/tenants/${tid}/issues/${issueId}/interactions`),
+    enabled: !!tid && !!issueId,
+  })
+}
+
+/**
+ * Loads the Issues-facing FormDescriptor for a `formRef` (§38.17). The descriptor is a rendering
+ * projection — it is fetched per selection, never embedded in the picker payload.
+ */
+export function useFormDescriptor(tid: string, formRef: string | undefined) {
+  return useQuery({
+    queryKey: ['collaboration-form', tid, formRef ?? ''],
+    queryFn: async () => {
+      const { data } = await AXIOS_INSTANCE.get<FormDescriptor>(
+        `/api/v1/tenants/${tid}/collaboration/forms/${encodeURIComponent(formRef ?? '')}`,
+      )
+      return data
+    },
+    enabled: !!tid && !!formRef,
+  })
+}
+
+/**
+ * Asks for AI suggestions for a Workflow form that has **not** been confirmed yet. The form is a draft
+ * until the user confirms it, so this route is deliberately stateless: no interaction needs to exist,
+ * and the call writes nothing (no comment, no run, no context ref).
+ */
+export function useAssistWorkflow(tid: string, issueId: string) {
+  return useMutation({
+    mutationFn: async (input: { targetId: string; values: FormValues }) => {
+      const { data } = await AXIOS_INSTANCE.post<AssistSuggestion>(
+        `/api/v1/tenants/${tid}/issues/${issueId}/collaboration/assist`,
+        input,
+        { headers: { 'Idempotency-Key': idempotencyKey() } },
+      )
+      return data
+    },
+  })
+}
+
+/**
+ * Confirms a Workflow interaction: the single boundary that turns configuration into an execution
+ * intent. It validates the values, persists the interaction's input and creates the initial run.
+ */
+export function useConfirmWorkflow(tid: string, issueId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      interactionId: string
+      values: FormValues
+      contextRefs?: ContextRefRef[]
+    }) => {
+      const { interactionId, ...body } = input
+      return created<IssueRun>(
+        `/api/v1/tenants/${tid}/issues/${issueId}/interactions/${interactionId}/confirm`,
+        body,
+      )
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['issue-interactions', tid, issueId] })
+      void queryClient.invalidateQueries({ queryKey: ['issue-runs', tid, issueId] })
+      void queryClient.invalidateQueries({ queryKey: ['issue-timeline', tid, issueId] })
+    },
+  })
+}
+
+/**
+ * Records the comment that carries a workflow target and returns the interaction it created. It runs at
+ * confirm time, never at selection time: selecting a workflow must leave no trace in the Timeline until
+ * the user actually confirms the configuration.
+ */
+export async function openWorkflowInteraction(
+  tid: string,
+  issueId: string,
+  targetId: string,
+  body: string,
+): Promise<IssueInteraction> {
+  await AXIOS_INSTANCE.post(
+    `/api/v1/tenants/${tid}/issues/${issueId}/comments`,
+    { body, targets: [{ type: 'workflow', id: targetId }] },
+    { headers: { 'Idempotency-Key': idempotencyKey() } },
+  )
+  const { data } = await AXIOS_INSTANCE.get<Page<IssueInteraction>>(
+    `/api/v1/tenants/${tid}/issues/${issueId}/interactions`,
+  )
+  const mine = data.items.findLast(
+    (item) => item.mode === 'form' && item.runId === null && item.targetId === targetId,
+  )
+  if (!mine) throw new Error('workflow interaction was not created')
+  return mine
 }
 
 export function useContextRefs(tid: string, issueId: string) {
