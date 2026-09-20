@@ -9,10 +9,12 @@ import {
   ListTodo,
   LogOut,
   MessageCircle,
+  Plus,
   Server,
   Sparkles,
   Users,
 } from 'lucide-react'
+import { useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { ActorAvatar } from '@/components/common/actor-avatar'
 import {
@@ -37,7 +39,11 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
+import type { SpaceListItem } from '@/api/generated.schemas'
 import { useInboxItems } from '@/features/inbox/api'
+import { CreateSpaceDialog } from '@/features/spaces/create-space-dialog'
+import { useCurrentSpace } from '@/features/spaces/current-space'
+import { clearCloudCredentials } from '@/lib/cloud-session'
 import { workspacePaths } from '@/lib/paths'
 import { db, workspaceBySlug } from '@/mocks/data/store'
 import { useAuthStore } from '@/state/auth-store'
@@ -58,6 +64,12 @@ const utilityNav = [
   { to: (p: ReturnType<typeof workspacePaths>) => p.settings, label: '设置', icon: Cog },
 ]
 
+/** Workspaces the switcher lists: cloud lists only joined real spaces. */
+function switchableSpaces(cloudMode: boolean, spaces: SpaceListItem[] | undefined) {
+  if (cloudMode) return spaces ?? []
+  return db.workspaces
+}
+
 // oxlint-disable-next-line max-lines-per-function -- this composition root owns the complete sidebar navigation tree.
 export function AppSidebar({ slug }: { slug: string }) {
   const p = workspacePaths(slug)
@@ -65,17 +77,29 @@ export function AppSidebar({ slug }: { slug: string }) {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const clear = useAuthStore((s) => s.clear)
+  const { cloudMode, spaces, tenantId } = useCurrentSpace()
   const { data: inboxItems = [] } = useInboxItems(slug)
   const unreadCount = inboxItems.filter((i) => !i.read).length
   const activeWorkspace = workspaceBySlug(slug) ?? db.workspace
+  // Cloud sessions switch between real spaces (collaboration pages), mock
+  // sessions between the demo store workspaces.
+  const switchable = switchableSpaces(cloudMode, spaces)
+  const [createSpaceOpen, setCreateSpaceOpen] = useState(false)
 
   function handleLogout() {
     clear()
+    clearCloudCredentials()
     void navigate('/login')
   }
 
   return (
     <Sidebar variant="inset">
+      <CreateSpaceDialog
+        open={createSpaceOpen}
+        onOpenChange={setCreateSpaceOpen}
+        tenantId={tenantId}
+        onCreated={(newSlug) => void navigate(`/${newSlug}/projects`)}
+      />
       <SidebarHeader className="py-3">
         <SidebarMenu>
           <SidebarMenuItem>
@@ -109,23 +133,33 @@ export function AppSidebar({ slug }: { slug: string }) {
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
                     工作区
                   </DropdownMenuLabel>
-                  {db.workspaces.map((ws) => (
+                  {switchable.map((ws) => (
                     <DropdownMenuItem
                       key={ws.id}
                       onClick={() => {
-                        if (ws.slug !== slug) void navigate(`/${ws.slug}/issues`)
+                        // Cloud spaces have no mock issue boards; land on projects.
+                        const target = cloudMode ? 'projects' : 'issues'
+                        if (ws.slug !== slug) void navigate(`/${ws.slug}/${target}`)
                       }}
                     >
                       <span
                         className="flex size-5 items-center justify-center rounded-sm text-[10px] font-semibold text-white"
-                        style={{ backgroundColor: ws.avatarColor }}
+                        style={{
+                          backgroundColor: 'avatarColor' in ws ? ws.avatarColor : '#3b82f6',
+                        }}
                       >
                         {ws.name.charAt(0)}
                       </span>
                       <span className="flex-1 truncate">{ws.name}</span>
-                      {ws.id === activeWorkspace.id && <Check className="size-3.5" />}
+                      {ws.slug === slug && <Check className="size-3.5" />}
                     </DropdownMenuItem>
                   ))}
+                  {cloudMode && (
+                    <DropdownMenuItem onClick={() => setCreateSpaceOpen(true)}>
+                      <Plus className="size-3.5" />
+                      新建工作区
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={handleLogout}>
@@ -201,28 +235,30 @@ export function AppSidebar({ slug }: { slug: string }) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>AI 团队</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-0.5">
-              {aiTeamNav.map((item) => {
-                const href = item.to(p)
-                const Icon = item.icon
-                return (
-                  <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton
-                      isActive={pathname.startsWith(href)}
-                      render={<NavLink to={href} />}
-                    >
-                      <Icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {!cloudMode && (
+          <SidebarGroup>
+            <SidebarGroupLabel>AI 团队</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                {aiTeamNav.map((item) => {
+                  const href = item.to(p)
+                  const Icon = item.icon
+                  return (
+                    <SidebarMenuItem key={item.label}>
+                      <SidebarMenuButton
+                        isActive={pathname.startsWith(href)}
+                        render={<NavLink to={href} />}
+                      >
+                        <Icon />
+                        <span>{item.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="p-2">

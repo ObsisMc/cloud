@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { GeneralSettingsPage } from '@/features/settings/general-settings-page'
+import { CurrentSpaceProvider } from '@/features/spaces/current-space'
 import { db } from '@/mocks/data/store'
 import { SettingsLayout } from './settings-layout'
 
@@ -26,7 +27,9 @@ function renderSettings() {
   return render(
     <QueryClientProvider client={queryClient}>
       <SidebarProvider>
-        <RouterProvider router={router} />
+        <CurrentSpaceProvider slug={db.workspace.slug}>
+          <RouterProvider router={router} />
+        </CurrentSpaceProvider>
       </SidebarProvider>
     </QueryClientProvider>,
   )

@@ -13,6 +13,8 @@
 | `setup.ts` | vitest `setupFiles`：每个用例后卸载 Testing Library 渲染的树。 |
 | `http.ts` | `installFakeHttp(body, status)`：替换 `AXIOS_INSTANCE` 的 adapter，记录请求并返回固定响应；测试结束自动还原。 |
 | `http.test.ts` | 验证假适配器本身的记录与错误状态语义，其它测试依赖这些行为。 |
+| `cloud-handlers.ts` | 云空间流程的共享 MSW 替身：测试租户、`cloud-dev` 空间与凭证 fixture（`installCloudSpaceHandlers`）。 |
+| `render.tsx` | `renderWithProviders` / `renderAtRoute`：包好 QueryClient、Sidebar 与 `CurrentSpaceProvider` 的渲染入口。 |
 
 ## 依赖方向
 
