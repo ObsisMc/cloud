@@ -10,6 +10,8 @@
   - [migrations](core/migrations/README.md)：包含按顺序执行、仅向前的 PostgreSQL Schema 迁移脚本和校验和验证。
 - [api](api/README.md)：HTTP 表现层与协议接入层。
   - [router](api/router/README.md)：绑定 HTTP 路由、验证两层 JWT 凭据、在大小限制下解析 JSON 请求体，并将领域错误转换为稳定契约。
+- [gateway](gateway/README.md)：公开认证边界：Login Attempt 与 Browser Session 的 PostgreSQL 存储、provider-neutral 登录编排、内部 JWT 签发、Cookie/CSRF/redirect 防护与 `/api/v1` 代理。
+  - [github](gateway/github/README.md)：GitHub OAuth App 适配器，产生 `VerifiedIdentity`。
 - [contract](contract/README.md)：定义 OpenAPI 3.0 Schema 模型、DTO 结构体与契约覆盖率测试。
 - [repository](repository/README.md)：基于 GORM 管理 PostgreSQL 连接池与启动时快速探活。
 - [config](config/README.md)：加载并校验应用程序配置文件及环境变量覆盖。
@@ -19,7 +21,8 @@
 ## 分层与架构规则
 
 1. **严格单向依赖**：
-   - `cmd/*` $\rightarrow$ `internal/api/router`, `internal/core`, `internal/config`, `internal/logger`, `internal/repository`。
+   - `cmd/*` $\rightarrow$ `internal/api/router`, `internal/gateway`, `internal/core`, `internal/config`, `internal/logger`, `internal/repository`。
+   - `internal/gateway` $\rightarrow$ `internal/core`（仅 `Claims` 类型）、`internal/config`、`internal/logger`；`internal/gateway/github` $\rightarrow$ `internal/gateway`。Gateway 不查询 Cloud 业务表。
    - `internal/api/router` $\rightarrow$ `internal/core`, `internal/contract`。
    - `internal/core` $\rightarrow$ 标准库、`gorm.io/gorm`、`internal/core/migrations`。
    - `internal/repository` $\rightarrow$ `internal/config`, `gorm.io/gorm`。

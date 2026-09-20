@@ -23,6 +23,9 @@
 - **`0004_effect_intent_and_ticket_scope.sql`**：执行意图与 Ticket 作用域约束：
   - 严格将执行 Ticket 限制到活动的 Workspace Node 和有效的准入 epoch。
   - 将持久化的 Effect 声明绑定至特定的操作阶段。
+- **`0005_gateway_auth.sql`**：Gateway 认证表（由 `cmd/gateway` 独占运行时访问）：
+  - `gateway_login_attempts`：一次性登录尝试；只保存 attempt secret 与 `state` 的 SHA-256 digest，`return_to` 在数据库层拒绝绝对、`//`、`/\` 形式，有效期不超过 1 小时，`consumed_at` 保证最多创建一个 session。
+  - `gateway_sessions`：浏览器会话；只保存 token digest，`expires_at` 非空且不超过创建后 90 天，吊销时间与有限的 `revoked_reason` 同时存在，并为 identity 吊销与有界清理建立索引。
 
 ## 校验和完整性与不可变性
 

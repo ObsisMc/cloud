@@ -83,14 +83,16 @@ go run ./cmd/simulator
 
 - **命令与运维入口 (`cmd/`)**：[入口总览 (`cmd/`)](cmd/README.md)
   - [服务守护进程 (`cmd/server`)](cmd/server/README.md)：生产环境 HTTP Daemon 核心。
+  - [认证 Gateway (`cmd/gateway`)](cmd/gateway/README.md)：GitHub OAuth 登录、PostgreSQL 浏览器会话与 `/api/v1` 反向代理。
   - [运维管理工具 (`cmd/cloudctl`)](cmd/cloudctl/README.md)：迁移执行、初始租户引导与凭据引用配置。
   - [本地执行模拟器 (`cmd/simulator`)](cmd/simulator/README.md)：内存与磁盘执行双工演示。
   - [OpenAPI 同步工具 (`cmd/openapi`)](cmd/openapi/README.md)：从 Go 契约自动编译导出 `api/openapi.json`。
   - [代码格式严检门禁 (`cmd/checkformat`)](cmd/checkformat/README.md)：CI 格式静态门禁。
 - **内部核心子系统 (`internal/`)**：[子系统总览 (`internal/`)](internal/README.md)
   - [领域状态机引擎 (`internal/core`)](internal/core/README.md)：聚合根、事务与全局锁、乐观版本控制、租约与幂等。
-  - [PostgreSQL 迁移目录 (`internal/core/migrations`)](internal/core/migrations/README.md)：0001~0004 线性 SQL 迁移与校验和防篡改校验。
+  - [PostgreSQL 迁移目录 (`internal/core/migrations`)](internal/core/migrations/README.md)：0001~0005 线性 SQL 迁移与校验和防篡改校验。
   - [HTTP 路由网关 (`internal/api/router`)](internal/api/router/README.md)：Gin 路由分流、双重 JWT 校验、白名单与 Fault 映射。
+  - [认证边界 (`internal/gateway`)](internal/gateway/README.md)：登录编排、Login Attempt/Session 存储、内部凭据签发、Cookie/CSRF 与代理；[GitHub 适配器 (`internal/gateway/github`)](internal/gateway/github/README.md)。
   - [API 契约定义 (`internal/contract`)](internal/contract/README.md)：OpenAPI 3.0 数据模型与测试。
   - [数据库连接池管理 (`internal/repository`)](internal/repository/README.md)：GORM 连接池、快速探活与安全约束。
   - [配置解析与加载 (`internal/config`)](internal/config/README.md)：Viper 强类型配置与环境变量映射。
@@ -102,4 +104,4 @@ go run ./cmd/simulator
 
 阶段一采用数据库事务级全局 advisory lock 串行核心事务，并限制每 Project 一个未完成 operation。HTTP/Git/Substrate 调用从不持有数据库事务。此选择适用于首版单集群单活，牺牲写吞吐以降低并发不变量复杂度；后续可按租户/Project 细分锁，但必须保持现有并发测试。
 
-容器只打包 server/cloudctl，运行身份为非 root。构建用 `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`，挂载自有配置和公钥；迁移使用同镜像 `--entrypoint /app/cloudctl` 独立执行。仓库 CI 分为两个 workflow：`Backend` 使用 PG service 跑格式/静态检查和 race 集成测试；`Frontend` 只在 `frontend/`、`api/` 或 `internal/contract/` 变化时触发，校验生成客户端与契约一致，并执行格式、lint、类型、测试覆盖率、模块文档/测试、死代码、重复代码与构建门禁（见 `frontend/AGENTS.md`）。Docker 镜像和真实部署不属于本地已验证结果。
+容器打包 server/gateway/cloudctl，运行身份为非 root。构建用 `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`，挂载自有配置和公钥；迁移使用同镜像 `--entrypoint /app/cloudctl` 独立执行，认证 Gateway 使用 `--entrypoint /app/gateway`（见 `docs/gateway.md`）。仓库 CI 分为两个 workflow：`Backend` 使用 PG service 跑格式/静态检查和 race 集成测试；`Frontend` 只在 `frontend/`、`api/` 或 `internal/contract/` 变化时触发，校验生成客户端与契约一致，并执行格式、lint、类型、测试覆盖率、模块文档/测试、死代码、重复代码与构建门禁（见 `frontend/AGENTS.md`）。Docker 镜像和真实部署不属于本地已验证结果。
