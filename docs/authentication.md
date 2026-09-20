@@ -1,6 +1,6 @@
 # 内部认证
 
-Gateway 独占外部登录集成。Cloud 不接入密码、SAML、OAuth 客户端或华为 SDK，也不根据姓名/email 合并账号。Gateway 规范化出 `{source, subject, displayName?}`；`source` 是长期稳定的账号命名空间，`(source,subject)` 联合唯一。
+Gateway 独占外部登录集成。Cloud 不接入密码、SAML、OAuth 客户端或华为 SDK，也不根据姓名/email 合并账号。Gateway 规范化出 `{source, subject, displayName?}`；`source` 是长期稳定的账号命名空间，`(source,subject)` 联合唯一。本仓库的生产 Gateway 是 `cmd/gateway`（GitHub OAuth、PostgreSQL 浏览器会话、`/api/v1` 代理），见 `docs/gateway.md`。
 
 HTTP 使用两种独立签名凭据：`Authorization: Bearer <service JWT>` 证明调用服务，`X-Ora-User-Token: <user JWT>` 证明最终用户。公开 API 要求 gateway 服务；访问检查/执行准入要求 controller 服务及用户凭据；后台控制 API 只要求 controller 服务；Node 接口只要求带资源范围的 node 服务凭据。普通 header 不能替代任何一类签名。
 
@@ -33,7 +33,7 @@ auth:
       public_key_file: /run/ora-keys/node-service.pem
 ```
 
-允许同时配置新旧 key ID 以轮换公钥，重启 server 载入配置。Cloud 从不持有这些私钥。签发权由 Gateway/受控基础设施适配器承担；这里没有另建认证中心。连接层仍应使用 TLS 或受控服务网络，JWT 不负责保密。
+允许同时配置新旧 key ID 以轮换公钥，重启 server 载入配置。Cloud 从不持有这些私钥。签发权由 Gateway/受控基础设施适配器承担；这里没有另建认证中心。`cmd/gateway` 用两把独立的 Ed25519 私钥分别签发 service 与 user 凭据，对应上面 `gateway-service-2026` 与 `user-identity-2026` 两个 purpose 不同的公钥条目。连接层仍应使用 TLS 或受控服务网络，JWT 不负责保密。
 
 service claims 示例（JWT header 同时带 `alg=EdDSA,kid=gateway-service-2026`）：
 

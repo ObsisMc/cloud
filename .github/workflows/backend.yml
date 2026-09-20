@@ -51,4 +51,4 @@ jobs:
           golangci-lint migrate --skip-validation || true
           golangci-lint run
       - run: go test -race -count=1 -v -coverpkg=./internal/... -coverprofile=coverage.out ./...
-      - run: go build ./cmd/server ./cmd/cloudctl ./cmd/simulator
+      - run: go build ./cmd/server ./cmd/gateway ./cmd/cloudctl ./cmd/simulator

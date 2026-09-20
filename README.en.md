@@ -83,14 +83,16 @@ Every subsystem, service command, and tool follows the same rigorous architectur
 
 - **Command and operations entrypoints (`cmd/`)**: [entrypoint overview (`cmd/`)](cmd/README.en.md)
   - [Service daemon (`cmd/server`)](cmd/server/README.en.md): core production HTTP daemon.
+  - [Authentication gateway (`cmd/gateway`)](cmd/gateway/README.en.md): GitHub OAuth login, PostgreSQL browser sessions, and the `/api/v1` reverse proxy.
   - [Operations CLI (`cmd/cloudctl`)](cmd/cloudctl/README.en.md): migrations, initial tenant bootstrap, and credential-reference configuration.
   - [Local execution simulator (`cmd/simulator`)](cmd/simulator/README.en.md): in-memory and disk-backed execution-double demo.
   - [OpenAPI synchronization tool (`cmd/openapi`)](cmd/openapi/README.en.md): automatically compiles the Go contract into `api/openapi.json`.
   - [Strict formatting gate (`cmd/checkformat`)](cmd/checkformat/README.en.md): static CI formatting gate.
 - **Internal core subsystems (`internal/`)**: [subsystem overview (`internal/`)](internal/README.en.md)
   - [Domain state-machine engine (`internal/core`)](internal/core/README.en.md): aggregates, transactions and global locking, optimistic versioning, leases, and idempotency.
-  - [PostgreSQL migration catalog (`internal/core/migrations`)](internal/core/migrations/README.en.md): linear migrations 0001–0004 and checksum integrity verification.
+  - [PostgreSQL migration catalog (`internal/core/migrations`)](internal/core/migrations/README.en.md): linear migrations 0001–0005 and checksum integrity verification.
   - [HTTP routing gateway (`internal/api/router`)](internal/api/router/README.en.md): Gin dispatch, two-tier JWT validation, allowlisting, and Fault projection.
+  - [Authentication boundary (`internal/gateway`)](internal/gateway/README.en.md): login orchestration, Login Attempt/Session store, internal credential issuance, cookie/CSRF policy, and the proxy; [GitHub adapter (`internal/gateway/github`)](internal/gateway/github/README.en.md).
   - [API contract definitions (`internal/contract`)](internal/contract/README.en.md): OpenAPI 3.0 data models and tests.
   - [Database pool management (`internal/repository`)](internal/repository/README.en.md): GORM connection pooling, fail-fast health checks, and security constraints.
   - [Configuration parsing and loading (`internal/config`)](internal/config/README.en.md): strongly typed Viper configuration and environment-variable mapping.
@@ -102,4 +104,4 @@ Every subsystem, service command, and tool follows the same rigorous architectur
 
 Phase one serializes core transactions with a database-level global advisory lock and permits only one unfinished operation per Project. HTTP, Git, and Substrate calls never hold a database transaction. This choice suits the initial single-cluster, active-singleton deployment and trades write throughput for simpler concurrency invariants. Locks may later be partitioned by tenant or Project, but the existing concurrency tests must continue to pass.
 
-The container packages only server and cloudctl and runs as a non-root user. Build it with `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`, mount your own configuration and public keys, and run migrations separately from the same image with `--entrypoint /app/cloudctl`. Repository CI is split into two workflows: `Backend` runs formatting, static checks and race-enabled integration tests against a PostgreSQL service; `Frontend` runs only when `frontend/`, `api/` or `internal/contract/` change, verifies the generated client matches the contract and runs the format, lint, type, coverage, module docs/tests, dead-code, duplication and build gates (see `frontend/AGENTS.md`). Docker images and real deployment are outside the locally validated scope.
+The container packages server, gateway, and cloudctl and runs as a non-root user. Build it with `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`, mount your own configuration and public keys, run migrations separately from the same image with `--entrypoint /app/cloudctl`, and run the authentication Gateway with `--entrypoint /app/gateway` (see `docs/gateway.md`). Repository CI is split into two workflows: `Backend` runs formatting, static checks and race-enabled integration tests against a PostgreSQL service; `Frontend` runs only when `frontend/`, `api/` or `internal/contract/` change, verifies the generated client matches the contract and runs the format, lint, type, coverage, module docs/tests, dead-code, duplication and build gates (see `frontend/AGENTS.md`). Docker images and real deployment are outside the locally validated scope.

@@ -23,6 +23,9 @@ Migrations are executed in ascending numerical sequence:
 - **`0004_effect_intent_and_ticket_scope.sql`**: Execution intent and ticket constraints:
   - Enforces strict scoping of execution tickets to active workspace nodes and valid admission epochs.
   - Binds durable effect declarations to specific operation phases.
+- **`0005_gateway_auth.sql`**: Gateway authentication tables (accessed at runtime only by `cmd/gateway`):
+  - `gateway_login_attempts`: one-shot login attempts; stores only SHA-256 digests of the attempt secret and `state`, rejects absolute, `//` and `/\` `return_to` values at the database layer, bounds the lifetime to one hour, and uses `consumed_at` to guarantee at most one session per attempt.
+  - `gateway_sessions`: browser sessions; stores only the token digest, requires a non-null `expires_at` no later than 90 days after creation, keeps revocation time and the bounded `revoked_reason` together, and indexes identity revocation and bounded cleanup.
 
 ## Checksum integrity and immutability
 
