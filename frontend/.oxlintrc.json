@@ -1,0 +1,89 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc", "unicorn", "import", "jsdoc", "promise", "vitest"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "ignorePatterns": ["src/api/**", "dist/**", "coverage/**", "public/mockServiceWorker.js"],
+  "rules": {
+    "react/react-in-jsx-scope": "off",
+    "react/only-export-components": "off",
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "error",
+    "react/no-unstable-nested-components": "error",
+    "react/no-array-index-key": "error",
+
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-namespace": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-inferrable-types": "error",
+
+    "import/no-cycle": "error",
+    "import/no-relative-parent-imports": "error",
+    "import/no-default-export": "error",
+    "import/no-namespace": "error",
+    "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
+
+    "promise/catch-or-return": "error",
+
+    "no-console": ["error", { "allow": ["warn", "error"] }],
+    "no-nested-ternary": "error",
+    "no-await-in-loop": "error",
+
+    "max-lines": ["error", { "max": 800, "skipBlankLines": true, "skipComments": true }],
+    "max-lines-per-function": ["error", { "max": 100, "skipBlankLines": true, "skipComments": true, "IIFEs": true }],
+    "max-depth": ["error", 4],
+    "max-params": ["error", 4],
+    "complexity": ["error", 15],
+    "react/jsx-max-depth": ["error", { "max": 8 }],
+
+    "jsdoc/check-tag-names": "error",
+    "jsdoc/check-property-names": "error",
+    "jsdoc/check-access": "error",
+    "jsdoc/empty-tags": "error",
+    "jsdoc/no-defaults": "error",
+    "jsdoc/no-blank-blocks": "error",
+    "jsdoc/require-param-name": "error",
+    "jsdoc/require-param-description": "error",
+    "jsdoc/require-returns-description": "error",
+    "jsdoc/require-property": "error",
+    "jsdoc/require-property-name": "error",
+    "jsdoc/require-property-description": "error",
+    "jsdoc/require-throws-description": "error",
+    "jsdoc/require-yields-description": "error",
+    "jsdoc/require-param-type": "off",
+    "jsdoc/require-returns-type": "off",
+    "jsdoc/require-property-type": "off",
+
+    "unicorn/filename-case": ["error", { "case": "kebabCase" }]
+  },
+  "overrides": [
+    {
+      "files": ["*.config.ts", "*.config.mjs", "scripts/**"],
+      "rules": {
+        "import/no-default-export": "off",
+        "no-console": "off"
+      }
+    },
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "rules": {
+        "max-lines-per-function": "off",
+        "vitest/no-focused-tests": "error",
+        "vitest/no-disabled-tests": "error",
+        "vitest/expect-expect": "error",
+        "vitest/no-identical-title": "error",
+        "vitest/valid-expect": "error"
+      }
+    },
+    {
+      "files": ["src/test/setup.ts"],
+      "rules": {
+        "import/no-unassigned-import": "off"
+      }
+    }
+  ]
+}

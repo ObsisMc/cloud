@@ -6,7 +6,7 @@ Migrate the **Issue Board (Kanban)** capability from the reference project **Mul
 (`multica-ai/multica`) into **Ora Cloud** (`ora-space/cloud`), re-implemented in Ora Cloud's
 own architecture — additive-first, minimizing changes to existing Cloud code.
 
-**In scope (two waves):**
+**In scope (three waves):**
 
 *Wave 1 — core board:*
 
@@ -30,6 +30,16 @@ own architecture — additive-first, minimizing changes to existing Cloud code.
 
 - New PostgreSQL migrations (0005 + 0006) + verification against PostgreSQL 17.
 - Integration tests + a runnable browser demo.
+
+*Wave 3 — formal frontend (see [13-frontend-migration.md](13-frontend-migration.md)):*
+
+- Migrate the reference frontend into `frontend/` as Cloud's official web UI (React 19 + TS + Vite +
+  Tailwind 4 + TanStack Query), generated API client, dual-JWT via `cmd/ora-web`.
+- Issue board/CRUD/status/priority/assignee/labels/comments/subscribers/search/batch/views +
+  Wave 3A surfaces (`assigneeType`/`assigneeId`/`projectRef`, comment thread + author actor,
+  IssueRun, IssueContextRef) against the real HTTP API.
+- Agent/team assignee, project details, execution, realtime, PR, logs — unavailable placeholders,
+  not faked.
 
 ## Non-goals (still deferred)
 

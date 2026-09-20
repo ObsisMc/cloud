@@ -1,7 +1,7 @@
 # 开发进度（新员工向）
 
 一眼看清 Ora Cloud 目前**做到哪了、在进行什么、刻意没做什么**。更新于 Issue Board 第三波
-协作地基的第一个编码批次（3A — issue-owned 地基）完成后、3B+ 待规划。
+协作地基（3A — issue-owned 地基）与正式前端（`frontend/`）迁移完成后、3B+ 待规划。
 
 图例：✅ 已完成 · 🚧 进行中 · 🧭 规划中（仅架构方案，未编码） · ⏸️ 刻意暂缓 · ❌ 未开始
 
@@ -84,6 +84,24 @@
 | 机器人 / 小组负责人 / Workflow / Autopilot | 🧭⏸️ | agent/team/workflow 走第三波的端口 + 模拟适配器；Autopilot 本体仍暂缓 |
 | 富表格 / 图形视图 | ⏸️ | 分组视图已是一等端点，任意视图引擎未做 |
 
+## Web 前端（正式）
+
+正式前端在 [`frontend/`](../../frontend/README.md)（React 19 + TS + Vite + Tailwind 4 + TanStack
+Query），从参考项目 `cloud前端/` 迁移而来，API 层由 orval 从 `api/openapi.json` 生成，鉴权复用
+双 JWT（`cmd/ora-web` 服务端签 token，浏览器只持会话 cookie + profile）。与
+`cmd/demo-issue-board-web`（单文件看板演示，仅手工验证接口）并存、互不替代。
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| 看板（列 / 卡片 / 拖拽移动） | ✅ | 走真实 `/issues` + `/move`，分数 position |
+| Issue 详情 | ✅ | 左 Activity/评论 + 右属性/执行占位 |
+| 状态 / 优先级 / 负责人 / 描述 | ✅ | 真实接口；agent/team 负责人暂不可用 |
+| 评论 / 标签 / 订阅 / 搜索 / 批量 / 视图 | ✅ | 对应第二波后端接口 |
+| IssueRun（运行） | ✅ | 仅列表/创建，展示「已入队」而非「执行中」 |
+| ContextRef（上下文引用） | ✅ | 仅列表/增/删，不智能解析 |
+| projectRef / agent / team / 执行 / 实时 / PR / 日志 | 🧭⏸️ | 后端无对应能力，前端给「暂不可用 / Coming later」占位 |
+| 前端门禁（lint/typecheck/test/build） | ✅ | 需 Node >= 24；CI 与 `task frontend:check` 同门禁 |
+
 ## 已知限制
 
 - 看板列表不分页（一次返回整个租户的所有卡片）。
@@ -100,6 +118,7 @@
 | — | Issue 看板 第一波（核心看板，migration 0005） |
 | 最近 | Issue 看板 第二波（周边功能，migration 0006）+ 文档体系 |
 | — | Issue 协作地基 3A（issue-owned 地基，migration 0007） |
+| 最近 | 正式前端迁移（`frontend/`，从 `cloud前端/` 迁入） |
 | 下一步 | Issue 协作地基 3B+（ports → 模拟适配器 → Issue Detail 投影）＋ 生产 Substrate / 看板分页与全文搜索 / 实时推送 |
 
 > 想看每个功能对应的接口和表，去 [../agent/api-reference.md](../agent/api-reference.md) 和

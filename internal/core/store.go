@@ -288,6 +288,24 @@ func (s *Store) Bootstrap(ctx context.Context, name, source, subject, display st
 	})
 }
 
+// EnsureMember resolves or provisions a user identity and guarantees an active membership in the
+// given tenant, returning the user object. It exists only for the local development edge server
+// (cmd/ora-web), which signs a user token for an arbitrary login subject and must attach that user
+// to its bootstrap tenant before they can read the board; it is never a public HTTP path.
+func (s *Store) EnsureMember(ctx context.Context, tid, source, subject, display string) (Object, error) {
+	return s.transact(ctx, func(t *transaction) Object {
+		require(validID(tid), 404, "not_found")
+		u := identity(t, source, subject, display)
+		uid := u.S("id")
+		if t.one("SELECT user_id FROM tenant_memberships WHERE tenant_id=$1 AND user_id=$2", tid, uid) == nil {
+			t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'member','active')", tid, uid)
+		} else {
+			t.exec("UPDATE tenant_memberships SET status='active' WHERE tenant_id=$1 AND user_id=$2 AND status<>'active'", tid, uid)
+		}
+		return u
+	})
+}
+
 // ConfigureCredential is deliberately a deployment-only management path, never a public secret API.
 func (s *Store) ConfigureCredential(ctx context.Context, tid, owner, ref string) (Object, error) {
 	return s.transact(ctx, func(t *transaction) Object {

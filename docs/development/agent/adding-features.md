@@ -24,6 +24,9 @@ Touch exactly these (in order):
    `inputSchema` + `optionalField` (+ `isList` for list endpoints). Insert resource branches
    **before** the `Contains(path,"/issues")` fallthrough (trap #2).
 7. **Regenerate** — `go run ./cmd/openapi` → rewrites `api/openapi.json` (required, trap #4).
+   If the frontend client should consume the new endpoint too, run `task frontend:generate` and commit
+   `api/openapi.json` together with `frontend/src/api` (the drift is checked by the CI `frontend` job
+   and `TestPublishedOpenAPIIsValidAndCurrent`).
 8. **Test** — `integration/…_test.go`: drive it through the router via `f.call`/`f.path` (see
    `issues_test.go` / `issue_extensions_test.go`). The validating transport checks every response.
 

@@ -69,6 +69,26 @@ go run ./cmd/simulator
 
 演示启动独立 loopback HTTP cloud/Substrate，创建测试租户、bare repo、main linked worktree、模拟 sandbox 和 Node，再输出 Ready Workspace。磁盘在 `.local/demo/`，PG 记录保留；再次运行创建新的演示租户。模拟器没有生产基础设施凭据，不部署 Kubernetes，不启动真实 Agent/Deno。
 
+## 前端
+
+正式 Web 前端在 [`frontend/`](frontend/README.md)：React 19 + TypeScript + Vite + Tailwind CSS 4 +
+TanStack Query，API 层由 [orval](https://orval.dev) 从 [`api/openapi.json`](api/openapi.json) 编译
+生成，独立安装、开发、构建：
+
+```sh
+cd frontend
+npm ci                 # Node >= 24，见 frontend/.node-version
+npm run dev            # Vite dev server（:5173），/api、/internal、/healthz 代理到 :8080
+npm run build          # tsc -b && vite build
+```
+
+鉴权复用 Cloud 的双 JWT：浏览器只持有会话 cookie + 用户 profile，令牌由边缘服务 `cmd/ora-web`
+在服务端签名（浏览器不可信）。dev 联调需真实 PostgreSQL，按上文「本地验证」起库并 `task run`
+（:8080），再 `npm run dev`。
+
+与 demo 的区分：`cmd/demo-issue-board-web` 是单文件 HTML 的看板演示（无前端依赖、无 CORS、
+服务端签 JWT），只用于手工验证 Issue 接口；`frontend/` 才是正式产品前端。二者并存、互不替代。
+
 ## 契约与边界
 
 - [OpenAPI 3.0](api/openapi.json)：所有 19 个公开接口、15 个内部接口和 health。`task openapi` 重新生成，测试校验文档合法性、生成结果和实际 HTTP 响应结构。

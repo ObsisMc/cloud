@@ -70,7 +70,8 @@ Ora Cloud 是一个**云端开发环境编排平台**的权威存储与控制面
 ## 它和 Multica 的关系
 
 Issue 看板能力迁移自参考项目 Multica，但**完全按 Ora Cloud 自己的架构重写**（不是抄代码）。
-两次迁移：第一波做了核心看板，第二波补齐了评论/标签/订阅/编号/搜索/批量等周边。完整故事在
+三次迁移：第一波做了核心看板，第二波补齐了评论/标签/订阅/编号/搜索/批量等周边，第三波把正式
+Web 前端迁入 [`frontend/`](../../frontend/README.md)。完整故事在
 [../../migrations/multica-issue-board/](../../migrations/multica-issue-board/)。
 
 ## 下一步读什么
@@ -78,7 +79,7 @@ Issue 看板能力迁移自参考项目 Multica，但**完全按 Ora Cloud 自�
 | 我想… | 去读 |
 | --- | --- |
 | 知道哪些做完了、哪些还没做 | [progress.md](progress.md) |
-| 跑起来看看 | 根目录 README / `scripts/demo-issue-board-web.sh` |
+| 跑起来看看 | 根目录 README / `scripts/demo-issue-board-web.sh`（看板演示）· `frontend/`（正式前端） |
 | 改代码、加功能 | [../agent/architecture.md](../agent/architecture.md) → [../agent/adding-features.md](../agent/adding-features.md) |
 | 查某个接口的字段 | [../agent/api-reference.md](../agent/api-reference.md) |
 | 查某张表的结构 | [../agent/database.md](../agent/database.md) |
