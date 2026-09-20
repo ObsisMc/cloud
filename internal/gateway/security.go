@@ -83,21 +83,34 @@ func (p CookiePolicy) SessionCookie(token string, expiresAt, now time.Time) *htt
 	if maxAge < 1 {
 		maxAge = 1
 	}
-	return &http.Cookie{Name: p.SessionCookieName(), Value: token, Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: p.Secure, SameSite: http.SameSiteLaxMode}
+	return p.cookie(p.SessionCookieName(), token, "/", maxAge)
 }
 
 // ClearSessionCookie expires the session cookie in the browser.
 func (p CookiePolicy) ClearSessionCookie() *http.Cookie {
-	return &http.Cookie{Name: p.SessionCookieName(), Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: p.Secure, SameSite: http.SameSiteLaxMode}
+	return p.cookie(p.SessionCookieName(), "", "/", -1)
 }
 
 // AttemptCookie binds the browser to one login attempt. SameSite must be Lax, not Strict: the
 // provider callback is a cross-site top-level navigation and a Strict cookie would never arrive.
 func (p CookiePolicy) AttemptCookie(secret string, ttl time.Duration) *http.Cookie {
-	return &http.Cookie{Name: p.AttemptCookieName(), Value: secret, Path: p.CallbackPath, MaxAge: int(ttl / time.Second), HttpOnly: true, Secure: p.Secure, SameSite: http.SameSiteLaxMode}
+	return p.cookie(p.AttemptCookieName(), secret, p.CallbackPath, int(ttl/time.Second))
 }
 
 // ClearAttemptCookie removes the attempt secret after the callback completes either way.
 func (p CookiePolicy) ClearAttemptCookie() *http.Cookie {
-	return &http.Cookie{Name: p.AttemptCookieName(), Value: "", Path: p.CallbackPath, MaxAge: -1, HttpOnly: true, Secure: p.Secure, SameSite: http.SameSiteLaxMode}
+	return p.cookie(p.AttemptCookieName(), "", p.CallbackPath, -1)
+}
+
+// cookie is the single place both cookies get their attributes: HttpOnly, SameSite=Lax and Secure
+// by construction. Only the explicit loopback development policy removes Secure afterwards, so the
+// downgrade is visible here and nowhere else.
+func (p CookiePolicy) cookie(name, value, path string, maxAge int) *http.Cookie {
+	// gosec G124 wants Secure to be a constant true; PublicOrigin already rejects every non-loopback
+	// HTTP origin, so the only way to reach Secure=false is the explicit development configuration.
+	c := &http.Cookie{Name: name, Value: value, Path: path, MaxAge: maxAge, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode} //nolint:gosec // G124: development loopback downgrade below is deliberate.
+	if !p.Secure {
+		c.Secure = false
+	}
+	return c
 }

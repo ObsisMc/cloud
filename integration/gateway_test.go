@@ -14,6 +14,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -507,7 +508,8 @@ func TestGatewayLoginAttemptReplayStateAndConcurrentConsume(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
-	if !((results[0] == http.StatusSeeOther && results[1] == http.StatusUnauthorized) || (results[1] == http.StatusSeeOther && results[0] == http.StatusUnauthorized)) {
+	slices.Sort(results)
+	if results[0] != http.StatusSeeOther || results[1] != http.StatusUnauthorized {
 		t.Fatalf("exactly one concurrent callback may win: %v", results)
 	}
 	if n := f.count("SELECT count(*) FROM gateway_sessions WHERE revoked_at IS NULL"); n != 2 {
