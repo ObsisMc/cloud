@@ -1,7 +1,7 @@
 # 开发进度（新员工向）
 
 一眼看清 Ora Cloud 目前**做到哪了、在进行什么、刻意没做什么**。更新于 Issue Board 第三波
-协作地基（3A — issue-owned 地基）与正式前端（`frontend/`）迁移完成后、3B+ 待规划。
+协作地基（Wave 3A — issue-owned 地基）与正式前端（`frontend/`）迁移完成后、3B/3C 待规划。
 
 图例：✅ 已完成 · 🚧 进行中 · 🧭 规划中（仅架构方案，未编码） · ⏸️ 刻意暂缓 · ❌ 未开始
 
@@ -48,9 +48,9 @@
 
 架构方案见 [12-collaboration-architecture.md](../../migrations/multica-issue-board/12-collaboration-architecture.md)
 （rev. 2：Issues 只拥有 Issue 域，外部能力一律走稳定 port）。已落地 **3A — issue-owned 地基**
-（migration `0007` + 持久化/API-contract 脊柱）；其余为 3B+ 待编码。
+（migration `0007` + 持久化/API-contract 脊柱）；其余为 3B / 3C 待编码。
 
-#### 3A — issue-owned 地基 ✅（已编码）
+#### 3A — issue-owned 地基 ✅ IMPLEMENTED / REVIEWED
 
 | 功能 | 状态 | 说明 |
 | --- | --- | --- |
@@ -62,16 +62,27 @@
 | Sub-Issue context | ✅ | `issue_context_refs`（引用而非复制，硬删） |
 | 迁移 / API-contract 脊柱 | ✅ | `0007` + `PublicRequest`/`router`/`validField`/OpenAPI（`IssueRun`/`ContextRef` schema） |
 
-#### 3B+ — 待编码 🧭
+#### 3B — Collaboration Integration Shell 🧭（待编码）
 
 | 功能 | 状态 | 说明 |
 | --- | --- | --- |
-| 模块边界 + 集成端口 | 🧭 | Issues 拥有 Issue 域；Agent/Team/Workflow/Runtime/通知/实时/PR/日志走稳定 contract/port，三态 Unavailable/Simulator/Real |
-| Issue Detail（协作产品面） | 🧭 | 左栏 Activity/Timeline + 右栏 Properties/Development/Execution（投影 + UI） |
-| Agent/Team 引用（临时调试目录） | 🧭 | Issue 只存 actor ref；dev 用 `sim_*` 目录 + FakeResolver，明确临时、有替换边界 |
+| 集成端口（consuming-side seams） | 🧭 | Go interface：ActorResolver、ExecutionDispatcher（含 ExecutionObserver）、WorkflowResolver（含 CapabilityDescriptor）、ProjectContextResolver、NotificationSink、RealtimePublisher、ExecutionLogProvider；三态 Unavailable/Simulator/Real |
+| 模拟执行器（in-memory 适配器） | 🧭 | 内存 dev fixture 实现同一 port（**不再建 `sim_*` 关系表**，rev.2 的 `0008` sim catalog 已作废）；Issue 核心无 `if runtimeExists` |
 | 显式 @targets + 对话目标 | 🧭 | 显式解析目标为 contract（非纯正则）；ConversationTarget 续接当前执行者 |
 | Workflow Invocation | 🧭 | 可执行 capability（非 Actor）；schema → 预填 → 补缺 → 用户确认 → 调用 |
-| 模拟执行器（adapter） | 🧭 | Fake 适配器实现同一 port；Issue 核心无 `if runtimeExists` |
+
+#### 3C — Issue Detail & Collaboration UI 🧭（待编码）
+
+| 功能 | 状态 | 说明 |
+| --- | --- | --- |
+| Issue Detail（协作产品面） | 🧭 | 左栏 Activity/Timeline + 右栏 Properties/Development/Execution（投影 + UI） |
+| Timeline 分页/truncation、执行日志、PR、通知、实时 | 🧭⏸️ | 依赖 3B 端口 + 外部模块（logs/PR/通知/实时均非 issue-domain） |
+
+#### 真实 Agent / Team / Workflow 集成 — 🚫 BLOCKED ON EXTERNAL DESIGN
+
+Issues **不定义** Agent / Team / Workflow 的**内部实现**（三者 internal design = **UNKNOWN**）。
+真实 Agent/Team/Workflow 模块、Runtime/LLM、通知/实时/PR/日志的后端一律 **BLOCKED ON EXTERNAL
+DESIGN** —— 只在未来这些模块落地时通过 3B 的同一 port 接入；Issues 只约束 consuming-side contract。
 
 ### 刻意暂缓（本期不做）
 
@@ -81,7 +92,7 @@
 | 卡片绑定 project | ⏸️ | Cloud 的 project 语义不同（开发环境，非轻量分组） |
 | 关联 Pull Request | ⏸️ | 需接外部 Git 服务 |
 | 实时推送（WebSocket） | ⏸️ | 无事件总线 |
-| 机器人 / 小组负责人 / Workflow / Autopilot | 🧭⏸️ | agent/team/workflow 走第三波的端口 + 模拟适配器；Autopilot 本体仍暂缓 |
+| 机器人 / 小组负责人 / Workflow / Autopilot | 🧭⏸️ | agent/team/workflow 走 3B 的 port + in-memory 适配器（真实模块 BLOCKED ON EXTERNAL DESIGN）；Autopilot 本体仍暂缓 |
 | 富表格 / 图形视图 | ⏸️ | 分组视图已是一等端点，任意视图引擎未做 |
 
 ## Web 前端（正式）
@@ -119,7 +130,7 @@ Query），从参考项目 `cloud前端/` 迁移而来，API 层由 orval 从 `a
 | 最近 | Issue 看板 第二波（周边功能，migration 0006）+ 文档体系 |
 | — | Issue 协作地基 3A（issue-owned 地基，migration 0007） |
 | 最近 | 正式前端迁移（`frontend/`，从 `cloud前端/` 迁入） |
-| 下一步 | Issue 协作地基 3B+（ports → 模拟适配器 → Issue Detail 投影）＋ 生产 Substrate / 看板分页与全文搜索 / 实时推送 |
+| 下一步 | Wave 3B（Collaboration Integration Shell）→ Wave 3C（Issue Detail & Collaboration UI）；生产 Substrate / 看板分页与全文搜索 / 实时推送 |
 
 > 想看每个功能对应的接口和表，去 [../agent/api-reference.md](../agent/api-reference.md) 和
 > [../agent/database.md](../agent/database.md)。想看迁移的完整决策记录，去

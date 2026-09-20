@@ -10,6 +10,13 @@ per-tenant numbers, custom `properties`, search, batch update, saved views, and 
 unit and integration tests pass, the migrations run on PostgreSQL 17 via Docker, everything is verified over HTTP,
 and the schema/data persist across a container restart.
 
+**Subsequent waves (see their own docs):** Wave 3 migrated the formal React frontend into
+[`frontend/`](../../../frontend/README.md) ([13-frontend-migration.md](13-frontend-migration.md)); **Wave 3A**
+landed the issue-owned collaboration foundation (migration `0007` — polymorphic assignee, comment author actors,
+`issue_runs`, `issue_activities`, `issue_context_refs`). Wave 3A's divergences and the 3B/3C plan are the source of
+truth in [12-collaboration-architecture.md](12-collaboration-architecture.md) (§36 + §0) and
+[06-implementation-log.md](06-implementation-log.md); the record below describes waves 1–2 in detail.
+
 ## Architecture
 
 ```
@@ -113,6 +120,10 @@ machinery), schema-less `properties`, no polymorphic assignee, no project bindin
 idempotency keys on POST/DELETE, `{resource}`-wrapped create, status-only move re-ranks to column top,
 soft delete with explicit child orphan, batch without per-issue version guard, saved-view filters not
 applied server-side, subscriptions without notification pipeline.
+
+> Wave 3A later **re-opened** two items above — polymorphic `assignee_type/assignee_id` and nullable
+> `project_ref` — see [12-collaboration-architecture.md](12-collaboration-architecture.md) §36 and
+> [08-differences.md](08-differences.md) §"Wave 3A divergences".
 
 ## Known limitations
 

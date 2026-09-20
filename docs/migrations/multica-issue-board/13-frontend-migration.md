@@ -38,7 +38,7 @@ of faking production behavior:
 
 ## Not in scope this pass (do not build)
 
-Wave 3B ports, the 0008 simulator catalog, fake Agent/Team/Workflow/Executor backends, real agent
+Wave 3B ports, the (superseded) 0008 simulator catalog, fake Agent/Team/Workflow/Executor backends, real agent
 execution, workflow backend, realtime, PR backend, execution-logs backend, notification system,
 LLM/runtime.
 

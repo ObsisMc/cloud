@@ -18,13 +18,15 @@ Legend: 🔑 = `Idempotency-Key` required · 🔢 = `version` precondition (428/
 
 ## Issues (board)
 
-`Issue`: `id, tenantId, creatorUserId, assigneeUserId?, parentIssueId?, title, description, status,
-priority, position, number, properties, labels[], version, createdAt, updatedAt, deletedAt?`.
+`Issue`: `id, tenantId, creatorUserId, assigneeType, assigneeId?, assigneeUserId?, parentIssueId?,
+projectRef?, title, description, status, priority, position, number, properties, labels[], version,
+createdAt, updatedAt, deletedAt?`. Non-`user` `assigneeType`/`assigneeId` and `projectRef` are opaque
+refs — shape-validated, not resolved this wave.
 
 | Method | Path | Body fields | Response |
 | --- | --- | --- | --- |
 | GET | `/issues` | query `?q=` | `{items, nextCursor}` |
-| POST 🔑 | `/issues` | `title`*, `description`, `status`, `priority`, `assigneeUserId`, `parentIssueId`, `properties` | `{resource: Issue}` |
+| POST 🔑 | `/issues` | `title`*, `description`, `status`, `priority`, `assigneeUserId`, `assigneeType`, `assigneeId`, `parentIssueId`, `projectRef`, `properties` | `{resource: Issue}` |
 | GET | `/issues/{iid}` | — | Issue |
 | PUT | `/issues/{iid}` | any create field + 🔢`version` | Issue |
 | DELETE 🔑 | `/issues/{iid}` | 🔢`version` | Issue (soft-deleted) |
@@ -49,7 +51,7 @@ priority, position, number, properties, labels[], version, createdAt, updatedAt,
 | PUT | `/issue-views/{vid}` | `name`, `filter`, 🔢`version` | IssueView |
 | DELETE 🔑 | `/issue-views/{vid}` | 🔢`version` | IssueView |
 | GET | `/issues/{iid}/comments` | — | `{items:[Comment]}` |
-| POST 🔑 | `/issues/{iid}/comments` | `body`* | `{resource: Comment}` |
+| POST 🔑 | `/issues/{iid}/comments` | `body`*, `parentId` (threading) | `{resource: Comment}` |
 | PUT | `/issues/{iid}/comments/{cid}` | `body`, 🔢`version` | Comment |
 | DELETE 🔑 | `/issues/{iid}/comments/{cid}` | 🔢`version` | Comment |
 | GET | `/issues/{iid}/labels` | — | `{items:[Label]}` |
@@ -58,6 +60,32 @@ priority, position, number, properties, labels[], version, createdAt, updatedAt,
 | GET | `/issues/{iid}/subscribers` | — | `{items:[User]}` |
 | POST 🔑 | `/issues/{iid}/subscribers` | `userId`* | `{resource: User}` |
 | DELETE 🔑 | `/issues/{iid}/subscribers` | `userId`* | `{resource: User}` |
+
+## Issue collaboration (Wave 3A)
+
+`IssueRun`: `id, tenantId, issueId, version, executorType, executorId, status, externalExecutionId?,
+executionContextRef?, workflowInvocationRef?, triggerEvidenceKind, triggerEvidenceRefId?, parentRunId?,
+retryOfRunId?, rerunOfRunId?, delegatedFromRunId?, attempt, maxAttempts, input, result?, error?,
+failureReason?, triggerSummary, queuedAt, dispatchedAt?, startedAt?, completedAt?, fireAt?,
+leaseExpiresAt?, createdAt, updatedAt, deletedAt?`. `executorType ∈ agent|team|workflow` (opaque ref,
+unresolved); `status` is an SQL-WHERE-guarded 7-state machine
+(`queued/dispatched/running/completed/failed/cancelled/deferred`).
+
+`ContextRef`: `id, tenantId, issueId, refType, refId, createdAt`.
+
+Wave 3A also extended `Comment` with `authorType`/`authorId`/`parentId`/`seq` (uniform author ActorRef,
+threading, shared per-issue timeline `seq`).
+
+| Method | Path | Body fields | Response |
+| --- | --- | --- | --- |
+| GET | `/issues/{iid}/runs` | — | `{items:[IssueRun]}` |
+| POST 🔑 | `/issues/{iid}/runs` | `executorType`*, `executorId`*, `input`(object) | `{resource: IssueRun}` (`status=queued`; pending-executor dup → 409 `pending_run_exists`) |
+| GET | `/issues/{iid}/runs/{rid}` | — | IssueRun |
+| GET | `/issues/{iid}/context-refs` | — | `{items:[ContextRef]}` |
+| POST 🔑 | `/issues/{iid}/context-refs` | `refType`*, `refId`* | `{resource: ContextRef}` |
+| DELETE 🔑 | `/issues/{iid}/context-refs/{crid}` | — | ContextRef (hard delete) |
+
+There is **no** `DELETE /issues/{iid}/runs/{rid}` — terminal runs are history, not deletable.
 
 ## Projects / workspaces / operations
 
@@ -104,7 +132,7 @@ Service-only (no user token except where noted). `epoch` = controller fencing. S
 | default (incl. `title`, `status`, `name`, `body`, `key`, …) | string |
 | `version`, `epoch`, `position`, `retrySeconds`, … | integer (json.Number, Int64) |
 | `ids` | array of strings |
-| `filter`, `properties` | object |
+| `filter`, `properties`, `input` | object |
 | `idle`, `initialized` | bool |
 
 Unknown body key → 400 `unknown_field`; wrong type → 400 `invalid_field_type`; `null` body on

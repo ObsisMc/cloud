@@ -29,6 +29,17 @@ docs/
   execution-contract.md         ← execution/operations contract (pre-existing)
 ```
 
+## Source of truth (one doc per topic)
+
+| Topic | Where | Notes |
+| --- | --- | --- |
+| **Project status / roadmap** | [progress.md](development/onboarding/progress.md) | done / in-progress / planned / deferred / blocked |
+| **Issue architecture** | [agent/architecture.md](development/agent/architecture.md) + [12-collaboration-architecture.md](migrations/multica-issue-board/12-collaboration-architecture.md) | the latter is the frozen Wave-3 design (rev. 2) |
+| **API** | [agent/api-reference.md](development/agent/api-reference.md) | live endpoint/field reference; `api/openapi.json` is the machine truth |
+| **Database** | [agent/database.md](development/agent/database.md) | live table + migration inventory |
+| **Collaboration / integration contract** | [12-collaboration-architecture.md](migrations/multica-issue-board/12-collaboration-architecture.md) §6.2 | consuming-side seams (ports); all planned |
+| **How to add code** | [agent/adding-features.md](development/agent/adding-features.md) | endpoint / sub-resource how-to + verify |
+
 ## Repo layout (one glance)
 
 | Path | What lives there |
@@ -45,8 +56,14 @@ docs/
 ## Current status (see [progress.md](development/onboarding/progress.md) for detail)
 
 - ✅ Core platform: tenants, memberships, identity, projects, workspaces, operations.
-- ✅ **Issue Board — wave 1** (core Kanban) and **wave 2** (status catalog, comments, labels,
-  subscribers, numbers, properties, search, batch, saved views, groups). Migrations 0005 + 0006.
+- ✅ **Issue Board** — wave 1 (core Kanban), wave 2 (status catalog, comments, labels, subscribers,
+  numbers, properties, search, batch, saved views, groups) and **Wave 3A** (collaboration
+  foundation: polymorphic assignee, comment author actors, IssueRun, timeline projection, context
+  refs). Migrations 0005–0007; the formal React frontend in `frontend/` is migrated and speaks to
+  the real API.
+- 🧭 Planned — **Wave 3B** (Collaboration Integration Shell: ports → in-memory dev fixtures) and
+  **Wave 3C** (Issue Detail & Collaboration UI). Real Agent/Team/Workflow modules are **blocked on
+  external design**.
 - ⏸️ Deferred: attachments, issue↔project binding, PR links, realtime, bots/squads, Autopilot.
 
 ## Golden rules (both audiences)

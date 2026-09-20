@@ -107,7 +107,7 @@ Envelope `{code, params, requestId}`. Common codes by status:
 | Public dispatch + shared helpers | `internal/core/public.go` |
 | Store / transact / Object / Fault / Migrate | `internal/core/store.go` |
 | Control (internal) dispatch | `internal/core/control.go` |
-| Issue board | `internal/core/issues.go`, `issue_*.go` |
+| Issue board + collaboration foundation | `internal/core/issues.go`, `issue_{statuses,comments,labels,subscribers,views,runs,activities,context_refs}.go` |
 | Projects / workspaces / operations | `internal/core/{project,workspace,operation,node}.go` |
 | OpenAPI generator | `internal/contract/openapi.go` |
 | Migrations | `internal/core/migrations/NNNN_*.sql` |
@@ -132,10 +132,14 @@ landed; the cross-module port layer and projections have not.
 - **Integration ports** — the Go interfaces (`ActorResolver`, `ExecutionDispatcher`,
   `WorkflowResolver`, `NotificationSink`, `RealtimePublisher`, `ProjectContextResolver`,
   `PullRequestResolver`, `ExecutionLogProvider`) do **not** exist yet.
-- **Simulator adapters** (`FakeActorResolver`/`FakeTeamResolver`/`FakeWorkflowResolver`/
-  `FakeProjectContextResolver`/fake executor + no-op sinks) and the `0008` sim catalog — not started.
-- **Issue Detail** full projection + UI; Timeline pagination/truncation; execution logs; PR
-  integration; Notification; Realtime/WebSocket; real runtime/LLM/agent/team/workflow execution.
+- **Simulator adapters** (`FakeActorResolver`/`FakeWorkflowResolver`/`FakeProjectContextResolver`/
+  fake executor + no-op sinks) as **in-memory dev fixtures** — not started. The rev.-2
+  `0008_sim_collaboration_catalog.sql` relational `sim_agents`/`sim_teams` catalog is **superseded**:
+  no `sim_*` tables are created; dev fixtures implement the same ports in memory.
+- **Wave 3C Issue Detail** full projection + UI; Timeline pagination/truncation; execution logs; PR
+  integration; Notification; Realtime/WebSocket; real runtime/LLM/agent/team/workflow execution — all
+  **blocked on external design** (Agent/Team/Workflow internal design = UNKNOWN; Issues constrains only
+  the consuming-side contract).
 
 Non-`user` actor refs (agent/team/system/workflow) are **opaque UUIDs** this wave — shape-validated,
 not resolved. `users` remains the only *resolved* human actor. The target contracts live in

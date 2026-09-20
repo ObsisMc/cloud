@@ -14,6 +14,7 @@ applied file; add a new `NNNN_*.sql`.
 | `0004_effect_intent_and_ticket_scope.sql` | effect intent + ticket scoping hardening |
 | `0005_issues.sql` | `issues` (board) |
 | `0006_issue_extensions.sql` | issue_statuses, issue_comments, labels, issue_labels, issue_subscribers, issue_views + `issues` ALTERs (`number`, `properties`, status format check) |
+| `0007_issue_collaboration.sql` | `issues` ALTERs (`assignee_type`/`assignee_id`/`project_ref` + backfill), `issue_comments` ALTERs (`parent_id`/`author_type`/`author_id`/`seq` + backfill + `UNIQUE(issue_id,seq)`), new tables `issue_runs`, `issue_activities`, `issue_context_refs` |
 
 ## Table inventory
 
@@ -42,12 +43,15 @@ applied file; add a new `NNNN_*.sql`.
 | `controller_leases` | controller leadership | epoch fencing |
 | `idempotency_records` | POST/DELETE replay | tenant_id, user_id, key, request_hash, response, status |
 
-### Issue board (0005/0006)
+### Issue board (0005/0006/0007)
 | Table | Purpose | Key columns |
 | --- | --- | --- |
-| `issues` | board card | tenant_id, creator_user_id, assignee_user_id?, parent_issue_id?, title, description, status, priority, position, number, properties(jsonb), version, deleted_at |
+| `issues` | board card | tenant_id, creator_user_id, assignee_type/assignee_id (polymorphic), assignee_user_id? (mirror), project_ref?, parent_issue_id?, title, description, status, priority, position, number, properties(jsonb), version, deleted_at |
 | `issue_statuses` | status catalog | tenant_id, key, name, category, color, icon, is_system, position, deleted_at · UNIQUE(tenant_id,key) |
-| `issue_comments` | comment thread | tenant_id, issue_id, author_user_id, body, version, deleted_at |
+| `issue_comments` | comment thread | tenant_id, issue_id, author_user_id? (mirror), author_type/author_id (ActorRef), parent_id? (threading), body, seq, version, deleted_at · UNIQUE(issue_id,seq) |
+| `issue_runs` | issue-owned run lifecycle | tenant_id, issue_id, executor_type/executor_id, status, external_execution_id?/execution_context_ref?/workflow_invocation_ref? (opaque refs), input/result/error, trigger_evidence_*, version, deleted_at |
+| `issue_activities` | append-only timeline projection | tenant_id, issue_id, actor_type/actor_id, action, details(jsonb), seq, created_at |
+| `issue_context_refs` | issue→external reference | tenant_id, issue_id, ref_type, ref_id, created_at · hard delete |
 | `labels` | tenant label | tenant_id, name, color, deleted_at · partial UNIQUE(tenant_id,name) WHERE deleted_at IS NULL |
 | `issue_labels` | issue↔label join | (issue_id,label_id) PK · hard delete |
 | `issue_subscribers` | issue watchers | (issue_id,user_id) PK, tenant_id |

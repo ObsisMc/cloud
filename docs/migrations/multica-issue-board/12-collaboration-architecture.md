@@ -19,6 +19,24 @@
 > Source-truth rule: where a Multica detail below differs from its current source, the source wins and
 > the difference is recorded here with its rationale — never a silent design change.
 
+## 0. Current status (post-Wave 3A)
+
+> Added after Wave 3A landed; kept here so readers reconcile the frozen design with what actually
+> happened. The sections below are the **frozen rev. 2 design** — see §36 for what diverged.
+
+- **Wave 3A** (Step 2 — issue-owned foundation) is **IMPLEMENTED / REVIEWED** (migration `0007`).
+- **Wave 3B — Collaboration Integration Shell** (Steps 3–4: integration ports + in-memory dev fixtures)
+  is **PLANNED**.
+- **Wave 3C — Issue Detail & Collaboration UI** (Steps 5–9: projections + UI) is **PLANNED**.
+- **Real Agent/Team/Workflow integration is BLOCKED ON EXTERNAL DESIGN.** Issues does not define their
+  internal design — Agent/Team/Workflow internal design = **UNKNOWN** — it only constrains the
+  consuming-side contract (§6.2).
+- **REVISION: the `0008` `sim_*` relational catalog is SUPERSEDED.** §9/§24 originally sketched a
+  `0008_sim_collaboration_catalog.sql` with `sim_agents`/`sim_teams`/`sim_team_members` tables. That is
+  no longer the plan: dev/demo fixtures are **in-memory adapters** implementing the same ports
+  (`ExecutionDispatcher`, fake resolvers, …), not a new simulator relational schema. Issue core never
+  gains `sim_*` tables; the run/assignee/timeline contract stays unchanged.
+
 ## Revision map (v1 § → v2 §)
 
 | v1 § | v2 § | Topic | Change |
@@ -354,20 +372,24 @@ in issue core.
 
 **Temporary dev catalog** (for demo/test until real Agent/Team modules exist):
 
-- A clearly simulator-owned catalog, e.g. `sim_agents`, `sim_teams`, `sim_team_members` in a separate
-  migration `0008_sim_collaboration_catalog.sql` (not `0007`), **explicitly marked
-  "temporary ownership — simulator/dev adapter only"**.
-- `FakeActorResolver` / `FakeTeamResolver` read it. Issue core never touches it.
+> **SUPERSEDED (post-Wave 3A).** The `sim_agents`/`sim_teams`/`sim_team_members` relational catalog and
+> its `0008_sim_collaboration_catalog.sql` migration are **dropped from the plan** (see §0). Replacement:
+> **in-memory dev fixtures** implementing the same ports — no new simulator relational schema, no `sim_*`
+> tables in issue core.
+
+- *(Superseded bullet, retained for history.)* Originally: a simulator-owned catalog `sim_agents`,
+  `sim_teams`, `sim_team_members` in a migration `0008_sim_collaboration_catalog.sql`, read by
+  `FakeActorResolver`/`FakeTeamResolver`; issue core never touches it.
 
 **Replacement plan (recorded, not hypothetical):**
 
 | Concern | Statement |
 | --- | --- |
 | Temporary ownership | `sim_*` catalog belongs to the simulator/dev adapter, not Issues. |
-| Migration strategy | Landed in its own migration `0008`; independent of `0007` (issue-owned). |
-| Replacement boundary | Real Agent/Team modules land; they own their tables; `sim_*` + fake resolvers are dropped; resolvers are swapped at wiring. |
+| Migration strategy | ~~Landed in its own migration `0008`~~ — **SUPERSEDED**: no `sim_*` migration; in-memory fixtures implement the same ports instead. |
+| Replacement boundary | Real Agent/Team modules land; they own their tables; fake resolvers are swapped at wiring; no `sim_*` tables to drop. |
 | What remains stable | Issue columns (`assignee_type/assignee_id`), `issue_runs.executor_ref`, Timeline, UI contract. |
-| What is removed/reused | `sim_*` tables removed; port contracts reused verbatim by the real modules. |
+| What is removed/reused | Fixture adapters replaced; port contracts reused verbatim by the real modules. |
 
 ## 10. Issue assignee & Assign ≠ Execute
 
@@ -721,9 +743,9 @@ Two migrations this wave — the split itself encodes the ownership boundary:
   - New tables: `issue_runs` (§11 columns + `seq` not needed), `issue_activities`
     (`tenant_id, issue_id, actor_type, actor_id, action, details jsonb, seq, created_at`),
     `issue_context_refs` (§20).
-- **`0008_sim_collaboration_catalog.sql`** (temporary, simulator-owned dev catalog, explicitly
-  marked): `sim_agents`, `sim_teams`, `sim_team_members`. Removable independently; replaced by real
-  Agent/Team modules (§9).
+- ~~**`0008_sim_collaboration_catalog.sql`** (temporary, simulator-owned dev catalog): `sim_agents`,
+  `sim_teams`, `sim_team_members`.~~ **SUPERSEDED** (see §0): no `sim_*` tables; in-memory dev fixtures
+  implement the same ports.
 
 No `operations`/`execution_tickets`/`users`/`tenant_memberships` semantic changes. Agents/teams are
 **not** principals.
@@ -827,7 +849,7 @@ Extend `cmd/demo-issue-board-web/` to the **Issue Detail surface** (§13):
 | Deferred | Why / when |
 | --- | --- |
 | Real LLM / real agent runtime / real execution module | Simulator adapters first; real modules implement the same ports later. |
-| Real Agent / Team / Workflow domain tables & CRUD | Future modules; `sim_*` catalog + fake resolvers stand in (§9). |
+| Real Agent / Team / Workflow domain tables & CRUD | Future modules; in-memory fake resolvers stand in (§9 — `sim_*` catalog superseded, §0). |
 | Autopilot (schedule/manual/webhook triggers, rule versions) | Needs runs + trigger engine + runtime first. |
 | Multi-agent orchestration / squad-leader fan-out | Single-executor runs first. |
 | Production WebSocket / event bus | HTTP refetch + polling now. |
@@ -889,8 +911,9 @@ Port-first (order respects "stabilize Issue-owned domain + ports before fake ext
       `ExecutionDispatcher`, `WorkflowResolver`, `ProjectContextResolver`, `NotificationSink`,
       `RealtimePublisher`, `ExecutionLogProvider` (+ `PullRequestResolver` interface-only).
       Wire points chosen here (see open Q1). |
-| 4 | **Simulator adapters** — `FakeActorResolver`/`FakeTeamResolver`/`FakeWorkflowResolver`/
-      `FakeProjectContextResolver`/fake executor + no-op sinks; `0008` sim catalog. |
+| 4 | **Simulator adapters** — in-memory `FakeActorResolver`/`FakeWorkflowResolver`/
+      `FakeProjectContextResolver`/fake executor + no-op sinks. **(`0008` sim catalog superseded — no
+      `sim_*` tables.)** |
 | 5 | **Issue Detail API projections** — timeline endpoint, runs endpoints, panels' projections
       (unavailable states honored). |
 | 6 | **Conversation + explicit `@targets`** — target validation, `triggerOutcomes`,
