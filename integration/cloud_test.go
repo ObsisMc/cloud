@@ -402,12 +402,14 @@ func TestIdentityConcurrencyMembershipAndIsolation(t *testing.T) {
 	f.drain()
 	pid, wid := created.O("resource").S("id"), created.O("workspace").S("id")
 	f.user.Subject = "new-user"
-	f.call("GET", f.path("/projects/"+pid), nil, "", 404)
-	f.call("GET", f.path("/workspaces/"+wid), nil, "", 404)
+	// Joining the tenant grants default-space membership, so the project and its
+	// runtime workspace become shared; operations stay scoped to their actor.
+	f.call("GET", f.path("/projects/"+pid), nil, "", 200)
+	f.call("GET", f.path("/workspaces/"+wid), nil, "", 200)
 	f.call("GET", f.path("/operations/"+created.O("operation").S("id")), nil, "", 404)
 	list := f.call("GET", f.path("/projects"), nil, "", 200)
-	if len(list["items"].([]any)) != 0 {
-		t.Fatal("list owner filter missing")
+	if len(list["items"].([]any)) != 1 {
+		t.Fatal("space membership must expose the shared project")
 	}
 	f.user.Subject = "alice"
 	f.call("PUT", f.path("/members/"+id), core.Object{"role": "admin", "status": "active", "version": 1}, "", 200)
