@@ -26,6 +26,15 @@
 - **`0005_gateway_auth.sql`**：Gateway 认证表（由 `cmd/gateway` 独占运行时访问）：
   - `gateway_login_attempts`：一次性登录尝试；只保存 attempt secret 与 `state` 的 SHA-256 digest，`return_to` 在数据库层拒绝绝对、`//`、`/\` 形式，有效期不超过 1 小时，`consumed_at` 保证最多创建一个 session。
   - `gateway_sessions`：浏览器会话；只保存 token digest，`expires_at` 非空且不超过创建后 90 天，吊销时间与有限的 `revoked_reason` 同时存在，并为 identity 吊销与有界清理建立索引。
+- **`0006_collab_spaces.sql`**：协作空间（产品术语 Workspace）Schema：
+  - `collab_workspaces`：租户内的协作与可见性边界（名称、不可变 slug、归档时间、乐观版本）。
+  - `collab_workspace_members`：成员与角色（owner/admin/member）、状态（active/disabled）、乐观版本。
+  - 与运行时 `workspaces` 表（执行环境）严格分离。
+- **`0007_project_space_scope.sql`**：Project 空间作用域与数据回填：
+  - 为每个既有租户（含仍有 Project 的已删除租户）创建默认 Space（slug=`default`）。
+  - 既有 active tenant members 加入默认 Space（admin→owner，member→member）。
+  - 既有 Project 回填 `space_id` 并转为 NOT NULL，复合外键 `(space_id, tenant_id)` 在 SQL 级杜绝跨租户归属。
+  - `SET CONSTRAINTS ALL IMMEDIATE` 在 ALTER 前触发回填 UPDATE 排队的 deferred 约束触发器。
 
 ## 校验和完整性与不可变性
 
