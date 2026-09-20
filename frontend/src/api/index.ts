@@ -4,5 +4,6 @@ export * from './me/me';
 export * from './members/members';
 export * from './operations/operations';
 export * from './projects/projects';
+export * from './spaces/spaces';
 export * from './tenants/tenants';
 export * from './workspaces/workspaces';

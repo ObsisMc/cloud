@@ -1,12 +1,17 @@
 import { format } from 'date-fns'
-import { Link } from 'react-router-dom'
+import { Plus } from 'lucide-react'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { ActorAvatar } from '@/components/common/actor-avatar'
 import { PageHeader } from '@/components/layout/page-header'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { CreateProjectDialog } from '@/features/projects/create-project-dialog'
 import { ProjectIcon } from '@/features/projects/components/project-icon'
 import { useProjects } from '@/features/projects/api'
 import { PROJECT_STATUS_LABELS, PROJECT_STATUS_VARIANT } from '@/features/projects/status'
+import { useCurrentSpace } from '@/features/spaces/current-space'
 import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
 
@@ -15,10 +20,31 @@ const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six']
 export function ProjectsPage({ slug }: { slug: string }) {
   const { data: projects, isPending } = useProjects(slug)
   const p = workspacePaths(slug)
+  const navigate = useNavigate()
+  const { space } = useCurrentSpace()
+  const cloudMode = space?.slug === slug
+  const [createOpen, setCreateOpen] = useState(false)
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title="项目" />
+      <PageHeader
+        title="项目"
+        actions={
+          cloudMode && (
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-3.5" />
+              新建项目
+            </Button>
+          )
+        }
+      />
+      {cloudMode && (
+        <CreateProjectDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          onCreated={(projectId) => void navigate(p.projectDetail(projectId))}
+        />
+      )}
       <div className="flex-1 overflow-y-auto p-4">
         {isPending && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
