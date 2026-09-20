@@ -26,6 +26,16 @@ Migrations are executed in ascending numerical sequence:
 - **`0005_gateway_auth.sql`**: Gateway authentication tables (accessed at runtime only by `cmd/gateway`):
   - `gateway_login_attempts`: one-shot login attempts; stores only SHA-256 digests of the attempt secret and `state`, rejects absolute, `//` and `/\` `return_to` values at the database layer, bounds the lifetime to one hour, and uses `consumed_at` to guarantee at most one session per attempt.
   - `gateway_sessions`: browser sessions; stores only the token digest, requires a non-null `expires_at` no later than 90 days after creation, keeps revocation time and the bounded `revoked_reason` together, and indexes identity revocation and bounded cleanup.
+- **`0006_collab_spaces.sql`**: Collaboration space schema (product term Workspace):
+  - `collab_workspaces`: tenant-scoped collaboration and visibility boundary (name, immutable slug, archive time, optimistic version).
+  - `collab_workspace_members`: members with roles (owner/admin/member), status (active/disabled), and optimistic version.
+  - Strictly separated from the runtime `workspaces` table (execution environments).
+- **`0007_project_space_scope.sql`**: Project space scoping and data backfill:
+  - Creates a default space (slug=`default`) for every existing tenant, including deleted tenants that still own projects.
+  - Adds existing active tenant members to the default space (admin maps to owner, member maps to member).
+  - Backfills `projects.space_id`, then enforces NOT NULL and a composite foreign key `(space_id, tenant_id)` that rejects cross-tenant ownership at the SQL level.
+  - Runs `SET CONSTRAINTS ALL IMMEDIATE` before the ALTER to flush deferred constraint triggers queued by the backfill UPDATE.
+
 
 ## Checksum integrity and immutability
 
