@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Error as ApiError, Space, SpaceListItem, SpaceMember } from '@/api/generated.schemas'
 import {
@@ -11,6 +12,50 @@ import {
   putApiV1TenantsTidSpacesSpaceIdMembersUid,
 } from '@/api/spaces/spaces'
 import type { ErrorType } from '@/lib/api-client'
+
+/** Fresh idempotency key; the backend requires one on every POST/DELETE. */
+function idempotencyKey(): string {
+  return crypto.randomUUID()
+}
+
+/**
+ * Returns the idempotency key for one logical mutation: minted the first time
+ * `variables` is seen and reused for every later call with that same object.
+ *
+ * React Query re-invokes `mutationFn` for each retry of a `mutate()` call but
+ * always passes the same variables object, so a retry replays the original key
+ * and the backend dedupes it instead of running the mutation twice. A new
+ * `mutate()` call carries fresh variables and therefore mints a fresh key, and
+ * two overlapping calls can never share one because they never share variables.
+ */
+export function idempotencyKeyFor(
+  pending: { current: { variables: unknown; key: string } | null },
+  variables: unknown,
+): string {
+  const current = pending.current
+  if (current !== null && current.variables === variables) return current.key
+  const key = idempotencyKey()
+  pending.current = { variables, key }
+  return key
+}
+
+/** Per-hook slot backing {@link idempotencyKeyFor}. */
+function useIdempotencyKeys() {
+  const pending = useRef<{ variables: unknown; key: string } | null>(null)
+  return (variables: unknown): string => idempotencyKeyFor(pending, variables)
+}
+
+/**
+ * Headers for one mutating request. The backend rejects a POST/DELETE without a
+ * non-empty `Idempotency-Key` (400 `idempotency_key_required`) and dedupes a
+ * replay that carries the same key, so the key must stay stable across retries
+ * of the same logical mutation. `Content-Type` is repeated here because the
+ * orval mutator spreads these options over the generated request config, which
+ * replaces its headers object outright.
+ */
+function mutationHeaders(key: string): Record<string, string> {
+  return { 'Content-Type': 'application/json', 'Idempotency-Key': key }
+}
 
 /** Space membership roles; mirrors the backend owner/admin/member model. */
 export type SpaceRole = 'owner' | 'admin' | 'member'
@@ -100,8 +145,12 @@ export function useSpaceProjects(tenantId: string | undefined, spaceId: string |
 
 export function useCreateSpace(tenantId: string | undefined) {
   const queryClient = useQueryClient()
+  const keyFor = useIdempotencyKeys()
   return useMutation<Space, ErrorType<ApiError>, CreateSpaceInput>({
-    mutationFn: (input: CreateSpaceInput) => postApiV1TenantsTidSpaces(tenantId ?? '', input),
+    mutationFn: (input: CreateSpaceInput) =>
+      postApiV1TenantsTidSpaces(tenantId ?? '', input, {
+        headers: mutationHeaders(keyFor(input)),
+      }),
     onSuccess: () => {
       if (!tenantId) return
       void queryClient.invalidateQueries({
@@ -130,9 +179,15 @@ export function useUpdateSpace(tenantId: string | undefined, spaceId: string | u
 
 export function useArchiveSpace(tenantId: string | undefined, spaceId: string | undefined) {
   const queryClient = useQueryClient()
+  const keyFor = useIdempotencyKeys()
   return useMutation<Space, ErrorType<ApiError>, number>({
     mutationFn: (version: number) =>
-      deleteApiV1TenantsTidSpacesSpaceId(tenantId ?? '', spaceId ?? '', { version }),
+      deleteApiV1TenantsTidSpacesSpaceId(
+        tenantId ?? '',
+        spaceId ?? '',
+        { version },
+        { headers: mutationHeaders(keyFor(version)) },
+      ),
     onSuccess: () => {
       if (!tenantId) return
       void queryClient.invalidateQueries({

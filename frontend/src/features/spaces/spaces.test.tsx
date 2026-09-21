@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeSpaceRole } from '@/features/spaces/api'
+import { idempotencyKeyFor, normalizeSpaceRole } from '@/features/spaces/api'
 import { parseSSEFrames } from '@/features/spaces/use-space-events'
+
+describe('idempotencyKeyFor', () => {
+  it('mints one key per logical mutation and replays it for the same variables', () => {
+    const pending: { current: { variables: unknown; key: string } | null } = { current: null }
+    const input = { name: 'Team', slug: 'team', description: '' }
+
+    const first = idempotencyKeyFor(pending, input)
+    expect(first).not.toBe('')
+    // A retry re-enters mutationFn with the very same variables object.
+    expect(idempotencyKeyFor(pending, input)).toBe(first)
+    // A separate mutate() call carries a fresh object and must get a fresh key.
+    const second = idempotencyKeyFor(pending, { name: 'Other', slug: 'other', description: '' })
+    expect(second).not.toBe(first)
+  })
+
+  it('keeps the archive key stable across a retry of the same version', () => {
+    const pending: { current: { variables: unknown; key: string } | null } = { current: null }
+    expect(idempotencyKeyFor(pending, 1)).toBe(idempotencyKeyFor(pending, 1))
+  })
+})
 
 describe('parseSSEFrames', () => {
   it('splits complete frames into typed events and keeps partial tails', () => {

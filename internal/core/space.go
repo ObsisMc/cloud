@@ -49,15 +49,26 @@ func requireSpaceRole(m Object, roles ...string) {
 
 // createSpace atomically inserts a space and its first owner. slug is
 // lowercase, immutable and unique per tenant.
+//
+// An archived space does NOT release its slug: the tenant-scoped uniqueness of
+// 0011's UNIQUE(tenant_id,slug) covers live and archived rows alike, so the
+// pre-check deliberately omits an archived_at filter. Archiving is a soft delete
+// and the slug stays reserved for the space that owns it.
 func createSpace(t *transaction, r *PublicRequest, uid string) Object {
 	name := validText(r.Body.S("name"), 128)
 	slug := strings.ToLower(strings.TrimSpace(r.Body.S("slug")))
 	require(validSlug(slug), 400, "invalid_slug")
 	description := r.Body.S("description")
 	require(len(description) <= 2000, 400, "invalid_input")
-	require(t.one("SELECT id FROM collab_workspaces WHERE tenant_id=$1 AND slug=$2 AND archived_at IS NULL", r.TenantID, slug) == nil, 409, "space_slug_conflict")
+	require(t.one("SELECT id FROM collab_workspaces WHERE tenant_id=$1 AND slug=$2", r.TenantID, slug) == nil, 409, "space_slug_conflict")
 	id := newID()
-	t.exec("INSERT INTO collab_workspaces(id,tenant_id,name,slug,description,created_by) VALUES($1,$2,$3,$4,$5,$6)", id, r.TenantID, name, slug, description, uid)
+	// The pre-check above is exact, but the unique index remains the final integrity
+	// guard: a concurrent duplicate create loses the insert instead of failing the
+	// request with an internal error, and is reported as the same 409 the contract
+	// promises. Space and first owner are written together or not at all.
+	if t.execRows("INSERT INTO collab_workspaces(id,tenant_id,name,slug,description,created_by) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id,slug) DO NOTHING", id, r.TenantID, name, slug, description, uid) == 0 {
+		reject(409, "space_slug_conflict")
+	}
 	t.exec("INSERT INTO collab_workspace_members(workspace_id,user_id,role,status,created_by) VALUES($1,$2,'owner','active',$2)", id, uid)
 	return t.one("SELECT * FROM collab_workspaces WHERE id=$1", id)
 }

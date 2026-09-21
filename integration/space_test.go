@@ -168,3 +168,73 @@ func TestDefaultSpaceCannotBeArchived(t *testing.T) {
 		t.Fatalf("default space mutated: %v", still)
 	}
 }
+
+// TestSpaceMutationsRequireIdempotencyKey covers the backend half of S1: a POST or
+// DELETE without a non-empty Idempotency-Key is rejected outright, and replaying one
+// key with the same body returns the original result instead of creating a second
+// space. The frontend mints exactly one key per logical mutation so that a retry
+// lands on this replay path.
+func TestSpaceMutationsRequireIdempotencyKey(t *testing.T) {
+	f := setup(t)
+	body := core.Object{"name": "Keyed", "slug": "keyed", "description": ""}
+
+	// No key: the mutation never reaches the handler.
+	missing := f.call("POST", f.path("/spaces"), body, "", 400)
+	if missing.S("code") != "idempotency_key_required" {
+		t.Fatalf("keyless create: want idempotency_key_required got %v", missing)
+	}
+
+	// A keyed create succeeds; replaying the same key and body returns the same
+	// space rather than a duplicate.
+	created := f.call("POST", f.path("/spaces"), body, "keyed-create", 200)
+	replay := f.call("POST", f.path("/spaces"), body, "keyed-create", 200)
+	if replay.S("id") != created.S("id") {
+		t.Fatalf("replayed create made a second space: %v vs %v", replay.S("id"), created.S("id"))
+	}
+	if n := f.scalar("SELECT count(*) FROM collab_workspaces WHERE tenant_id=$1 AND slug=$2", f.tid, "keyed"); n != 1 {
+		t.Fatalf("replayed create inserted rows: want 1 got %d", n)
+	}
+
+	// Reusing a key for a different request is a conflict, which is why the key is
+	// bound to one logical mutation rather than minted per attempt.
+	conflict := f.call("POST", f.path("/spaces"), core.Object{"name": "Other", "slug": "other", "description": ""}, "keyed-create", 409)
+	if conflict.S("code") != "idempotency_conflict" {
+		t.Fatalf("key reuse with a new body: want idempotency_conflict got %v", conflict)
+	}
+}
+
+// TestArchivedSpaceSlugStaysReserved covers S2: archiving is a soft delete, so the
+// tenant-scoped slug stays reserved by the archived row. Re-creating the same slug
+// must be rejected with 409 space_slug_conflict — it must neither resurrect the
+// archived space nor insert a second row for that slug.
+func TestArchivedSpaceSlugStaysReserved(t *testing.T) {
+	f := setup(t)
+	gw := core.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "gateway-a"}}
+
+	space := f.createSpace("Reuse", "reuse", "reuse-create")
+	sid := space.S("id")
+	_, status, e := f.client.Call(context.Background(), "DELETE", f.path("/spaces/"+sid), "gateway", gw, &f.user, "reuse-archive", core.Object{"version": space.N("version")})
+	must(t, e)
+	if status != 200 {
+		t.Fatalf("archive space: want 200 got %d", status)
+	}
+
+	// The archived space no longer releases its slug: the create pre-check and the
+	// UNIQUE(tenant_id,slug) index both cover archived rows.
+	o, status, e := f.client.Call(context.Background(), "POST", f.path("/spaces"), "gateway", gw, &f.user, "reuse-create-2", core.Object{"name": "Reuse Again", "slug": "reuse", "description": ""})
+	must(t, e)
+	if status != 409 {
+		t.Fatalf("recreate archived slug: want 409 got %d %v", status, o)
+	}
+	if o.S("code") != "space_slug_conflict" {
+		t.Fatalf("recreate archived slug: want space_slug_conflict got %v", o)
+	}
+
+	// Exactly one row still owns the slug, and it is still the archived original.
+	if n := f.scalar("SELECT count(*) FROM collab_workspaces WHERE tenant_id=$1 AND slug=$2", f.tid, "reuse"); n != 1 {
+		t.Fatalf("slug rows after rejected recreate: want 1 got %d", n)
+	}
+	if n := f.scalar("SELECT count(*) FROM collab_workspaces WHERE id=$1 AND archived_at IS NOT NULL", sid); n != 1 {
+		t.Fatal("archived original was resurrected or unarchived")
+	}
+}

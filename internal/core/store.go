@@ -82,7 +82,8 @@ type Store struct {
 	Assist     InputAssistProvider
 
 	// Events broadcasts committed collaboration-space invalidation notices to live
-	// SSE subscribers (incoming zpc001/feat/collab-spaces; semantics pending D1/D2).
+	// SSE subscribers. Space association is optional (projects.space_id is nullable)
+	// and Space membership does not replace Project owner authorization (D1).
 	Events *SpaceHub
 }
 

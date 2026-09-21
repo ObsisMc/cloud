@@ -23,12 +23,15 @@ docs/
       progress.md               ← what's built / in-progress / deferred (status board)
   migrations/
     multica-issue-board/        ← single-migration archive (analysis → design → test → final)
-    workspace-integration-stage-a.md ← origin/main → workspace合并 融合决策记录（含迁移重编号 + 前端验证）
+    workspace-integration-stage-a.md ← Stage A：origin/main → workspace合并 上游对齐融合决策记录（含迁移重编号 + 前端验证）
+    workspace-integration-stage-b.md ← Stage B：Collaboration Space 集成 + D1–D7 ADR（决策已实施）
   acceptance.md                 ← product acceptance criteria (pre-existing)
   authentication.md             ← auth model (pre-existing)
   core-contract.md              ← core behavioural contract (pre-existing)
   execution-contract.md         ← execution/operations contract (pre-existing)
 ```
+
+**Integration stages.** **Stage A** = upstream main alignment (`origin/main` → `workspace合并`). **Stage B** = Collaboration Space integration + the D1–D7 ADR. **Stage C** = final integration review (a review phase; its record is not yet a repo document).
 
 ## Source of truth (one doc per topic)
 
@@ -41,7 +44,8 @@ docs/
 | **Collaboration interaction model** | [12-collaboration-architecture.md §37](migrations/multica-issue-board/12-collaboration-architecture.md#37-wave-3b-0--collaboration-interaction-model-frozen) | **authoritative product semantics** — `@`, the four target modes, cardinality, context, timeline, fixtures. Frozen by Wave 3B-0 |
 | **Collaboration / integration ports** | [12-collaboration-architecture.md §6.4](migrations/multica-issue-board/12-collaboration-architecture.md#64-canonical-port-inventory-unified-by-wave-3b-0) | the **single** canonical port inventory (15 ports; `FormDescriptorProvider` added by 3B-2). Other docs must point here, not repeat a list |
 | **Workflow interaction (Issues-facing)** | [12-collaboration-architecture.md §38](migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen) | the **contract** (`FormDescriptor`, single Confirm boundary, AI Assist authority, draft decision, API surface, `0010`) + **§38.37** implementation record |
-| **Workspace integration (Stage A)** | [workspace-integration-stage-a.md](migrations/workspace-integration-stage-a.md) | origin/main → `workspace合并` fusion: migration renumbering (0005→0006…), dual-JWT contract, frontend resolutions, decisions D-Auth / D4 |
+| **Workspace integration (Stage A)** | [workspace-integration-stage-a.md](migrations/workspace-integration-stage-a.md) | upstream main alignment: origin/main → `workspace合并` fusion, migration renumbering (0005→0006…), dual-JWT contract, frontend resolutions, decisions D-Auth / D4 |
+| **Workspace integration (Stage B)** | [workspace-integration-stage-b.md](migrations/workspace-integration-stage-b.md) | Collaboration Space integration into the merged tree + ADR: decisions D1–D7 (owner authorization, optional Space association, terminology, routing, session, isolation, default-Space protection) |
 | **How to add code** | [agent/adding-features.md](development/agent/adding-features.md) | endpoint / sub-resource how-to + verify |
 
 ## Repo layout (one glance)

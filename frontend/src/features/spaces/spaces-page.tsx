@@ -66,9 +66,9 @@ export function SpacesPage() {
 }
 
 /**
- * One space in the list. Owners and admins can archive; the backend rejects
- * archiving a space that would lose its last owner or the tenant default
- * (`space_last_owner` / `default_space_protected`).
+ * One space in the list. Only owners can archive — the backend requires the
+ * owner role and rejects admins, and it also refuses archiving the tenant
+ * default space (`default_space_protected`).
  */
 function SpaceRow({
   tenantId,
@@ -92,7 +92,7 @@ function SpaceRow({
   onSelect: () => void
 }) {
   const archive = useArchiveSpace(tenantId, spaceId)
-  const canArchive = role === 'owner' || role === 'admin'
+  const canArchive = role === 'owner'
 
   return (
     <Card className={selected ? 'ring-1 ring-primary' : undefined}>

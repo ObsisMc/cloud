@@ -31,15 +31,15 @@ Migrations are executed in ascending numerical sequence:
 - **`0008_issue_collaboration.sql`**: `issues` ALTERs (`assignee_type`/`assignee_id`/`project_ref` + backfill), `issue_comments` ALTERs (`parent_id`/`author_type`/`author_id`/`seq` + backfill + `UNIQUE(issue_id,seq)`), new tables `issue_runs`, `issue_activities`, `issue_context_refs`. (formerly `0007_issue_collaboration.sql`)
 - **`0009_issue_interactions.sql`**: new table `issue_interactions` (the `@` interaction spine) — one row per selected collaboration target: `id, tenant_id, issue_id, comment_id, target_type, target_id, mode, task, run_id, created_at`. (formerly `0008_issue_interactions.sql`)
 - **`0010_issue_interaction_input.sql`**: one generic additive column: `ALTER TABLE issue_interactions ADD COLUMN input jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(input)='object')` — the confirmed form values. Deliberately excludes `version`, a `status` enum, `confirmed_at` and a separate inputs table; `0009` is not modified. (formerly `0009_issue_interaction_input.sql`)
-- **`0011_collab_spaces.sql`** *(incoming collaboration-space migrations from `zpc001/feat/collab-spaces`, forward-renumbered to sit after the Issues sequence; **schema semantics pending decisions D1/D2** — do not treat as final)*: Collaboration space schema (product term "Workspace"):
-  - `collab_workspaces`: tenant-scoped collaboration and visibility boundary (name, immutable slug, archive time, optimistic version).
+- **`0011_collab_spaces.sql`** *(incoming collaboration-space migrations from `zpc001/feat/collab-spaces`, forward-renumbered to sit after the Issues sequence)*: Collaboration Space schema:
+  - `collab_workspaces`: tenant-scoped collaboration and visibility boundary (name, immutable slug, archive time, optimistic version). Archiving is a soft delete and does not release the slug: `UNIQUE(tenant_id, slug)` covers live and archived rows alike.
   - `collab_workspace_members`: members with roles (owner/admin/member), status (active/disabled), and optimistic version.
-  - Strictly separated from the runtime `workspaces` table (execution environments).
-- **`0012_project_space_scope.sql`** *(see 0011 — **semantics pending D1/D2**)*: Project space scoping and data backfill:
-  - Creates a default space (slug=`default`) for every existing tenant, including deleted tenants that still own projects.
-  - Adds existing active tenant members to the default space (admin maps to owner, member maps to member).
-  - Backfills `projects.space_id`, then enforces NOT NULL and a composite foreign key `(space_id, tenant_id)` that rejects cross-tenant ownership at the SQL level.
-  - Runs `SET CONSTRAINTS ALL IMMEDIATE` before the ALTER to flush deferred constraint triggers queued by the backfill UPDATE.
+  - Strictly separated from the runtime `workspaces` table (Runtime Workspace, execution environments).
+- **`0012_project_space_scope.sql`** *(see 0011)*: Optional Project-to-Space association:
+  - Creates a default Space (slug=`default`) for every existing tenant, including deleted tenants that still own projects.
+  - Adds existing active tenant members to the default Space (admin maps to owner, member maps to member).
+  - Adds a nullable `projects.space_id uuid`: a Project's Space association is optional (D2=C — a Space is an optional grouping, not a mandatory parent). Existing Projects are **not** backfilled and the column is **not** made NOT NULL; Projects without a `space_id` behave exactly as before.
+  - A composite foreign key `(space_id, tenant_id) REFERENCES collab_workspaces(id, tenant_id)` rejects cross-tenant ownership at the SQL level, and the `project_space_list(space_id, id)` index supports listing Projects by Space.
 
 ## Checksum integrity and immutability
 
