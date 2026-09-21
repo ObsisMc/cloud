@@ -25,13 +25,14 @@ docs/
     multica-issue-board/        ← single-migration archive (analysis → design → test → final)
     workspace-integration-stage-a.md ← Stage A：origin/main → workspace合并 上游对齐融合决策记录（含迁移重编号 + 前端验证）
     workspace-integration-stage-b.md ← Stage B：Collaboration Space 集成 + D1–D7 ADR（决策已实施）
+    workspace-integration-stage-d-coworker-login-workspace.md ← Stage D：同事 Login + Workspace UX 恢复 + SD1–SD7（决策已批准）
   acceptance.md                 ← product acceptance criteria (pre-existing)
   authentication.md             ← auth model (pre-existing)
   core-contract.md              ← core behavioural contract (pre-existing)
   execution-contract.md         ← execution/operations contract (pre-existing)
 ```
 
-**Integration stages.** **Stage A** = upstream main alignment (`origin/main` → `workspace合并`). **Stage B** = Collaboration Space integration + the D1–D7 ADR. **Stage C** = final integration review (a review phase; its record is not yet a repo document).
+**Integration stages.** **Stage A** = upstream main alignment (`origin/main` → `workspace合并`). **Stage B** = Collaboration Space integration + the D1–D7 ADR. **Stage C** = final integration review (a review phase; its record is not yet a repo document). **Stage D** = coworker Login + Workspace UX restoration (SD1–SD7), a product correction that restores the coworker's product shell on top of the merged Space backend.
 
 ## Source of truth (one doc per topic)
 
@@ -46,6 +47,7 @@ docs/
 | **Workflow interaction (Issues-facing)** | [12-collaboration-architecture.md §38](migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen) | the **contract** (`FormDescriptor`, single Confirm boundary, AI Assist authority, draft decision, API surface, `0010`) + **§38.37** implementation record |
 | **Workspace integration (Stage A)** | [workspace-integration-stage-a.md](migrations/workspace-integration-stage-a.md) | upstream main alignment: origin/main → `workspace合并` fusion, migration renumbering (0005→0006…), dual-JWT contract, frontend resolutions, decisions D-Auth / D4 |
 | **Workspace integration (Stage B)** | [workspace-integration-stage-b.md](migrations/workspace-integration-stage-b.md) | Collaboration Space integration into the merged tree + ADR: decisions D1–D7 (owner authorization, optional Space association, terminology, routing, session, isolation, default-Space protection) |
+| **Workspace integration (Stage D)** | [workspace-integration-stage-d-coworker-login-workspace.md](migrations/workspace-integration-stage-d-coworker-login-workspace.md) | coworker Login + Workspace UX restoration + ADR: SD1–SD7 (product shell, ora-web cookie session, two-plane login, tenant-scoped Issues, space-scoped Projects, switch semantics, demo-mode gating) |
 | **How to add code** | [agent/adding-features.md](development/agent/adding-features.md) | endpoint / sub-resource how-to + verify |
 
 ## Repo layout (one glance)
