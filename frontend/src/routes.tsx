@@ -86,7 +86,7 @@ export const router = createBrowserRouter([
         element: <WithSlug component={SettingsLayout} />,
         children: [
           { index: true, element: <GeneralSettingsPage /> },
-          { path: 'members', element: <CloudScope component={MembersPage} /> },
+          { path: 'members', element: <WithSlug component={MembersPage} /> },
           { path: 'billing', element: <WithSlug component={BillingPage} /> },
         ],
       },

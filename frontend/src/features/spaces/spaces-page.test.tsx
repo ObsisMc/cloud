@@ -4,15 +4,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { SpaceListItem } from '@/api/generated.schemas'
 import { SpacesPage } from '@/features/spaces/spaces-page'
 import { useAuthStore } from '@/state/auth-store'
+import { setCloudSession, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-session'
 import { server } from '@/test/msw-server'
 import { renderWithProviders } from '@/test/render'
 
-const TENANT_ID = '11111111-1111-1111-1111-111111111111'
-
 function spaceItem(role: string): SpaceListItem {
   return {
-    id: '22222222-2222-2222-2222-222222222222',
-    tenantId: TENANT_ID,
+    id: TEST_SPACE_ID,
+    tenantId: TEST_TENANT_ID,
     name: 'Team Space',
     slug: 'team',
     description: '',
@@ -28,7 +27,7 @@ function spaceItem(role: string): SpaceListItem {
 /** Mounts the page with one space in which the signed-in member holds `role`. */
 async function renderPageWithRole(role: string) {
   server.use(
-    http.get(`/api/v1/tenants/${TENANT_ID}/spaces`, () =>
+    http.get(`/api/v1/tenants/${TEST_TENANT_ID}/spaces`, () =>
       HttpResponse.json({ items: [spaceItem(role)], nextCursor: '' }),
     ),
   )
@@ -43,11 +42,7 @@ async function renderPageWithRole(role: string) {
  */
 describe('SpacesPage archive affordance', () => {
   beforeEach(() => {
-    useAuthStore.getState().setSession({
-      user: { id: 'u1', displayName: 'Alice', subject: 'alice' },
-      tenantId: TENANT_ID,
-      tenantName: 'Acme',
-    })
+    setCloudSession()
   })
 
   afterEach(() => {
