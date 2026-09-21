@@ -92,6 +92,7 @@ npm run build          # tsc -b && vite build
 ## 契约与边界
 
 - [OpenAPI 3.0](api/openapi.json)：所有 19 个公开接口、15 个内部接口和 health。`task openapi` 重新生成，测试校验文档合法性、生成结果和实际 HTTP 响应结构。
+- [Web 前端](frontend/README.md)：`frontend/src/api` 由 orval 从同一份 `api/openapi.json` 生成带类型的 TanStack Query hooks，`task frontend:generate` 一次完成 Go 契约 → JSON → TypeScript；CI 检测生成物漂移。
 - [核心不变量与状态机](docs/core-contract.md)：身份、归属、幂等、准入、租约、恢复和清理。
 - [Substrate/Node 与阶段二边界](docs/execution-contract.md)：共享卷布局、维护 Job、容器挂载、Git 语义与迁移责任。
 - [需求—实现—验证清单](docs/acceptance.md)：本次实际证据与未完成的阶段二验证。
@@ -102,14 +103,16 @@ npm run build          # tsc -b && vite build
 
 - **命令与运维入口 (`cmd/`)**：[入口总览 (`cmd/`)](cmd/README.md)
   - [服务守护进程 (`cmd/server`)](cmd/server/README.md)：生产环境 HTTP Daemon 核心。
+  - [认证 Gateway (`cmd/gateway`)](cmd/gateway/README.md)：GitHub OAuth 登录、PostgreSQL 浏览器会话与 `/api/v1` 反向代理。
   - [运维管理工具 (`cmd/cloudctl`)](cmd/cloudctl/README.md)：迁移执行、初始租户引导与凭据引用配置。
   - [本地执行模拟器 (`cmd/simulator`)](cmd/simulator/README.md)：内存与磁盘执行双工演示。
   - [OpenAPI 同步工具 (`cmd/openapi`)](cmd/openapi/README.md)：从 Go 契约自动编译导出 `api/openapi.json`。
   - [代码格式严检门禁 (`cmd/checkformat`)](cmd/checkformat/README.md)：CI 格式静态门禁。
 - **内部核心子系统 (`internal/`)**：[子系统总览 (`internal/`)](internal/README.md)
   - [领域状态机引擎 (`internal/core`)](internal/core/README.md)：聚合根、事务与全局锁、乐观版本控制、租约与幂等。
-  - [PostgreSQL 迁移目录 (`internal/core/migrations`)](internal/core/migrations/README.md)：0001~0004 线性 SQL 迁移与校验和防篡改校验。
+  - [PostgreSQL 迁移目录 (`internal/core/migrations`)](internal/core/migrations/README.md)：0001~0005 线性 SQL 迁移与校验和防篡改校验。
   - [HTTP 路由网关 (`internal/api/router`)](internal/api/router/README.md)：Gin 路由分流、双重 JWT 校验、白名单与 Fault 映射。
+  - [认证边界 (`internal/gateway`)](internal/gateway/README.md)：登录编排、Login Attempt/Session 存储、内部凭据签发、Cookie/CSRF 与代理；[GitHub 适配器 (`internal/gateway/github`)](internal/gateway/github/README.md)。
   - [API 契约定义 (`internal/contract`)](internal/contract/README.md)：OpenAPI 3.0 数据模型与测试。
   - [数据库连接池管理 (`internal/repository`)](internal/repository/README.md)：GORM 连接池、快速探活与安全约束。
   - [配置解析与加载 (`internal/config`)](internal/config/README.md)：Viper 强类型配置与环境变量映射。
@@ -121,4 +124,4 @@ npm run build          # tsc -b && vite build
 
 阶段一采用数据库事务级全局 advisory lock 串行核心事务，并限制每 Project 一个未完成 operation。HTTP/Git/Substrate 调用从不持有数据库事务。此选择适用于首版单集群单活，牺牲写吞吐以降低并发不变量复杂度；后续可按租户/Project 细分锁，但必须保持现有并发测试。
 
-容器只打包 server/cloudctl，运行身份为非 root。构建用 `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`，挂载自有配置和公钥；迁移使用同镜像 `--entrypoint /app/cloudctl` 独立执行。仓库 CI 使用 PG service、格式/静态检查和 race 集成测试。Docker 镜像和真实部署不属于本地已验证结果。
+容器打包 server/gateway/cloudctl，运行身份为非 root。构建用 `docker build -f scripts/Dockerfile -t ora-cloud:phase-one .`，挂载自有配置和公钥；迁移使用同镜像 `--entrypoint /app/cloudctl` 独立执行，认证 Gateway 使用 `--entrypoint /app/gateway`（见 `docs/gateway.md`）。仓库 CI 分为两个 workflow：`Backend` 使用 PG service 跑格式/静态检查和 race 集成测试；`Frontend` 只在 `frontend/`、`api/` 或 `internal/contract/` 变化时触发，校验生成客户端与契约一致，并执行格式、lint、类型、测试覆盖率、模块文档/测试、死代码、重复代码与构建门禁（见 `frontend/AGENTS.md`）。Docker 镜像和真实部署不属于本地已验证结果。

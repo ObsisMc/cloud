@@ -1,0 +1,66 @@
+# Gateway configuration. Every secret is a file reference; values are never inline.
+# Environment overrides use the GATEWAY_ prefix, e.g. GATEWAY_SESSION_TTL=720h.
+server:
+  port: 8081
+  mode: "debug" # debug | release | test
+  read_timeout: 10s
+  write_timeout: 30s
+
+logger:
+  level: "info"
+  filename: "logs/gateway.log"
+  max_size: 100
+  max_backups: 10
+  max_age: 30
+  compress: true
+  enable_console: true
+
+database:
+  driver: "postgres"
+  # Use a dedicated runtime role limited to gateway_login_attempts and gateway_sessions in production.
+  dsn: "host=127.0.0.1 port=55432 user=ora password=ora-local dbname=ora sslmode=disable"
+  max_idle_conns: 5
+  max_open_conns: 20
+  conn_max_lifetime: 1h
+
+public:
+  # The origin browsers see; the OAuth callback is <base_url>/auth/callback/<provider>.
+  # Production requires https. development: true permits http on localhost/127.0.0.1 only and
+  # drops the Secure cookie attributes.
+  base_url: "http://localhost:8081"
+  development: true
+
+session:
+  ttl: 720h            # absolute browser session lifetime; default 30 days, hard maximum 90 days
+  cleanup_interval: 10m
+  retention: 168h      # audit window before expired/revoked rows are deleted
+  cleanup_batch: 500
+
+login:
+  attempt_ttl: 10m     # 1m..1h
+  rate_limit_per_minute: 30
+  rate_limit_burst: 30
+  pkce_key_file: "/run/ora-keys/gateway-pkce.key" # at least 32 random bytes
+
+cloud:
+  upstream: "http://127.0.0.1:8080"
+  timeout: 30s
+
+tokens:
+  issuer: "ora-internal-issuer"
+  audience: "ora-cloud"
+  service_subject: "gateway-a"
+  service_key_id: "gateway-service-2026"
+  service_private_key_file: "/run/ora-keys/gateway-service.key" # PKCS#8 Ed25519 PEM
+  user_key_id: "user-identity-2026"
+  user_private_key_file: "/run/ora-keys/user-identity.key"      # PKCS#8 Ed25519 PEM
+  lifetime: 60s        # at most 5m; Cloud rejects longer credentials
+
+github:
+  client_id: "your-oauth-app-client-id"
+  client_secret_file: "/run/ora-keys/github-client-secret"
+  # Override for GitHub Enterprise Server; source then names that host.
+  # authorize_url: "https://github.example.com/login/oauth/authorize"
+  # token_url: "https://github.example.com/login/oauth/access_token"
+  # user_url: "https://github.example.com/api/v3/user"
+  # source: "github.example.com"

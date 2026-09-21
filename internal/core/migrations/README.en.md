@@ -23,6 +23,14 @@ Migrations are executed in ascending numerical sequence:
 - **`0004_effect_intent_and_ticket_scope.sql`**: Execution intent and ticket constraints:
   - Enforces strict scoping of execution tickets to active workspace nodes and valid admission epochs.
   - Binds durable effect declarations to specific operation phases.
+- **`0005_gateway_auth.sql`**: Gateway authentication tables (accessed at runtime only by `cmd/gateway`):
+  - `gateway_login_attempts`: one-shot login attempts; stores only SHA-256 digests of the attempt secret and `state`, rejects absolute, `//` and `/\` `return_to` values at the database layer, bounds the lifetime to one hour, and uses `consumed_at` to guarantee at most one session per attempt.
+  - `gateway_sessions`: browser sessions; stores only the token digest, requires a non-null `expires_at` no later than 90 days after creation, keeps revocation time and the bounded `revoked_reason` together, and indexes identity revocation and bounded cleanup.
+- **`0006_issues.sql`**: the `issues` (board) base table (formerly `0005_issues.sql`; forward-renumbered in the workspace integration to keep upstream numbering stable).
+- **`0007_issue_extensions.sql`**: `issue_statuses`, `issue_comments`, `labels`, `issue_labels`, `issue_subscribers`, `issue_views` + `issues` ALTERs (`number`, `properties`, status format check). (formerly `0006_issue_extensions.sql`)
+- **`0008_issue_collaboration.sql`**: `issues` ALTERs (`assignee_type`/`assignee_id`/`project_ref` + backfill), `issue_comments` ALTERs (`parent_id`/`author_type`/`author_id`/`seq` + backfill + `UNIQUE(issue_id,seq)`), new tables `issue_runs`, `issue_activities`, `issue_context_refs`. (formerly `0007_issue_collaboration.sql`)
+- **`0009_issue_interactions.sql`**: new table `issue_interactions` (the `@` interaction spine) — one row per selected collaboration target: `id, tenant_id, issue_id, comment_id, target_type, target_id, mode, task, run_id, created_at`. (formerly `0008_issue_interactions.sql`)
+- **`0010_issue_interaction_input.sql`**: one generic additive column: `ALTER TABLE issue_interactions ADD COLUMN input jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(input)='object')` — the confirmed form values. Deliberately excludes `version`, a `status` enum, `confirmed_at` and a separate inputs table; `0009` is not modified. (formerly `0009_issue_interaction_input.sql`)
 
 ## Checksum integrity and immutability
 

@@ -23,6 +23,7 @@ docs/
       progress.md               ← what's built / in-progress / deferred (status board)
   migrations/
     multica-issue-board/        ← single-migration archive (analysis → design → test → final)
+    workspace-integration-stage-a.md ← origin/main → workspace合并 融合决策记录（含迁移重编号 + 前端验证）
   acceptance.md                 ← product acceptance criteria (pre-existing)
   authentication.md             ← auth model (pre-existing)
   core-contract.md              ← core behavioural contract (pre-existing)
@@ -39,7 +40,8 @@ docs/
 | **Database** | [agent/database.md](development/agent/database.md) | live table + migration inventory |
 | **Collaboration interaction model** | [12-collaboration-architecture.md §37](migrations/multica-issue-board/12-collaboration-architecture.md#37-wave-3b-0--collaboration-interaction-model-frozen) | **authoritative product semantics** — `@`, the four target modes, cardinality, context, timeline, fixtures. Frozen by Wave 3B-0 |
 | **Collaboration / integration ports** | [12-collaboration-architecture.md §6.4](migrations/multica-issue-board/12-collaboration-architecture.md#64-canonical-port-inventory-unified-by-wave-3b-0) | the **single** canonical port inventory (15 ports; `FormDescriptorProvider` added by 3B-2). Other docs must point here, not repeat a list |
-| **Workflow interaction (Issues-facing)** | [12-collaboration-architecture.md §38](migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen) | the **contract** (`FormDescriptor`, single Confirm boundary, AI Assist authority, draft decision, API surface, `0009`) + **§38.37** implementation record |
+| **Workflow interaction (Issues-facing)** | [12-collaboration-architecture.md §38](migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen) | the **contract** (`FormDescriptor`, single Confirm boundary, AI Assist authority, draft decision, API surface, `0010`) + **§38.37** implementation record |
+| **Workspace integration (Stage A)** | [workspace-integration-stage-a.md](migrations/workspace-integration-stage-a.md) | origin/main → `workspace合并` fusion: migration renumbering (0005→0006…), dual-JWT contract, frontend resolutions, decisions D-Auth / D4 |
 | **How to add code** | [agent/adding-features.md](development/agent/adding-features.md) | endpoint / sub-resource how-to + verify |
 
 ## Repo layout (one glance)
@@ -61,17 +63,18 @@ docs/
 - ✅ **Issue Board** — wave 1 (core Kanban), wave 2 (status catalog, comments, labels, subscribers,
   numbers, properties, search, batch, saved views, groups) and **Wave 3A** (collaboration
   foundation: polymorphic assignee, comment author actors, IssueRun, timeline projection, context
-  refs). Migrations 0005–0009; the formal React frontend in `frontend/` is migrated and speaks to
-  the real API.
+  refs). Migrations 0006–0010 (renumbered from 0005–0009 in the workspace integration — see
+  [workspace-integration-stage-a.md](migrations/workspace-integration-stage-a.md)); the formal React frontend in
+  `frontend/` is migrated and speaks to the real API.
 - ✅ **Wave 3B-0** — Collaboration Architecture Alignment (docs only): the interaction model is frozen
   in [§37](migrations/multica-issue-board/12-collaboration-architecture.md#37-wave-3b-0--collaboration-interaction-model-frozen)
   and the 14 integration ports are unified in
   [§6.4](migrations/multica-issue-board/12-collaboration-architecture.md#64-canonical-port-inventory-unified-by-wave-3b-0).
-- ✅ **Wave 3B-1** — Collaboration Interaction Foundation (migration `0008`): the first real end-to-end
+- ✅ **Wave 3B-1** — Collaboration Interaction Foundation (migration `0009`, formerly `0008`): the first real end-to-end
   `@` collaboration chain — `GET /collaboration/targets` → `@` picker → Human Mention / Agent & Team
   Task → deterministic context → mock execution → IssueRun lifecycle / Activity / reply Comment →
   `GET /issues/{iid}/timeline` — with no real Agent/Team/Workflow/Runtime modules.
-- ✅ **Wave 3B-2 — Workflow Interaction Shell** (migration `0009`): `@Workflow` → `FormDescriptor` →
+- ✅ **Wave 3B-2 — Workflow Interaction Shell** (migration `0010`, formerly `0009`): `@Workflow` → `FormDescriptor` →
   dynamic form → optional AI Assist → **Review → Confirm** → `IssueRun` → mock execution → Timeline.
   New ports `FormDescriptorProvider` / `InputAssistProvider`; workflow output lands as a `system`
   activity. Real Workflow / AI providers remain **blocked on external design**

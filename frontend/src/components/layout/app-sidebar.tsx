@@ -92,7 +92,10 @@ export function AppSidebar({ slug }: { slug: string }) {
               />
               <DropdownMenuContent className="w-56" align="start" side="bottom" sideOffset={4}>
                 <div className="flex items-center gap-2.5 px-2 py-1.5">
-                  <ActorAvatar actor={{ name: user?.displayName ?? '用户', type: 'user' }} size="lg" />
+                  <ActorAvatar
+                    actor={{ name: user?.displayName ?? '用户', type: 'user' }}
+                    size="lg"
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium leading-tight">
                       {user?.displayName}

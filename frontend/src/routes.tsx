@@ -30,8 +30,8 @@ function RootRedirect() {
 
 /**
  * DashboardLayout only renders its children once the session is present, so every
- * page under it can trust the `:workspaceSlug` param (a tenant id) and doesn't need
- * to re-validate it — this just forwards it as the `slug` prop each page expects.
+ * page under it can trust the `:workspaceSlug` param (a tenant id) and doesn't
+ * need to re-validate it — this just forwards it as the `slug` prop each page expects.
  */
 function WithSlug({ component: Component }: { component: ComponentType<{ slug: string }> }) {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>()

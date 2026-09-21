@@ -26,6 +26,11 @@ function refTypeLabel(refType: ContextRef['refType']): string {
   return REF_TYPE_OPTIONS.find((o) => o.value === refType)?.label ?? refType
 }
 
+/** Runtime guard so select values (strings) narrow safely into the refType union. */
+function isRefType(value: unknown): value is ContextRef['refType'] {
+  return typeof value === 'string' && REF_TYPE_OPTIONS.some((o) => o.value === value)
+}
+
 /**
  * List/add/remove of issue context refs — reference-only pointers, not hydrated
  * resources. No smart resolution: the ref id is stored and shown verbatim.
@@ -46,10 +51,10 @@ export function ContextRefsPanel({ slug, issueId }: { slug: string; issueId: str
   return (
     <div className="space-y-2">
       <div className="flex gap-1.5">
-        <Select value={refType} onValueChange={(v) => setRefType(v as ContextRef['refType'])}>
+        <Select value={refType} onValueChange={(v) => isRefType(v) && setRefType(v)}>
           <SelectTrigger className="w-32">
             <SelectValue>
-              {(value: unknown) => refTypeLabel(value as ContextRef['refType'])}
+              {(value: unknown) => refTypeLabel(isRefType(value) ? value : refType)}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>

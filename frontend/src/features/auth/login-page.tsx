@@ -46,9 +46,7 @@ export function LoginPage() {
               required
             />
           </div>
-          {login.isError && (
-            <p className="text-sm text-destructive">登录失败，请稍后重试。</p>
-          )}
+          {login.isError && <p className="text-sm text-destructive">登录失败，请稍后重试。</p>}
           <Button type="submit" className="w-full" disabled={login.isPending}>
             {login.isPending ? '登录中…' : '继续'}
           </Button>

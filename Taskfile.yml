@@ -38,9 +38,16 @@ tasks:
       - task: test
   build:
     cmds:
-      - go build -o bin/ ./cmd/server ./cmd/cloudctl ./cmd/simulator
+      - go build -o bin/ ./cmd/server ./cmd/gateway ./cmd/cloudctl ./cmd/simulator
   run:
+    desc: Go API server on :8080
     cmds: [go run ./cmd/server]
+  run:gateway:
+    desc: Authentication gateway on :8081, proxying /api/v1 to the Go server; see docs/gateway.md
+    cmds: [go run ./cmd/gateway]
+  dev:
+    desc: Go API server and Vite dev server together; open http://localhost:5173
+    deps: [run, frontend:dev]
   migrate:
     cmds: [go run ./cmd/cloudctl -command migrate]
   simulate:
@@ -48,3 +55,34 @@ tasks:
     cmds: [go run ./cmd/simulator]
   openapi:
     cmds: [go run ./cmd/openapi]
+  frontend:install:
+    desc: Install frontend dependencies from package-lock.json
+    cmds: [npm --prefix frontend ci]
+  frontend:dev:
+    desc: Vite dev server on :5173, proxying /api, /internal and /healthz to the Go server on :8080
+    deps: [frontend:install]
+    cmds: [npm --prefix frontend run dev]
+  frontend:generate:
+    desc: Regenerate api/openapi.json, then the frontend's typed react-query client from it
+    cmds:
+      - task: openapi
+      - npm --prefix frontend run api:generate
+  frontend:format:
+    desc: Format frontend sources with prettier
+    cmds: [npm --prefix frontend run format]
+  frontend:test:
+    desc: Frontend unit tests with coverage thresholds
+    cmds: [npm --prefix frontend run test]
+  frontend:check:
+    desc: Same gate as CI; generated client must match the committed contract, then format/lint/types/tests/docs/dead-code/duplication/build
+    cmds:
+      - npm --prefix frontend run api:generate
+      - git status --porcelain -- frontend/src/api
+      - test -z "$(git status --porcelain -- frontend/src/api)"
+      - npm --prefix frontend run check
+  frontend:check:diff:
+    desc: Modules changed since BASE (default origin/main) must also update their READMEs and tests
+    vars:
+      BASE: '{{.BASE | default "origin/main"}}'
+    cmds:
+      - npm --prefix frontend run check:modules -- --base {{.BASE}}

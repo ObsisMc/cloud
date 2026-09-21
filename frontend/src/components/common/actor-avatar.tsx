@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Bot, Users } from 'lucide-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
@@ -16,13 +17,22 @@ export interface AvatarActor {
   initials?: string
 }
 
-const PALETTE = ['#f97316', '#f43f5e', '#8b5cf6', '#3b82f6', '#10b981', '#eab308', '#06b6d4', '#ec4899']
+const PALETTE = [
+  '#f97316',
+  '#f43f5e',
+  '#8b5cf6',
+  '#3b82f6',
+  '#10b981',
+  '#eab308',
+  '#06b6d4',
+  '#ec4899',
+] as const
 
 /** Deterministic color for actors that only carry a name (real cloud users). */
 function colorFor(name: string): string {
   let hash = 0
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0
-  return PALETTE[hash % PALETTE.length] ?? PALETTE[0]!
+  return PALETTE[hash % PALETTE.length] ?? PALETTE[0]
 }
 
 function initialsOf(name: string): string {
@@ -52,19 +62,17 @@ export function ActorAvatar({
   }
   const type = actor.type ?? 'user'
   const name = actor.name ?? ''
+  let fallback: ReactNode
+  if (type === 'agent') fallback = <Bot className="size-[60%]" />
+  else if (type === 'team') fallback = <Users className="size-[60%]" />
+  else fallback = actor.initials ?? initialsOf(name)
   return (
     <Avatar className={cn(SIZE_CLASSES[size], className)}>
       <AvatarFallback
         className="font-medium text-white"
         style={{ backgroundColor: actor.avatarColor ?? colorFor(name) }}
       >
-        {type === 'agent' ? (
-          <Bot className="size-[60%]" />
-        ) : type === 'team' ? (
-          <Users className="size-[60%]" />
-        ) : (
-          (actor.initials ?? initialsOf(name))
-        )}
+        {fallback}
       </AvatarFallback>
     </Avatar>
   )

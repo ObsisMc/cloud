@@ -9,6 +9,7 @@ operating-system signal handling, and process exit codes.
 ## Module map
 
 - [server](server/README.en.md) is the primary authoritative HTTP API service daemon.
+- [gateway](gateway/README.en.md) is the browser-facing authentication and reverse-proxy boundary: GitHub OAuth login, PostgreSQL sessions, and internal credential issuance.
 - [cloudctl](cloudctl/README.en.md) is the restricted deployment and operations CLI for migrations, tenant bootstrap, and credential reference management.
 - [simulator](simulator/README.en.md) provides an all-in-one local demo environment backed by in-process Substrate and Git execution doubles.
 - [openapi](openapi/README.en.md) compiles and synchronizes the canonical OpenAPI 3.0 specification (`api/openapi.json`) from Go contract definitions.

@@ -70,9 +70,7 @@ export function resolveDrop({
   if (!active) return null
 
   const isColumnDrop = !issues.some((i) => i.id === overId)
-  const targetStatus = isColumnDrop
-    ? String(overId)
-    : issues.find((i) => i.id === overId)?.status
+  const targetStatus = isColumnDrop ? String(overId) : issues.find((i) => i.id === overId)?.status
   if (!targetStatus) return null
 
   const column = issues
@@ -208,6 +206,7 @@ function BoardColumn({
   )
 }
 
+// oxlint-disable-next-line max-lines-per-function -- one cohesive drag-and-drop board: dnd hooks, column rendering and drop indicators live together.
 export function IssuesBoard({
   issues,
   slug,
@@ -224,7 +223,10 @@ export function IssuesBoard({
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
-  const columns = orderedColumns(statuses, issues.map((issue) => issue.status))
+  const columns = orderedColumns(
+    statuses,
+    issues.map((issue) => issue.status),
+  )
   /** parentIssueId → count of direct sub-issues, so a parent card can show its children at a glance. */
   const childCounts = useMemo(() => {
     const counts = new Map<string, number>()

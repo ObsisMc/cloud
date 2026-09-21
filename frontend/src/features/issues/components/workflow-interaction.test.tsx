@@ -99,13 +99,10 @@ function serveComposer(overrides: { descriptor?: unknown; suggestion?: AssistSug
     http.get('/api/v1/tenants/t1/collaboration/forms/security-review', () =>
       HttpResponse.json(overrides.descriptor ?? descriptor),
     ),
-    http.post(
-      '/api/v1/tenants/t1/issues/i1/collaboration/assist',
-      async ({ request }) => {
-        assist(await request.json())
-        return HttpResponse.json(overrides.suggestion ?? suggestion)
-      },
-    ),
+    http.post('/api/v1/tenants/t1/issues/i1/collaboration/assist', async ({ request }) => {
+      assist(await request.json())
+      return HttpResponse.json(overrides.suggestion ?? suggestion)
+    }),
     http.post('/api/v1/tenants/t1/issues/i1/comments', async ({ request }) => {
       comment(await request.json())
       return HttpResponse.json({ resource: { id: 'c1' } })
@@ -199,7 +196,9 @@ describe('WorkflowInteractionComposer', () => {
 
     await user.click(within(suggestionRow('because scope')).getByRole('button', { name: '应用' }))
     expect(await screen.findByText('Changed files')).toBeInTheDocument()
-    await user.click(within(suggestionRow('because severity')).getByRole('button', { name: '忽略' }))
+    await user.click(
+      within(suggestionRow('because severity')).getByRole('button', { name: '忽略' }),
+    )
     expect(screen.queryByText('because severity')).not.toBeInTheDocument()
 
     // A draft form writes nothing: no comment, no interaction, no run.

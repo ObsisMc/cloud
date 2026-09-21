@@ -20,8 +20,12 @@ function serveDetail(issue: Issue, allIssues: Issue[] = [issue]) {
       HttpResponse.json({ items: allIssues, nextCursor: '' }),
     ),
     http.put('/api/v1/tenants/t1/issues/i1', async ({ request }) => {
-      const body = (await request.json()) as { status?: string; version?: number }
-      return HttpResponse.json({ ...issue, ...body })
+      const body = await request.json()
+      const updates: Record<string, unknown> = {}
+      if (typeof body === 'object' && body !== null) {
+        for (const [key, value] of Object.entries(body)) updates[key] = value
+      }
+      return HttpResponse.json({ ...issue, ...updates })
     }),
     http.get('/api/v1/tenants/t1/issue-statuses', () =>
       HttpResponse.json({ items: statuses, nextCursor: '' }),
@@ -87,7 +91,11 @@ describe('IssueDetailPage', () => {
   })
 
   it('shows the parent task and its sub-issues', async () => {
-    const issue = makeIssue('i1', 'Fix the login', { status: 'backlog', parentIssueId: 'p1', number: 5 })
+    const issue = makeIssue('i1', 'Fix the login', {
+      status: 'backlog',
+      parentIssueId: 'p1',
+      number: 5,
+    })
     const parent = makeIssue('p1', 'Epic task', { number: 1 })
     const child = makeIssue('c1', 'Sub task', { number: 6, parentIssueId: 'i1' })
     serveDetail(issue, [parent, issue, child])

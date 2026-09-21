@@ -14,7 +14,11 @@ import {
 import { cn } from '@/lib/utils'
 import type { IssuePriority } from '@/features/issues/types'
 
-type StatusMeta = { label: string; className: string; icon: React.ComponentType<{ className?: string }> }
+type StatusMeta = {
+  label: string
+  className: string
+  icon: React.ComponentType<{ className?: string }>
+}
 
 /**
  * Labels/icons for the 7 canonical system status keys. Custom tenant statuses have no

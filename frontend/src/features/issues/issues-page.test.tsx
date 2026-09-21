@@ -13,7 +13,9 @@ const statuses = [makeStatus('backlog'), makeStatus('todo'), makeStatus('done')]
 /** Serves the three tenant queries the board mounts (issues, statuses, members). */
 function serveBoard(issues: Issue[]) {
   server.use(
-    http.get('/api/v1/tenants/t1/issues', () => HttpResponse.json({ items: issues, nextCursor: '' })),
+    http.get('/api/v1/tenants/t1/issues', () =>
+      HttpResponse.json({ items: issues, nextCursor: '' }),
+    ),
     http.get('/api/v1/tenants/t1/issue-statuses', () =>
       HttpResponse.json({ items: statuses, nextCursor: '' }),
     ),
@@ -37,8 +39,13 @@ describe('IssuesPage', () => {
     serveBoard(issues)
     server.use(
       http.post('/api/v1/tenants/t1/issues', async ({ request }) => {
-        const body = (await request.json()) as { title: string }
-        const created = makeIssue('new', body.title, { status: 'backlog' })
+        const body = await request.json()
+        const payload: Record<string, unknown> = {}
+        if (typeof body === 'object' && body !== null) {
+          for (const [key, value] of Object.entries(body)) payload[key] = value
+        }
+        const title = typeof payload['title'] === 'string' ? payload['title'] : 'Untitled'
+        const created = makeIssue('new', title, { status: 'backlog' })
         issues.unshift(created)
         return HttpResponse.json({ resource: created })
       }),

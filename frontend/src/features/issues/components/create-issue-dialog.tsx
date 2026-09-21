@@ -39,11 +39,15 @@ const FALLBACK_STATUS_KEYS = [
   'cancelled',
 ]
 
+/** Stable defaults so optional props don't allocate a fresh array per render. */
+const EMPTY_STATUSES: IssueStatusColumn[] = []
+const EMPTY_MEMBERS: TenantMember[] = []
+
 // oxlint-disable-next-line max-lines-per-function -- this dialog owns one cohesive create-issue form and its reset lifecycle.
 export function CreateIssueDialog({
   slug,
-  statuses = [],
-  members = [],
+  statuses = EMPTY_STATUSES,
+  members = EMPTY_MEMBERS,
   defaultStatus = 'backlog',
   trigger,
 }: {

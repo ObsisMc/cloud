@@ -79,7 +79,9 @@ describe('useCreateIssue', () => {
         return HttpResponse.json({ resource: issueFixture })
       }),
     )
-    const { result } = renderHook(() => useCreateIssue('t1'), { wrapper: wrapper(new QueryClient()) })
+    const { result } = renderHook(() => useCreateIssue('t1'), {
+      wrapper: wrapper(new QueryClient()),
+    })
 
     result.current.mutate({ title: 'Fix the login' })
 
@@ -96,7 +98,9 @@ describe('useCreateIssue', () => {
         return HttpResponse.json({ resource: issueFixture })
       }),
     )
-    const { result } = renderHook(() => useCreateIssue('t1'), { wrapper: wrapper(new QueryClient()) })
+    const { result } = renderHook(() => useCreateIssue('t1'), {
+      wrapper: wrapper(new QueryClient()),
+    })
 
     result.current.mutate({ title: 'Child task', parentIssueId: 'p1' })
 

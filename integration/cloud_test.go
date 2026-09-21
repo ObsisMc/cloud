@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -47,7 +48,9 @@ type fixture struct {
 	pgConfig               *pgx.ConnConfig
 }
 
-func setup(t *testing.T) *fixture {
+// testSchema creates an isolated PostgreSQL schema for one test and returns a pool bound to it.
+// The schema is dropped on cleanup; REQUIRE_POSTGRES=1 turns a missing database into a failure.
+func testSchema(t *testing.T, prefix string) (*sql.DB, *pgx.ConnConfig) {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -60,11 +63,29 @@ func setup(t *testing.T) *fixture {
 	must(t, e)
 	admin := stdlib.OpenDB(*config)
 	must(t, admin.Ping())
-	schema := "test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	schema := prefix + strings.ReplaceAll(uuid.NewString(), "-", "")
 	_, e = admin.Exec("CREATE SCHEMA " + schema)
 	must(t, e)
 	config.RuntimeParams["search_path"] = schema
 	pool := stdlib.OpenDB(*config)
+	t.Cleanup(func() {
+		if err := pool.Close(); err != nil {
+			t.Error(err)
+		}
+		_, err := admin.Exec("DROP SCHEMA " + schema + " CASCADE")
+		if err != nil {
+			t.Error(err)
+		}
+		if err = admin.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return pool, config
+}
+
+func setup(t *testing.T) *fixture {
+	t.Helper()
+	pool, config := testSchema(t, "test_")
 	db, e := gorm.Open(postgres.New(postgres.Config{Conn: pool}), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	must(t, e)
 	store, e := core.NewStore(db)
@@ -75,14 +96,6 @@ func setup(t *testing.T) *fixture {
 	store.Dispatcher = collab.MockExecutionDispatcher{}
 	store.Forms = collab.FixtureFormDescriptorProvider{}
 	store.Assist = collab.MockInputAssistProvider{}
-	t.Cleanup(func() {
-		pool.Close()
-		_, err := admin.Exec("DROP SCHEMA " + schema + " CASCADE")
-		if err != nil {
-			t.Error(err)
-		}
-		admin.Close()
-	})
 	must(t, store.Migrate(context.Background()))
 	must(t, store.Migrate(context.Background()))
 	credentials, e := simulator.NewCredentials()
@@ -127,31 +140,9 @@ func setup(t *testing.T) *fixture {
 }
 
 func TestMigrateUpgradesPreviousSchemaAndData(t *testing.T) {
-	t.Helper()
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		if os.Getenv("REQUIRE_POSTGRES") == "1" {
-			t.Fatal("TEST_DATABASE_URL is required; PostgreSQL integration must not skip")
-		}
-		t.Skip("real PostgreSQL: set TEST_DATABASE_URL (task test:integration requires it)")
-	}
-	config, err := pgx.ParseConfig(dsn)
-	must(t, err)
-	admin := stdlib.OpenDB(*config)
-	must(t, admin.Ping())
-	schema := "test_upgrade_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	_, err = admin.Exec("CREATE SCHEMA " + schema)
-	must(t, err)
-	config.RuntimeParams["search_path"] = schema
-	pool := stdlib.OpenDB(*config)
-	t.Cleanup(func() {
-		must(t, pool.Close())
-		_, dropErr := admin.Exec("DROP SCHEMA " + schema + " CASCADE")
-		must(t, dropErr)
-		must(t, admin.Close())
-	})
+	pool, _ := testSchema(t, "test_upgrade_")
 
-	_, err = pool.Exec("CREATE TABLE schema_migrations(version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())")
+	_, err := pool.Exec("CREATE TABLE schema_migrations(version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())")
 	must(t, err)
 	for _, version := range []string{"0001_core.sql", "0002_aggregate_guards.sql", "0003_resource_versions.sql"} {
 		migration, readErr := os.ReadFile(filepath.Join("..", "internal", "core", "migrations", version))

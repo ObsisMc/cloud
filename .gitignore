@@ -24,16 +24,50 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# env files (commit only *.example)
 .env
+.env.*
+!.env.example
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# AI assistants: local state only. AGENTS.md / CLAUDE.md and shared
+# .claude/settings.json stay tracked; everything else under .claude/ is per-machine.
+.claude/*
+!.claude/settings.json
+CLAUDE.local.md
+.codex/
+.cursor/
+.aider*
+.gemini/
+.copilot/
+.windsurf/
+.continue/
+.cline/
+.roo/
+.kiro/
+.opencode/
+.specstory/
+
+# Node (frontend/ has its own .gitignore; keep a root guard for stray installs)
+node_modules/
 
 # Build artifacts and local storage
 bin/
 logs/
 *.db
 .local/
+.task/
+tmp/
 /specs

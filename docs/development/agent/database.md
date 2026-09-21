@@ -12,11 +12,12 @@ applied file; add a new `NNNN_*.sql`.
 | `0002_aggregate_guards.sql` | deferred-constraint triggers (one main workspace per project, last-admin guard, …) |
 | `0003_resource_versions.sql` | `version` columns + optimistic-concurrency backfill |
 | `0004_effect_intent_and_ticket_scope.sql` | effect intent + ticket scoping hardening |
-| `0005_issues.sql` | `issues` (board) |
-| `0006_issue_extensions.sql` | issue_statuses, issue_comments, labels, issue_labels, issue_subscribers, issue_views + `issues` ALTERs (`number`, `properties`, status format check) |
-| `0007_issue_collaboration.sql` | `issues` ALTERs (`assignee_type`/`assignee_id`/`project_ref` + backfill), `issue_comments` ALTERs (`parent_id`/`author_type`/`author_id`/`seq` + backfill + `UNIQUE(issue_id,seq)`), new tables `issue_runs`, `issue_activities`, `issue_context_refs` |
-| `0008_issue_interactions.sql` | new table `issue_interactions` (the `@` interaction spine) — one row per selected collaboration target: `id, tenant_id, issue_id, comment_id, target_type, target_id, mode, task, run_id, created_at` |
-| `0009_issue_interaction_input.sql` | one generic additive column: `ALTER TABLE issue_interactions ADD COLUMN input jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(input)='object')` — the confirmed form values ([§38.30](../../migrations/multica-issue-board/12-collaboration-architecture.md#3830-does-3b-2-need-a-migration--yes-one-additive-column)). Deliberately excludes `version`, a `status` enum, `confirmed_at` and a separate inputs table. `0008` is not modified. |
+| `0005_gateway_auth.sql` | Gateway authentication tables: `gateway_login_attempts`, `gateway_sessions` (runtime-only access by `cmd/gateway`) |
+| `0006_issues.sql` | `issues` (board) — formerly `0005_issues.sql`, forward-renumbered in the workspace integration so upstream numbering stayed stable |
+| `0007_issue_extensions.sql` | issue_statuses, issue_comments, labels, issue_labels, issue_subscribers, issue_views + `issues` ALTERs (`number`, `properties`, status format check) — formerly `0006_issue_extensions.sql` |
+| `0008_issue_collaboration.sql` | `issues` ALTERs (`assignee_type`/`assignee_id`/`project_ref` + backfill), `issue_comments` ALTERs (`parent_id`/`author_type`/`author_id`/`seq` + backfill + `UNIQUE(issue_id,seq)`), new tables `issue_runs`, `issue_activities`, `issue_context_refs` — formerly `0007_issue_collaboration.sql` |
+| `0009_issue_interactions.sql` | new table `issue_interactions` (the `@` interaction spine) — one row per selected collaboration target: `id, tenant_id, issue_id, comment_id, target_type, target_id, mode, task, run_id, created_at` — formerly `0008_issue_interactions.sql` |
+| `0010_issue_interaction_input.sql` | one generic additive column: `ALTER TABLE issue_interactions ADD COLUMN input jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(input)='object')` — the confirmed form values ([§38.30](../../migrations/multica-issue-board/12-collaboration-architecture.md#3830-does-3b-2-need-a-migration--yes-one-additive-column)). Deliberately excludes `version`, a `status` enum, `confirmed_at` and a separate inputs table. `0009` is not modified. — formerly `0009_issue_interaction_input.sql` |
 
 ## Table inventory
 
@@ -45,7 +46,7 @@ applied file; add a new `NNNN_*.sql`.
 | `controller_leases` | controller leadership | epoch fencing |
 | `idempotency_records` | POST/DELETE replay | tenant_id, user_id, key, request_hash, response, status |
 
-### Issue board (0005–0008)
+### Issue board (0006–0008)
 | Table | Purpose | Key columns |
 | --- | --- | --- |
 | `issues` | board card | tenant_id, creator_user_id, assignee_type/assignee_id (polymorphic), assignee_user_id? (mirror), project_ref?, parent_issue_id?, title, description, status, priority, position, number, properties(jsonb), version, deleted_at |
@@ -70,7 +71,7 @@ an implemented feature:
 | `issue_activities` | ✅ written internally (`appendActivity`) | ✅ `GET /issues/{iid}/timeline` (merged with comments) |
 | `issue_comments.author_type` | ✅ CHECK allows `user/agent/team/system` | ✅ user + agent/team (internal run-reply path); `system` still unwritten |
 | `issue_comments.seq` | ✅ shared per-issue namespace with `issue_activities.seq` | ✅ comment list and `/timeline` order by it |
-| `issue_interactions` | ✅ migrations `0008` + `0009` | ✅ `GET /issues/{iid}/interactions`; written via `targets[]` on comment create, `input`/`run_id` claimed by confirm |
+| `issue_interactions` | ✅ migrations `0009` + `0010` | ✅ `GET /issues/{iid}/interactions`; written via `targets[]` on comment create, `input`/`run_id` claimed by confirm |
 | `issue_runs` | ✅ full 7-state lifecycle columns | ⚠️ create/list/get; transitions driven by the (mock) dispatcher/observer, not a public state API |
 | `issues.assignee_type` / `project_ref` | ✅ | ⚠️ agent/team/project refs are opaque, unresolved |
 

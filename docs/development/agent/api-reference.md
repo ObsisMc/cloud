@@ -83,7 +83,7 @@ threading, shared per-issue timeline `seq`).
 | `issue_comments.author_type = system` | CHECK allows `system`, but **no** code path writes a `system` comment yet (agent/team replies now go through the internal run-reply path, §Interaction). |
 | `ConversationTarget` | **Not implemented** — out of scope this wave, left open in §37.17. |
 
-**Implemented by Wave 3B-1** (migration `0008`, semantics frozen in
+**Implemented by Wave 3B-1** (migration `0009` — formerly `0008`, renumbered in the workspace integration; semantics frozen in
 [12-collaboration-architecture.md §37](../../migrations/multica-issue-board/12-collaboration-architecture.md#37-wave-3b-0--collaboration-interaction-model-frozen)):
 
 - `Comment.authorType` is no longer hard-coded `user`: mock agent/team runs post a reply comment with
@@ -128,7 +128,7 @@ integration tests (they assert the comment→interaction→run cardinality) plus
 because it is the read surface for the spine table; the frontend hook `useInteractions` exists but is
 unused. Widening it later must stay additive.
 
-### Workflow interaction (Wave 3B-2, migration `0009`)
+### Workflow interaction (Wave 3B-2, migration `0010` — formerly `0009`, renumbered in the workspace integration)
 
 Form Mode. `POST /comments` with `targets:[{type:"workflow", id}]` now records a `mode='form'`,
 `runId=null` interaction and **creates no run**; only an explicit confirm does. `409

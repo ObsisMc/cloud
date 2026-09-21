@@ -23,6 +23,14 @@
 - **`0004_effect_intent_and_ticket_scope.sql`**：执行意图与 Ticket 作用域约束：
   - 严格将执行 Ticket 限制到活动的 Workspace Node 和有效的准入 epoch。
   - 将持久化的 Effect 声明绑定至特定的操作阶段。
+- **`0005_gateway_auth.sql`**：Gateway 认证表（由 `cmd/gateway` 独占运行时访问）：
+  - `gateway_login_attempts`：一次性登录尝试；只保存 attempt secret 与 `state` 的 SHA-256 digest，`return_to` 在数据库层拒绝绝对、`//`、`/\` 形式，有效期不超过 1 小时，`consumed_at` 保证最多创建一个 session。
+  - `gateway_sessions`：浏览器会话；只保存 token digest，`expires_at` 非空且不超过创建后 90 天，吊销时间与有限的 `revoked_reason` 同时存在，并为 identity 吊销与有界清理建立索引。
+- **`0006_issues.sql`**：Issues 看板基线表 `issues`（原 `0005_issues.sql`；工作区整合时前移重编号，保持 upstream 编号稳定）。
+- **`0007_issue_extensions.sql`**：`issue_statuses`、`issue_comments`、`labels`、`issue_labels`、`issue_subscribers`、`issue_views` + `issues` ALTER（`number`、`properties`、状态格式检查）。（原 `0006_issue_extensions.sql`）
+- **`0008_issue_collaboration.sql`**：`issues` ALTER（`assignee_type`/`assignee_id`/`project_ref` + 回填）、`issue_comments` ALTER（`parent_id`/`author_type`/`author_id`/`seq` + 回填 + `UNIQUE(issue_id,seq)`）、新表 `issue_runs`、`issue_activities`、`issue_context_refs`。（原 `0007_issue_collaboration.sql`）
+- **`0009_issue_interactions.sql`**：新表 `issue_interactions`（`@` 交互脊）——每个选中的协作目标一行：`id, tenant_id, issue_id, comment_id, target_type, target_id, mode, task, run_id, created_at`。（原 `0008_issue_interactions.sql`）
+- **`0010_issue_interaction_input.sql`**：一个通用增量列：`ALTER TABLE issue_interactions ADD COLUMN input jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(input)='object')` —— 已确认的表单值。刻意排除 `version`、`status` 枚举、`confirmed_at` 与独立 inputs 表；`0009` 不被修改。（原 `0009_issue_interaction_input.sql`）
 
 ## 校验和完整性与不可变性
 

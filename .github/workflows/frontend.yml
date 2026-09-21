@@ -1,0 +1,62 @@
+name: Frontend
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'frontend/**'
+      # The generated client must track the published contract, so a Go-side
+      # contract change re-runs the drift check even without frontend edits.
+      - 'api/**'
+      - 'internal/contract/**'
+      - '.github/workflows/frontend.yml'
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'api/**'
+      - 'internal/contract/**'
+      - '.github/workflows/frontend.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The change check diffs against the pull request base; full history keeps
+          # merge-base resolution and commit-trailer waivers working.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.node-version
+          # Caches ~/.npm keyed by package-lock.json; npm ci then installs offline.
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Generated client matches api/openapi.json
+        run: |
+          npm run api:generate
+          git status --porcelain -- src/api
+          git diff -- src/api
+          test -z "$(git status --porcelain -- src/api)"
+      # The steps below mirror `npm run check`; keep both lists in sync.
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - name: Module READMEs and tests present
+        run: npm run check:modules
+      - name: Changed modules updated their docs and tests
+        if: github.event_name == 'pull_request'
+        run: npm run check:modules -- --base origin/${{ github.base_ref }}
+      - name: Exported symbols documented
+        run: npm run check:docs
+      - name: No dead code or dependencies
+        run: npm run check:dead
+      - name: No duplicated code
+        run: npm run check:dup
+      - run: npm run build

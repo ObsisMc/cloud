@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 type ViewMode = 'board' | 'list'
 const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']
 
+// oxlint-disable-next-line complexity -- view switch + pending/empty/board/list branches render one cohesive screen.
 export function IssuesList({
   slug,
   title,
@@ -32,7 +33,10 @@ export function IssuesList({
     ? (issues ?? []).filter((i) => i.assigneeUserId === assigneeUserId)
     : (issues ?? [])
   const memberNames = memberNameById(members)
-  const columns = orderedColumns(statuses, visible.map((i) => i.status))
+  const columns = orderedColumns(
+    statuses,
+    visible.map((i) => i.status),
+  )
 
   return (
     <div className="flex h-full flex-col">

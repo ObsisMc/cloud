@@ -68,7 +68,9 @@ function StatusField({
           <span className="flex items-center gap-2">
             <StatusIcon status={issue.status} />
             <SelectValue>
-              {(value: unknown) => columnLabel(statuses ?? [], typeof value === 'string' ? value : issue.status)}
+              {(value: unknown) =>
+                columnLabel(statuses ?? [], typeof value === 'string' ? value : issue.status)
+              }
             </SelectValue>
           </span>
         </SelectTrigger>
@@ -226,7 +228,10 @@ export function IssueDetailPage({ slug }: { slug: string }) {
           <div className="space-y-1.5">
             <PropertyLabel>负责人</PropertyLabel>
             <div className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
-              <ActorAvatar actor={type ? { name: assigneeName(issue, names), type } : undefined} size="sm" />
+              <ActorAvatar
+                actor={type ? { name: assigneeName(issue, names), type } : undefined}
+                size="sm"
+              />
               <span className="truncate">{assigneeName(issue, names)}</span>
               {type === 'agent' || type === 'team' ? (
                 <span className="shrink-0 text-xs text-muted-foreground">暂不可用</span>
@@ -261,7 +266,9 @@ export function IssueDetailPage({ slug }: { slug: string }) {
             {issue.projectRef ? (
               <div className="text-sm">
                 <p className="text-muted-foreground">项目详情暂不可用</p>
-                <p className="truncate font-mono text-xs text-muted-foreground">{issue.projectRef}</p>
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {issue.projectRef}
+                </p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">未关联项目</p>

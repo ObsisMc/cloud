@@ -7,6 +7,11 @@ Interaction Shell 实现并验证**之后：`@` 协作链路（Mention / Task / 
 [12-collab §38 / §38.37](../../migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen)，
 下一步是 3C（Issue Detail & Collaboration UI）。
 
+> **2026-09-21 — Workspace Integration Stage A**：`origin/main`（含 `cmd/gateway`、`0005_gateway_auth`）已受控融合进
+> `workspace合并`（main 只读、SHA 不变）；Issues 迁移前移重编号 **0005→0006 … 0009→0010** 以保持上游编号稳定；
+> 前端认证/会话基座 = ora-web cookie 会话（决策 D-Auth=A）。记录见
+> [workspace-integration-stage-a.md](../../migrations/workspace-integration-stage-a.md)。
+
 图例：✅ 已完成 · 🚧 进行中 · 🧭 规划中（仅架构方案，未编码） · ⏸️ 刻意暂缓 · ❌ 未开始
 
 ## 平台核心
@@ -52,9 +57,11 @@ Interaction Shell 实现并验证**之后：`@` 协作链路（Mention / Task / 
 
 架构方案见 [12-collaboration-architecture.md](../../migrations/multica-issue-board/12-collaboration-architecture.md)
 （rev. 2：Issues 只拥有 Issue 域，外部能力一律走稳定 port；**§37 是交互模型的权威定义**，§6.4 是
-端口的权威清单）。已落地 **3A — issue-owned 地基**（migration `0007` + 持久化/API-contract 脊柱）与
-**3B-0 — 协作架构对齐**（仅文档）、**3B-1 — 协作交互地基**（migration `0008`）与 **3B-2 — Workflow
-Interaction Shell**（migration `0009`）；其余为 3C 待编码。
+端口的权威清单）。已落地 **3A — issue-owned 地基**（migration `0008` + 持久化/API-contract 脊柱）与
+**3B-0 — 协作架构对齐**（仅文档）、**3B-1 — 协作交互地基**（migration `0009`）与 **3B-2 — Workflow
+Interaction Shell**（migration `0010`）；其余为 3C 待编码。
+（注：workspace integration Stage A 将 Issues 迁移 0005→0006 … 0009→0010 重编号，见
+[workspace-integration-stage-a.md](../../migrations/workspace-integration-stage-a.md)。）
 
 #### 3A — issue-owned 地基 ✅ IMPLEMENTED / REVIEWED
 
@@ -67,7 +74,7 @@ Interaction Shell**（migration `0009`）；其余为 3C 待编码。
 | Timeline（Projection） | ✅ / ⚠️ | **持久化已实现**：`issue_activities` + 评论共享 per-issue `seq`（Option-C `GREATEST(MAX,MAX)+1`），投影非事件源；**公开 timeline 读接口未实现**（无 `/timeline` 路由） |
 | 评论作者 actor | ⚠️ schema-ready | `author_type` CHECK 允许 `user/agent/team/system`，但 API 只写 `user`（尚无 agent/system 评论写入路径） |
 | Sub-Issue context | ✅ | `issue_context_refs`（引用而非复制，硬删） |
-| 迁移 / API-contract 脊柱 | ✅ | `0007` + `PublicRequest`/`router`/`validField`/OpenAPI（`IssueRun`/`ContextRef` schema） |
+| 迁移 / API-contract 脊柱 | ✅ | `0008` + `PublicRequest`/`router`/`validField`/OpenAPI（`IssueRun`/`ContextRef` schema） |
 
 #### 3B-0 — Collaboration Architecture Alignment ✅ DONE（仅文档，无代码）
 
@@ -84,7 +91,7 @@ Interaction Shell**（migration `0009`）；其余为 3C 待编码。
 - Context：`IssueContextRef`（显式引用）≠ `ContextBuilder`（调用期构造）≠ `IssueRun.input`（执行期快照）。
 - Timeline = Comment + IssueActivity 的高层投影，与 Execution Logs 严格分离。
 
-#### 3B-1 — Collaboration Interaction Foundation ✅ IMPLEMENTED（migration `0008`）
+#### 3B-1 — Collaboration Interaction Foundation ✅ IMPLEMENTED（migration `0009`）
 
 第一条真实端到端 `@` 协作链路（**无真实 Agent/Team/Workflow/Runtime**）：`Collaboration Directory →
 @ Picker → Human Mention / Agent Task / Team Task → Context → Mock Execution → IssueRun / Activity /
@@ -100,7 +107,7 @@ Reply Comment → Timeline`。语义照抄 [12-collab §37](../../migrations/mul
 | ExecutionDispatcher + ExecutionObserver + mock 执行适配器 | ✅ | 内存 fixture（`FixtureCollaborationDirectory`/`DeterministicContextBuilder`/`MockExecutionDispatcher`）实现同一 port；仅 dev/demo 配置，**生产默认关闭**；**不建 `sim_*` 表、不建 mock domain 表** |
 | IssueRun lifecycle + 固定回复 → IssueComment | ✅ | `queued → dispatched → running → completed(/failed)` 走真实 Issue API→IssueRun→Dispatcher→adapter→observer→Activity/Comment；agent/team 回复落 `author_type='agent'/'team'` 评论（内部路径，无公开冒充） |
 | Timeline 读 API | ✅ | `GET /issues/:iid/timeline`（Comment + Activity 按共享 `seq` 合并） |
-| Interaction spine 读 API | ✅ | `GET /issues/:iid/interactions`（`issue_interactions` 表，migration `0008`） |
+| Interaction spine 读 API | ✅ | `GET /issues/:iid/interactions`（`issue_interactions` 表，migration `0009`） |
 | 前端 `@` Picker + Mention/Task Mode | ✅ | Composer → Target Picker → Interaction Mode；workflow 目标显示「本阶段不可用」 |
 
 > **封板前复核（2026-09-20）**：后端 `go build` / 单元测试 / 契约测试（OpenAPI 逐字节）/ 真实 PostgreSQL
@@ -109,7 +116,7 @@ Reply Comment → Timeline`。语义照抄 [12-collab §37](../../migrations/mul
 > 既有欠债**（16 个 prettier、9 个 oxlint，均在本次未触碰的文件里，已用 HEAD 版本比对确认），Wave 3B-1
 > 自身新增违规为 0。
 
-#### 3B-2 — Workflow Interaction Shell ✅ IMPLEMENTED + VERIFIED（migration `0009`）
+#### 3B-2 — Workflow Interaction Shell ✅ IMPLEMENTED + VERIFIED（migration `0010`）
 
 Issues-facing 契约与实现记录见 [12-collab §38 / §38.37](../../migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen)：
 `@Workflow → FormDescriptor → 动态表单 → 可选 AI Assist → Review → Confirm → IssueRun → mock 执行 → Timeline`
@@ -133,7 +140,7 @@ Issues-facing 契约与实现记录见 [12-collab §38 / §38.37](../../migratio
 | Workflow 输出 | 落 **`IssueActivity`**（`actor_type='system'` + `details` 带 run/executor/message），**不给 ActorRef 加 `workflow`**；node/raw log 不进 Timeline |
 | Dispatcher / Observer | **复用**，不建 `WorkflowDispatcher`；新增 `ObserveProgress` → `run.progress` activity |
 | 前端结构 | `WorkflowInteractionComposer → DynamicFormRenderer → FormFieldRenderer / AssistSuggestions / ConfirmReview`；**禁止** `if workflow.id == ...` 硬编码表单 |
-| 迁移 | 需要 **一个** additive `0009`：`issue_interactions.input jsonb NOT NULL DEFAULT '{}'`（generic，非 workflow 专用）；不改 0008 |
+| 迁移 | 需要 **一个** additive `0010`：`issue_interactions.input jsonb NOT NULL DEFAULT '{}'`（generic，非 workflow 专用）；不改 0009 |
 | API | ✅ 已实现：`GET /collaboration/forms/{formRef}`、`POST /issues/{iid}/collaboration/assist`（**无状态**，未确认前即可用）、`POST /issues/{iid}/interactions/{ixid}/confirm`；`409 workflow_not_available` 已 **SUPERSEDED** |
 | fixture | ✅ `FixtureFormDescriptorProvider`、`MockInputAssistProvider`、`MockExecutionDispatcher`（workflow 分支）；仍 dev/demo only、生产默认关闭、无 mock domain 表 |
 | Workflow 输出 | ✅ 落 `IssueActivity`（`actor_type='system'` + `details{runId,executorType,executorId,message}`）；`ObserveProgress` → `run.progress`；**ActorRef 未加 `workflow`** |

@@ -655,7 +655,6 @@
             "type": "boolean"
           }
         },
-        "required": null,
         "type": "object"
       },
       "EmptyClaim": {
@@ -1683,7 +1682,6 @@
             "type": "object"
           }
         },
-        "required": null,
         "type": "object"
       },
       "OperationResult": {
@@ -1694,7 +1692,6 @@
             "type": "string"
           }
         },
-        "required": null,
         "type": "object"
       },
       "Project": {
@@ -2407,7 +2404,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/me"
+        "summary": "GET /api/v1/me",
+        "tags": [
+          "me"
+        ]
       }
     },
     "/api/v1/me/tenants": {
@@ -2549,7 +2549,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/me/tenants"
+        "summary": "GET /api/v1/me/tenants",
+        "tags": [
+          "me"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/collaboration/forms/{formRef}": {
@@ -2676,7 +2679,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/collaboration/forms/:formRef"
+        "summary": "GET /api/v1/tenants/:tid/collaboration/forms/:formRef",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/collaboration/targets": {
@@ -2808,7 +2814,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/collaboration/targets"
+        "summary": "GET /api/v1/tenants/:tid/collaboration/targets",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issue-groups": {
@@ -2952,7 +2961,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issue-groups"
+        "summary": "GET /api/v1/tenants/:tid/issue-groups",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issue-statuses": {
@@ -3103,7 +3115,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issue-statuses"
+        "summary": "GET /api/v1/tenants/:tid/issue-statuses",
+        "tags": [
+          "tenants"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -3278,7 +3293,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issue-statuses"
+        "summary": "POST /api/v1/tenants/:tid/issue-statuses",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issue-statuses/{sid}": {
@@ -3435,7 +3453,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/issue-statuses/:sid"
+        "summary": "DELETE /api/v1/tenants/:tid/issue-statuses/:sid",
+        "tags": [
+          "tenants"
+        ]
       },
       "put": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -3604,7 +3625,10 @@
             "userCredential": []
           }
         ],
-        "summary": "PUT /api/v1/tenants/:tid/issue-statuses/:sid"
+        "summary": "PUT /api/v1/tenants/:tid/issue-statuses/:sid",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issue-views": {
@@ -3755,7 +3779,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issue-views"
+        "summary": "GET /api/v1/tenants/:tid/issue-views",
+        "tags": [
+          "tenants"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -3912,7 +3939,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issue-views"
+        "summary": "POST /api/v1/tenants/:tid/issue-views",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issue-views/{vid}": {
@@ -4069,7 +4099,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/issue-views/:vid"
+        "summary": "DELETE /api/v1/tenants/:tid/issue-views/:vid",
+        "tags": [
+          "tenants"
+        ]
       },
       "put": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -4220,7 +4253,10 @@
             "userCredential": []
           }
         ],
-        "summary": "PUT /api/v1/tenants/:tid/issue-views/:vid"
+        "summary": "PUT /api/v1/tenants/:tid/issue-views/:vid",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues": {
@@ -4352,7 +4388,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues"
+        "summary": "GET /api/v1/tenants/:tid/issues",
+        "tags": [
+          "tenants"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -4548,7 +4587,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues"
+        "summary": "POST /api/v1/tenants/:tid/issues",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/batch": {
@@ -4731,7 +4773,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues/batch"
+        "summary": "POST /api/v1/tenants/:tid/issues/batch",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}": {
@@ -4888,7 +4933,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid"
+        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid",
+        "tags": [
+          "tenants"
+        ]
       },
       "get": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -5011,7 +5059,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues/:iid"
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid",
+        "tags": [
+          "tenants"
+        ]
       },
       "put": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -5094,7 +5145,6 @@
                     "type": "integer"
                   }
                 },
-                "required": [],
                 "type": "object"
               }
             }
@@ -5199,7 +5249,10 @@
             "userCredential": []
           }
         ],
-        "summary": "PUT /api/v1/tenants/:tid/issues/:iid"
+        "summary": "PUT /api/v1/tenants/:tid/issues/:iid",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/collaboration/assist": {
@@ -5359,7 +5412,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues/:iid/collaboration/assist"
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/collaboration/assist",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/comments": {
@@ -5519,7 +5575,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues/:iid/comments"
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/comments",
+        "tags": [
+          "tenants"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -5714,7 +5773,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues/:iid/comments"
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/comments",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/comments/{cid}": {
@@ -5880,7 +5942,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/comments/:cid"
+        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/comments/:cid",
+        "tags": [
+          "tenants"
+        ]
       },
       "put": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -6036,7 +6101,10 @@
             "userCredential": []
           }
         ],
-        "summary": "PUT /api/v1/tenants/:tid/issues/:iid/comments/:cid"
+        "summary": "PUT /api/v1/tenants/:tid/issues/:iid/comments/:cid",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/context-refs": {
@@ -6177,7 +6245,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues/:iid/context-refs"
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/context-refs",
+        "tags": [
+          "tenants"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -6353,7 +6424,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues/:iid/context-refs"
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/context-refs",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/context-refs/{crid}": {
@@ -6406,7 +6480,6 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {},
-                "required": [],
                 "type": "object"
               }
             }
@@ -6511,7 +6584,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/context-refs/:crid"
+        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/context-refs/:crid",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/interactions": {
@@ -6652,7 +6728,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues/:iid/interactions"
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/interactions",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/interactions/{ixid}/confirm": {
@@ -6832,7 +6911,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues/:iid/interactions/:ixid/confirm"
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/interactions/:ixid/confirm",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/labels": {
@@ -6992,7 +7074,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues/:iid/labels"
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/labels",
+        "tags": [
+          "tenants"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -7155,7 +7240,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues/:iid/labels"
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/labels",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/labels/{lid}": {
@@ -7208,7 +7296,6 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {},
-                "required": [],
                 "type": "object"
               }
             }
@@ -7313,7 +7400,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/labels/:lid"
+        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/labels/:lid",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/move": {
@@ -7480,7 +7570,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues/:iid/move"
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/move",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/runs": {
@@ -7621,7 +7714,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues/:iid/runs"
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/runs",
+        "tags": [
+          "tenants"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -7797,7 +7893,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues/:iid/runs"
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/runs",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/runs/{rid}": {
@@ -7931,7 +8030,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues/:iid/runs/:rid"
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/runs/:rid",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/subscribers": {
@@ -8096,7 +8198,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/subscribers"
+        "summary": "DELETE /api/v1/tenants/:tid/issues/:iid/subscribers",
+        "tags": [
+          "tenants"
+        ]
       },
       "get": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -8254,7 +8359,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues/:iid/subscribers"
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/subscribers",
+        "tags": [
+          "tenants"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -8417,7 +8525,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/issues/:iid/subscribers"
+        "summary": "POST /api/v1/tenants/:tid/issues/:iid/subscribers",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/issues/{iid}/timeline": {
@@ -8558,7 +8669,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/issues/:iid/timeline"
+        "summary": "GET /api/v1/tenants/:tid/issues/:iid/timeline",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/labels": {
@@ -8709,7 +8823,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/labels"
+        "summary": "GET /api/v1/tenants/:tid/labels",
+        "tags": [
+          "tenants"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -8865,7 +8982,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/labels"
+        "summary": "POST /api/v1/tenants/:tid/labels",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/labels/{lid}": {
@@ -9022,7 +9142,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/labels/:lid"
+        "summary": "DELETE /api/v1/tenants/:tid/labels/:lid",
+        "tags": [
+          "tenants"
+        ]
       },
       "put": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -9172,7 +9295,10 @@
             "userCredential": []
           }
         ],
-        "summary": "PUT /api/v1/tenants/:tid/labels/:lid"
+        "summary": "PUT /api/v1/tenants/:tid/labels/:lid",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/members": {
@@ -9323,7 +9449,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/members"
+        "summary": "GET /api/v1/tenants/:tid/members",
+        "tags": [
+          "members"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/members/{uid}": {
@@ -9484,7 +9613,10 @@
             "userCredential": []
           }
         ],
-        "summary": "PUT /api/v1/tenants/:tid/members/:uid"
+        "summary": "PUT /api/v1/tenants/:tid/members/:uid",
+        "tags": [
+          "members"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/operations/{oid}": {
@@ -9616,7 +9748,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/operations/:oid"
+        "summary": "GET /api/v1/tenants/:tid/operations/:oid",
+        "tags": [
+          "operations"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/operations/{oid}/retry": {
@@ -9789,7 +9924,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/operations/:oid/retry"
+        "summary": "POST /api/v1/tenants/:tid/operations/:oid/retry",
+        "tags": [
+          "operations"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/projects": {
@@ -9940,7 +10078,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/projects"
+        "summary": "GET /api/v1/tenants/:tid/projects",
+        "tags": [
+          "projects"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Creates Project/storage/main Workspace/operation atomically. repositoryUrl allows HTTPS or SSH with no password/query/fragment. defaultBranch defaults to HEAD; credentialRefId must belong to tenant and owner. Storage/worktree/sandbox initialization is asynchronous. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -10112,7 +10253,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/projects"
+        "summary": "POST /api/v1/tenants/:tid/projects",
+        "tags": [
+          "projects"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/projects/{pid}": {
@@ -10282,7 +10426,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/projects/:pid"
+        "summary": "DELETE /api/v1/tenants/:tid/projects/:pid",
+        "tags": [
+          "projects"
+        ]
       },
       "get": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -10405,7 +10552,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/projects/:pid"
+        "summary": "GET /api/v1/tenants/:tid/projects/:pid",
+        "tags": [
+          "projects"
+        ]
       },
       "patch": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Only project name may change; version must match. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -10553,7 +10703,10 @@
             "userCredential": []
           }
         ],
-        "summary": "PATCH /api/v1/tenants/:tid/projects/:pid"
+        "summary": "PATCH /api/v1/tenants/:tid/projects/:pid",
+        "tags": [
+          "projects"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/projects/{pid}/workspaces": {
@@ -10713,7 +10866,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/projects/:pid/workspaces"
+        "summary": "GET /api/v1/tenants/:tid/projects/:pid/workspaces",
+        "tags": [
+          "workspaces"
+        ]
       },
       "post": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Creates one isolated Workspace and Task display identity. title/baseRef required; branch and relative path are server-generated. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -10883,7 +11039,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/projects/:pid/workspaces"
+        "summary": "POST /api/v1/tenants/:tid/projects/:pid/workspaces",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/resource-status": {
@@ -11034,7 +11193,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/resource-status"
+        "summary": "GET /api/v1/tenants/:tid/resource-status",
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/workspaces/{wid}": {
@@ -11204,7 +11366,10 @@
             "userCredential": []
           }
         ],
-        "summary": "DELETE /api/v1/tenants/:tid/workspaces/:wid"
+        "summary": "DELETE /api/v1/tenants/:tid/workspaces/:wid",
+        "tags": [
+          "workspaces"
+        ]
       },
       "get": {
         "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
@@ -11327,7 +11492,10 @@
             "userCredential": []
           }
         ],
-        "summary": "GET /api/v1/tenants/:tid/workspaces/:wid"
+        "summary": "GET /api/v1/tenants/:tid/workspaces/:wid",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/workspaces/{wid}/administrative-stop": {
@@ -11497,7 +11665,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/administrative-stop"
+        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/administrative-stop",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/workspaces/{wid}/start": {
@@ -11667,7 +11838,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/start"
+        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/start",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/api/v1/tenants/{tid}/workspaces/{wid}/stop": {
@@ -11837,7 +12011,10 @@
             "userCredential": []
           }
         ],
-        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/stop"
+        "summary": "POST /api/v1/tenants/:tid/workspaces/:wid/stop",
+        "tags": [
+          "workspaces"
+        ]
       }
     },
     "/healthz": {
@@ -11877,7 +12054,10 @@
             "description": "Database unavailable"
           }
         },
-        "summary": "PostgreSQL readiness"
+        "summary": "PostgreSQL readiness",
+        "tags": [
+          "health"
+        ]
       }
     },
     "/internal/v1/access": {
@@ -12020,7 +12200,10 @@
             "userCredential": []
           }
         ],
-        "summary": "access"
+        "summary": "access",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/admissions": {
@@ -12177,7 +12360,10 @@
             "userCredential": []
           }
         ],
-        "summary": "admit"
+        "summary": "admit",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/controller-lease/acquire": {
@@ -12190,7 +12376,6 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {},
-                "required": [],
                 "type": "object"
               }
             }
@@ -12294,7 +12479,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "lease acquire"
+        "summary": "lease acquire",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/controller-lease/release": {
@@ -12419,7 +12607,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "lease release"
+        "summary": "lease release",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/controller-lease/renew": {
@@ -12544,7 +12735,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "lease renew"
+        "summary": "lease renew",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/nodes/idle": {
@@ -12691,7 +12885,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "node idle"
+        "summary": "node idle",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/nodes/register": {
@@ -12817,7 +13014,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "node register"
+        "summary": "node register",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/nodes/status": {
@@ -12954,7 +13154,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "node status"
+        "summary": "node status",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/nodes/tickets/{ticket}/finish": {
@@ -13090,7 +13293,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "node finish"
+        "summary": "node finish",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/claim": {
@@ -13222,7 +13428,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "claim"
+        "summary": "claim",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/advance": {
@@ -13364,7 +13573,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "advance"
+        "summary": "advance",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/defer": {
@@ -13531,7 +13743,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "defer"
+        "summary": "defer",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/effects": {
@@ -13701,7 +13916,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "plan"
+        "summary": "plan",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/effects/{eid}/result": {
@@ -13882,7 +14100,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "effect result"
+        "summary": "effect result",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/v1/operations/{oid}/snapshot": {
@@ -14024,7 +14245,10 @@
             "serviceCredential": []
           }
         ],
-        "summary": "snapshot"
+        "summary": "snapshot",
+        "tags": [
+          "internal"
+        ]
       }
     }
   },

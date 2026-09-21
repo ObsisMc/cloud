@@ -30,7 +30,10 @@ export function makeIssue(id: string, title: string, overrides: Partial<Issue> =
 }
 
 /** Builds a status column; `key` is the only field tests normally vary. */
-export function makeStatus(key: string, overrides: Partial<IssueStatusColumn> = {}): IssueStatusColumn {
+export function makeStatus(
+  key: string,
+  overrides: Partial<IssueStatusColumn> = {},
+): IssueStatusColumn {
   return {
     id: `st-${key}`,
     tenantId: 't1',
