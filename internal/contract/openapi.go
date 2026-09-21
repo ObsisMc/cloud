@@ -78,7 +78,13 @@ func Document() map[string]any {
 	s["Tenant"] = resource("id name status role", "")
 	s["Member"] = resource("tenantId userId role status version createdAt", "")
 	s["MemberListItem"] = resource("id tenantId userId role status version displayName", "")
-	s["Project"] = resource("id tenantId ownerUserId name repositoryUrl defaultBranch credentialRefId lifecycle version createdAt deletedAt", "credentialRefId deletedAt")
+	s["Space"] = resource("id tenantId name slug description createdBy version createdAt updatedAt archivedAt", "archivedAt")
+	s["SpaceListItem"] = resource("id tenantId name slug description createdBy version createdAt updatedAt archivedAt role", "archivedAt")
+	s["SpaceMember"] = resource("workspaceId userId role status version createdBy joinedAt", "createdBy")
+	s["SpaceMemberListItem"] = resource("id workspaceId userId role status version displayName joinedAt", "")
+	properties(s, "SpaceMember")["role"] = enumeration("owner", "admin", "member")
+	s["SpaceEvent"] = object(obj{"type": enumeration("space.updated", "space.member_updated", "project.created", "project.updated", "project.archived"), "spaceId": uuid(), "projectId": optional(uuid()), "version": number()}, "type", "spaceId")
+	s["Project"] = resource("id tenantId ownerUserId spaceId name repositoryUrl defaultBranch credentialRefId lifecycle version createdAt deletedAt", "spaceId credentialRefId deletedAt")
 	s["Workspace"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt", "deletedAt")
 	s["WorkspaceListItem"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt branchName baseCommitId title", "deletedAt baseCommitId title")
 	s["Comment"] = resource("id tenantId issueId authorUserId authorType authorId parentId body seq version createdAt updatedAt deletedAt", "authorUserId authorId parentId deletedAt")
@@ -169,7 +175,7 @@ func Document() map[string]any {
 	ep["externalId"] = optional(str())
 	ep["request"] = ref("EffectRequest")
 	ep["result"] = ref("EffectResult")
-	s["ControllerProject"] = resource("id tenantId ownerUserId name repositoryUrl defaultBranch credentialRefId lifecycle version createdAt deletedAt secretRef", "credentialRefId deletedAt secretRef")
+	s["ControllerProject"] = resource("id tenantId ownerUserId spaceId name repositoryUrl defaultBranch credentialRefId lifecycle version createdAt deletedAt secretRef", "spaceId credentialRefId deletedAt secretRef")
 	s["ControllerWorkspace"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt relativePath branchName requestedRef baseCommitId", "deletedAt baseCommitId")
 	for _, name := range []string{"WorkspaceListItem", "ControllerWorkspace"} {
 		properties(s, name)["baseCommitId"] = optional(obj{"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"})
@@ -226,6 +232,25 @@ func Document() map[string]any {
 		}
 		asObject(paths[path])[strings.ToLower(r.Method)] = operation
 	}
+	// The SSE stream is not part of router.Routes(); it is documented manually with the
+	// same authorization contract as REST (membership verified before the stream opens).
+	paths["/api/v1/tenants/{tid}/spaces/{spaceId}/events"] = obj{"get": obj{
+		"operationId": "getSpaceEvents",
+		"tags":        []string{"spaces"},
+		"summary":     "Stream collaboration space events over server-sent events",
+		"description": "Membership is verified before the stream opens. Events are lightweight invalidation notices published after commit; clients refetch authoritative state over REST.",
+		"parameters": []any{
+			obj{"name": "tid", "in": "path", "required": true, "schema": uuid()},
+			obj{"name": "spaceId", "in": "path", "required": true, "schema": uuid()},
+		},
+		"security": []any{obj{"serviceCredential": []string{}, "userCredential": []string{}}},
+		"responses": obj{
+			"200": obj{"description": "Server-sent event stream", "content": obj{"text/event-stream": obj{"schema": ref("SpaceEvent")}}},
+			"401": obj{"description": errorDescription("401"), "content": obj{"application/json": obj{"schema": ref("Error")}}},
+			"403": obj{"description": errorDescription("403"), "content": obj{"application/json": obj{"schema": ref("Error")}}},
+			"404": obj{"description": errorDescription("404"), "content": obj{"application/json": obj{"schema": ref("Error")}}},
+		},
+	}}
 	paths["/healthz"] = obj{"get": obj{"operationId": "health", "tags": []string{"health"}, "summary": "PostgreSQL readiness", "responses": obj{"200": obj{"description": "Database reachable", "content": obj{"application/json": obj{"schema": object(obj{"status": enumeration("ok")}, "status")}}}, "503": obj{"description": "Database unavailable", "content": obj{"application/json": obj{"schema": ref("Error")}}}}}}
 	return obj{"openapi": "3.0.3", "info": obj{"title": "Ora Cloud phase one", "version": "1.0.0", "description": "Authoritative PostgreSQL core. Simulation is separate; no production Controller/Node/Kubernetes implementation is implied."}, "servers": []any{obj{"url": "http://localhost:8080"}}, "paths": paths, "components": obj{"schemas": s, "securitySchemes": obj{"serviceCredential": obj{"type": "http", "scheme": "bearer", "bearerFormat": "EdDSA JWT", "description": "Pinned issuer/kid/kind=service/role, aud=ora-cloud, exp and iat required, <=5 minute lifetime. Public API requires gateway; internal control requires controller; nodes require scoped node role."}, "userCredential": obj{"type": "apiKey", "in": "header", "name": "X-Ora-User-Token", "description": "Separately signed EdDSA JWT: kind=user, source+sub, caller must equal authenticated service sub, aud=ora-cloud. User and membership status checked in PostgreSQL."}}}}
 }
@@ -247,6 +272,8 @@ func tag(r router.Route) string {
 		return "internal"
 	case strings.HasPrefix(r.Path, "/api/v1/me"):
 		return "me"
+	case strings.Contains(r.Path, "/spaces"):
+		return "spaces"
 	case strings.Contains(r.Path, "/workspaces"):
 		return "workspaces"
 	case strings.Contains(r.Path, "/projects"):
@@ -260,7 +287,7 @@ func tag(r router.Route) string {
 }
 
 func isList(r router.Route) bool {
-	return r.Method == "GET" && (strings.HasSuffix(r.Path, "/tenants") || strings.HasSuffix(r.Path, "/members") || strings.HasSuffix(r.Path, "/projects") || strings.HasSuffix(r.Path, "/workspaces") || strings.HasSuffix(r.Path, "/resource-status") || strings.HasSuffix(r.Path, "/issue-statuses") || strings.HasSuffix(r.Path, "/labels") || strings.HasSuffix(r.Path, "/issue-views") || strings.HasSuffix(r.Path, "/comments") || strings.HasSuffix(r.Path, "/subscribers"))
+	return r.Method == "GET" && (strings.HasSuffix(r.Path, "/tenants") || strings.HasSuffix(r.Path, "/members") || strings.HasSuffix(r.Path, "/projects") || strings.HasSuffix(r.Path, "/workspaces") || strings.HasSuffix(r.Path, "/spaces") || strings.HasSuffix(r.Path, "/resource-status") || strings.HasSuffix(r.Path, "/issue-statuses") || strings.HasSuffix(r.Path, "/labels") || strings.HasSuffix(r.Path, "/issue-views") || strings.HasSuffix(r.Path, "/comments") || strings.HasSuffix(r.Path, "/subscribers"))
 }
 
 func responseSchema(r router.Route) (schema obj, status string) {
@@ -287,6 +314,24 @@ func responseSchema(r router.Route) (schema obj, status string) {
 		}
 	}
 	switch {
+	case strings.Contains(r.Path, "/spaces"):
+		switch {
+		case strings.Contains(r.Path, "/members"):
+			if r.Method == "GET" {
+				return object(obj{"items": array(ref("SpaceMemberListItem")), "nextCursor": str()}, "items", "nextCursor"), "200"
+			}
+			return ref("SpaceMember"), "200"
+		case strings.Contains(r.Path, "/projects"):
+			if r.Method == "GET" {
+				return object(obj{"items": array(ref("Project")), "nextCursor": str()}, "items", "nextCursor"), "200"
+			}
+			return object(obj{"resource": ref("Project"), "workspace": ref("Workspace"), "operation": ref("Operation")}, "resource", "workspace", "operation"), "202"
+		default:
+			if r.Method == "GET" && isList(r) {
+				return object(obj{"items": array(ref("SpaceListItem")), "nextCursor": str()}, "items", "nextCursor"), "200"
+			}
+			return ref("Space"), "200"
+		}
 	case strings.HasSuffix(r.Path, "/collaboration/targets"):
 		return object(obj{"items": array(ref("CollaborationTarget")), "nextCursor": str()}, "items", "nextCursor"), "200"
 	case strings.Contains(r.Path, "/collaboration/forms/"):
@@ -456,6 +501,9 @@ func inputSchema(name string, r router.Route) obj {
 	case "action":
 		return enumeration("read", "execute")
 	case "role":
+		if strings.Contains(r.Path, "/spaces/") {
+			return enumeration("owner", "admin", "member")
+		}
 		return enumeration("admin", "member")
 	case "status":
 		if strings.Contains(r.Path, "/issues") {
@@ -541,7 +589,23 @@ func description(r router.Route) string {
 	case "node_register", "node_status", "node_idle", "node_finish":
 		return "Requires node service credential whose sub is a process UUID and whose workspaceId/sandboxId/generation match the current unterminated instance. Node identity cannot be replaced while live. Status/idle use Node version; ticket finish uses Ticket version and a completed replay is idempotent. initialized cannot regress. Idle is scoped to operationId and exact Workspace admissionEpoch; true requires no active tickets. false fails that quiesce operation with resource_in_use and restores original admission. Registration requires protocolVersion=1; Pod Running alone cannot make Ready."
 	}
-	if strings.Contains(r.Path, "members") {
+	if strings.Contains(r.Path, "/spaces") {
+		switch {
+		case strings.Contains(r.Path, "/members"):
+			base += "Admin or owner manages membership; granting owner requires owner. The target user must be an active member of the same tenant. Last owner cannot be demoted or disabled. "
+		case r.Method == "POST" && strings.HasSuffix(r.Path, "/spaces"):
+			base += "Creates the collaboration space and its first owner atomically. slug is lowercase, immutable and unique per tenant. "
+		case strings.Contains(r.Path, "/projects"):
+			base += "Project collection scoped to one collaboration space; membership is required, and project visibility follows owner ownership within it. spaceId on a created project is optional, never forced. "
+		case r.Method == "PATCH":
+			base += "Only name and description may change; slug is immutable. Requires admin or owner and a matching version. "
+		case r.Method == "DELETE":
+			base += "Archives the space (soft delete); requires owner and a matching version. The default space cannot be archived. Projects are unaffected. "
+		default:
+			base += "Only joined members can read a space. "
+		}
+	}
+	if strings.Contains(r.Path, "members") && !strings.Contains(r.Path, "/spaces") {
 		base += "Administrator only. Updating an existing membership requires matching version; new membership uses version=0. Last effective administrator cannot be disabled/demoted, including concurrent changes. "
 	}
 	if strings.Contains(r.Path, "resource-status") || strings.Contains(r.Path, "administrative-stop") {
@@ -550,10 +614,10 @@ func description(r router.Route) string {
 	if strings.Contains(r.Path, "operations") {
 		base += "Operation lookup follows project owner; administrative-stop actor receives only the restricted projection. Retry only accepts blocked/retry_wait, exact operation version, and an idempotency key. "
 	}
-	if r.Method == "PATCH" {
+	if r.Method == "PATCH" && !strings.Contains(r.Path, "/spaces") {
 		base += "Only project name may change; version must match. "
 	}
-	if r.Method == "DELETE" || strings.HasSuffix(r.Path, "/stop") {
+	if (r.Method == "DELETE" || strings.HasSuffix(r.Path, "/stop")) && !strings.Contains(r.Path, "/spaces") {
 		base += "Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. "
 	}
 	if strings.HasSuffix(r.Path, "/projects") && r.Method == "POST" {
@@ -576,7 +640,7 @@ func errorDescription(code string) string {
 	case "404":
 		return "Resource absent or outside authorized tenant/owner scope"
 	case "409":
-		return "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, or last_admin"
+		return "Version/idempotency conflict, resource_in_use, closed admission, stale epoch/Node/sandbox, incomplete effect, invalid transition, unconfirmed termination/idle, last_admin, space_last_owner, space_slug_conflict, or default_space_protected"
 	case "428":
 		return "Version precondition required"
 	case "503":

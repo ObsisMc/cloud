@@ -200,6 +200,8 @@ export interface ControllerProject {
   repositoryUrl: string;
   /** @nullable */
   secretRef: string | null;
+  /** @nullable */
+  spaceId: string | null;
   tenantId: string;
   version: number;
 }
@@ -738,6 +740,8 @@ export interface Project {
   name: string;
   ownerUserId: string;
   repositoryUrl: string;
+  /** @nullable */
+  spaceId: string | null;
   tenantId: string;
   version: number;
 }
@@ -773,6 +777,85 @@ export interface Snapshot {
   sandboxes: Sandbox[];
   storage: Storage;
   workspaces: ControllerWorkspace[];
+}
+
+export interface Space {
+  /** @nullable */
+  archivedAt: string | null;
+  createdAt: string;
+  createdBy: string;
+  description: string;
+  id: string;
+  name: string;
+  slug: string;
+  tenantId: string;
+  updatedAt: string;
+  version: number;
+}
+
+export type SpaceEventType = typeof SpaceEventType[keyof typeof SpaceEventType];
+
+
+export const SpaceEventType = {
+  spaceupdated: 'space.updated',
+  spacemember_updated: 'space.member_updated',
+  projectcreated: 'project.created',
+  projectupdated: 'project.updated',
+  projectarchived: 'project.archived',
+} as const;
+
+export interface SpaceEvent {
+  /** @nullable */
+  projectId?: string | null;
+  spaceId: string;
+  type: SpaceEventType;
+  version?: number;
+}
+
+export interface SpaceListItem {
+  /** @nullable */
+  archivedAt: string | null;
+  createdAt: string;
+  createdBy: string;
+  description: string;
+  id: string;
+  name: string;
+  role: string;
+  slug: string;
+  tenantId: string;
+  updatedAt: string;
+  version: number;
+}
+
+export type SpaceMemberRole = typeof SpaceMemberRole[keyof typeof SpaceMemberRole];
+
+
+export const SpaceMemberRole = {
+  owner: 'owner',
+  admin: 'admin',
+  member: 'member',
+} as const;
+
+export interface SpaceMember {
+  /** @nullable */
+  createdBy: string | null;
+  joinedAt: string;
+  role: SpaceMemberRole;
+  status: string;
+  userId: string;
+  version: number;
+  workspaceId: string;
+}
+
+export interface SpaceMemberListItem {
+  displayName: string;
+  id: string;
+  joinedAt: string;
+  role: string;
+  status: string;
+  userId: string;
+  version: number;
+  workspaceId: string;
 }
 
 export interface Tenant {
@@ -1538,6 +1621,112 @@ after?: string;
 export type GetApiV1TenantsTidResourceStatus200 = {
   items: AdminResource[];
   nextCursor: string;
+};
+
+export type GetApiV1TenantsTidSpacesParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Exclusive UUID cursor, ascending stable ordering.
+ */
+after?: string;
+};
+
+export type GetApiV1TenantsTidSpaces200 = {
+  items: SpaceListItem[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidSpacesBody = {
+  description?: string;
+  name: string;
+  slug: string;
+};
+
+export type DeleteApiV1TenantsTidSpacesSpaceIdBody = {
+  /** @minimum 0 */
+  version: number;
+};
+
+export type PatchApiV1TenantsTidSpacesSpaceIdBody = {
+  description?: string;
+  name: string;
+  /** @minimum 0 */
+  version: number;
+};
+
+export type GetApiV1TenantsTidSpacesSpaceIdMembersParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Exclusive UUID cursor, ascending stable ordering.
+ */
+after?: string;
+};
+
+export type GetApiV1TenantsTidSpacesSpaceIdMembers200 = {
+  items: SpaceMemberListItem[];
+  nextCursor: string;
+};
+
+export type PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole = typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole[keyof typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole];
+
+
+export const PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole = {
+  owner: 'owner',
+  admin: 'admin',
+  member: 'member',
+} as const;
+
+export type PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus = typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus[keyof typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus];
+
+
+export const PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus = {
+  active: 'active',
+  disabled: 'disabled',
+} as const;
+
+export type PutApiV1TenantsTidSpacesSpaceIdMembersUidBody = {
+  role: PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole;
+  status: PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus;
+  /** @minimum 0 */
+  version?: number;
+};
+
+export type GetApiV1TenantsTidSpacesSpaceIdProjectsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Exclusive UUID cursor, ascending stable ordering.
+ */
+after?: string;
+};
+
+export type GetApiV1TenantsTidSpacesSpaceIdProjects200 = {
+  items: Project[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidSpacesSpaceIdProjectsBody = {
+  credentialRefId?: string;
+  defaultBranch?: string;
+  name: string;
+  repositoryUrl: string;
+};
+
+export type PostApiV1TenantsTidSpacesSpaceIdProjects202 = {
+  operation: Operation;
+  resource: Project;
+  workspace: Workspace;
 };
 
 export type DeleteApiV1TenantsTidWorkspacesWidBody = {

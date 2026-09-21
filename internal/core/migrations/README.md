@@ -31,6 +31,15 @@
 - **`0008_issue_collaboration.sql`**：`issues` ALTER（`assignee_type`/`assignee_id`/`project_ref` + 回填）、`issue_comments` ALTER（`parent_id`/`author_type`/`author_id`/`seq` + 回填 + `UNIQUE(issue_id,seq)`）、新表 `issue_runs`、`issue_activities`、`issue_context_refs`。（原 `0007_issue_collaboration.sql`）
 - **`0009_issue_interactions.sql`**：新表 `issue_interactions`（`@` 交互脊）——每个选中的协作目标一行：`id, tenant_id, issue_id, comment_id, target_type, target_id, mode, task, run_id, created_at`。（原 `0008_issue_interactions.sql`）
 - **`0010_issue_interaction_input.sql`**：一个通用增量列：`ALTER TABLE issue_interactions ADD COLUMN input jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(input)='object')` —— 已确认的表单值。刻意排除 `version`、`status` 枚举、`confirmed_at` 与独立 inputs 表；`0009` 不被修改。（原 `0009_issue_interaction_input.sql`）
+- **`0011_collab_spaces.sql`** *（来自 `zpc001/feat/collab-spaces` 的协作空间迁移，前移重编号到 Issues 序列之后；**schema 语义待 D1/D2 决策，不可视为定稿**）*：协作空间（产品术语 Workspace）Schema：
+  - `collab_workspaces`：租户内的协作与可见性边界（名称、不可变 slug、归档时间、乐观版本）。
+  - `collab_workspace_members`：成员与角色（owner/admin/member）、状态（active/disabled）、乐观版本。
+  - 与运行时 `workspaces` 表（执行环境）严格分离。
+- **`0012_project_space_scope.sql`** *（见 0011 —— **语义待 D1/D2 决策**）*：Project 空间作用域与数据回填：
+  - 为每个既有租户（含仍有 Project 的已删除租户）创建默认 Space（slug=`default`）。
+  - 既有 active tenant members 加入默认 Space（admin→owner，member→member）。
+  - 既有 Project 回填 `space_id` 并转为 NOT NULL，复合外键 `(space_id, tenant_id)` 在 SQL 级杜绝跨租户归属。
+  - `SET CONSTRAINTS ALL IMMEDIATE` 在 ALTER 前触发回填 UPDATE 排队的 deferred 约束触发器。
 
 ## 校验和完整性与不可变性
 

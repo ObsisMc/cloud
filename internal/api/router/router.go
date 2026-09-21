@@ -3,6 +3,7 @@ package router
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"runtime/debug"
@@ -86,6 +87,15 @@ func Routes() []Route {
 		{"POST", "/api/v1/tenants/:tid/operations/:oid/retry", "", []string{"version"}},
 		{"GET", "/api/v1/tenants/:tid/resource-status", "", nil},
 		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/administrative-stop", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/spaces", "", nil},
+		{"POST", "/api/v1/tenants/:tid/spaces", "", []string{"name", "slug", "description"}},
+		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId", "", nil},
+		{"PATCH", "/api/v1/tenants/:tid/spaces/:spaceId", "", []string{"name", "description", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/spaces/:spaceId", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/members", "", nil},
+		{"PUT", "/api/v1/tenants/:tid/spaces/:spaceId/members/:uid", "", []string{"role", "status", "version"}},
+		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/projects", "", nil},
+		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},
 		{"POST", "/internal/v1/access", "access", []string{"tenantId", "workspaceId", "action", "epoch"}},
 		{"POST", "/internal/v1/admissions", "admit", []string{"tenantId", "workspaceId", "action", "ticketId", "kind", "epoch"}},
 		{"POST", "/internal/v1/controller-lease/acquire", "lease_acquire", []string{}},
@@ -201,7 +211,7 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger) *gin.Engi
 						return
 					}
 				}
-				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), OperationID: c.Param("oid"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), InteractionID: c.Param("ixid"), FormRef: c.Param("formRef"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user})
+				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), SpaceID: c.Param("spaceId"), OperationID: c.Param("oid"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), InteractionID: c.Param("ixid"), FormRef: c.Param("formRef"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user})
 			} else {
 				out, e = store.Control(c.Request.Context(), &core.ControlRequest{Action: route.Action, OperationID: c.Param("oid"), EffectID: c.Param("eid"), TicketID: c.Param("ticket"), Body: body, Service: service, Identity: user})
 			}
@@ -216,8 +226,75 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger) *gin.Engi
 			c.JSON(status, out)
 		})
 	}
+	r.GET("/api/v1/tenants/:tid/spaces/:spaceId/events", func(c *gin.Context) { sseEvents(store, auth, c) })
 	r.NoRoute(func(c *gin.Context) { failure(c, &core.Fault{Code: "not_found", Status: 404, Params: core.Object{}}) })
 	return r
+}
+
+// sseEvents streams committed space invalidation events to a verified member.
+// Authorization reuses the REST path: the caller must be able to read the space.
+// Events are lightweight invalidation notices; the authoritative state is always
+// fetched over REST afterwards.
+func sseEvents(store *core.Store, auth *core.Authenticator, c *gin.Context) {
+	_, user, fault := verifyPublicCredentials(c, auth)
+	if fault != nil {
+		failure(c, fault)
+		return
+	}
+	tid, sid := c.Param("tid"), c.Param("spaceId")
+	out, status, e := store.Public(c.Request.Context(), &core.PublicRequest{Method: "GET", Path: "/api/v1/tenants/" + tid + "/spaces/" + sid, TenantID: tid, SpaceID: sid, Identity: user})
+	if e != nil {
+		failure(c, core.ErrorCode(e))
+		return
+	}
+	if status != 200 || out == nil {
+		failure(c, &core.Fault{Code: "not_found", Status: 404, Params: core.Object{}})
+		return
+	}
+	if store.Events == nil {
+		failure(c, &core.Fault{Code: "realtime_unavailable", Status: 503, Params: core.Object{}})
+		return
+	}
+	stream, cancel := store.Events.Subscribe(sid)
+	defer cancel()
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.WriteHeader(200)
+	c.Writer.Flush()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case ev := <-stream:
+			b, err := json.Marshal(ev)
+			if err != nil {
+				return
+			}
+			if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", b); err != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+	}
+}
+
+// verifyPublicCredentials checks the dual gateway-service and caller-bound
+// final-user credentials required by every public endpoint.
+func verifyPublicCredentials(c *gin.Context, auth *core.Authenticator) (service, user *core.Claims, fault *core.Fault) {
+	raw, ok := bearerToken(c.GetHeader("Authorization"))
+	if !ok {
+		return nil, nil, &core.Fault{Code: "invalid_service_credential", Status: 401, Params: core.Object{}}
+	}
+	service, e := auth.Verify(raw, "service")
+	if e != nil || service.Role != "gateway" {
+		return nil, nil, &core.Fault{Code: "invalid_service_credential", Status: 401, Params: core.Object{}}
+	}
+	user, e = auth.Verify(c.GetHeader("X-Ora-User-Token"), "user")
+	if e != nil || user.Caller != service.Subject {
+		return nil, nil, &core.Fault{Code: "invalid_user_credential", Status: 401, Params: core.Object{}}
+	}
+	return service, user, nil
 }
 
 func bearerToken(header string) (string, bool) {

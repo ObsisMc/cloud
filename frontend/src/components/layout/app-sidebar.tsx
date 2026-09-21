@@ -1,5 +1,6 @@
 import {
   Bot,
+  Boxes,
   ChevronDown,
   CircuitBoard,
   Cog,
@@ -42,6 +43,7 @@ import { useAuthStore } from '@/state/auth-store'
 const workNav = [
   { to: (p: ReturnType<typeof workspacePaths>) => p.issues, label: '任务', icon: Layers },
   { to: (p: ReturnType<typeof workspacePaths>) => p.projects, label: '项目', icon: CircuitBoard },
+  { to: (p: ReturnType<typeof workspacePaths>) => p.spaces, label: '空间', icon: Boxes },
 ]
 
 const aiTeamNav = [

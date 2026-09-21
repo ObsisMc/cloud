@@ -17,6 +17,7 @@ import { RuntimesPage } from '@/features/runtimes/runtimes-page'
 import { GeneralSettingsPage } from '@/features/settings/general-settings-page'
 import { SettingsLayout } from '@/features/settings/settings-layout'
 import { SkillsPage } from '@/features/skills/skills-page'
+import { SpacesPage } from '@/features/spaces/spaces-page'
 import { SquadDetailPage } from '@/features/squads/squad-detail-page'
 import { SquadsPage } from '@/features/squads/squads-page'
 import { useAuthStore } from '@/state/auth-store'
@@ -52,6 +53,7 @@ export const router = createBrowserRouter([
       { path: 'my-issues', element: <WithSlug component={MyIssuesPage} /> },
       { path: 'projects', element: <WithSlug component={ProjectsPage} /> },
       { path: 'projects/:projectId', element: <WithSlug component={ProjectDetailPage} /> },
+      { path: 'spaces', element: <SpacesPage /> },
       { path: 'squads', element: <WithSlug component={SquadsPage} /> },
       { path: 'squads/:squadId', element: <WithSlug component={SquadDetailPage} /> },
       { path: 'agents', element: <WithSlug component={AgentsPage} /> },
