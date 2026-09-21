@@ -25,14 +25,15 @@ docs/
     multica-issue-board/        ← single-migration archive (analysis → design → test → final)
     workspace-integration-stage-a.md ← Stage A：origin/main → workspace合并 上游对齐融合决策记录（含迁移重编号 + 前端验证）
     workspace-integration-stage-b.md ← Stage B：Collaboration Space 集成 + D1–D7 ADR（决策已实施）
-    workspace-integration-stage-d-coworker-login-workspace.md ← Stage D：同事 Login + Workspace UX 恢复 + SD1–SD7（决策已批准）
+    workspace-integration-stage-d-coworker-login-workspace.md ← Stage D：同事 Login + Workspace UX 恢复 + SD1–SD7（COMPLETE）
+    workspace-integration-stage-d-report.md ← Stage D 最终报告（§38：恢复内容、作用域矩阵、结论）
   acceptance.md                 ← product acceptance criteria (pre-existing)
   authentication.md             ← auth model (pre-existing)
   core-contract.md              ← core behavioural contract (pre-existing)
   execution-contract.md         ← execution/operations contract (pre-existing)
 ```
 
-**Integration stages.** **Stage A** = upstream main alignment (`origin/main` → `workspace合并`). **Stage B** = Collaboration Space integration + the D1–D7 ADR. **Stage C** = final integration review (a review phase; its record is not yet a repo document). **Stage D** = coworker Login + Workspace UX restoration (SD1–SD7), a product correction that restores the coworker's product shell on top of the merged Space backend.
+**Integration stages.** **Stage A** = upstream main alignment (`origin/main` → `workspace合并`). **Stage B** = Collaboration Space integration + the D1–D7 ADR. **Stage C** = final integration review (a review phase; its record is not yet a repo document). **Stage D** = coworker Login + Workspace UX restoration (SD1–SD7), a product correction that restores the coworker's product shell on top of the merged Space backend — **COMPLETE** (commits `c4a7510`…`c570b9e`, branch `workspace合并`; `main` stays `1c5b9b4`, not merged/pushed).
 
 ## Source of truth (one doc per topic)
 
@@ -47,7 +48,7 @@ docs/
 | **Workflow interaction (Issues-facing)** | [12-collaboration-architecture.md §38](migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen) | the **contract** (`FormDescriptor`, single Confirm boundary, AI Assist authority, draft decision, API surface, `0010`) + **§38.37** implementation record |
 | **Workspace integration (Stage A)** | [workspace-integration-stage-a.md](migrations/workspace-integration-stage-a.md) | upstream main alignment: origin/main → `workspace合并` fusion, migration renumbering (0005→0006…), dual-JWT contract, frontend resolutions, decisions D-Auth / D4 |
 | **Workspace integration (Stage B)** | [workspace-integration-stage-b.md](migrations/workspace-integration-stage-b.md) | Collaboration Space integration into the merged tree + ADR: decisions D1–D7 (owner authorization, optional Space association, terminology, routing, session, isolation, default-Space protection) |
-| **Workspace integration (Stage D)** | [workspace-integration-stage-d-coworker-login-workspace.md](migrations/workspace-integration-stage-d-coworker-login-workspace.md) | coworker Login + Workspace UX restoration + ADR: SD1–SD7 (product shell, ora-web cookie session, two-plane login, tenant-scoped Issues, space-scoped Projects, switch semantics, demo-mode gating) |
+| **Workspace integration (Stage D)** | [workspace-integration-stage-d-coworker-login-workspace.md](migrations/workspace-integration-stage-d-coworker-login-workspace.md) | coworker Login + Workspace UX restoration + ADR: SD1–SD7 (product shell, ora-web cookie session, two-plane login, tenant-scoped Issues, space-scoped Projects, switch semantics, demo-mode gating) — **COMPLETE** |
 | **How to add code** | [agent/adding-features.md](development/agent/adding-features.md) | endpoint / sub-resource how-to + verify |
 
 ## Repo layout (one glance)
@@ -85,6 +86,11 @@ docs/
   New ports `FormDescriptorProvider` / `InputAssistProvider`; workflow output lands as a `system`
   activity. Real Workflow / AI providers remain **blocked on external design**
   ([§38.37](migrations/multica-issue-board/12-collaboration-architecture.md#3837-implementation-record-2026-09-20--implemented--verified)).
+- ✅ **Workspace integration Stage D** — coworker Login + Workspace UX restoration (SD1–SD7): ora-web
+  cookie-session 双 tab 登录（真实 + 演示）、Current Workspace shell、左上工作区选择器/创建/切换、
+  space 级 Projects/成员/设置 + tenant 级 Issues 挂回外壳；记录 **WORKSPACE SCOPING GAP**（后端
+  Issues 无 `space_id`，不伪造）。`main` 保持 `1c5b9b4`，未 merge/push（见
+  [stage-d](migrations/workspace-integration-stage-d-coworker-login-workspace.md)）。
 - 🧭 Planned — **Wave 3C** (Issue Detail & Collaboration UI). Real Agent/Team/Workflow modules are
   **blocked on external design**.
 - ⏸️ Deferred: attachments, issue↔project binding, PR links, realtime, bots/squads, Autopilot.

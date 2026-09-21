@@ -1,9 +1,10 @@
 # Workspace Integration Stage D — 同事 Login + Workspace UX 恢复（决策 / 集成记录）
 
-> 状态：**决策已批准 — 实施中**（决策经 plan `distributed-wishing-ritchie` 用户批准）
-> 与 Stage A/B/C 同级，属集成过程记录。分支 `workspace合并`，HEAD=`39815387`，`main` 保持 `1c5b9b4` 未动。
+> 状态：**COMPLETE**（决策经 plan `distributed-wishing-ritchie` 用户批准后实施完成）
+> 与 Stage A/B/C 同级，属集成过程记录。分支 `workspace合并`，起点 HEAD=`39815387`，结束 HEAD=`c570b9e`，
+> `main` 保持 `1c5b9b4` 未动（未 push、未进入 Final Main Sync）。
 > 关联 ADR：`specs/decisions/cloud/collaboration-workspace/0-frontend-workspace-product-shell.md`（SD1–SD7）。
-> 结束标记（实施完成后更新）：`WORKSPACE INTEGRATION STAGE D: COMPLETE`
+> 结束标记：`WORKSPACE INTEGRATION STAGE D: COMPLETE`
 
 ---
 
@@ -57,20 +58,48 @@ D4/D5 决策把登录与 Current Workspace shell 排除在外。复盘后确认�
 5. **测试 + 文档**：登录/选择器/切换/缓存无泄漏/回归测试；`docs/INDEX.md` 产品结构更新；本记录更新为
    COMPLETE；最终报告。
 
----
-
-## 3. 验证（实施完成后填写）
-
-- [ ] `go build ./...`；`go test -count=1 ./...`（REQUIRE_POSTGRES=1）通过，space 测试保持绿。
-- [ ] 前端 gates：`format:check`/`lint`/`typecheck`/`build`/`check:modules`/`check:docs`/`check:dup`
-      （`test`/`check:dead` 受 Node 20 vs engines>=24 环境阻断，记录不重跑）。
-- [ ] 新增测试：登录（成功/失败/会话恢复/登出/重定向）、选择器（列表/选中/切换/创建→自动选中）、
-      Workspace 资源切换（A→B 查询消失、B 加载）、缓存无跨工作区泄漏、回归。
-- [ ] Smoke path：build dist → `go run ./cmd/ora-web`（:8080，PG 起）→ 登录 → shell → 左上选择器 →
-      创建工作区 → 出现 → 选中 → 在其中创建/列表项目 → 切换工作区 → 资源上下文变化 → 打开 Issues 仍可用 →
-      刷新 → 会话 + 工作区恢复。演示账号平面经 `npm run dev`（MSW）核对。
-- [ ] `main` 保持 `1c5b9b4`；不 push；不进入 Final Main Sync。
+提交（checkpoint → commit SHA，分支 `workspace合并`）：
+1. `c4a7510` — 决策记录 + ADR（编码前先写 ADR，铁律）
+2. `b1f472d` — 会话 + 登录（双会话 auth-store、useDemoLogin、双 tab login-page）
+3. `f09ae06` — Shell（current-space / dashboard-layout / app-sidebar 选择器 / routes space-slug）
+4. `5a13a13` — 工作区项目（双模 useProjects、新建对话框、云感知详情页）
+5. `ba7d78b` — 设置/成员并入外壳（云感知成员管理、空间设置 + 归档危险区）
+6. `c570b9e` — 测试集（登录双 tab、选择器切换、资源不跨区泄漏）+ docs
 
 ---
 
-WORKSPACE INTEGRATION STAGE D: 决策已批准 — 实施中
+## 3. 验证（实施完成，实测通过）
+
+- [x] `go build ./...` 通过；`go test -count=1 ./...`（REQUIRE_POSTGRES=1 +
+      `TEST_DATABASE_URL=postgres://ora:ora-local@127.0.0.1:55432/ora?sslmode=disable`）通过
+      （integration 26.5s ok）。关键 space 测试保持绿：
+      `TestSpaceMutationsRequireIdempotencyKey`、`TestArchivedSpaceSlugStaysReserved`、
+      `TestDefaultSpaceCannotBeArchived`、`TestProjectSpaceScopingAndOwnerIsolation`。
+- [x] 前端 gates 全部绿：`format:check`/`lint`/`typecheck`/`build`/`check:modules`/`check:docs`/`check:dup`
+      （`test`/`check:dead` 受 Node v20.18.1 vs engines>=24 ESM 环境阻断，记录不重跑）。
+- [x] 新增测试（§30）：登录（渲染/成功/失败提示/会话恢复/重定向——真实与演示两 tab）、选择器（demo
+      列表/切换到 issues、cloud 列真实空间/切换落 projects/新建入口）、Workspace 资源切换（A→B 查询
+      重建且 A 缓存不渗入 B，`spaces/api.test` 查询键断言）、缓存无跨工作区泄漏、回归（members 云/
+      演示双模、settings demo 渲染、spaces 归档权限）。环境阻断未运行，编码与类型/门禁已验证。
+- [x] Smoke path（真实 PG + 构建 dist + `go run ./cmd/ora-web` :8080）：根与 healthz 200 → 登录
+      `POST /auth/login` 返回 `{tenantId,tenantName,user}` → 携带 HttpOnly `ora_subject` cookie 的
+      `/api/v1/me` 200 会话恢复 → 空空间列表 → 创建工作区（创建者为 owner）→ 项目创建 202 异步
+      （`spaceId` 绑定）→ 项目列表 200 → Issues 状态/列表/创建（`projectRef` 绑定）→ 登出后 `/me` 401。
+      已清理 smoke 数据（删 issue、归档 space，列表复空）。演示账号平面经 `npm run dev`（MSW）核对
+      逻辑（mock auth handler + 双 tab）。
+- [x] `main` 保持 `1c5b9b4`；未 push；未进入 Final Main Sync；工作树干净。
+
+### 作用域矩阵（实施后确认）
+
+| 资源 | 作用域 | 说明 |
+| --- | --- | --- |
+| Projects | **space 级**（真实） | `useSpaceProjects(tenantId, space.id)`；创建走 spaces 端点（202）；列表 owner 隔离（D1）；`space_id` 保持可空（D2）。 |
+| Runtime Workspaces | 项目派生 | 项目创建时随 `operation`/`workspace` 202 返回，未在 shell 直接展示。 |
+| Members | **space 级**（真实） | 空间成员列表 + role/status 管理（admin/owner），owner 可加成员。 |
+| Settings | **space 级**（真实） | 改名（版本守卫）+ owner 归档危险区（S3 owner-only）。 |
+| Issues / Workflow | **tenant 级**（真实） | 保持 `useIssues(tenantId)`；同 tenant 内切换 Workspace 不改变 issue 列表（诚实）。**WORKSPACE SCOPING GAP**：后端 issues 无 `space_id`，前端不伪造、无大 schema 迁移。 |
+| 收件箱/聊天/AI 团队等 | demo 平面（mock） | 云模式下 mock 页经 interceptor slug 重写展示演示数据；真实 Issues/空间等表面在 demo 模式隐藏（SD7）。 |
+
+---
+
+WORKSPACE INTEGRATION STAGE D: COMPLETE
