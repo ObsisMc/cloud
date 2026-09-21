@@ -3,14 +3,25 @@ import { render } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom'
 import { SidebarProvider } from '@/components/ui/sidebar'
+import { CurrentSpaceProvider } from '@/features/spaces/current-space'
 
-/** Fresh QueryClient per render so cached data never leaks between tests. */
-export function renderWithProviders(ui: ReactElement, { route = '/' }: { route?: string } = {}) {
+/**
+ * Fresh QueryClient per render so cached data never leaks between tests. The
+ * current-space provider is always present: without cloud credentials its
+ * queries stay disabled and pages fall back to the mock store, so existing
+ * mock-backed tests keep working unchanged.
+ */
+export function renderWithProviders(
+  ui: ReactElement,
+  { route = '/', slug = '' }: { route?: string; slug?: string } = {},
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[route]}>
-        <SidebarProvider>{ui}</SidebarProvider>
+        <SidebarProvider>
+          <CurrentSpaceProvider slug={slug}>{ui}</CurrentSpaceProvider>
+        </SidebarProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -26,7 +37,9 @@ export function renderAtRoute(path: string, element: ReactElement, initialPath: 
   return render(
     <QueryClientProvider client={queryClient}>
       <SidebarProvider>
-        <RouterProvider router={router} />
+        <CurrentSpaceProvider slug={initialPath.split('/')[1] ?? ''}>
+          <RouterProvider router={router} />
+        </CurrentSpaceProvider>
       </SidebarProvider>
     </QueryClientProvider>,
   )
