@@ -23,11 +23,12 @@ func (f *fixture) callUser(t *testing.T, u core.Claims, method, path string, bod
 	return o
 }
 
-// TestProjectSpaceScopingAndOwnerIsolation covers scenarios 2-4, 9-12 and the D1
-// boundary. Space membership scopes the member collection and gates the space,
-// but Project / Runtime Workspace visibility stays owner-based: a member who did
-// not create a project can never read, list, patch, or delete it — identically
-// to a non-member of the space.
+// TestProjectSpaceScopingAndOwnerIsolation covers scenarios 2-4, 9-12 and the
+// current owner-only project boundary. Space membership scopes the member
+// collection and gates the space, while Project / Runtime Workspace visibility
+// stays owner-based — the existing implementation, temporary until the project
+// workspace-sharing migration (next step); a member who did not create a project
+// cannot read, list, patch, or delete it, identically to a non-member of the space.
 func TestProjectSpaceScopingAndOwnerIsolation(t *testing.T) {
 	f := setup(t)
 	space := f.createSpace("Scoped", "scoped", "space-scoped")
@@ -57,8 +58,9 @@ func TestProjectSpaceScopingAndOwnerIsolation(t *testing.T) {
 		t.Fatalf("non-owner space project list should be empty: %v", daveList)
 	}
 
-	// D1: a space member who is not the owner gets 404 on the project and its
-	// runtime workspace, and on any mutation over them — exactly like a non-member.
+	// Current-state: a space member who is not the owner gets 404 on the project
+	// and its runtime workspace, and on any mutation over them — exactly like a
+	// non-member (owner-only until the workspace-sharing migration).
 	for name, subject := range map[string]core.Claims{"member-not-owner": dave, "non-member": carol} {
 		f.callUser(t, subject, "GET", f.path("/projects/"+pid), nil, "", 404)
 		f.callUser(t, subject, "GET", f.path("/workspaces/"+wid), nil, "", 404)

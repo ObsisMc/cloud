@@ -592,7 +592,7 @@ func description(r router.Route) string {
 	if strings.Contains(r.Path, "/spaces") {
 		switch {
 		case strings.Contains(r.Path, "/members") && r.Method == "POST":
-			base += "Adds an already-registered user to the space as a plain member by email, resolved in the caller's identity source. Admin or owner only. The target is atomically ensured tenant membership (existing role kept) and never granted any Project or Runtime Workspace visibility (D1). Unknown or inactive email is 404 user_not_registered; adding an existing member returns the current membership unchanged. "
+			base += "Adds an already-registered user to the space as a plain member by email, resolved in the caller's identity source. Admin or owner only. The target is atomically ensured tenant membership (existing role kept) and never granted any Project or Runtime Workspace visibility (current owner-based authorization). Unknown or inactive email is 404 user_not_registered; adding an existing member returns the current membership unchanged. "
 		case strings.Contains(r.Path, "/members"):
 			base += "Admin or owner manages membership; granting owner requires owner. The target user must be an active member of the same tenant. Last owner cannot be demoted or disabled. "
 		case r.Method == "POST" && strings.HasSuffix(r.Path, "/spaces"):

@@ -11,7 +11,8 @@ import (
 // reference a space (projects.space_id is nullable); when it does, the space
 // scopes Space-level membership and metadata only. Space membership does NOT
 // widen Project or Runtime Workspace visibility — those keep their existing
-// owner-based authorization (D1). Tenant membership stays the precondition,
+// owner-based authorization (the current implementation, until the project
+// workspace-sharing migration). Tenant membership stays the precondition,
 // roles stay independent (TenantMember != SpaceMember).
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -109,7 +110,7 @@ func archiveSpace(t *transaction, r *PublicRequest, uid string) Object {
 // enrollSpaceMemberByEmail adds an already-registered user to the space as a
 // plain member, resolved by (source, normalized email) in the caller's identity
 // source. It never auto-creates a user, never invites, and never widens Project
-// or Runtime Workspace visibility (D1). Admin or owner may enroll; the target is
+// or Runtime Workspace visibility (current owner-based authorization). Admin or owner may enroll; the target is
 // atomically ensured a tenant membership (keeping an existing role) if they are
 // not already a tenant member. Adding an existing member returns the current
 // membership unchanged — idempotent, no role/status/version mutation.

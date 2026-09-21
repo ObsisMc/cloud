@@ -12438,7 +12438,7 @@
         ]
       },
       "post": {
-        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Adds an already-registered user to the space as a plain member by email, resolved in the caller's identity source. Admin or owner only. The target is atomically ensured tenant membership (existing role kept) and never granted any Project or Runtime Workspace visibility (D1). Unknown or inactive email is 404 user_not_registered; adding an existing member returns the current membership unchanged. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Adds an already-registered user to the space as a plain member by email, resolved in the caller's identity source. Admin or owner only. The target is atomically ensured tenant membership (existing role kept) and never granted any Project or Runtime Workspace visibility (current owner-based authorization). Unknown or inactive email is 404 user_not_registered; adding an existing member returns the current membership unchanged. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
         "operationId": "post_api_v1_tenants_tid_spaces_spaceId_members",
         "parameters": [
           {

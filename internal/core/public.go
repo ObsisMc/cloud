@@ -271,8 +271,9 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 			return page(t, "SELECT wm.user_id AS id, wm.workspace_id, wm.user_id, wm.role, wm.status, wm.version, wm.joined_at, u.display_name FROM collab_workspace_members wm JOIN users u ON u.id=wm.user_id WHERE wm.workspace_id=$1", []any{r.SpaceID}, "wm.user_id", r)
 		case strings.HasSuffix(r.Path, "/projects"):
 			spaceMember(t, r.SpaceID, uid)
-			// D1: space membership gates the collection, but project visibility inside
-			// it stays owner-based — membership alone never exposes another owner's project.
+			// Current-state: space membership gates the collection, but project visibility
+			// inside it stays owner-based — membership alone never exposes another owner's
+			// project (until the project workspace-sharing migration).
 			return page(t, "SELECT p.* FROM projects p WHERE p.space_id=$1 AND p.owner_user_id=$2 AND p.deleted_at IS NULL", []any{r.SpaceID, uid}, "p.id", r)
 		default:
 			spaceMember(t, r.SpaceID, uid)
@@ -349,10 +350,10 @@ func putMember(t *transaction, r *PublicRequest, uid string) Object {
 	} else {
 		require(r.Body.N("version") == 0, 409, "version_conflict")
 		t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,$3,$4)", r.TenantID, r.UserID, role, status)
-		// Space-level convenience (D1/D2): a new tenant member also joins the default
+		// Space-level convenience: a new tenant member also joins the default
 		// collaboration space — admins as owners, members as members — mirroring the
 		// mapping migration 0012 seeded for pre-existing members. This never widens
-		// Project or Runtime Workspace visibility.
+		// Project or Runtime Workspace visibility (current owner-based authorization).
 		if dw := t.one("SELECT id FROM collab_workspaces WHERE tenant_id=$1 AND slug='default' AND archived_at IS NULL", r.TenantID); dw != nil {
 			spaceRole := "member"
 			if role == "admin" {
@@ -377,9 +378,10 @@ func validRef(s string) string {
 }
 
 func createProject(t *transaction, r *PublicRequest, uid, hash string) Object {
-	// D2=C: Space is optional. The tenant-level path leaves space_id NULL; the
+	// Space is optional. The tenant-level path leaves space_id NULL; the
 	// space-scoped path (SpaceID set) requires active membership in that space and
-	// persists the space_id. Neither path grants any widened visibility (D1).
+	// persists the space_id. Neither path grants any widened visibility (current
+	// owner-based authorization).
 	var spaceID any
 	if r.SpaceID != "" {
 		spaceMember(t, r.SpaceID, uid)

@@ -218,11 +218,12 @@ func TestEnrollCrossTenantNoExistenceLeak(t *testing.T) {
 	}
 }
 
-// TestWorkspaceMembershipDoesNotGrantProjectAccess covers the hard constraint:
+// TestProjectAccessOwnerOnlyUntilWorkspaceSharing is a current-state regression:
 // enrolling B into the space makes W visible to B, but B still cannot see or open
-// A's project P inside that space (D1 owner isolation). This is the expected
-// behavior, not a bug.
-func TestWorkspaceMembershipDoesNotGrantProjectAccess(t *testing.T) {
+// A's project P inside that space. Project access stays owner-only — this is the
+// CURRENT implementation, kept as a temporary constraint until the project
+// workspace-sharing migration (next step) applies; it is not a product rule.
+func TestProjectAccessOwnerOnlyUntilWorkspaceSharing(t *testing.T) {
 	f := setup(t)
 	gw := core.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "gateway-a"}}
 	space := f.createSpace("Team", "team", "space-create")
@@ -259,10 +260,12 @@ func TestWorkspaceMembershipDoesNotGrantProjectAccess(t *testing.T) {
 	_ = bobID
 }
 
-// TestWorkspaceMembershipDoesNotGrantRuntimeAccess covers §14/§19: even as a
+// TestRuntimeWorkspaceOwnerOnlyUntilWorkspaceSharing covers §14/§19: even as a
 // space member (and therefore tenant member), B cannot reach A's runtime
 // workspace — the /workspaces/:wid route keeps owner-based authorization.
-func TestWorkspaceMembershipDoesNotGrantRuntimeAccess(t *testing.T) {
+// Current-state regression: owner-only runtime access is the existing
+// implementation, temporary until the workspace-sharing migration (next step).
+func TestRuntimeWorkspaceOwnerOnlyUntilWorkspaceSharing(t *testing.T) {
 	f := setup(t)
 	gw := core.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "gateway-a"}}
 	space := f.createSpace("Team", "team", "space-create")

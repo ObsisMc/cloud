@@ -4,8 +4,11 @@
 > 分支 `workspace合并`，起点 HEAD=`662e211`，实施完成后提交 `feat: add workspace member enrollment`。
 > `main` 保持 `1c5b9b4` 未动（未 merge、未 push、未进入 Final Main Sync）。
 > 关联 ADR：`specs/decisions/cloud/collaboration-workspace/20260921-workspace-add-member.md`（SD1–SD6）。
+> ⚠️ **已取代（superseded）**：本记录的 **SD6「Workspace Membership ≠ Project Access」产品语义**已被
+> [workspace-sharing-model.md](workspace-sharing-model.md)（Step 2B）取代 —— owner 隔离降级为**当前实现**
+> （project workspace-sharing migration pending），不再是产品规则。本记录保留为历史。
 > 结束标记：`WORKSPACE ADD MEMBER: COMPLETE` · `NEW MEMBER WORKSPACE VISIBILITY: COMPLETE` ·
-> `WORKSPACE MEMBER AUTO-PROJECT ACCESS: DISABLED BY DESIGN` · `PROJECT OWNER ISOLATION: PASS` ·
+> `PROJECT WORKSPACE SHARING: NOT YET MIGRATED` · `CURRENT PROJECT ACCESS: OWNER-ONLY — TEMPORARY UNTIL STEP 3` ·
 > `PROJECT SHARING: NOT IMPLEMENTED — NEXT STEP` · `EMAIL INVITATION: NOT IMPLEMENTED` ·
 > `DOCUMENTATION: SYNCED`
 
@@ -32,7 +35,7 @@ Registration；**不新建**第二套 membership 系统 —— 复用 Stage B �
 | SD3 — 角色 | **新成员固定 `member`** | request 不接受 owner/admin；已存在 → **幂等返回 existing（200，不改 role/status/version）**；不改 `putSpaceMember`（角色/状态管理保留）。 |
 | SD4 — 分发与路由 | **`public.go` POST case + router allowlist** | POST 自动继承全局 Idempotency-Key 约定；OpenAPI `description()` 的 `/members` 分支区分 POST；`go run ./cmd/openapi` 重生成 `api/openapi.json`。 |
 | SD5 — 前端 | **email Dialog 替换 userId 内联表单** | `useAddSpaceMemberByEmail`（POST + `mutationHeaders` + members key invalidation）；`AddMemberDialog`（「添加成员」按钮仅 `canManage` 显示；本地校验；成功关 dialog + 列表刷新；`user_not_registered` → 「该邮箱尚未注册，请先完成注册。」）。 |
-| SD6 — 不变量 | **Workspace Membership ≠ Project Access** | owner 隔离保留：B 可见/可切换 W，但看不到/打不开 A 的 Project P（预期行为，非 bug）；不改 runtime `workspaces` 授权；Selector 靠内存缓存 refresh 反射新可见 Workspace，不重写 Current Workspace provider。 |
+| SD6 — 不变量 | **Workspace Membership ≠ Project Access** | 〔**已取代**，见 [[20260921-workspace-sharing-model]]〕当时 owner 隔离保留：B 可见/可切换 W，但看不到/打不开 A 的 Project P（当时记作预期行为，非 bug）。Step 2B 后为**当前实现**：Project 访问 owner-only，project workspace-sharing migration pending；不改 runtime `workspaces` 授权；Selector 靠内存缓存 refresh 反射新可见 Workspace，不重写 Current Workspace provider。 |
 
 ## 2. 实施内容
 
@@ -78,14 +81,15 @@ Registration；**不新建**第二套 membership 系统 —— 复用 Stage B �
   `/workspaces/:wid` 也无法绕过 project isolation；未知邮箱 → `user_not_registered` + 无脏
   tenant/workspace membership。
 
-## 4. 已知缺口（诚实记录）
+## 4. 已知缺口（诚实记录；Step 2B 对齐后的措辞）
 
-- **PROJECT SHARING NOT IMPLEMENTED — NEXT STEP**：Workspace 成员目前**不会**自动获得空间内其他
-  owner 的 Project 访问权（D1 owner 隔离，刻意保留）；项目级分享/授权不在本期。
+- **PROJECT WORKSPACE SHARING: NOT IMPLEMENTED — NEXT STEP**：Workspace 成员目前**不会**自动获得
+  空间内其他 owner 的 Project 访问权（**当前实现** owner-only，迁移 pending，不再表述为"刻意保留"）；
+  项目级分享/授权不在本期。下一步 Project 权限直接来自 `projects.space_id` + Workspace Membership。
 - **EMAIL INVITATION NOT IMPLEMENTED**：只接受**已注册**用户（未知邮箱 → 404 `user_not_registered`），
   无邀请邮件 / pending member / 自动建号。
-- **WORKSPACE MEMBER AUTO-PROJECT ACCESS: DISABLED BY DESIGN**：空间成员身份不派生任何 Project
-  visibility（见 §0/SD6）。
+- **WORKSPACE MEMBER AUTO-PROJECT ACCESS: NOT YET MIGRATED**：空间成员身份目前不派生任何 Project
+  visibility（当前实现，见 §0/SD6 + workspace-sharing-model）。
 - **角色管理不在本期**：新成员固定 `member`，添加时不能指定 owner/admin；角色调整仍走既有
   `PUT /members/:uid`。
 

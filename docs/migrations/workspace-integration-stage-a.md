@@ -82,7 +82,7 @@
 
 下一步：`zpc001/feat/collab-spaces` → `workspace合并`。已知 CLASS D 候选（须停下问用户）：
 
-- **D1** project 可见性
+- **D1** project 可见性（2026-09-21 已被 [workspace-sharing-model.md](./workspace-sharing-model.md) superseded：owner-only 为当前实现，migration pending）
 - **D2** 层级 `Tenant → Space → Project → Runtime Workspace`
 - **D3** Space 命名
 - **D5** devgateway vs ora-web（两个 edge 桥接同一 dual-JWT 核心）

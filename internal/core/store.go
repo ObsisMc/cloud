@@ -83,7 +83,8 @@ type Store struct {
 
 	// Events broadcasts committed collaboration-space invalidation notices to live
 	// SSE subscribers. Space association is optional (projects.space_id is nullable)
-	// and Space membership does not replace Project owner authorization (D1).
+	// and Space membership does not replace Project owner authorization (current
+	// implementation, until the project workspace-sharing migration).
 	Events *SpaceHub
 }
 
@@ -413,9 +414,10 @@ func membership(t *transaction, tid, uid string, admin bool) Object {
 }
 
 // project loads a live project in the tenant and requires the caller's
-// ownership. Space membership is intentionally NOT a substitute visibility
-// boundary (D1): projects and runtime workspaces keep their existing
-// owner-based authorization regardless of the owning project's space_id.
+// ownership. Space membership is not a substitute visibility boundary (current
+// implementation, until the project workspace-sharing migration): projects and
+// runtime workspaces keep their existing owner-based authorization regardless
+// of the owning project's space_id.
 func project(t *transaction, tid, uid, pid string) Object {
 	require(validID(pid), 404, "not_found")
 	p := t.one("SELECT * FROM projects WHERE id=$1 AND tenant_id=$2 AND owner_user_id=$3 AND deleted_at IS NULL", pid, tid, uid)

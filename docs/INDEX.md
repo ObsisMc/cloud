@@ -28,7 +28,8 @@ docs/
     workspace-integration-stage-d-coworker-login-workspace.md ← Stage D：同事 Login + Workspace UX 恢复 + SD1–SD7（COMPLETE）
     workspace-integration-stage-d-report.md ← Stage D 最终报告（§38：恢复内容、作用域矩阵、结论）
     user-registration.md              ← User Registration：创建 User Identity（SD1–SD5，IMPLEMENTED）
-    workspace-membership.md           ← Workspace Add Member：email 添加已注册用户（SD1–SD6，IMPLEMENTED）
+    workspace-membership.md           ← Workspace Add Member：email 添加已注册用户（SD1–SD6，IMPLEMENTED；SD6 已被取代）
+    workspace-sharing-model.md        ← Workspace Sharing Model：Workspace=资源共享边界 + 统一删除规则（SS1–SS5，IMPLEMENTED）
   acceptance.md                 ← product acceptance criteria (pre-existing)
   authentication.md             ← auth model (pre-existing)
   core-contract.md              ← core behavioural contract (pre-existing)
@@ -52,7 +53,8 @@ docs/
 | **Workspace integration (Stage B)** | [workspace-integration-stage-b.md](migrations/workspace-integration-stage-b.md) | Collaboration Space integration into the merged tree + ADR: decisions D1–D7 (owner authorization, optional Space association, terminology, routing, session, isolation, default-Space protection) |
 | **Workspace integration (Stage D)** | [workspace-integration-stage-d-coworker-login-workspace.md](migrations/workspace-integration-stage-d-coworker-login-workspace.md) | coworker Login + Workspace UX restoration + ADR: SD1–SD7 (product shell, ora-web cookie session, two-plane login, tenant-scoped Issues, space-scoped Projects, switch semantics, demo-mode gating) — **COMPLETE** |
 | **User Registration** | [user-registration.md](migrations/user-registration.md) | create a User Identity (name + email) at the ora-web boundary → session → current-user flow. ADR: SD1–SD5 (ora-web `POST /auth/register`, strict-create store, email trim+lowercase case-insensitive uniqueness, register mode in the existing Login page) — **IMPLEMENTED**; AUTHENTICATION not fully implemented, WORKSPACE ADD MEMBER / PROJECT SHARING not implemented |
-| **Workspace Add Member** | [workspace-membership.md](migrations/workspace-membership.md) | owner/admin adds an already-registered user to a Collaboration Space by email (`POST /spaces/:sid/members`); atomic tenant+space enrollment in one tx, fixed `member` role, idempotent existing-member return, 404 `user_not_registered` for unknown email. ADR: SD1–SD6 (enrollment endpoint, atomic dual-write, fixed role, dispatch/routing, email dialog frontend, **Workspace Membership ≠ Project Access**) — **IMPLEMENTED**; PROJECT SHARING / EMAIL INVITATION not implemented |
+| **Workspace Add Member** | [workspace-membership.md](migrations/workspace-membership.md) | owner/admin adds an already-registered user to a Collaboration Space by email (`POST /spaces/:sid/members`); atomic tenant+space enrollment in one tx, fixed `member` role, idempotent existing-member return, 404 `user_not_registered` for unknown email. ADR: SD1–SD6 (enrollment endpoint, atomic dual-write, fixed role, dispatch/routing, email dialog frontend, **Workspace Membership ≠ Project Access** — SD6 superseded, see next row) — **IMPLEMENTED**; PROJECT SHARING / EMAIL INVITATION not implemented |
+| **Workspace Sharing Model** | [workspace-sharing-model.md](migrations/workspace-sharing-model.md) | **Workspace = resource-sharing boundary**: a Workspace member may access the resources shared inside that Workspace (Projects/Issues/Agents/Teams/Workflows/MCPs/Skills); per-resource membership (`project_members`/…) NOT used; unified delete rule `CanDeleteWorkspaceResource = creator OR workspace owner/admin`; minimal predicates `IsWorkspaceMember`/`IsWorkspaceAdmin`/`CanDeleteWorkspaceResource`. ADR: SS1–SS5. **Supersedes the old D1 owner-isolation product rule** — owner-only Project access is now the *current implementation*, project workspace-sharing migration pending. — **IMPLEMENTED**; Project/Issue/Agent/Team/Workflow/MCP/Skill Workspace Scoping NOT IMPLEMENTED |
 | **How to add code** | [agent/adding-features.md](development/agent/adding-features.md) | endpoint / sub-resource how-to + verify |
 
 ## Repo layout (one glance)
@@ -107,10 +109,16 @@ docs/
   email (`POST /spaces/:sid/members`, SD1–SD6): atomic tenant+space enrollment in one tx (no
   half-state), fixed `member` role, idempotent existing-member return, 404 `user_not_registered` for
   unknown/inactive email, business-level role enforcement (owner/admin 200, member 403). The new member
-  sees and can switch to the Workspace after refresh, but **Workspace Membership ≠ Project Access**:
-  owner isolation is preserved (the new member cannot see/open another owner's Projects — expected
-  behavior). PROJECT SHARING / EMAIL INVITATION not implemented (see
-  [workspace-membership.md](migrations/workspace-membership.md)).
+  sees and can switch to the Workspace after refresh. PROJECT SHARING / EMAIL INVITATION not implemented
+  (see [workspace-membership.md](migrations/workspace-membership.md)).
+- ✅ **Workspace Sharing Model (Step 2B)** — alignment, not resource migration. Workspace is now the
+  **resource-sharing boundary** (member may access the Workspace's shared resources); per-resource
+  membership is **not used**; the unified delete rule is **creator OR workspace owner/admin**, backed by
+  minimal predicates `IsWorkspaceMember`/`IsWorkspaceAdmin`/`CanDeleteWorkspaceResource`. The old D1
+  owner-isolation product rule is **superseded**: Project access remains **owner-only as the current
+  implementation**, temporary until the project workspace-sharing migration (next step) — the new member
+  still cannot see/open another owner's Projects today (see
+  [workspace-sharing-model.md](migrations/workspace-sharing-model.md)).
 - 🧭 Planned — **Wave 3C** (Issue Detail & Collaboration UI). Real Agent/Team/Workflow modules are
   **blocked on external design**.
 - ⏸️ Deferred: attachments, issue↔project binding, PR links, realtime, bots/squads, Autopilot.

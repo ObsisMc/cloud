@@ -34,7 +34,7 @@ D4/D5 决策把登录与 Current Workspace shell 排除在外。复盘后确认�
 | SD2 — 会话适配 | **维持 D5=A 并扩展** | ora-web cookie 会话为前端权威会话；`cloudMode` 由持久化 `tenantId` 判定；不恢复 `cmd/devgateway`、`cloud-session.ts`(+test)、`cloud-handlers.ts`、JWT axios interceptor。`lib/api-client.ts` 保持无拦截器。auth-store 扩展 demo 会话槽。 |
 | SD3 — 双平面 | **完整双 tab** | 登录页双 tab：真实账号 = ora-web email/cookie 登录；演示账号 = mock store 登录（seed 工作区 `ora-demo`/`ora-labs`/`personal`）。演示平面纯前端 mock。 |
 | SD4 — Issues 作用域 | **tenant 级（后端不变量）** | Issues 保持 tenant 级，**不引入 `issues.space_id` 迁移**。同 tenant 内切换 Workspace 不改变 issue 列表（诚实）。记录 **WORKSPACE SCOPING GAP**；禁止伪造空间作用域的大 schema 迁移。 |
-| SD5 — 项目作用域 | **真实 space 级** | 项目创建走 `POST /tenants/:tid/spaces/:spaceId/projects`（202 异步，立即关 dialog，失效 space 项目查询）；列表维持 owner 隔离（D1）；`projects.space_id` 保持可空（D2=C）。 |
+| SD5 — 项目作用域 | **真实 space 级** | 项目创建走 `POST /tenants/:tid/spaces/:spaceId/projects`（202 异步，立即关 dialog，失效 space 项目查询）；列表维持 owner 隔离（D1 —— 2026-09-21 superseded，owner-only 为当前实现，migration pending，见 [workspace-sharing-model.md](./workspace-sharing-model.md)）；`projects.space_id` 保持可空（D2=C）。 |
 | SD6 — 切换语义 | **全链恢复** | 路由更新 + CurrentWorkspace context 更新 + 空间级 query 失效（key 内嵌 space id）+ SSE 退订旧空间、订阅当前空间。 |
 | SD7 — 演示模式隐藏真实功能 | **隐藏** | 任务/我的任务/空间/成员（真实后端功能）在 demo 模式隐藏；demo 只展示 mock 预览功能。参考 Issues 是 mock、我们是真实后端——不做数据伪造。 |
 
@@ -93,7 +93,7 @@ D4/D5 决策把登录与 Current Workspace shell 排除在外。复盘后确认�
 
 | 资源 | 作用域 | 说明 |
 | --- | --- | --- |
-| Projects | **space 级**（真实） | `useSpaceProjects(tenantId, space.id)`；创建走 spaces 端点（202）；列表 owner 隔离（D1）；`space_id` 保持可空（D2）。 |
+| Projects | **space 级**（真实） | `useSpaceProjects(tenantId, space.id)`；创建走 spaces 端点（202）；列表 owner 隔离（D1 —— 当前实现，migration pending）；`space_id` 保持可空（D2）。 |
 | Runtime Workspaces | 项目派生 | 项目创建时随 `operation`/`workspace` 202 返回，未在 shell 直接展示。 |
 | Members | **space 级**（真实） | 空间成员列表 + role/status 管理（admin/owner），owner 可加成员。 |
 | Settings | **space 级**（真实） | 改名（版本守卫）+ owner 归档危险区（S3 owner-only）。 |

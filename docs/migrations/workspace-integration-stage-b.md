@@ -20,6 +20,12 @@
 | D6 — 现有行为削弱 | **A** | 拒绝削弱既有隔离：未授权的 Project / Runtime Workspace 保持 404。新增 Space 隔离测试，不改既有 404 断言。 |
 | D7 — default Space | **A** | 默认 Space（slug=`default`）不可归档/删除 → 409 `default_space_protected`，配套测试。 |
 
+> **⚠️ 后续 superseded（2026-09-21，Step 2B — [workspace-sharing-model.md](./workspace-sharing-model.md)）**：
+> 上表 D1「Space 成员资格**不得**授予对他人 Project / Runtime Workspace 的访问」曾作为**产品决策**
+> 记录。该产品语义已被取代 —— **Workspace 现为资源共享边界**，member 最终可访问该 Workspace 的共享
+> 资源；owner-only Project 访问只是**当前实现**（project workspace-sharing migration pending），不再
+> 是产品规则。本记录保留为历史决策记录，不作修改。
+
 ---
 
 ## 2. 实施内容

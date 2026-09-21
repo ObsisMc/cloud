@@ -107,7 +107,7 @@ cloudMode = tenantId != null  （持久化 tenantId 判定，与 cookie 会话�
 
 | 资源 | 作用域 | 说明 |
 | --- | --- | --- |
-| Projects | **space 级**（真实） | `useSpaceProjects(tenantId, space.id)`；创建 `POST /tenants/:tid/spaces/:spaceId/projects`（202 异步，关 dialog，失效 space-projects key）；列表 owner 隔离（D1）；`space_id` 可空（D2）。 |
+| Projects | **space 级**（真实） | `useSpaceProjects(tenantId, space.id)`；创建 `POST /tenants/:tid/spaces/:spaceId/projects`（202 异步，关 dialog，失效 space-projects key）；列表 owner 隔离（D1 —— 2026-09-21 superseded，owner-only 为当前实现，migration pending，见 [workspace-sharing-model.md](./workspace-sharing-model.md)）；`space_id` 可空（D2）。 |
 | Runtime Workspaces | 项目派生 | 随创建 operation 202 返回，未在 shell 直接展示。 |
 | Members | **space 级**（真实） | 空间成员 + role/status 管理；owner 可加成员（PUT upsert）。 |
 | Settings | **space 级**（真实） | 改名（版本守卫）+ owner 归档危险区（S3 owner-only）。 |
