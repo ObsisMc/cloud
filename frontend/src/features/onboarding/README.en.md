@@ -6,7 +6,7 @@
 
 A signed-in member who has no workspace yet creates their first one here. It is the `/onboarding` route and also where `/` lands: members who already have a workspace are sent straight to it, so this screen only ever serves first use.
 
-The form has a name and a slug (derived from the name until the user edits it) and previews the address. On submit the page picks the API by the member's state: no tenant → `POST /api/v1/tenants` (the backend implicitly provisions a tenant and makes the caller its administrator and the space's owner; the product never shows tenants); a tenant with no live space → `POST /tenants/{tid}/spaces`. Both land on `/{slug}/issues`.
+The form has a name and a workspace address: the reserved prefix `host/w/` is fixed in front of the input (not editable) and only the slug after it can change (derived from the name until the user edits it); the full address is shown underneath. On submit the page picks the API by the member's state: no tenant → `POST /api/v1/tenants` (the backend implicitly provisions a tenant and makes the caller its administrator and the space's owner; the product never shows tenants); a tenant with no live space → `POST /tenants/{tid}/spaces`. Both land on `/w/{slug}/issues`.
 
 It does not log in (`features/auth`), create later workspaces (the sidebar's `CreateSpaceDialog`) or expose any tenant management.
 
@@ -27,6 +27,7 @@ May be consumed by: `routes.tsx`.
 
 - The page renders only inside `RequireSession`; it assumes the session is confirmed.
 - A member with a workspace never sees the form and is `Navigate`d away, which is what lets `/` redirect here unconditionally.
+- Workspaces always live under `WORKSPACE_ROUTE_PREFIX` from `src/lib/paths`, so a slug can never collide with an application route such as `/login` or `/onboarding`.
 - The slug must pass `isValidSlug` before submit, the same rule the backend applies; a backend rejection shows its fault code verbatim and keeps the form.
 
 ## Testing

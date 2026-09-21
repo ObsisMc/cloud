@@ -14,7 +14,7 @@ Utilities shared by generated code and components that contain neither React nor
 | `api-client.test.ts` | Verifies body unwrapping, both cancellation paths, the idempotency-key policy, that no credential header is attached, and that 401 listeners fire and can be removed. |
 | `navigation.ts` | The only exit from this app, `navigateExternal` (the login redirect to the provider); `replaceExternalNavigation` lets the test scaffolding swap it, since jsdom does not allow spying on `location.assign`. |
 | `navigation.test.ts` | Verifies the replace-and-restore semantics. |
-| `paths.ts` | Workspace route builder `workspacePaths`, the login route `loginPath`, narrowing of an untrusted `returnTo` (`safeReturnTo`) and `appOrigin`. |
+| `paths.ts` | The reserved workspace prefix `WORKSPACE_ROUTE_PREFIX` (`/w`) with its router pattern `WORKSPACE_ROUTE_PATTERN`, the workspace route builder `workspacePaths`, the login route `loginPath`, narrowing of an untrusted `returnTo` (`safeReturnTo`) and `workspaceUrlPrefix` (`host/w/`, the fixed part shown in front of the slug input). |
 | `mock-api-client.ts` | Axios client for the MSW-mocked domain (`/mock-api/*`), kept separate from the real-backend generated client. It rewrites the real space slug to the seeded demo workspace so pages without a backend keep showing demo data in any space until they gain real API counterparts. The mock domain has no authentication. |
 | `utils.ts` | Re-exports `cn` (Tailwind-aware class merging); shadcn components import it via `@/lib/utils`. |
 

@@ -21,6 +21,7 @@ import { SettingsLayout } from '@/features/settings/settings-layout'
 import { SkillsPage } from '@/features/skills/skills-page'
 import { SquadDetailPage } from '@/features/squads/squad-detail-page'
 import { SquadsPage } from '@/features/squads/squads-page'
+import { WORKSPACE_ROUTE_PATTERN } from '@/lib/paths'
 
 /**
  * DashboardLayout only renders its children once :workspaceSlug matches a
@@ -37,7 +38,9 @@ function WithSlug({ component: Component }: { component: ComponentType<{ slug: s
 /**
  * `/` and `/onboarding` both resolve to "the member's first workspace, or the
  * screen that creates one": the onboarding page redirects members who already
- * have a workspace, so it doubles as the signed-in landing route.
+ * have a workspace, so it doubles as the signed-in landing route. Workspaces
+ * live under the reserved `/w/` prefix, so top-level routes and slugs never
+ * compete for the same path.
  */
 export const router = createBrowserRouter([
   { path: '/', element: <Navigate to="/onboarding" replace /> },
@@ -51,7 +54,7 @@ export const router = createBrowserRouter([
     ),
   },
   {
-    path: '/:workspaceSlug',
+    path: WORKSPACE_ROUTE_PATTERN,
     element: (
       <RequireSession>
         <DashboardLayout />

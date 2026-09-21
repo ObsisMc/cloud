@@ -17,6 +17,7 @@ logger:
 
 database:
   driver: "postgres"
+  # Locally overridden by GATEWAY_DATABASE_DSN from .local/dev.env (`task setup`).
   # Use a dedicated runtime role limited to gateway_login_attempts and gateway_sessions in production.
   dsn: "host=127.0.0.1 port=55432 user=postgres dbname=ora_test sslmode=disable"
   max_idle_conns: 5
@@ -43,7 +44,11 @@ login:
   attempt_ttl: 10m     # 1m..1h
   rate_limit_per_minute: 30
   rate_limit_burst: 30
-  pkce_key_file: ".local/gateway/gateway-pkce.key" # at least 32 random bytes; `task dev:keys`
+  pkce_key_file: ".local/gateway/gateway-pkce.key" # at least 32 random bytes; `task setup`
+  # Registers the "dev" provider: a local form where any typed identity signs in, so the
+  # frontend can be developed without a GitHub OAuth App. Only valid with public.development;
+  # production configurations must not set it.
+  development_provider: true
 
 cloud:
   upstream: "http://127.0.0.1:8080"
@@ -60,8 +65,10 @@ tokens:
   lifetime: 60s        # at most 5m; Cloud rejects longer credentials
 
 github:
-  # Override locally with GATEWAY_GITHUB_CLIENT_ID; the secret file holds only the secret value.
-  client_id: "your-oauth-app-client-id"
+  # Optional locally: `task setup` supplies GATEWAY_GITHUB_CLIENT_ID and writes the secret file
+  # from config.toml when [github] is filled in; an empty client_id leaves GitHub unregistered.
+  # The secret file holds only the secret value.
+  client_id: ""
   client_secret_file: ".local/gateway/github-client-secret"
   # Override for GitHub Enterprise Server; source then names that host.
   # authorize_url: "https://github.example.com/login/oauth/authorize"

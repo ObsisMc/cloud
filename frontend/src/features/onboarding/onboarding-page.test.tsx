@@ -17,7 +17,7 @@ function renderOnboarding() {
   return renderRoutes(
     [
       { path: '/onboarding', element: <OnboardingPage /> },
-      { path: '/:workspaceSlug/issues', element: <div>Issues screen</div> },
+      { path: '/w/:workspaceSlug/issues', element: <div>Issues screen</div> },
     ],
     '/onboarding',
   )
@@ -56,13 +56,15 @@ describe('OnboardingPage', () => {
     renderOnboarding()
 
     await user.type(await screen.findByLabelText('工作区名称'), 'Acme Inc')
-    expect(screen.getByLabelText(/标识/)).toHaveValue('acme-inc')
-    expect(screen.getByText(/地址预览：.*\/acme-inc$/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/工作区地址/)).toHaveValue('acme-inc')
+    // The reserved prefix is fixed in front of the input and repeated in the full address.
+    expect(screen.getByText('localhost:3000/w/')).toBeInTheDocument()
+    expect(screen.getByText('完整地址：localhost:3000/w/acme-inc')).toBeInTheDocument()
 
-    await user.clear(screen.getByLabelText(/标识/))
-    await user.type(screen.getByLabelText(/标识/), 'Team')
+    await user.clear(screen.getByLabelText(/工作区地址/))
+    await user.type(screen.getByLabelText(/工作区地址/), 'Team')
     await user.type(screen.getByLabelText('工作区名称'), ' Ltd')
-    expect(screen.getByLabelText(/标识/)).toHaveValue('team')
+    expect(screen.getByLabelText(/工作区地址/)).toHaveValue('team')
   })
 
   it('provisions a tenant with the first workspace for a member without one', async () => {
@@ -142,8 +144,8 @@ describe('OnboardingPage', () => {
     renderOnboarding()
 
     await user.type(await screen.findByLabelText('工作区名称'), 'Acme')
-    await user.clear(screen.getByLabelText(/标识/))
-    await user.type(screen.getByLabelText(/标识/), '-bad')
+    await user.clear(screen.getByLabelText(/工作区地址/))
+    await user.type(screen.getByLabelText(/工作区地址/), '-bad')
 
     expect(screen.getByRole('button', { name: '创建工作区' })).toBeDisabled()
     expect(screen.getByText(/小写字母、数字与连字符/)).toBeInTheDocument()

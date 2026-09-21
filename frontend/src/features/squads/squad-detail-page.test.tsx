@@ -9,9 +9,9 @@ describe('SquadDetailPage', () => {
     const squad = db.squads[0]
     if (!squad) throw new Error('squad seed data must not be empty')
     renderAtRoute(
-      '/:workspaceSlug/squads/:squadId',
+      '/w/:workspaceSlug/squads/:squadId',
       <SquadDetailPage slug={db.workspace.slug} />,
-      `/${db.workspace.slug}/squads/${squad.id}`,
+      `/w/${db.workspace.slug}/squads/${squad.id}`,
     )
 
     expect(await screen.findAllByText(squad.name)).not.toHaveLength(0)

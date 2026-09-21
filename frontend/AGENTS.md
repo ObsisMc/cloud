@@ -140,6 +140,21 @@ review verifies substance.
   is not exempt from type checking; if a strict compiler flag rejects generated output, fix the
   hand-written mutator or adapter types rather than relaxing the flag.
 
+## Dependencies and the lock file
+
+- `package-lock.json` is regenerated only by the npm version CI uses: `engines.npm` in
+  `package.json` names the minimum and `.npmrc` sets `engine-strict`, so an older npm refuses to
+  install. If `npm install` fails with `EBADENGINE`, upgrade npm (`npm install -g npm@latest`) or
+  Node 24 itself; never lower the range. The lock has broken three times (e27f86d, 7a8e7ec,
+  and the 8511e39 removal of zustand) because an older npm silently drops the optional peer
+  dependencies of `@napi-rs/wasm-runtime` (`@emnapi/core`, `@emnapi/runtime`) that npm 11.19+
+  requires, and CI's `npm ci` then fails with "lock file out of sync".
+- After any `package.json` change, run `npm ci` before committing: it is the same command CI
+  runs and the only reliable proof that `package.json` and the lock agree. Commit both files
+  together, never hand-edit the lock, and keep one registry in it; entries currently resolve to
+  `registry.npmmirror.com`, so a machine with a different registry setting must not rewrite the
+  others.
+
 ## Security and data
 
 - No secrets in the frontend, ever: no tokens, keys or passwords in source, `.env` files that are

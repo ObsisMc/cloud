@@ -11,4 +11,7 @@ const signedOut = http.get('/api/v1/me', () =>
   HttpResponse.json({ code: 'unauthenticated', params: {}, requestId: 'r' }, { status: 401 }),
 )
 
-export const server = setupServer(...handlers, signedOut)
+/** A production-shaped gateway: GitHub is the only login it offers. */
+const githubOnly = http.get('/auth/providers', () => HttpResponse.json({ providers: ['github'] }))
+
+export const server = setupServer(...handlers, signedOut, githubOnly)

@@ -22,7 +22,7 @@ React 19 + TypeScript + Vite 8 + Tailwind CSS 4（shadcn/ui 组件）。API 层�
 ## 命令
 
 ```sh
-npm ci                  # 安装（CI 同款）；Node >= 24，见 .node-version
+npm ci                  # 安装（CI 同款）；Node >= 24 且 npm >= 11.19（engine-strict），见 .node-version
 npm run dev             # Vite dev server，默认 http://localhost:5173
 npm run api:generate    # 从 ../api/openapi.json 重新生成 src/api
 npm run format          # prettier --write（只管 ts/tsx/css/html，不动 Markdown 和 JSON）
@@ -43,7 +43,7 @@ npm run check           # 以上全部（不含 --base 差异检查），顺序�
 
 - `task frontend:install`：`npm ci`。
 - `task frontend:dev`：只起 Vite dev server（需要另开终端 `task run` 与 `task run:gateway`）。
-- `task dev`：同时起 Cloud（:8080）、认证 Gateway（:8081）和 Vite（:5173），日常开发的统一入口；首次会先 `task dev:keys` 生成本地密钥。
+- `task dev`：同时起 Cloud（:8080）、认证 Gateway（:8081）和 Vite（:5173），日常开发的统一入口；需要先 `cp config.toml.template config.toml` 并 `task setup`。
 - `task frontend:generate`：先 `task openapi`（Go 契约 → `api/openapi.json`），再 `npm run api:generate`。改了后端接口就跑这个，并把 `api/openapi.json` 和 `frontend/src/api` 一起提交。
 - `task frontend:format` / `task frontend:test`：即 `npm run format` / `npm run test`。
 - `task frontend:check`：与 CI `frontend` job 相同的门禁：重新生成并检测 `frontend/src/api` 漂移，再跑 `npm run check`。
@@ -58,6 +58,6 @@ npm run check           # 以上全部（不含 --base 差异检查），顺序�
 
 ## 本地联调
 
-浏览器只和认证 Gateway 说话：登录经 GitHub OAuth 完成，Gateway 持有 HttpOnly 会话 Cookie 并为每个 `/api/v1/*` 请求签发 Cloud 需要的内部凭据；前端代码不接触任何 token。本地按根目录 [README](../README.md) 起库、`task dev:keys`、写入 GitHub OAuth App 的 client secret，然后 `GATEWAY_GITHUB_CLIENT_ID=<id> task dev`。Vite 把 `/auth`、`/api`、`/healthz` 代理到 Gateway（:8081），因此 Gateway 的 `public.base_url` 是 `http://localhost:5173`，GitHub 侧的 callback 登记为 `http://localhost:5173/auth/callback/github`。dev 代理只在 Vite 下生效；生产部署必须让前端与 Gateway 同源（Cookie 与同源校验都以此为前提）。
+浏览器只和认证 Gateway 说话：登录经 GitHub OAuth 完成，Gateway 持有 HttpOnly 会话 Cookie 并为每个 `/api/v1/*` 请求签发 Cloud 需要的内部凭据；前端代码不接触任何 token。本地按根目录 [README](../README.md) 起库、`cp config.toml.template config.toml`、`task setup`，然后 `task dev`；登录页默认提供仅限本地的"开发者登录"（输入任意身份），填了 `config.toml` 的 `[github]` 才会多出 GitHub 按钮。Vite 把 `/auth`、`/api`、`/healthz` 代理到 Gateway（:8081），因此 Gateway 的 `public.base_url` 是 `http://localhost:5173`，GitHub 侧的 callback 登记为 `http://localhost:5173/auth/callback/github`。dev 代理只在 Vite 下生效；生产部署必须让前端与 Gateway 同源（Cookie 与同源校验都以此为前提）。
 
 首次登录的用户没有任何工作区，会进入 `/onboarding` 创建第一个；尚未接入后端的页面（任务、智能体、聊天等）继续由 MSW 的 `/mock-api/*` 提供演示数据。

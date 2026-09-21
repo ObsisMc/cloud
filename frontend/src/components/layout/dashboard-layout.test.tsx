@@ -17,7 +17,7 @@ function renderRouter(initialPath: string) {
       { path: '/login', element: <div>Login screen</div> },
       { path: '/onboarding', element: <div>Onboarding screen</div> },
       {
-        path: '/:workspaceSlug',
+        path: '/w/:workspaceSlug',
         element: (
           <RequireSession>
             <DashboardLayout />
@@ -32,19 +32,19 @@ function renderRouter(initialPath: string) {
 
 describe('DashboardLayout', () => {
   it('redirects to /login with returnTo when there is no session', async () => {
-    renderRouter('/cloud-dev/issues')
+    renderRouter('/w/cloud-dev/issues')
     expect(await screen.findByText('Login screen')).toBeInTheDocument()
   })
 
   it('renders the matched child route for a joined space', async () => {
     installCloudSpaceHandlers('member')
-    renderRouter('/cloud-dev/issues')
+    renderRouter('/w/cloud-dev/issues')
     expect(await screen.findByText('Issues screen')).toBeInTheDocument()
   })
 
   it('redirects an unknown slug to the first joined space', async () => {
     installCloudSpaceHandlers('member')
-    renderRouter('/some-other-workspace/issues')
+    renderRouter('/w/some-other-workspace/issues')
     expect(await screen.findByText('Issues screen')).toBeInTheDocument()
   })
 
@@ -53,7 +53,7 @@ describe('DashboardLayout', () => {
     server.use(
       http.get('/api/v1/me/tenants', () => HttpResponse.json({ items: [], nextCursor: '' })),
     )
-    renderRouter('/default/issues')
+    renderRouter('/w/default/issues')
     expect(await screen.findByText('Onboarding screen')).toBeInTheDocument()
     expect(screen.queryByText('Issues screen')).not.toBeInTheDocument()
   })
@@ -71,7 +71,7 @@ describe('DashboardLayout', () => {
         HttpResponse.json({ items: [], nextCursor: '' }),
       ),
     )
-    renderRouter('/default/issues')
+    renderRouter('/w/default/issues')
     expect(await screen.findByText('Onboarding screen')).toBeInTheDocument()
   })
 })

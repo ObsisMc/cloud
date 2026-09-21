@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label'
 import { useSession } from '@/features/auth/session'
 import { useCreateSpace, useCreateTenant, useJoinedSpaces } from '@/features/spaces/api'
 import { isValidSlug, slugFromName } from '@/features/spaces/slug'
-import { appOrigin, workspacePaths } from '@/lib/paths'
+import { workspacePaths, workspaceUrlPrefix } from '@/lib/paths'
 
 /**
  * First-run screen: a signed-in member who joined no workspace names their
@@ -139,23 +139,38 @@ function CreateFirstWorkspace({ tenantId }: { tenantId: string | undefined }) {
   )
 }
 
-/** Slug input with the backend rule as inline hint and a live URL preview. */
+/**
+ * URL field: the reserved `host/w/` prefix is rendered as a fixed adornment
+ * and only the slug after it is editable, so what the member types is exactly
+ * what the final address ends with.
+ */
 function SlugField({ slug, onChange }: { slug: string; onChange: (slug: string) => void }) {
   const invalid = slug !== '' && !isValidSlug(slug)
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="onboarding-slug">标识（URL 中使用，创建后不可修改）</Label>
-      <Input
-        id="onboarding-slug"
-        value={slug}
-        onChange={(e) => onChange(e.target.value.toLowerCase())}
-        placeholder="acme"
-        required
-      />
-      <p className="text-xs text-muted-foreground">
+      <Label htmlFor="onboarding-slug">工作区地址（创建后不可修改）</Label>
+      <div className="flex h-8 items-stretch rounded-lg border border-input bg-transparent focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+        <span
+          aria-hidden="true"
+          className="flex select-none items-center whitespace-nowrap rounded-l-lg border-r border-input bg-muted/60 px-2.5 font-mono text-sm text-muted-foreground"
+        >
+          {workspaceUrlPrefix()}
+        </span>
+        <Input
+          id="onboarding-slug"
+          value={slug}
+          onChange={(e) => onChange(e.target.value.toLowerCase())}
+          placeholder="acme"
+          aria-invalid={invalid || undefined}
+          aria-describedby="onboarding-slug-hint"
+          className="h-auto rounded-l-none border-0 font-mono focus-visible:ring-0"
+          required
+        />
+      </div>
+      <p id="onboarding-slug-hint" className="text-xs text-muted-foreground">
         {invalid
           ? '小写字母、数字与连字符，以字母或数字开头，最多 64 个字符'
-          : `地址预览：${appOrigin()}/${slug || 'acme'}`}
+          : `完整地址：${workspaceUrlPrefix()}${slug || 'acme'}`}
       </p>
     </div>
   )

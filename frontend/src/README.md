@@ -11,7 +11,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `main.tsx` | 浏览器入口：启动 MSW（仅 `/mock-api/*`）、创建 `QueryClient`、挂载 `SessionProvider` 与路由。无导出，不做单元测试。 |
-| `routes.tsx` | 路由表：`/login`、受 `RequireSession` 保护的 `/onboarding` 与 `/:workspaceSlug/*`；`/` 落到 `/onboarding`。 |
+| `routes.tsx` | 路由表：`/login`、受 `RequireSession` 保护的 `/onboarding` 与保留前缀下的 `/w/:workspaceSlug/*`（工作区 slug 不会与顶层路由冲突）；`/` 落到 `/onboarding`。 |
 | `index.css` | Tailwind 入口与设计令牌（颜色、圆角）。只放全局主题变量，组件样式写在组件里。 |
 
 ## 子模块

@@ -10,7 +10,7 @@ import { installSignedInSession, TEST_USER } from '@/test/cloud-handlers'
 import { installFakeNavigation } from '@/test/navigation'
 import { renderRoutes, renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw-server'
-import { fetchSessionUser, logoutSession, startLogin } from './api'
+import { fetchLoginProviders, fetchSessionUser, logoutSession, startLogin } from './api'
 import { LoginPage } from './login-page'
 import { RequireSession } from './require-session'
 import { SessionProvider, useSession } from './session'
@@ -54,6 +54,15 @@ describe('gateway auth api', () => {
 
     await expect(startLogin('github', '/')).rejects.toBeDefined()
     expect(navigation.destinations).toEqual([])
+  })
+
+  it('lists the providers the gateway offers and drops ones this build cannot present', async () => {
+    server.use(
+      http.get('/auth/providers', () =>
+        HttpResponse.json({ providers: ['saml-future', 'dev', 'github'] }),
+      ),
+    )
+    await expect(fetchLoginProviders()).resolves.toEqual(['github', 'dev'])
   })
 
   it('treats a 401 from the session probe as signed out and any other failure as an error', async () => {
@@ -222,6 +231,39 @@ describe('LoginPage', () => {
 
     expect(await screen.findByText(/无法开始登录/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '使用 GitHub 登录' })).toBeEnabled()
+  })
+
+  it('offers the developer login only when the gateway registers it, and starts it as "dev"', async () => {
+    let body: unknown = null
+    server.use(
+      http.get('/auth/providers', () => HttpResponse.json({ providers: ['dev', 'github'] })),
+      http.post('/auth/login', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ authorizationUrl: 'http://localhost:5173/auth/dev/authorize?s' })
+      }),
+    )
+    const navigation = installFakeNavigation()
+    const user = userEvent.setup()
+    renderWithProviders(<LoginPage />, { route: '/login?returnTo=%2Fw%2Facme%2Fissues' })
+
+    await user.click(await screen.findByRole('button', { name: '开发者登录（仅本地）' }))
+
+    await waitFor(() => expect(navigation.destinations).toHaveLength(1))
+    expect(body).toEqual({ provider: 'dev', returnTo: '/w/acme/issues' })
+    expect(screen.getByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument()
+  })
+
+  it('shows no developer login against a production-shaped gateway', async () => {
+    renderWithProviders(<LoginPage />, { route: '/login' })
+    expect(await screen.findByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /开发者登录/ })).not.toBeInTheDocument()
+  })
+
+  it('reports an unreachable gateway when the provider list cannot be loaded', async () => {
+    server.use(http.get('/auth/providers', () => HttpResponse.error()))
+    renderWithProviders(<LoginPage />, { route: '/login' })
+    expect(await screen.findByText(/认证网关不可用/)).toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
   it('sends an already signed-in tab to returnTo', async () => {

@@ -29,6 +29,7 @@ import (
 	"github.com/wanglongan587/cloud/internal/api/router"
 	"github.com/wanglongan587/cloud/internal/core"
 	"github.com/wanglongan587/cloud/internal/gateway"
+	"github.com/wanglongan587/cloud/internal/gateway/devlogin"
 	"github.com/wanglongan587/cloud/internal/gateway/github"
 )
 
@@ -188,7 +189,11 @@ func (f *gatewayFixture) newGatewayWithTimeouts(upstream string, burst int, upst
 	listener, e := net.Listen("tcp", "127.0.0.1:0")
 	must(f.t, e)
 	origin := "http://" + listener.Addr().String()
-	login, e := gateway.NewLogin(f.store, map[string]gateway.Authenticator{"github": provider}, f.pkceKey, origin+gateway.CallbackPath, 5*time.Minute, 48*time.Hour)
+	// Every replica also carries the development provider, as `task dev` does, so the tests
+	// prove it shares the attempt, cookie and session machinery with the real provider.
+	dev, e := devlogin.New(origin, time.Now)
+	must(f.t, e)
+	login, e := gateway.NewLogin(f.store, map[string]gateway.Authenticator{"github": provider, devlogin.Name: dev}, f.pkceKey, origin+gateway.CallbackPath, 5*time.Minute, 48*time.Hour)
 	must(f.t, e)
 	upstreamURL, e := url.Parse(upstream)
 	must(f.t, e)
@@ -198,6 +203,7 @@ func (f *gatewayFixture) newGatewayWithTimeouts(upstream string, burst int, upst
 		Cookies: gateway.CookiePolicy{Secure: false, CallbackPath: gateway.CallbackPath}, Log: log, Now: time.Now,
 	})
 	must(f.t, e)
+	dev.Routes(handler)
 	server := httptest.NewUnstartedServer(handler)
 	must(f.t, server.Listener.Close())
 	server.Listener = listener
@@ -795,4 +801,97 @@ func TestGatewayRelaysEventStreamsBeyondTimeouts(t *testing.T) {
 	if resp.StatusCode != http.StatusBadGateway || out.S("code") != "upstream_unavailable" {
 		t.Fatalf("stalled upstream must fail as upstream_unavailable: %d %v", resp.StatusCode, out)
 	}
+}
+
+// Evidence for specs/test-cases/cloud/identity-access/proxy-and-credentials.md
+// (#cloud-only-receives-gateway-issued-short-lived-credentials): the development provider is a
+// provider like any other to the orchestration, so a typed identity ends in a real session and
+// Gateway-issued credentials, and a forged code cannot.
+func TestGatewayDevelopmentProviderSignsInTypedIdentity(t *testing.T) {
+	f := setupGateway(t)
+	gw := f.newGateway("", 100)
+	browser := gw.browser()
+
+	resp, out := gw.do(browser, http.MethodGet, gateway.ProvidersPath, nil, nil)
+	if resp.StatusCode != http.StatusOK || !slices.Equal(anyStrings(out["providers"]), []string{"dev", "github"}) {
+		t.Fatalf("providers must list both adapters: %d %v", resp.StatusCode, out)
+	}
+
+	resp, out = gw.do(browser, http.MethodPost, gateway.LoginPath, map[string]string{"provider": "dev", "returnTo": "/w/acme/issues"}, gw.origin())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("dev login start: %d %v", resp.StatusCode, out)
+	}
+	authorize, e := url.Parse(out.S("authorizationUrl"))
+	must(t, e)
+	if authorize.Scheme+"://"+authorize.Host != gw.server.URL || authorize.Path != devlogin.AuthorizePath {
+		t.Fatalf("dev provider must send the browser to the gateway's own form, got %q", authorize)
+	}
+	page := gw.callback(browser, authorize.String())
+	if page.StatusCode != http.StatusOK || !strings.HasPrefix(page.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("authorize form: %d %s", page.StatusCode, page.Header.Get("Content-Type"))
+	}
+	form := url.Values{
+		"state": {authorize.Query().Get("state")}, "code_challenge": {authorize.Query().Get("code_challenge")},
+		"source": {"acme-corp"}, "subject": {"stable-account-id"}, "display_name": {"Ada"},
+	}
+	req, e := http.NewRequestWithContext(context.Background(), http.MethodPost, gw.server.URL+devlogin.AuthorizePath, strings.NewReader(form.Encode()))
+	must(t, e)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", gw.server.URL)
+	submitted, e := browser.Do(req)
+	must(t, e)
+	hop := consume(t, submitted)
+	if hop.StatusCode != http.StatusSeeOther || !strings.HasPrefix(hop.Header.Get("Location"), gw.server.URL+gateway.CallbackPath+"/dev?") {
+		t.Fatalf("form must redirect to the dev callback: %d %q", hop.StatusCode, hop.Header.Get("Location"))
+	}
+
+	// A code with a forged identity fails like any provider rejection and leaves the attempt open.
+	forged, e := url.Parse(hop.Header.Get("Location"))
+	must(t, e)
+	fq := forged.Query()
+	fq.Set("code", "eyJzb3VyY2UiOiJnaXRodWIuY29tIiwic3ViamVjdCI6IjEifQ."+strings.SplitN(fq.Get("code"), ".", 2)[1])
+	forged.RawQuery = fq.Encode()
+	if bad := gw.callback(browser, forged.String()); bad.StatusCode != http.StatusUnauthorized || bad.body.S("code") != "login_failed" {
+		t.Fatalf("forged code must fail uniformly: %d %v", bad.StatusCode, bad.body)
+	}
+	if n := f.count("SELECT count(*) FROM gateway_sessions"); n != 0 {
+		t.Fatalf("forged code must not create a session, found %d", n)
+	}
+
+	// The callback cleared the attempt cookie, so the genuine code needs a fresh attempt: rerun
+	// the start and the form, then the real callback signs in exactly the typed identity.
+	_, out = gw.do(browser, http.MethodPost, gateway.LoginPath, map[string]string{"provider": "dev", "returnTo": "/w/acme/issues"}, gw.origin())
+	authorize, e = url.Parse(out.S("authorizationUrl"))
+	must(t, e)
+	form.Set("state", authorize.Query().Get("state"))
+	form.Set("code_challenge", authorize.Query().Get("code_challenge"))
+	req, e = http.NewRequestWithContext(context.Background(), http.MethodPost, gw.server.URL+devlogin.AuthorizePath, strings.NewReader(form.Encode()))
+	must(t, e)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", gw.server.URL)
+	submitted, e = browser.Do(req)
+	must(t, e)
+	hop = consume(t, submitted)
+	done := gw.callback(browser, hop.Header.Get("Location"))
+	if done.StatusCode != http.StatusSeeOther || done.Header.Get("Location") != "/w/acme/issues" {
+		t.Fatalf("dev callback must sign in and honor return_to: %d %q %v", done.StatusCode, done.Header.Get("Location"), done.body)
+	}
+	resp, me := gw.do(browser, http.MethodGet, "/api/v1/me", nil, nil)
+	if resp.StatusCode != http.StatusOK || me.S("displayName") != "Ada" {
+		t.Fatalf("/api/v1/me as the typed identity: %d %v", resp.StatusCode, me)
+	}
+	if n := f.count("SELECT count(*) FROM user_identities WHERE source='acme-corp' AND subject='stable-account-id'"); n != 1 {
+		t.Fatalf("Cloud must map exactly the typed source and subject, found %d", n)
+	}
+}
+
+func anyStrings(v any) []string {
+	items, _ := v.([]any)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

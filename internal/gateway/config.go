@@ -51,11 +51,14 @@ type SessionConfig struct {
 }
 
 // LoginConfig bounds login attempts and the unauthenticated start/callback rate.
+// DevelopmentProvider registers the "dev" adapter (internal/gateway/devlogin), which lets a
+// developer type any identity; it is only accepted together with public.development.
 type LoginConfig struct {
-	AttemptTTL         time.Duration `mapstructure:"attempt_ttl"`
-	RateLimitPerMinute int           `mapstructure:"rate_limit_per_minute"`
-	RateLimitBurst     int           `mapstructure:"rate_limit_burst"`
-	PKCEKeyFile        string        `mapstructure:"pkce_key_file"`
+	AttemptTTL          time.Duration `mapstructure:"attempt_ttl"`
+	RateLimitPerMinute  int           `mapstructure:"rate_limit_per_minute"`
+	RateLimitBurst      int           `mapstructure:"rate_limit_burst"`
+	PKCEKeyFile         string        `mapstructure:"pkce_key_file"`
+	DevelopmentProvider bool          `mapstructure:"development_provider"`
 }
 
 // CloudConfig names the single fixed upstream; requests can never select another.
@@ -76,8 +79,8 @@ type TokenConfig struct {
 	Lifetime              time.Duration `mapstructure:"lifetime"`
 }
 
-// GitHubConfig configures the first adapter. Endpoint overrides exist for GitHub Enterprise Server
-// and tests; the client secret is read from a file.
+// GitHubConfig configures the GitHub adapter; an empty client_id leaves it unregistered. Endpoint
+// overrides exist for GitHub Enterprise Server and tests; the client secret is read from a file.
 type GitHubConfig struct {
 	ClientID         string `mapstructure:"client_id"`
 	ClientSecretFile string `mapstructure:"client_secret_file"`
@@ -183,8 +186,14 @@ func (c *Config) Validate() error {
 	if c.Tokens.Lifetime <= 0 || c.Tokens.Lifetime > MaxCredentialLifetime {
 		return fmt.Errorf("tokens.lifetime must be positive and at most %s", MaxCredentialLifetime)
 	}
-	if c.GitHub.ClientID == "" || c.GitHub.ClientSecretFile == "" {
-		return fmt.Errorf("github.client_id and github.client_secret_file are required")
+	if c.Login.DevelopmentProvider && !c.Public.Development {
+		return fmt.Errorf("login.development_provider requires public.development")
+	}
+	if c.GitHub.ClientID != "" && c.GitHub.ClientSecretFile == "" {
+		return fmt.Errorf("github.client_secret_file is required with github.client_id")
+	}
+	if c.GitHub.ClientID == "" && !c.Login.DevelopmentProvider {
+		return fmt.Errorf("at least one login provider is required: github.client_id or login.development_provider")
 	}
 	return nil
 }

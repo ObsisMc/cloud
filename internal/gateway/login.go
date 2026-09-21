@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -70,6 +71,17 @@ func NewLogin(store *Store, providers map[string]Authenticator, pkceKey []byte, 
 // CallbackURL is the fixed, configuration-derived redirect URI for one provider.
 func (l *Login) CallbackURL(provider string) string { return l.callbackBase + "/" + provider }
 
+// Providers lists the registered adapter names in a stable order so the sign-in screen can offer
+// exactly the logins this deployment supports.
+func (l *Login) Providers() []string {
+	names := make([]string, 0, len(l.providers))
+	for name := range l.providers {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
 // Start creates a login attempt and the provider redirect. Nothing external is called.
 func (l *Login) Start(ctx context.Context, provider, returnTo string) (Started, error) {
 	adapter, ok := l.providers[provider]
@@ -91,7 +103,7 @@ func (l *Login) Start(ctx context.Context, provider, returnTo string) (Started, 
 	if _, e = l.store.CreateAttempt(ctx, secret, state, provider, path, l.attemptTTL); e != nil {
 		return Started{}, e
 	}
-	target, e := adapter.AuthorizationURL(AuthorizationRequest{State: state, CodeChallenge: codeChallenge(l.codeVerifier(secret)), CallbackURL: l.CallbackURL(provider)})
+	target, e := adapter.AuthorizationURL(AuthorizationRequest{State: state, CodeChallenge: CodeChallenge(l.codeVerifier(secret)), CallbackURL: l.CallbackURL(provider)})
 	if e != nil {
 		return Started{}, fmt.Errorf("build authorization URL: %w", e)
 	}
@@ -145,8 +157,9 @@ func (l *Login) codeVerifier(attemptSecret string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// codeChallenge is the S256 transform of a verifier.
-func codeChallenge(verifier string) string {
+// CodeChallenge is the S256 transform of a PKCE verifier (RFC 7636). Adapters that play the
+// provider role themselves use it to check the verifier they are handed.
+func CodeChallenge(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }

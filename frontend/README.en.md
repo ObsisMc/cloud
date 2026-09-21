@@ -22,7 +22,7 @@ Every directory with hand-written source is a module and carries its own `README
 ## Commands
 
 ```sh
-npm ci                  # install (same as CI); Node >= 24, see .node-version
+npm ci                  # install (same as CI); Node >= 24 and npm >= 11.19 (engine-strict), see .node-version
 npm run dev             # Vite dev server, http://localhost:5173 by default
 npm run api:generate    # regenerate src/api from ../api/openapi.json
 npm run format          # prettier --write (ts/tsx/css/html; Markdown and JSON are left alone)
@@ -43,7 +43,7 @@ Task wrappers at the repository root:
 
 - `task frontend:install`: `npm ci`.
 - `task frontend:dev`: Vite dev server only (start `task run` and `task run:gateway` separately).
-- `task dev`: Cloud (:8080), the authentication gateway (:8081) and Vite (:5173) together; the single entry point for day-to-day development. It runs `task dev:keys` first to generate local keys.
+- `task dev`: Cloud (:8080), the authentication gateway (:8081) and Vite (:5173) together; the single entry point for day-to-day development. It needs `cp config.toml.template config.toml` and `task setup` first.
 - `task frontend:generate`: runs `task openapi` (Go contract → `api/openapi.json`), then `npm run api:generate`. Run this after any backend API change and commit `api/openapi.json` together with `frontend/src/api`.
 - `task frontend:format` / `task frontend:test`: `npm run format` / `npm run test`.
 - `task frontend:check`: the same gate as the CI `frontend` job: regenerate and detect drift in `frontend/src/api`, then `npm run check`.
@@ -58,6 +58,6 @@ Task wrappers at the repository root:
 
 ## Local end-to-end
 
-The browser only talks to the authentication gateway: login completes through GitHub OAuth, the gateway holds the HttpOnly session cookie and signs the internal credentials Cloud requires for every `/api/v1/*` request; frontend code never touches a token. Locally, follow the root [README](../README.en.md) to start the database, run `task dev:keys`, put your GitHub OAuth App client secret in place, then `GATEWAY_GITHUB_CLIENT_ID=<id> task dev`. Vite proxies `/auth`, `/api` and `/healthz` to the gateway (:8081), so the gateway's `public.base_url` is `http://localhost:5173` and the callback registered at GitHub is `http://localhost:5173/auth/callback/github`. The dev proxy only exists under Vite; production deployments must serve the frontend from the gateway's origin, which the cookie and same-origin checks assume.
+The browser only talks to the authentication gateway: login completes through GitHub OAuth, the gateway holds the HttpOnly session cookie and signs the internal credentials Cloud requires for every `/api/v1/*` request; frontend code never touches a token. Locally, follow the root [README](../README.en.md) to start the database, `cp config.toml.template config.toml`, run `task setup`, then `task dev`; the sign-in screen offers the local-only "developer login" (any typed identity) by default and adds a GitHub button once `[github]` in `config.toml` is filled in. Vite proxies `/auth`, `/api` and `/healthz` to the gateway (:8081), so the gateway's `public.base_url` is `http://localhost:5173` and the callback registered at GitHub is `http://localhost:5173/auth/callback/github`. The dev proxy only exists under Vite; production deployments must serve the frontend from the gateway's origin, which the cookie and same-origin checks assume.
 
 A first-time user has no workspace and lands on `/onboarding` to create one; pages without a backend yet (issues, agents, chat, ...) keep their demo data from MSW's `/mock-api/*`.
