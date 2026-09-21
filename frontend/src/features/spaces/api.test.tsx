@@ -3,8 +3,8 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { server } from '@/test/msw-server'
-import type { Space } from '@/api/generated.schemas'
-import { useArchiveSpace, useCreateSpace } from './api'
+import type { Project, Space } from '@/api/generated.schemas'
+import { useArchiveSpace, useCreateSpace, useSpaceProjects } from './api'
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111'
 const SPACE_ID = '22222222-2222-2222-2222-222222222222'
@@ -124,6 +124,59 @@ describe('useCreateSpace', () => {
     // A retry must replay the original key, or the backend creates a second space.
     expect(seen[1]?.key).toBe(seen[0]?.key)
     expectKeyed(seen)
+  })
+})
+
+describe('useSpaceProjects workspace scoping', () => {
+  const SPACE_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+  const SPACE_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+
+  function projectFixture(spaceId: string): Project {
+    return {
+      id: 'pppppppp-pppp-pppp-pppp-pppppppppppp',
+      tenantId: TENANT_ID,
+      name: `Project in ${spaceId}`,
+      repositoryUrl: 'https://example.com/repo.git',
+      defaultBranch: 'main',
+      ownerUserId: 'u1',
+      spaceId,
+      lifecycle: 'active',
+      version: 1,
+      createdAt: '2026-09-21T10:00:00+08:00',
+      deletedAt: null,
+      credentialRefId: null,
+    }
+  }
+
+  it('keys each space project list by space id and never crosses spaces', async () => {
+    server.use(
+      http.get(`/api/v1/tenants/${TENANT_ID}/spaces/${SPACE_A}/projects`, () =>
+        HttpResponse.json({ items: [projectFixture(SPACE_A)], nextCursor: '' }),
+      ),
+      http.get(`/api/v1/tenants/${TENANT_ID}/spaces/${SPACE_B}/projects`, () =>
+        HttpResponse.json({ items: [projectFixture(SPACE_B)], nextCursor: '' }),
+      ),
+    )
+    const queryClient = new QueryClient()
+    const { result, rerender } = renderHook(
+      ({ spaceId }: { spaceId: string | undefined }) => useSpaceProjects(TENANT_ID, spaceId),
+      { wrapper: wrapper(queryClient), initialProps: { spaceId: SPACE_A } },
+    )
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.items[0]?.name).toContain(SPACE_A)
+
+    // Switch the active workspace: the query is re-keyed to B, and the cached
+    // A list must not leak into B's result.
+    rerender({ spaceId: SPACE_B })
+    await waitFor(() => expect(result.current.data?.items[0]?.name).toContain(SPACE_B))
+    expect(result.current.data?.items[0]?.name).not.toContain(SPACE_A)
+    expect(
+      queryClient.getQueryData([`/api/v1/tenants/${TENANT_ID}/spaces/${SPACE_A}/projects`]),
+    ).toBeTruthy()
+    expect(
+      queryClient.getQueryData([`/api/v1/tenants/${TENANT_ID}/spaces/${SPACE_B}/projects`]),
+    ).toBeTruthy()
   })
 })
 
