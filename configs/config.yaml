@@ -21,4 +21,15 @@ database:
   conn_max_lifetime: 1h
 auth:
   audience: "ora-cloud"
-  keys: [] # Required at server startup; see docs/authentication.md.
+  # Public keys of the local Gateway; generate them with `task dev:keys`. Production replaces
+  # these entries with the deployment's keys; see docs/authentication.md.
+  keys:
+    - id: gateway-service-2026
+      issuer: ora-internal-issuer
+      kind: service
+      role: gateway
+      public_key_file: .local/gateway/gateway-service.pem
+    - id: user-identity-2026
+      issuer: ora-internal-issuer
+      kind: user
+      public_key_file: .local/gateway/user-identity.pem

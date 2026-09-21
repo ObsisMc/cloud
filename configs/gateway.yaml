@@ -18,7 +18,7 @@ logger:
 database:
   driver: "postgres"
   # Use a dedicated runtime role limited to gateway_login_attempts and gateway_sessions in production.
-  dsn: "host=127.0.0.1 port=55432 user=ora password=ora-local dbname=ora sslmode=disable"
+  dsn: "host=127.0.0.1 port=55432 user=postgres dbname=ora_test sslmode=disable"
   max_idle_conns: 5
   max_open_conns: 20
   conn_max_lifetime: 1h
@@ -27,7 +27,10 @@ public:
   # The origin browsers see; the OAuth callback is <base_url>/auth/callback/<provider>.
   # Production requires https. development: true permits http on localhost/127.0.0.1 only and
   # drops the Secure cookie attributes.
-  base_url: "http://localhost:8081"
+  # Locally the Vite dev server on :5173 is the browser-facing origin and proxies /auth, /api and
+  # /healthz here, so cookies and the same-origin check are evaluated against it; register
+  # http://localhost:5173/auth/callback/github as the GitHub OAuth App callback.
+  base_url: "http://localhost:5173"
   development: true
 
 session:
@@ -40,7 +43,7 @@ login:
   attempt_ttl: 10m     # 1m..1h
   rate_limit_per_minute: 30
   rate_limit_burst: 30
-  pkce_key_file: "/run/ora-keys/gateway-pkce.key" # at least 32 random bytes
+  pkce_key_file: ".local/gateway/gateway-pkce.key" # at least 32 random bytes; `task dev:keys`
 
 cloud:
   upstream: "http://127.0.0.1:8080"
@@ -51,14 +54,15 @@ tokens:
   audience: "ora-cloud"
   service_subject: "gateway-a"
   service_key_id: "gateway-service-2026"
-  service_private_key_file: "/run/ora-keys/gateway-service.key" # PKCS#8 Ed25519 PEM
+  service_private_key_file: ".local/gateway/gateway-service.key" # PKCS#8 Ed25519 PEM
   user_key_id: "user-identity-2026"
-  user_private_key_file: "/run/ora-keys/user-identity.key"      # PKCS#8 Ed25519 PEM
+  user_private_key_file: ".local/gateway/user-identity.key"      # PKCS#8 Ed25519 PEM
   lifetime: 60s        # at most 5m; Cloud rejects longer credentials
 
 github:
+  # Override locally with GATEWAY_GITHUB_CLIENT_ID; the secret file holds only the secret value.
   client_id: "your-oauth-app-client-id"
-  client_secret_file: "/run/ora-keys/github-client-secret"
+  client_secret_file: ".local/gateway/github-client-secret"
   # Override for GitHub Enterprise Server; source then names that host.
   # authorize_url: "https://github.example.com/login/oauth/authorize"
   # token_url: "https://github.example.com/login/oauth/access_token"

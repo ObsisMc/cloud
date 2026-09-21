@@ -1,16 +1,9 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { MembersPage } from '@/features/members/members-page'
-import { setCloudCredentials } from '@/lib/cloud-session'
-import { db } from '@/mocks/data/store'
-import {
-  installCloudSpaceHandlers,
-  TEST_CLOUD_CREDENTIALS,
-  TEST_SPACE_ID,
-  TEST_TENANT_ID,
-} from '@/test/cloud-handlers'
+import { installCloudSpaceHandlers, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-handlers'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw-server'
 
@@ -38,13 +31,8 @@ function installMembersHandler(members: unknown[]) {
   )
 }
 
-describe('MembersPage cloud mode', () => {
-  afterEach(() => {
-    sessionStorage.clear()
-  })
-
+describe('MembersPage', () => {
   it('renders real members and hides management controls from members', async () => {
-    setCloudCredentials(TEST_CLOUD_CREDENTIALS)
     installCloudSpaceHandlers('member')
     installMembersHandler([
       memberRow(ALICE_ID, 'Alice', 'owner'),
@@ -62,7 +50,6 @@ describe('MembersPage cloud mode', () => {
   })
 
   it('lets an owner add a member through the upsert API', async () => {
-    setCloudCredentials(TEST_CLOUD_CREDENTIALS)
     installCloudSpaceHandlers('owner')
     installMembersHandler([memberRow(ALICE_ID, 'Alice', 'owner')])
     let putBody: unknown = null
@@ -84,13 +71,5 @@ describe('MembersPage cloud mode', () => {
 
     await waitFor(() => expect(putBody).not.toBeNull())
     expect(putBody).toEqual({ role: 'member', status: 'active', version: 0 })
-  })
-
-  it('keeps the demo store table for mock sessions', async () => {
-    renderWithProviders(<MembersPage slug={db.workspace.slug} />, { slug: db.workspace.slug })
-    const first = db.users[0]
-    if (!first) throw new Error('seed users must not be empty')
-    expect(await screen.findByText(first.name)).toBeInTheDocument()
-    expect(screen.queryByLabelText('新成员 userId')).not.toBeInTheDocument()
   })
 })

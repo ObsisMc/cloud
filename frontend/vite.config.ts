@@ -14,12 +14,15 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // Development traffic goes through devgateway (cmd/devgateway), which
-      // signs dual JWTs and proxies cloud verbatim; the browser never holds keys.
-      '/api': 'http://localhost:8090',
-      '/internal': 'http://localhost:8090',
-      '/healthz': 'http://localhost:8090',
-      '/devgateway': 'http://localhost:8090',
+      // The browser only ever talks to the authentication gateway
+      // (cmd/gateway, `task run:gateway`): it completes the GitHub login, owns
+      // the HttpOnly session cookie and signs the internal credentials the
+      // cloud verifies. Proxying keeps everything same-origin with this dev
+      // server, which is what the gateway's cookie and Origin checks require
+      // (its `public.base_url` is this origin).
+      '/auth': 'http://localhost:8081',
+      '/api': 'http://localhost:8081',
+      '/healthz': 'http://localhost:8081',
     },
   },
   test: {

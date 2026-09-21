@@ -70,6 +70,7 @@ func Document() map[string]any {
 	s["Error"] = object(obj{"code": str(), "params": obj{"type": "object", "additionalProperties": true}, "requestId": uuid()}, "code", "params", "requestId")
 	s["User"] = resource("id displayName status version createdAt deletedAt", "deletedAt")
 	s["Tenant"] = resource("id name status role", "")
+	s["TenantCreated"] = object(obj{"tenant": ref("Tenant"), "space": ref("Space")}, "tenant", "space")
 	s["Member"] = resource("tenantId userId role status version createdAt", "")
 	s["MemberListItem"] = resource("id tenantId userId role status version displayName", "")
 	s["Space"] = resource("id tenantId name slug description createdBy version createdAt updatedAt archivedAt", "archivedAt")
@@ -257,6 +258,9 @@ func responseSchema(r router.Route) (schema obj, status string) {
 			return ref("Space"), "200"
 		}
 	}
+	if r.Path == "/api/v1/tenants" && r.Method == "POST" {
+		return ref("TenantCreated"), "201"
+	}
 	name := "Project"
 	switch {
 	case r.Path == "/api/v1/me":
@@ -346,6 +350,8 @@ func inputSchema(name string, r router.Route) obj {
 		return enumeration("substrate_timeout", "termination_unconfirmed", "git_cleanup_failed", "node_unavailable", "external_failure")
 	case "tenantId", "operationId", "ticketId", "credentialRefId":
 		return uuid()
+	case "slug":
+		return obj{"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$", "description": "Lowercase, immutable, unique per tenant."}
 	case "workspaceId":
 		if r.Action == "plan" {
 			return str()
@@ -402,6 +408,9 @@ func description(r router.Route) string {
 		default:
 			base += "Only joined members can read a workspace. "
 		}
+	}
+	if r.Path == "/api/v1/tenants" && r.Method == "POST" {
+		base = "Public requests require a gateway service credential plus a caller-bound user credential. No tenant membership is required: the verified identity alone authorizes provisioning. Atomically creates a tenant named after the space, makes the caller its first administrator, creates the space with the given slug and makes the caller its owner. The tenant is an implicit container the product never shows. The idempotency key is matched per user across tenants and recorded under the created tenant. "
 	}
 	if strings.Contains(r.Path, "members") && !strings.Contains(r.Path, "/spaces") {
 		base += "Administrator only. Updating an existing membership requires matching version; new membership uses version=0. Last effective administrator cannot be disabled/demoted, including concurrent changes. "

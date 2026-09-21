@@ -9,7 +9,7 @@ Gateway（`cmd/gateway`）是浏览器可访问的公开认证与反向代理边
 | `POST /auth/login` | 同源 JSON：`{"provider":"github","returnTo":"/path"}`。校验 `Origin`（或 `Sec-Fetch-Site: same-origin`）、限流后写入 Login Attempt，返回 `{"authorizationUrl"}` 并设置 attempt Cookie。`returnTo` 只接受以单个 `/` 开头且第二个字符不是 `/` 或 `\` 的相对路径；不存在 `GET` 形式。 |
 | `GET /auth/callback/{provider}` | provider 回跳。同时匹配 attempt Cookie、`state`、provider、未过期、未消费；在事务外向 provider 交换 code 与 PKCE verifier；再在一个短事务里锁定 attempt、写入 `consumed_at` 并创建 session。成功 `303` 到 attempt 中保存的 `returnTo`，失败统一 `401 login_failed`。无论成败都清除 attempt Cookie。 |
 | `POST /auth/logout` | 同源校验后吊销当前 session（`revoked_reason=logout`）并清除 Cookie；幂等，返回 `204`。 |
-| `ANY /api/v1/*` | 解析 session Cookie，失败返回 `401 unauthenticated`。修改状态的方法要求同源证明（`403 origin_forbidden`）。丢弃浏览器提供的 `Authorization`、`X-Ora-User-Token`、`Cookie`、`Forwarded`/`X-Forwarded-*`，用本副本的两把私钥签发 service/user JWT 后转发。Cloud 不可达返回 `502 upstream_unavailable`，session 不受影响。 |
+| `ANY /api/v1/*` | 解析 session Cookie，失败返回 `401 unauthenticated`。修改状态的方法要求同源证明（`403 origin_forbidden`）。丢弃浏览器提供的 `Authorization`、`X-Ora-User-Token`、`Cookie`、`Forwarded`/`X-Forwarded-*`，用本副本的两把私钥签发 service/user JWT 后转发。Cloud 不可达或在 `cloud.timeout` 内未完成响应返回 `502 upstream_unavailable`，session 不受影响。Cloud 以 `text/event-stream` 应答时（空间事件流），该连接不再受 `cloud.timeout`、`server.write_timeout` 与 8 MB 响应体上限约束，逐帧转发直到任一方关闭；限制只对已授权的这一个连接放开。 |
 | `GET /healthz` | PostgreSQL 探活。 |
 
 `/internal/v1/*` 没有路由，落到 `404 not_found`。所有错误使用 `{"code","params","requestId"}`，与 Cloud 一致。
@@ -63,7 +63,7 @@ head -c 32 /dev/urandom > gateway-pkce.key
 ## 本地运行
 
 ```bash
-task run:gateway
+task dev
 ```
 
-需要 Cloud（`task run`）已启动、`configs/gateway.yaml` 指向可用的密钥文件，且 Cloud `auth.keys` 登记了 Gateway 的两把公钥。前端页面与登录入口不在本文范围。
+`task dev` 同时启动 Cloud（:8080）、Gateway（:8081）与 Vite 前端（:5173），并先执行 `task dev:keys`（`cmd/devkeys`）在 `.local/gateway/` 生成两把 Ed25519 私钥、对应公钥与 PKCE 密钥；`configs/config.yaml` 的 `auth.keys` 与 `configs/gateway.yaml` 已指向这些文件，重复执行不会覆盖已有密钥。浏览器只访问 `http://localhost:5173`：Vite 把 `/auth`、`/api`、`/healthz` 代理到 Gateway，因此 `public.base_url` 是 `http://localhost:5173`，Cookie、同源校验与 OAuth callback（`http://localhost:5173/auth/callback/github`，需在 GitHub OAuth App 中登记）都以它为准。GitHub client id 通过 `GATEWAY_GITHUB_CLIENT_ID` 提供，client secret 写入 `.local/gateway/github-client-secret`。前端页面见 `frontend/src/features/auth`。

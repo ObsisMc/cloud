@@ -1,28 +1,24 @@
 import { create, isAxiosError, type AxiosError, type AxiosRequestConfig } from 'axios'
-import { clearCloudCredentials, getCloudCredentials } from '@/lib/cloud-session'
 
 /**
  * Shared axios instance behind every generated hook in `src/api`.
  *
- * Cross-cutting HTTP policy (base URL, auth headers, interceptors) belongs here
+ * Cross-cutting HTTP policy (base URL, idempotency, interceptors) belongs here
  * so that generated code and hand-written code observe one configuration.
+ *
+ * Authentication is not a header: the browser holds only the gateway's
+ * HttpOnly session cookie, which same-origin requests carry automatically,
+ * and the gateway signs the internal credentials the cloud verifies. Nothing
+ * in the frontend ever sees or attaches a token.
  */
 export const AXIOS_INSTANCE = create({ baseURL: '' })
 
-// Attach the dual gateway credentials (service + caller-bound user JWT) to
-// every request once the tab has signed in through devgateway. The signing
-// keys never enter frontend code; this only replays tokens the gateway issued.
-// POST and DELETE additionally receive a fresh idempotency key when the caller
-// did not supply one: the cloud core rejects them without it. The interceptor
-// is synchronous so axios keeps dispatching to the adapter immediately — an
+// POST and DELETE receive a fresh idempotency key when the caller did not
+// supply one: the cloud core rejects them without it. The interceptor is
+// synchronous so axios keeps dispatching to the adapter immediately — an
 // abort must still win the race the way it does without interceptors.
 AXIOS_INSTANCE.interceptors.request.use(
   (config) => {
-    const credentials = getCloudCredentials()
-    if (credentials) {
-      config.headers.set('Authorization', `Bearer ${credentials.serviceToken}`)
-      config.headers.set('X-Ora-User-Token', credentials.userToken)
-    }
     if (
       (config.method === 'post' || config.method === 'delete') &&
       !config.headers.get('Idempotency-Key')
@@ -35,11 +31,30 @@ AXIOS_INSTANCE.interceptors.request.use(
   { synchronous: true },
 )
 
-// An expired or rejected credential ends the session so the sign-in flow can
-// re-run instead of every subsequent query failing with the same 401.
-AXIOS_INSTANCE.interceptors.response.use(undefined, (error) => {
-  if (isAxiosError(error) && error.response?.status === 401 && getCloudCredentials()) {
-    clearCloudCredentials()
+type UnauthorizedListener = () => void
+const unauthorizedListeners = new Set<UnauthorizedListener>()
+
+/**
+ * Registers a listener for any 401 the backend returns, and returns the
+ * function that removes it. The session owner subscribes so an expired or
+ * revoked cookie ends the session once, instead of every later query failing
+ * with the same 401. Listeners run synchronously before the error propagates.
+ */
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener)
+  return () => {
+    unauthorizedListeners.delete(listener)
+  }
+}
+
+/** True when `error` is an HTTP 401 from the shared instance. */
+export function isUnauthorizedError(error: unknown): boolean {
+  return isAxiosError(error) && error.response?.status === 401
+}
+
+AXIOS_INSTANCE.interceptors.response.use(undefined, (error: unknown) => {
+  if (isUnauthorizedError(error)) {
+    for (const listener of unauthorizedListeners) listener()
   }
   throw error
 })

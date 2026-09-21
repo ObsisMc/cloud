@@ -285,13 +285,8 @@ func (s *Store) Bootstrap(ctx context.Context, name, source, subject, display st
 	return s.transact(ctx, func(t *transaction) Object {
 		require(name != "" && len(name) <= 200, 400, "invalid_name")
 		u := identity(t, source, subject, display)
-		id := newID()
-		t.exec("INSERT INTO tenants(id,name,status) VALUES($1,$2,'active')", id, name)
-		t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'admin','active')", id, u.S("id"))
-		wid := newID()
-		t.exec("INSERT INTO collab_workspaces(id,tenant_id,name,slug,created_by) VALUES($1,$2,'Default','default',$3)", wid, id, u.S("id"))
-		t.exec("INSERT INTO collab_workspace_members(workspace_id,user_id,role,status,created_by) VALUES($1,$2,'owner','active',$2)", wid, u.S("id"))
-		return Object{"tenantId": id, "userId": u.S("id"), "spaceId": wid}
+		tenant, space := provisionTenant(t, u.S("id"), name, "Default", "default")
+		return Object{"tenantId": tenant.S("id"), "userId": u.S("id"), "spaceId": space.S("id")}
 	})
 }
 

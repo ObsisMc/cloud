@@ -6,16 +6,20 @@
  * OpenAPI spec version: 1.0.0
  */
 import {
+  useMutation,
   useQuery
 } from '@tanstack/react-query';
 import type {
   DataTag,
   DefinedInitialDataOptions,
   DefinedUseQueryResult,
+  MutationFunction,
   QueryClient,
   QueryFunction,
   QueryKey,
   UndefinedInitialDataOptions,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult
 } from '@tanstack/react-query';
@@ -23,7 +27,9 @@ import type {
 import type {
   Error,
   GetApiV1TenantsTidResourceStatus200,
-  GetApiV1TenantsTidResourceStatusParams
+  GetApiV1TenantsTidResourceStatusParams,
+  PostApiV1TenantsBody,
+  TenantCreated
 } from '../generated.schemas';
 
 import { customInstance } from '../../lib/api-client';
@@ -50,6 +56,74 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
 };
 
 /**
+ * Public requests require a gateway service credential plus a caller-bound user credential. No tenant membership is required: the verified identity alone authorizes provisioning. Atomically creates a tenant named after the space, makes the caller its first administrator, creates the space with the given slug and makes the caller its owner. The tenant is an implicit container the product never shows. The idempotency key is matched per user across tenants and recorded under the created tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary POST /api/v1/tenants
+ */
+export const postApiV1Tenants = (
+    postApiV1TenantsBody: PostApiV1TenantsBody,
+ options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
+) => {
+
+
+      return customInstance<TenantCreated>(
+      {url: `/api/v1/tenants`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: postApiV1TenantsBody, signal
+    },
+      options);
+    }
+
+
+
+
+export const getPostApiV1TenantsMutationKey = () => ['postApiV1Tenants'] as const;
+
+export const getPostApiV1TenantsMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1Tenants>>, TError,PostApiV1TenantsMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof postApiV1Tenants>>, TError,PostApiV1TenantsMutationVariables, TContext> => {
+
+const mutationKey = getPostApiV1TenantsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiV1Tenants>>, PostApiV1TenantsMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  postApiV1Tenants(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostApiV1TenantsMutationResult = NonNullable<Awaited<ReturnType<typeof postApiV1Tenants>>>
+    export type PostApiV1TenantsMutationBody = PostApiV1TenantsBody
+    export type PostApiV1TenantsMutationError = ErrorType<Error>
+    export type PostApiV1TenantsMutationVariables = {data: PostApiV1TenantsBody}
+
+    /**
+ * @summary POST /api/v1/tenants
+ */
+export const usePostApiV1Tenants = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1Tenants>>, TError,PostApiV1TenantsMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postApiV1Tenants>>,
+        TError,
+        PostApiV1TenantsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostApiV1TenantsMutationOptions(options), queryClient);
+    }
+    /**
  * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Administrator response explicitly excludes repository URL, worktree details, credentials, execution output and operation request/result/error details. Administrative stop still requires idle evidence. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/resource-status
  */

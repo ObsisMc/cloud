@@ -10,9 +10,8 @@ Browser entry point and composition root. This layer only wires things together:
 
 | File | Description |
 | --- | --- |
-| `main.tsx` | Browser entry: validates the mount point, creates the `QueryClient`, renders `<App />`. No exports; not unit-tested (the composition is covered by `app.test.tsx`). |
-| `app.tsx` | Root screen component `App`: shows backend `/healthz` reachability and is where routing/layout will attach. |
-| `app.test.tsx` | Renders both the success and failure paths against a fake HTTP adapter. |
+| `main.tsx` | Browser entry: starts MSW (for `/mock-api/*` only), creates the `QueryClient`, mounts `SessionProvider` and the router. No exports; not unit-tested. |
+| `routes.tsx` | Route table: `/login`, and `/onboarding` plus `/:workspaceSlug/*` behind `RequireSession`; `/` lands on `/onboarding`. |
 | `index.css` | Tailwind entry and design tokens (colors, radius). Global theme variables only; component styles live with components. |
 
 ## Submodules
@@ -21,14 +20,18 @@ Browser entry point and composition root. This layer only wires things together:
 | --- | --- |
 | `api/` | **Generated** by orval; never hand-edited, see [`../README.en.md`](../README.en.md). |
 | `components/ui/` | Presentational primitives (shadcn/ui) with no business meaning. |
-| `lib/` | React-free infrastructure: HTTP client, class-name merging. |
-| `test/` | Test scaffolding: jsdom cleanup and the fake HTTP adapter. |
+| `features/auth/` | Session and login boundary: gateway login/logout, the `/api/v1/me` probe, the 401 policy, the route gate. |
+| `features/onboarding/` | First-workspace creation screen. |
+| `features/spaces/` | Collaboration space adapter: tenant/space resolution, space APIs, SSE subscription. |
+| `lib/` | React-free infrastructure: HTTP client, external navigation, paths. |
+| `mocks/` | MSW demo data: `/mock-api/*` handlers and seeds for pages without a backend yet. |
+| `test/` | Test scaffolding: jsdom cleanup, the fake HTTP adapter, session and space fixtures. |
 
 ## Dependency direction
 
-`main.tsx → app.tsx → (api, components/ui)`; `api → lib`. Lower layers never import higher ones.
+`main.tsx → routes.tsx → (features, components)`; `features → (api, lib)`; `api → lib`. Lower layers never import higher ones.
 
 ## Invariants
 
 - `main.tsx` is the only top-level module with side effects (mounting the DOM).
-- All HTTP goes through `AXIOS_INSTANCE` in `lib/api-client.ts`; tests isolate the network by swapping its adapter.
+- All real-backend HTTP goes through `AXIOS_INSTANCE` in `lib/api-client.ts`; authentication is the gateway's HttpOnly cookie, and the frontend holds no token.

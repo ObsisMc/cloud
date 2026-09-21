@@ -1,69 +1,65 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { setCloudCredentials } from '@/lib/cloud-session'
-import { db } from '@/mocks/data/store'
-import { useAuthStore } from '@/state/auth-store'
-import { TEST_CLOUD_CREDENTIALS, TEST_TENANT_ID } from '@/test/cloud-handlers'
+import { describe, expect, it } from 'vitest'
+import { RequireSession } from '@/features/auth/require-session'
+import {
+  installCloudSpaceHandlers,
+  installSignedInSession,
+  TEST_TENANT_ID,
+} from '@/test/cloud-handlers'
+import { renderRoutes } from '@/test/render'
 import { server } from '@/test/msw-server'
 import { DashboardLayout } from './dashboard-layout'
 
 function renderRouter(initialPath: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const router = createMemoryRouter(
+  return renderRoutes(
     [
       { path: '/login', element: <div>Login screen</div> },
+      { path: '/onboarding', element: <div>Onboarding screen</div> },
       {
         path: '/:workspaceSlug',
-        element: <DashboardLayout />,
+        element: (
+          <RequireSession>
+            <DashboardLayout />
+          </RequireSession>
+        ),
         children: [{ path: 'issues', element: <div>Issues screen</div> }],
       },
     ],
-    { initialEntries: [initialPath] },
-  )
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
+    initialPath,
   )
 }
 
 describe('DashboardLayout', () => {
-  beforeEach(() => {
-    useAuthStore.getState().clear()
-  })
-
-  afterEach(() => {
-    sessionStorage.clear()
-  })
-
-  it('redirects to /login when there is no session', async () => {
-    renderRouter(`/${db.workspace.slug}/issues`)
+  it('redirects to /login with returnTo when there is no session', async () => {
+    renderRouter('/cloud-dev/issues')
     expect(await screen.findByText('Login screen')).toBeInTheDocument()
   })
 
-  it('redirects an unknown workspace slug back to the real workspace', async () => {
-    useAuthStore.getState().setSession('token', db.users[0])
+  it('renders the matched child route for a joined space', async () => {
+    installCloudSpaceHandlers('member')
+    renderRouter('/cloud-dev/issues')
+    expect(await screen.findByText('Issues screen')).toBeInTheDocument()
+  })
+
+  it('redirects an unknown slug to the first joined space', async () => {
+    installCloudSpaceHandlers('member')
     renderRouter('/some-other-workspace/issues')
     expect(await screen.findByText('Issues screen')).toBeInTheDocument()
   })
 
-  it('renders the matched child route once authenticated', async () => {
-    useAuthStore.getState().setSession('token', db.users[0])
-    renderRouter(`/${db.workspace.slug}/issues`)
-    expect(await screen.findByText('Issues screen')).toBeInTheDocument()
-  })
-})
-
-describe('DashboardLayout cloud mode', () => {
-  afterEach(() => {
-    sessionStorage.clear()
+  it('sends a member with no tenant to onboarding instead of showing demo data', async () => {
+    installSignedInSession()
+    server.use(
+      http.get('/api/v1/me/tenants', () => HttpResponse.json({ items: [], nextCursor: '' })),
+    )
+    renderRouter('/default/issues')
+    expect(await screen.findByText('Onboarding screen')).toBeInTheDocument()
+    expect(screen.queryByText('Issues screen')).not.toBeInTheDocument()
   })
 
-  it('shows an empty state instead of demo data for a session with no joined space', async () => {
-    setCloudCredentials(TEST_CLOUD_CREDENTIALS)
+  it('sends a member whose tenant has no live space to onboarding', async () => {
+    installSignedInSession()
     server.use(
       http.get('/api/v1/me/tenants', () =>
         HttpResponse.json({
@@ -76,7 +72,6 @@ describe('DashboardLayout cloud mode', () => {
       ),
     )
     renderRouter('/default/issues')
-    expect(await screen.findByText(/尚未加入任何工作区/)).toBeInTheDocument()
-    expect(screen.queryByText('Issues screen')).not.toBeInTheDocument()
+    expect(await screen.findByText('Onboarding screen')).toBeInTheDocument()
   })
 })

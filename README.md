@@ -50,7 +50,7 @@ go run ./cmd/cloudctl -command bootstrap -name '研发组织' -source 'huawei-co
 go run ./cmd/cloudctl -command credential-ref -tenant '<tenant UUID>' -owner '<user UUID>' -secret-ref 'infra-secret://git/team/account'
 ```
 
-`bootstrap` 原子创建租户与首位管理员，是部署操作；重复执行会新建租户。`credential-ref` 只保存基础设施引用，不接收 Git 密钥值；引用受 tenant+owner 外键约束。普通成员须先经有效 gateway 身份访问 `/api/v1/me` 建立 user，再由管理员通过成员 API 显式添加。没有自助组织注册或外部组自动授权。
+`bootstrap` 原子创建租户、首位管理员与 `default` 空间，是部署操作；重复执行会新建租户。`credential-ref` 只保存基础设施引用，不接收 Git 密钥值；引用受 tenant+owner 外键约束。已登录用户也可以通过 `POST /api/v1/tenants` 为自己创建租户：请求体只有第一个协作空间的 `name` 与 `slug`，租户借用该名称，调用者成为租户管理员和空间 owner；租户是产品不展示的隐式容器。加入已有租户仍须先经有效 gateway 身份访问 `/api/v1/me` 建立 user，再由管理员通过成员 API 显式添加；没有外部组自动授权。
 
 生产启动前在配置中设置内部验证公钥，见 [认证配置与凭据](docs/authentication.md)。空 trust 配置会启动失败：
 
@@ -59,6 +59,8 @@ go run ./cmd/server -config /path/to/config.yaml
 ```
 
 server 只检查已执行迁移及 checksum，不执行 DDL；数据库、迁移、trust 或监听失败会非零退出。`GET /healthz` 检查 PG 可达性。
+
+本地联调（浏览器 → Gateway → Cloud，见 [认证 Gateway](docs/gateway.md)）：`task dev:keys` 在 `.local/gateway/` 生成 Gateway 私钥、Cloud 信任公钥与 PKCE 密钥（`configs/config.yaml` 与 `configs/gateway.yaml` 已指向这些路径）；把 GitHub OAuth App 的 client secret 写入 `.local/gateway/github-client-secret`，callback 登记为 `http://localhost:5173/auth/callback/github`，再 `GATEWAY_GITHUB_CLIENT_ID=<client id> task dev` 同时启动 Cloud、Gateway 与前端。首次登录的用户没有租户，前端会引导其创建第一个工作区。
 
 可直接运行完整创建演示（独立生成短期模拟签名密钥，仅限进程内测试）：
 

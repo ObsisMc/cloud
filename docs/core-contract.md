@@ -8,11 +8,13 @@ Cloud 是唯一业务权威存储。Gateway 转发查询/生命周期到 cloud�
 
 每个未软删 Project 通过延迟约束触发器检查恰有一个未软删 main Workspace，允许在同一事务原子创建或整体删除；不能单独删 main。partial unique index 防止两个 main。isolated Workspace 有唯一 Task 展示身份。云端 main 同样有 `workspace_worktrees` 行及 linked worktree；这与只读参考的 desktop 当前 schema 不同，未改动 desktop/specs 的现有语义。
 
+租户有两条创建路径，共用同一事务形态：`cloudctl bootstrap` 为部署创建租户、首位管理员与 slug 固定为 `default` 的空间；`POST /api/v1/tenants` 让已验证身份的用户为自己创建租户，租户借用请求中第一个空间的 `name`，空间使用请求中的 `slug`，调用者同时成为租户 admin 与空间 owner。自助创建的租户没有 `default` 空间，租户级 `POST /tenants/{tid}/projects` 对其返回 404；项目应通过空间级路径创建。
+
 角色只分 admin/member。查询在 SQL 中过滤 tenant+owner；admin 不享有跨用户业务读权限。管理员成员列表只含身份显示信息和角色状态；资源状态只含资源 UUID、owner、kind、运行状态/generation/version。administrative-stop 的响应以及 operation GET/retry 使用专门投影，不含 repositoryUrl、secretRef、worktree、request/result/error 明细。最后一个有效管理员不能被删除/停用/降级；用户停用或租户启用也受 PG 延迟约束保护。没有公共用户删除或停用 CRUD。
 
 ## 幂等与并发
 
-POST/DELETE 需要 `Idempotency-Key`，范围是 tenant+user，保留原始 HTTP 状态与响应。hash 由 method、path、规范化 JSON map 组成；相同 key 不同内容为 409。同 key 同请求首先重放，再检查当前资源版本，因此响应丢失后的旧 version 重试不会创建第二份资源。停用成员仍先被拒绝。
+POST/DELETE 需要 `Idempotency-Key`，范围是 tenant+user，保留原始 HTTP 状态与响应。hash 由 method、path、规范化 JSON map 组成；相同 key 不同内容为 409。同 key 同请求首先重放，再检查当前资源版本，因此响应丢失后的旧 version 重试不会创建第二份资源。停用成员仍先被拒绝。`POST /api/v1/tenants` 在租户存在之前执行，因此按 user+key 在该用户所属的全部租户中匹配重放，并把记录写在新建租户名下；同 key 不同内容同样为 409。
 
 PATCH 与生命周期动作携带整数 `version`；现存 membership PUT/operation retry/Node status/idle/ticket finish 同样使用 version。缺失必需版本为 428，不匹配为 409；已经 finished 的同版本请求重放不产生第二次写入。列表按 UUID 升序，`limit` 1–100，`after` 是排他 UUID cursor；身份过滤在分页前执行。
 

@@ -26,3 +26,29 @@ export function workspacePaths(slug: string) {
     settings: `${base}/settings`,
   }
 }
+
+/**
+ * Builds the login route that brings the user back to `returnTo` after the
+ * provider round-trip. `returnTo` is kept as a query parameter so a reload of
+ * the login page preserves the destination.
+ */
+export function loginPath(returnTo: string): string {
+  return `/login?returnTo=${encodeURIComponent(returnTo)}`
+}
+
+/**
+ * Narrows an untrusted `returnTo` (query string, storage) to a same-origin
+ * path the gateway accepts: a single leading slash, never `//` or `/\\`, which
+ * browsers would treat as another origin. Anything else falls back to `/`.
+ */
+export function safeReturnTo(candidate: string | null | undefined): string {
+  if (!candidate || !candidate.startsWith('/')) return '/'
+  const second = candidate.charAt(1)
+  if (second === '/' || second === '\\') return '/'
+  return candidate
+}
+
+/** The origin this app is served from, for previews of absolute URLs. */
+export function appOrigin(): string {
+  return window.location.origin
+}

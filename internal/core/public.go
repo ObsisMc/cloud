@@ -32,6 +32,14 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 		if r.Path == "/api/v1/me/tenants" {
 			return page(t, "SELECT t.id,t.name,t.status,m.role FROM tenants t JOIN tenant_memberships m ON m.tenant_id=t.id WHERE m.user_id=$1 AND m.status='active' AND t.status='active' AND t.deleted_at IS NULL", []any{uid}, "t.id", r)
 		}
+		if r.Path == "/api/v1/tenants" {
+			// Tenant provisioning is the one mutation with no tenant scope to
+			// check membership against: the caller's verified identity is the
+			// whole authorization.
+			var out Object
+			out, status = createTenant(t, r, uid)
+			return out
+		}
 		isAdmin := r.SpaceID == "" && (strings.HasSuffix(r.Path, "/resource-status") || strings.HasSuffix(r.Path, "/administrative-stop") || (r.UserID != "" && r.Method == "PUT") || strings.HasSuffix(r.Path, "/members"))
 		membership(t, r.TenantID, uid, isAdmin)
 		if r.Method == "GET" {

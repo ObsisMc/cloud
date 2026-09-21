@@ -38,16 +38,20 @@ tasks:
       - task: test
   build:
     cmds:
-      - go build -o bin/ ./cmd/server ./cmd/gateway ./cmd/cloudctl ./cmd/simulator
+      - go build -o bin/ ./cmd/server ./cmd/gateway ./cmd/cloudctl ./cmd/simulator ./cmd/devkeys
   run:
     desc: Go API server on :8080
     cmds: [go run ./cmd/server]
   run:gateway:
     desc: Authentication gateway on :8081, proxying /api/v1 to the Go server; see docs/gateway.md
+    deps: [dev:keys]
     cmds: [go run ./cmd/gateway]
+  dev:keys:
+    desc: Generate the local Gateway/Cloud key material under .local/gateway (idempotent)
+    cmds: [go run ./cmd/devkeys]
   dev:
-    desc: Go API server and Vite dev server together; open http://localhost:5173
-    deps: [run, frontend:dev]
+    desc: Go API server, authentication gateway and Vite dev server together; open http://localhost:5173
+    deps: [run, run:gateway, frontend:dev]
   migrate:
     cmds: [go run ./cmd/cloudctl -command migrate]
   simulate:
@@ -59,7 +63,7 @@ tasks:
     desc: Install frontend dependencies from package-lock.json
     cmds: [npm --prefix frontend ci]
   frontend:dev:
-    desc: Vite dev server on :5173, proxying /api, /internal and /healthz to the Go server on :8080
+    desc: Vite dev server on :5173, proxying /auth, /api and /healthz to the gateway on :8081
     deps: [frontend:install]
     cmds: [npm --prefix frontend run dev]
   frontend:generate:

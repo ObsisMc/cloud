@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Error as ApiError, Space, SpaceListItem, SpaceMember } from '@/api/generated.schemas'
+import type {
+  Error as ApiError,
+  Space,
+  SpaceListItem,
+  SpaceMember,
+  TenantCreated,
+} from '@/api/generated.schemas'
+import { getGetApiV1MeTenantsQueryKey, useGetApiV1MeTenants } from '@/api/me/me'
+import { useSession } from '@/features/auth/session'
 import {
   deleteApiV1TenantsTidSpacesSid,
   getApiV1TenantsTidSpaces,
@@ -10,6 +18,7 @@ import {
   postApiV1TenantsTidSpaces,
   putApiV1TenantsTidSpacesSidMembersUid,
 } from '@/api/spaces/spaces'
+import { postApiV1Tenants } from '@/api/tenants/tenants'
 import type { ErrorType } from '@/lib/api-client'
 
 /** Space membership roles; mirrors the backend owner/admin/member model. */
@@ -59,6 +68,61 @@ export function useSpaces(tenantId: string | undefined) {
     queryKey: tenantId ? getGetApiV1TenantsTidSpacesQueryKey(tenantId) : ['spaces', 'no-tenant'],
     queryFn: ({ signal }) => getApiV1TenantsTidSpaces(tenantId ?? '', undefined, undefined, signal),
     enabled: !!tenantId,
+  })
+}
+
+/**
+ * Everything the signed-in member joined, resolved in two hops: the tenant
+ * list, then that tenant's spaces. The product shows only spaces; the tenant
+ * is an implicit container, so the first tenant is taken without a choice.
+ * `spaces` is `[]` (not `undefined`) for a member with no tenant, so callers
+ * can tell "nothing joined" from "still loading" by `isPending` alone.
+ */
+export interface JoinedSpaces {
+  tenantId: string | undefined
+  spaces: SpaceListItem[] | undefined
+  isPending: boolean
+  isError: boolean
+}
+
+export function useJoinedSpaces(): JoinedSpaces {
+  const { session } = useSession()
+  // Nothing is fetched before the session probe confirms a member: a
+  // signed-out tab would only collect a guaranteed 401.
+  const tenants = useGetApiV1MeTenants(undefined, {
+    query: { enabled: session.status === 'signed-in' },
+  })
+  const tenantId = tenants.data?.items[0]?.id
+  const spacesQuery = useSpaces(tenantId)
+  const resolved = tenants.isSuccess && (tenantId === undefined || spacesQuery.isSuccess)
+  let spaces: SpaceListItem[] | undefined
+  if (resolved) spaces = tenantId === undefined ? [] : spacesQuery.data?.items
+  return {
+    tenantId,
+    spaces,
+    isPending: !resolved && !tenants.isError && !spacesQuery.isError,
+    isError: tenants.isError || spacesQuery.isError,
+  }
+}
+
+/** Input for a first-time member's tenant: the name and slug of its first space. */
+export interface CreateTenantInput {
+  name: string
+  slug: string
+}
+
+/**
+ * Provisions a tenant for the signed-in member together with its first
+ * space; the backend makes the caller tenant admin and space owner in one
+ * transaction. Success refreshes the tenant list so the new space resolves.
+ */
+export function useCreateTenant() {
+  const queryClient = useQueryClient()
+  return useMutation<TenantCreated, ErrorType<ApiError>, CreateTenantInput>({
+    mutationFn: (input: CreateTenantInput) => postApiV1Tenants(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: getGetApiV1MeTenantsQueryKey() })
+    },
   })
 }
 

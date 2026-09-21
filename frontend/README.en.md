@@ -11,9 +11,9 @@ React 19 + TypeScript + Vite 8 + Tailwind CSS 4 (shadcn/ui components). The API 
 | `src/api/<tag>/<tag>.ts` | **Generated.** One directory per OpenAPI tag (`me`, `projects`, `workspaces`, `internal`, …), with a `useXxx` / `getXxxQueryKey` / `getXxxQueryOptions` set per operation; never edit by hand |
 | `src/api/generated.schemas.ts` | **Generated.** All request, response, and parameter TypeScript types; never edit by hand |
 | `src/api/index.ts` | **Generated.** Re-exports every tag directory |
-| `src/lib/api-client.ts` | The axios instance (`AXIOS_INSTANCE`) and mutator shared by every generated hook; auth headers, interceptors, and `baseURL` go here |
+| `src/lib/api-client.ts` | The axios instance (`AXIOS_INSTANCE`) and mutator shared by every generated hook; interceptors and `baseURL` go here. There are no auth headers: the session is the gateway's HttpOnly cookie |
 | `orval.config.ts` | Generator config: input `../api/openapi.json`, `client: 'react-query'`, `clean: true` |
-| `vite.config.ts` | `@` → `src` alias; dev proxy for `/api`, `/internal`, `/healthz` to `http://localhost:8080`; vitest and coverage thresholds |
+| `vite.config.ts` | `@` → `src` alias; dev proxy for `/auth`, `/api`, `/healthz` to the authentication gateway at `http://localhost:8081`; vitest and coverage thresholds |
 | `scripts/` | Gate scripts that enforce module READMEs, tests and documented exports; see [`scripts/README.en.md`](scripts/README.en.md) |
 | `AGENTS.md` | Engineering rules for this directory (cohesion, size limits, docs, tests); `CLAUDE.md` imports it |
 
@@ -42,8 +42,8 @@ npm run check           # everything above except the --base diff, in CI order
 Task wrappers at the repository root:
 
 - `task frontend:install`: `npm ci`.
-- `task frontend:dev`: Vite dev server only (start the backend separately with `task run`).
-- `task dev`: Go backend (:8080) and Vite (:5173) together; the single entry point for day-to-day development.
+- `task frontend:dev`: Vite dev server only (start `task run` and `task run:gateway` separately).
+- `task dev`: Cloud (:8080), the authentication gateway (:8081) and Vite (:5173) together; the single entry point for day-to-day development. It runs `task dev:keys` first to generate local keys.
 - `task frontend:generate`: runs `task openapi` (Go contract → `api/openapi.json`), then `npm run api:generate`. Run this after any backend API change and commit `api/openapi.json` together with `frontend/src/api`.
 - `task frontend:format` / `task frontend:test`: `npm run format` / `npm run test`.
 - `task frontend:check`: the same gate as the CI `frontend` job: regenerate and detect drift in `frontend/src/api`, then `npm run check`.
@@ -58,4 +58,6 @@ Task wrappers at the repository root:
 
 ## Local end-to-end
 
-The backend needs a real PostgreSQL. Follow the root [README](../README.en.md) to start the database and `task run` (listens on `:8080`), then `npm run dev`. The dev proxy only exists under Vite; production deployments must either serve the frontend from the API origin or set `baseURL` in `src/lib/api-client.ts`.
+The browser only talks to the authentication gateway: login completes through GitHub OAuth, the gateway holds the HttpOnly session cookie and signs the internal credentials Cloud requires for every `/api/v1/*` request; frontend code never touches a token. Locally, follow the root [README](../README.en.md) to start the database, run `task dev:keys`, put your GitHub OAuth App client secret in place, then `GATEWAY_GITHUB_CLIENT_ID=<id> task dev`. Vite proxies `/auth`, `/api` and `/healthz` to the gateway (:8081), so the gateway's `public.base_url` is `http://localhost:5173` and the callback registered at GitHub is `http://localhost:5173/auth/callback/github`. The dev proxy only exists under Vite; production deployments must serve the frontend from the gateway's origin, which the cookie and same-origin checks assume.
+
+A first-time user has no workspace and lands on `/onboarding` to create one; pages without a backend yet (issues, agents, chat, ...) keep their demo data from MSW's `/mock-api/*`.

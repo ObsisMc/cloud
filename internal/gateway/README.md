@@ -14,7 +14,7 @@
 | `tokens.go` | `Issuer`：用两把用途分离的 Ed25519 私钥签发 `kind=service,role=gateway` 与 `kind=user`（`caller` 绑定 service `sub`）凭据，期限不超过 Cloud 的 5 分钟上限。`LoadPrivateKey` 读取 PKCS#8 PEM。 |
 | `security.go` | `NormalizeReturnTo`（拒绝绝对、`//`、`/\`、反斜杠、控制字符）、`SameOrigin`（`Origin` 精确匹配或 `Sec-Fetch-Site: same-origin`）、`CookiePolicy`（`__Host-` session Cookie、限定 callback 路径的 `SameSite=Lax` attempt Cookie）。 |
 | `handler.go` | Gin 路由：`POST /auth/login`、`GET /auth/callback/:provider`、`POST /auth/logout`、`ANY /api/v1/*`、`GET /healthz`；稳定错误形状 `{code, params, requestId}`。 |
-| `proxy.go` | 到固定 upstream 的 `httputil.ReverseProxy`：连接/响应头超时、响应体 8 MiB 上限、错误回调经 context 传递。 |
+| `proxy.go` | 到固定 upstream 的 `httputil.ReverseProxy`：连接/响应头超时、响应体 8 MiB 上限、错误回调经 context 传递。upstream 以 `text/event-stream` 应答时跳过体积上限并触发流回调，由 handler 解除该连接的 upstream 超时与写超时，事件流才能长期存活。 |
 | `ratelimit.go` | 按客户端地址的令牌桶，键表有界；start/callback 在写入任何 attempt 前限流。 |
 | `cleanup.go` | `RunCleanup`：生命周期拥有的有界批量清理循环。 |
 | `config.go` | `Config`/`LoadConfig`/`Validate`/`PublicOrigin`：默认值与所有安全边界的启动期校验。 |

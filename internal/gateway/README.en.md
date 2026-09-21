@@ -14,7 +14,7 @@
 | `tokens.go` | `Issuer`: signs `kind=service,role=gateway` and `kind=user` (`caller` bound to the service `sub`) credentials with two purpose-separated Ed25519 keys, never beyond Cloud's 5-minute ceiling. `LoadPrivateKey` reads PKCS#8 PEM. |
 | `security.go` | `NormalizeReturnTo` (rejects absolute, `//`, `/\`, backslash, and control characters), `SameOrigin` (exact `Origin` match or `Sec-Fetch-Site: same-origin`), `CookiePolicy` (`__Host-` session cookie, callback-scoped `SameSite=Lax` attempt cookie). |
 | `handler.go` | Gin routes: `POST /auth/login`, `GET /auth/callback/:provider`, `POST /auth/logout`, `ANY /api/v1/*`, `GET /healthz`; stable error shape `{code, params, requestId}`. |
-| `proxy.go` | `httputil.ReverseProxy` to the fixed upstream: dial/response-header timeouts, 8 MiB response cap, per-request error callback carried in the context. |
+| `proxy.go` | `httputil.ReverseProxy` to the fixed upstream: dial/response-header timeouts, 8 MiB response cap, per-request error callback carried in the context. A `text/event-stream` upstream answer skips the cap and fires the stream callback, through which the handler lifts that connection's upstream and write timeouts so event streams can live long. |
 | `ratelimit.go` | Per-client token bucket with a bounded key table; start/callback are limited before any attempt row is written. |
 | `cleanup.go` | `RunCleanup`: lifecycle-owned bounded batch cleanup loop. |
 | `config.go` | `Config`/`LoadConfig`/`Validate`/`PublicOrigin`: defaults and startup validation of every security bound. |

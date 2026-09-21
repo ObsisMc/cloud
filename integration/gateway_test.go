@@ -165,6 +165,13 @@ type gatewayInstance struct {
 // real HTTP. An empty upstream targets the fixture's Cloud.
 func (f *gatewayFixture) newGateway(upstream string, burst int) *gatewayInstance {
 	f.t.Helper()
+	return f.newGatewayWithTimeouts(upstream, burst, 2*time.Second, 0)
+}
+
+// newGatewayWithTimeouts is newGateway with an explicit upstream timeout and http.Server write
+// timeout (zero keeps httptest's default of none), for tests about long-lived responses.
+func (f *gatewayFixture) newGatewayWithTimeouts(upstream string, burst int, upstreamTimeout, writeTimeout time.Duration) *gatewayInstance {
+	f.t.Helper()
 	if len(f.replicas) == 0 {
 		f.t.Fatal("no replica identities left; extend the trusted set in setupGateway")
 	}
@@ -187,13 +194,14 @@ func (f *gatewayFixture) newGateway(upstream string, burst int) *gatewayInstance
 	must(f.t, e)
 	handler, e := gateway.NewHandler(&gateway.Options{
 		Store: f.store, Login: login, Issuer: issuer, Limiter: gateway.NewRateLimiter(600, burst, 1000, time.Now),
-		Upstream: upstreamURL, UpstreamTimeout: 2 * time.Second, PublicOrigin: origin,
+		Upstream: upstreamURL, UpstreamTimeout: upstreamTimeout, PublicOrigin: origin,
 		Cookies: gateway.CookiePolicy{Secure: false, CallbackPath: gateway.CallbackPath}, Log: log, Now: time.Now,
 	})
 	must(f.t, e)
 	server := httptest.NewUnstartedServer(handler)
 	must(f.t, server.Listener.Close())
 	server.Listener = listener
+	server.Config.WriteTimeout = writeTimeout
 	server.Start()
 	f.t.Cleanup(server.Close)
 	return &gatewayInstance{f: f, server: server}
@@ -732,5 +740,59 @@ func TestGatewaySchemaConstraints(t *testing.T) {
 	}
 	if _, e := f.pool.Exec("INSERT INTO gateway_sessions(id,token_hash,source,subject,expires_at) VALUES(gen_random_uuid(),$1,'github.com','2',now()+interval '1 day')", hash); e == nil {
 		t.Fatal("token digest must be unique")
+	}
+}
+
+// TestGatewayRelaysEventStreamsBeyondTimeouts proves the relay keeps an authorized event stream open
+// past both the upstream timeout and the server write timeout, while bounded responses still honor
+// the upstream timeout. The signed-in user also provisions their own tenant through the Gateway,
+// which is the path a first-time browser user takes.
+func TestGatewayRelaysEventStreamsBeyondTimeouts(t *testing.T) {
+	f := setupGateway(t)
+	const timeout = 200 * time.Millisecond
+	gw := f.newGatewayWithTimeouts("", 100, timeout, timeout)
+	browser := gw.browser()
+	gw.login(browser, "/")
+
+	headers := gw.origin()
+	headers["Idempotency-Key"] = "gateway-tenant"
+	resp, created := gw.do(browser, http.MethodPost, "/api/v1/tenants", map[string]string{"name": "Stream", "slug": "stream"}, headers)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("provision tenant through gateway: %d %v", resp.StatusCode, created)
+	}
+	tid, sid := created.O("tenant").S("id"), created.O("space").S("id")
+	space := created.O("space")
+
+	streamReq, e := http.NewRequestWithContext(context.Background(), http.MethodGet, gw.server.URL+"/api/v1/tenants/"+tid+"/spaces/"+sid+"/events", http.NoBody)
+	must(t, e)
+	stream, e := (&http.Client{Jar: browser.Jar}).Do(streamReq)
+	must(t, e)
+	defer stream.Body.Close()
+	if stream.StatusCode != http.StatusOK || !strings.HasPrefix(stream.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("event stream through gateway: %d %s", stream.StatusCode, stream.Header.Get("Content-Type"))
+	}
+	// The subscription must outlive both timeouts; the wait is the assertion.
+	time.Sleep(5 * timeout)
+
+	resp, _ = gw.do(browser, http.MethodPatch, "/api/v1/tenants/"+tid+"/spaces/"+sid, map[string]any{"name": "Stream Renamed", "description": "", "version": space.N("version")}, gw.origin())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch space through gateway: %d", resp.StatusCode)
+	}
+	nextEvent(t, stream, "space.updated")
+
+	// A bounded response that never arrives is still cut off by the upstream timeout.
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * timeout):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	t.Cleanup(slow.Close)
+	stalled := f.newGatewayWithTimeouts(slow.URL, 100, timeout, 0)
+	resp, out := stalled.do(browser, http.MethodGet, "/api/v1/me", nil, nil)
+	if resp.StatusCode != http.StatusBadGateway || out.S("code") != "upstream_unavailable" {
+		t.Fatalf("stalled upstream must fail as upstream_unavailable: %d %v", resp.StatusCode, out)
 	}
 }

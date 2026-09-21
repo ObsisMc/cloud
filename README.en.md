@@ -50,7 +50,7 @@ go run ./cmd/cloudctl -command bootstrap -name 'Engineering Organization' -sourc
 go run ./cmd/cloudctl -command credential-ref -tenant '<tenant UUID>' -owner '<user UUID>' -secret-ref 'infra-secret://git/team/account'
 ```
 
-`bootstrap` atomically creates a tenant and its first administrator and is a deployment operation; running it again creates another tenant. `credential-ref` stores only an infrastructure reference and never accepts a Git credential value; tenant and owner foreign keys scope the reference. A regular member must first access `/api/v1/me` through an authenticated gateway to create the user, and an administrator must then add that user explicitly through the membership API. There is no self-service organization registration or automatic authorization from external groups.
+`bootstrap` atomically creates a tenant, its first administrator and its `default` space and is a deployment operation; running it again creates another tenant. `credential-ref` stores only an infrastructure reference and never accepts a Git credential value; tenant and owner foreign keys scope the reference. A signed-in user can also provision a tenant for themselves through `POST /api/v1/tenants`: the body carries only the first collaboration space's `name` and `slug`, the tenant borrows that name, and the caller becomes the tenant administrator and the space owner; the tenant is an implicit container the product never shows. Joining an existing tenant still requires the user to access `/api/v1/me` through an authenticated gateway first and an administrator to add them explicitly through the membership API; there is no automatic authorization from external groups.
 
 Before starting production, configure internal verification public keys as described in [Authentication and credentials](docs/authentication.md). Startup fails when the trust configuration is empty:
 
@@ -59,6 +59,8 @@ go run ./cmd/server -config /path/to/config.yaml
 ```
 
 The server only checks applied migrations and their checksums; it does not execute DDL. Database, migration, trust, or listen failures cause a non-zero exit. `GET /healthz` checks PostgreSQL reachability.
+
+Local end-to-end development (browser → Gateway → Cloud, see [Authentication Gateway](docs/gateway.md)): `task dev:keys` generates the Gateway private keys, the public keys Cloud trusts and the PKCE key under `.local/gateway/` (`configs/config.yaml` and `configs/gateway.yaml` already point there). Put your GitHub OAuth App client secret in `.local/gateway/github-client-secret`, register `http://localhost:5173/auth/callback/github` as the callback, then run `GATEWAY_GITHUB_CLIENT_ID=<client id> task dev` to start Cloud, the Gateway and the frontend together. A first-time user belongs to no tenant; the frontend guides them to create their first workspace.
 
 Run the complete creation demo directly; it generates short-lived simulated signing keys independently and uses them only for in-process testing:
 

@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router-dom'
 import './index.css'
+import { SessionProvider } from '@/features/auth/session'
 import { router } from './routes'
 
 const rootElement = document.getElementById('root')
@@ -15,13 +16,17 @@ const mountNode = rootElement
 const queryClient = new QueryClient()
 
 async function bootstrap() {
+  // MSW serves only the `/mock-api/*` domain of pages without a backend yet;
+  // `/auth`, `/api` and the session cookie pass through to the gateway.
   const { worker } = await import('./mocks/browser')
   await worker.start({ onUnhandledRequest: 'bypass' })
 
   createRoot(mountNode).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
+        <SessionProvider>
+          <RouterProvider router={router} />
+        </SessionProvider>
       </QueryClientProvider>
     </StrictMode>,
   )

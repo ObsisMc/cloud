@@ -42,77 +42,27 @@ function roleOptions(canGrantOwner: boolean): SpaceRole[] {
 }
 
 /**
- * Members page. Cloud sessions render the real membership list with
- * admin/owner management controls (role changes, disable/enable, add member);
- * mock sessions keep the demo store table.
+ * Members page: the space's real membership list with admin/owner management
+ * controls (role changes, disable/enable, add member). Renders a skeleton
+ * until the route slug resolved to a joined space.
  */
 export function MembersPage({ slug }: { slug: string }) {
   const { data: members, isPending } = useMembers(slug)
   const { tenantId, space } = useCurrentSpace()
   const cloudSpace = space?.slug === slug ? space : undefined
 
-  if (cloudSpace) {
-    return (
-      <CloudMembersView
-        tenantId={tenantId ?? ''}
-        spaceId={cloudSpace.id}
-        members={members ?? []}
-        isPending={isPending}
-        myRole={normalizeSpaceRole(cloudSpace.role)}
-      />
-    )
-  }
-
   return (
-    <div className="p-4">
-      {isPending && (
-        <div className="space-y-2">
-          {SKELETON_KEYS.map((key) => (
-            <Skeleton key={key} className="h-10 w-full" />
-          ))}
-        </div>
-      )}
-      {members && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>成员</TableHead>
-              <TableHead>角色</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead>加入时间</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {members.map((member) => (
-              <MemberCells key={member.id} member={member} />
-            ))}
-          </TableBody>
-        </Table>
-      )}
-    </div>
+    <CloudMembersView
+      tenantId={tenantId ?? ''}
+      spaceId={cloudSpace?.id ?? ''}
+      members={members ?? []}
+      isPending={isPending || !cloudSpace}
+      myRole={cloudSpace ? normalizeSpaceRole(cloudSpace.role) : 'member'}
+    />
   )
 }
 
-/** Read-only member row for the mock store. */
-function MemberCells({ member }: { member: MemberWithUser }) {
-  return (
-    <TableRow>
-      <TableCell>
-        <div className="flex items-center gap-2">
-          <ActorAvatar actor={member} size="sm" />
-          <div>
-            <p className="text-sm font-medium">{member.name}</p>
-            <p className="text-xs text-muted-foreground">{member.email}</p>
-          </div>
-        </div>
-      </TableCell>
-      <TableCell>{ROLE_LABELS[member.role] ?? member.role}</TableCell>
-      <MemberStatusCells member={member} />
-    </TableRow>
-  )
-}
-
-/** Status badge and join-date cells shared by both member tables. */
+/** Status badge and join-date cells of a member row. */
 function MemberStatusCells({ member }: { member: MemberWithUser }) {
   return (
     <>
