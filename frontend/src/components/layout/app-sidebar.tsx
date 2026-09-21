@@ -38,7 +38,6 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-import { signOutOfGitHub } from '@/features/auth/api'
 import { useLoginProviders } from '@/features/auth/providers'
 import { useSession } from '@/features/auth/session'
 import { useInboxItems } from '@/features/inbox/api'
@@ -67,7 +66,7 @@ export function AppSidebar({ slug }: { slug: string }) {
   const p = workspacePaths(slug)
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const { session, signOut } = useSession()
+  const { session, signOut, signOutOfGitHub } = useSession()
   const { data: providers = [] } = useLoginProviders()
   const user = session.status === 'signed-in' ? session.user : undefined
   const { spaces = [], space, tenantId } = useCurrentSpace()

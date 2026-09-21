@@ -15,7 +15,7 @@ Environment setup and test doubles shared by every test. The goal is that each t
 | `http.test.ts` | Verifies the fake adapter's own recording and error-status semantics, which other tests rely on. |
 | `msw-server.ts` | MSW node server: the mock-domain handlers plus a baseline `GET /api/v1/me → 401` (every render starts signed out) and `GET /auth/providers → ['github']` (a production-shaped gateway; tests of the developer login override it). |
 | `cloud-handlers.ts` | Shared MSW doubles for the cloud flow: `installSignedInSession` (session probe), `installCloudSpaceHandlers` (session + test tenant + `cloud-dev` space) and fixtures such as `TEST_USER`. |
-| `navigation.ts` | `installFakeNavigation()`: swaps external navigation and records destination URLs; restored when the test finishes. |
+| `navigation.ts` | `installFakeNavigation()`: swaps external navigation and new-tab opening, recording `destinations` and `openedTabs`; restored when the test finishes. |
 | `render.tsx` | `renderWithProviders` / `renderAtRoute` / `renderRoutes`: render entries that wire QueryClient, `SessionProvider`, Sidebar and (for the first two) `CurrentSpaceProvider`; `renderAtRoute` resolves the slug from the initial path with the app's `WORKSPACE_ROUTE_PATTERN` (`/w/:workspaceSlug`). |
 
 ## Dependency direction

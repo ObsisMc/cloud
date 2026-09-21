@@ -15,7 +15,7 @@
 | `http.test.ts` | 验证假适配器本身的记录与错误状态语义，其它测试依赖这些行为。 |
 | `msw-server.ts` | MSW node server：mock 域 handler 加上基线 `GET /api/v1/me → 401`（任何渲染默认未登录）与 `GET /auth/providers → ['github']`（生产形态的网关；开发者登录的测试会覆盖它）。 |
 | `cloud-handlers.ts` | 云流程的共享 MSW 替身：`installSignedInSession`（会话探测），`installCloudSpaceHandlers`（会话 + 测试租户 + `cloud-dev` 空间），以及 `TEST_USER` 等 fixture。 |
-| `navigation.ts` | `installFakeNavigation()`：替换外部跳转并记录目标 URL；测试结束自动还原。 |
+| `navigation.ts` | `installFakeNavigation()`：替换外部跳转与新标签页打开，记录 `destinations` 与 `openedTabs`；测试结束自动还原。 |
 | `render.tsx` | `renderWithProviders` / `renderAtRoute` / `renderRoutes`：包好 QueryClient、`SessionProvider`、Sidebar 与（前两者）`CurrentSpaceProvider` 的渲染入口；`renderAtRoute` 用应用的 `WORKSPACE_ROUTE_PATTERN`（`/w/:workspaceSlug`）从初始路径解析 slug。 |
 
 ## 依赖方向

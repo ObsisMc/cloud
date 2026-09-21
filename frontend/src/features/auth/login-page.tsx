@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { signOutOfGitHub, startLogin, type LoginProvider } from '@/features/auth/api'
+import { startLogin, type LoginProvider } from '@/features/auth/api'
 import { useLoginProviders } from '@/features/auth/providers'
 import { useSession } from '@/features/auth/session'
 import { safeReturnTo } from '@/lib/paths'
@@ -18,7 +18,7 @@ const PROVIDER_LABELS: Record<LoginProvider, { idle: string; pending: string }> 
  * signed-in tab is sent straight to `returnTo`.
  */
 export function LoginPage() {
-  const { session } = useSession()
+  const { session, signOutOfGitHub } = useSession()
   const [params] = useSearchParams()
   const returnTo = safeReturnTo(params.get('returnTo'))
   const providers = useLoginProviders()

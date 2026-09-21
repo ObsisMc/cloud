@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import type { User } from '@/api/generated.schemas'
-import { fetchSessionUser, logoutSession } from '@/features/auth/api'
+import { fetchSessionUser, GITHUB_SIGN_OUT_URL, logoutSession } from '@/features/auth/api'
 import { onUnauthorized } from '@/lib/api-client'
+import { openExternalTab } from '@/lib/navigation'
 
 /**
  * The tab's authentication state. `loading` lasts until the first
@@ -15,11 +16,18 @@ export type Session =
   | { status: 'unavailable' }
   | { status: 'signed-in'; user: User }
 
-/** Session plus the one action every screen may take on it. */
+/** Session plus the actions every screen may take on it. */
 export interface SessionValue {
   session: Session
   /** Revokes the gateway session and drops every cached query. */
   signOut: () => Promise<void>
+  /**
+   * `signOut`, then GitHub's own sign-out page in a new tab so this tab stays
+   * on Ora (it lands on the login screen) and the member can come straight
+   * back with another GitHub account. Ora is signed out first, so cancelling
+   * on GitHub's page still leaves Ora signed out.
+   */
+  signOutOfGitHub: () => Promise<void>
 }
 
 /** Query key of the session probe; other modules invalidate it after login. */
@@ -56,9 +64,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     })
   }, [queryClient])
 
+  const signOutOfGitHub = useCallback(async () => {
+    await signOut()
+    openExternalTab(GITHUB_SIGN_OUT_URL)
+  }, [signOut])
+
   const value = useMemo<SessionValue>(
-    () => ({ session: toSession(query.data, query.isPending, query.isError), signOut }),
-    [query.data, query.isPending, query.isError, signOut],
+    () => ({
+      session: toSession(query.data, query.isPending, query.isError),
+      signOut,
+      signOutOfGitHub,
+    }),
+    [query.data, query.isPending, query.isError, signOut, signOutOfGitHub],
   )
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

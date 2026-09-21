@@ -15,7 +15,6 @@ import {
   fetchSessionUser,
   GITHUB_SIGN_OUT_URL,
   logoutSession,
-  signOutOfGitHub,
   startLogin,
 } from './api'
 import { LoginPage } from './login-page'
@@ -70,22 +69,6 @@ describe('gateway auth api', () => {
       ),
     )
     await expect(fetchLoginProviders()).resolves.toEqual(['github', 'dev'])
-  })
-
-  it("signs out of Ora before leaving for GitHub's own sign-out page", async () => {
-    const order: string[] = []
-    server.use(
-      http.post('/auth/logout', () => {
-        order.push('logout')
-        return new HttpResponse(null, { status: 204 })
-      }),
-    )
-    const navigation = installFakeNavigation()
-
-    await signOutOfGitHub()
-
-    expect(order).toEqual(['logout'])
-    expect(navigation.destinations).toEqual([GITHUB_SIGN_OUT_URL])
   })
 
   it('treats a 401 from the session probe as signed out and any other failure as an error', async () => {
@@ -166,6 +149,27 @@ describe('SessionProvider', () => {
     await act(() => result.current.signOut())
 
     await waitFor(() => expect(result.current.session).toEqual({ status: 'signed-out' }))
+  })
+
+  it("signs out of Ora, then opens GitHub's sign-out page in a new tab", async () => {
+    installSignedInSession()
+    let loggedOut = false
+    server.use(
+      http.post('/auth/logout', () => {
+        loggedOut = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const navigation = installFakeNavigation()
+    const { result } = renderHook(() => useSession(), { wrapper })
+    await waitFor(() => expect(result.current.session.status).toBe('signed-in'))
+
+    await act(() => result.current.signOutOfGitHub())
+
+    expect(loggedOut).toBe(true)
+    await waitFor(() => expect(result.current.session).toEqual({ status: 'signed-out' }))
+    expect(navigation.openedTabs).toEqual([GITHUB_SIGN_OUT_URL])
+    expect(navigation.destinations).toEqual([])
   })
 })
 
@@ -289,7 +293,10 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage />, { route: '/login' })
 
     await user.click(await screen.findByRole('button', { name: '先退出 GitHub' }))
-    await waitFor(() => expect(navigation.destinations).toEqual([GITHUB_SIGN_OUT_URL]))
+    await waitFor(() => expect(navigation.openedTabs).toEqual([GITHUB_SIGN_OUT_URL]))
+    // This tab stays on the login screen, ready for the other account.
+    expect(navigation.destinations).toEqual([])
+    expect(screen.getByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument()
   })
 
   it('has no GitHub sign-out when the gateway offers only the developer login', async () => {

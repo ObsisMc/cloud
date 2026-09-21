@@ -17,9 +17,9 @@ It does not resolve tenants or spaces (`features/spaces`) and never holds a toke
 
 | File | Description |
 | --- | --- |
-| `api.ts` | `fetchLoginProviders` (the gateway's provider list, filtered to `github` / `dev`), `startLogin` (fetches `authorizationUrl`, then `navigateExternal`), `logoutSession`, `signOutOfGitHub` (revokes the Ora session, then leaves for `GITHUB_SIGN_OUT_URL`, GitHub's own sign-out page), `fetchSessionUser` (401 → `null`, anything else throws) |
+| `api.ts` | `fetchLoginProviders` (the gateway's provider list, filtered to `github` / `dev`), `startLogin` (fetches `authorizationUrl`, then `navigateExternal`), `logoutSession`, `GITHUB_SIGN_OUT_URL` (GitHub's own sign-out page), `fetchSessionUser` (401 → `null`, anything else throws) |
 | `providers.ts` | `useLoginProviders`: the provider list as a query cached for the tab; shared by the login page and the sidebar |
-| `session.tsx` | `SessionProvider` (session query + `onUnauthorized` subscription), `useSession`, the `Session` type, `SESSION_QUERY_KEY` |
+| `session.tsx` | `SessionProvider` (session query + `onUnauthorized` subscription), `useSession` with `signOut` and `signOutOfGitHub` (sign out, then GitHub's sign-out page in a new tab so this tab stays on Ora), the `Session` type, `SESSION_QUERY_KEY` |
 | `require-session.tsx` | `RequireSession`: renders nothing while loading; redirects a signed-out tab to `loginPath(current location)`; reports an unreachable backend in place |
 | `login-page.tsx` | One button per provider the gateway offers, plus a "sign out of GitHub first" link when GitHub login exists (GitHub otherwise reuses the browser's current account): "sign in with GitHub" and, on a local gateway with `login.development_provider`, "developer login" (the gateway's own form where any typed identity signs in); `?returnTo=` is narrowed by `safeReturnTo`; a signed-in tab is redirected straight away |
 | `auth.test.tsx` | Tests for all of the above |
@@ -35,7 +35,7 @@ May be consumed by: `main.tsx` (mounts `SessionProvider`), `routes.tsx`, layout 
 - `SessionProvider` is mounted exactly once, outside the router and inside the QueryClient.
 - `fetchSessionUser` treats only 401 as "signed out"; network errors and 5xx are `unavailable`, so `RequireSession` never mistakes them for a sign-out and never loses `returnTo` over them.
 - `signOut` calls the gateway first, then clears the cache: the session becomes null and every other query is removed, so the next member never sees the previous one's data.
-- Ora cannot end a github.com session: the gateway never holds a GitHub token (it discards it right after reading the profile), so "sign out of GitHub" can only send the member to GitHub's own sign-out page, always after revoking the Ora session. The URL is public github.com; a GitHub Enterprise Server deployment would need it made configurable.
+- Ora cannot end a github.com session: the gateway never holds a GitHub token (it discards it right after reading the profile), so "sign out of GitHub" can only open GitHub's own sign-out page, always after revoking the Ora session, and in a new tab so the member returns to the login screen in this one. The URL is public github.com; a GitHub Enterprise Server deployment would need it made configurable.
 - The login page never builds a provider URL or parses a callback; that is the gateway's job. It also never decides on its own whether the developer login exists: the button appears only when `/auth/providers` lists `dev`, which the gateway allows solely on loopback development origins.
 
 ## Testing

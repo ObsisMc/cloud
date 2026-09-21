@@ -19,7 +19,7 @@
 | --- | --- |
 | `api.ts` | `fetchLoginProviders`（Gateway 的 provider 列表，过滤为 `github` / `dev`）、`startLogin`（拿 `authorizationUrl` 后 `navigateExternal`）、`logoutSession`、`signOutOfGitHub`（先吊销 Ora 会话，再跳到 `GITHUB_SIGN_OUT_URL` 即 GitHub 自己的注销页）、`fetchSessionUser`（401 → `null`，其它错误抛出） |
 | `providers.ts` | `useLoginProviders`：provider 列表的 query，整个 tab 内缓存；登录页与侧栏共用 |
-| `session.tsx` | `SessionProvider`（会话查询 + 订阅 `onUnauthorized`）、`useSession`、`Session` 类型、`SESSION_QUERY_KEY` |
+| `session.tsx` | `SessionProvider`（会话查询 + 订阅 `onUnauthorized`）、`useSession` 提供 `signOut` 与 `signOutOfGitHub`（先退出，再在新标签页打开 GitHub 注销页，当前页留在 Ora）、`Session` 类型、`SESSION_QUERY_KEY` |
 | `require-session.tsx` | `RequireSession`：加载中不渲染；未登录跳 `loginPath(当前地址)`；后端不可达就地提示 |
 | `login-page.tsx` | Gateway 提供几种登录方式就显示几个按钮，存在 GitHub 登录时再加一条"先退出 GitHub"链接（否则 GitHub 会复用浏览器当前账号）："使用 GitHub 登录"，以及本地 Gateway 开启 `login.development_provider` 时的"开发者登录"（Gateway 自己的表单，输入任意身份即可登录）；`?returnTo=` 经 `safeReturnTo` 收窄；已登录直接跳转 |
 | `auth.test.tsx` | 上述全部行为的测试 |
@@ -35,7 +35,7 @@
 - `SessionProvider` 在应用里只挂载一次，位于 router 之外、QueryClient 之内。
 - `fetchSessionUser` 只把 401 当作"未登录"；网络错误或 5xx 是 `unavailable`，`RequireSession` 不会把它误判为未登录而丢掉 `returnTo`。
 - `signOut` 先调 Gateway 再清缓存：会话置空，其余查询全部移除，避免下一个登录者看到上一个人的数据。
-- Ora 无法结束 github.com 的会话：Gateway 从不持有 GitHub token（读完资料立刻丢弃），所以"退出 GitHub"只能把成员送到 GitHub 自己的注销页，且总是先吊销 Ora 会话。该 URL 是公网 github.com；GitHub Enterprise Server 部署需要把它做成可配置。
+- Ora 无法结束 github.com 的会话：Gateway 从不持有 GitHub token（读完资料立刻丢弃），所以"退出 GitHub"只能打开 GitHub 自己的注销页，且总是先吊销 Ora 会话，并在新标签页打开，让成员在当前页直接回到登录界面。该 URL 是公网 github.com；GitHub Enterprise Server 部署需要把它做成可配置。
 - 登录页从不构造 provider URL，也不解析 callback；那是 Gateway 的事。它也从不自行判断开发者登录是否存在：只有 `/auth/providers` 列出 `dev` 时才显示按钮，而 Gateway 只在 loopback 开发 origin 上允许该 provider。
 
 ## 测试

@@ -65,21 +65,11 @@ export async function logoutSession(): Promise<void> {
  * GitHub's own sign-out page (public github.com). It asks the member to
  * confirm and then ends the github.com session, so the next "sign in with
  * GitHub" starts from GitHub's login form instead of silently reusing the
- * account the browser was holding.
+ * account the browser was holding. Ora cannot end that session itself: the
+ * gateway discards the GitHub token right after reading the profile and never
+ * holds one.
  */
 export const GITHUB_SIGN_OUT_URL = 'https://github.com/logout'
-
-/**
- * Signs out of Ora and then leaves for GitHub's sign-out page. Ora cannot end
- * the github.com session itself: the gateway discards the GitHub token right
- * after reading the profile and never holds one, so GitHub's own page is the
- * only place that session can be ended. The Ora session is revoked first so
- * a member who cancels on GitHub's page is still signed out here.
- */
-export async function signOutOfGitHub(): Promise<void> {
-  await logoutSession()
-  navigateExternal(GITHUB_SIGN_OUT_URL)
-}
 
 /**
  * Resolves the signed-in user, or `null` when the browser holds no valid

@@ -139,7 +139,10 @@ describe('AppSidebar workspace switcher', () => {
     await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
     await user.click(await screen.findByRole('menuitem', { name: /退出并注销 GitHub/ }))
 
-    await waitFor(() => expect(navigation.destinations).toEqual([GITHUB_SIGN_OUT_URL]))
+    // Ora signs out in this tab (back to the login screen); GitHub's page opens beside it.
+    expect(await screen.findByText('Login screen')).toBeInTheDocument()
+    await waitFor(() => expect(navigation.openedTabs).toEqual([GITHUB_SIGN_OUT_URL]))
+    expect(navigation.destinations).toEqual([])
     expect(loggedOut).toBe(true)
   })
 
