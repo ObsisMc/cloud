@@ -54,10 +54,10 @@ export function notFound(message = 'not found') {
 }
 
 export function requireWorkspace(slug: string) {
-  // The route param is now a real tenant id (UUID) rather than a mock workspace slug,
-  // so an unknown slug falls back to the default preview workspace instead of 404ing —
-  // this keeps the non-issue preview features rendering their mock data regardless of tenant.
-  return db.workspaces.find((w) => w.slug === slug) ?? db.workspace
+  // The route slug is a mock workspace slug in demo mode, and the mock-api
+  // interceptor rewrites cloud-mode requests to the seeded workspace, so an
+  // unknown slug genuinely means the workspace does not exist.
+  return db.workspaces.find((w) => w.slug === slug) ?? null
 }
 
 export function withMember(userId: string) {

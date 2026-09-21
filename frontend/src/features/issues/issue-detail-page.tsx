@@ -166,7 +166,9 @@ function ParentField({
 
 // oxlint-disable-next-line max-lines-per-function -- the detail screen keeps its issue controls and two-column layout transaction together.
 export function IssueDetailPage({ slug }: { slug: string }) {
-  const { issueId } = useParams<{ issueId: string }>()
+  // The `slug` prop is the tenant id (forwarded by CloudScope); nav links must
+  // carry the space slug from the route.
+  const { issueId, workspaceSlug } = useParams<{ issueId: string; workspaceSlug: string }>()
   const navigate = useNavigate()
   const { data: issue, isPending } = useIssue(slug, issueId)
   const { data: statuses } = useIssueStatuses(slug)
@@ -174,7 +176,7 @@ export function IssueDetailPage({ slug }: { slug: string }) {
   const { data: allIssues = [] } = useIssues(slug)
   const updateIssue = useUpdateIssue(slug)
   const deleteIssue = useDeleteIssue(slug)
-  const p = workspacePaths(slug)
+  const p = workspacePaths(workspaceSlug ?? slug)
 
   if (isPending || !issue) {
     return (

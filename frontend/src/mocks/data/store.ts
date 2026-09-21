@@ -67,10 +67,10 @@ export function nextIssueIdentifier(): string {
   return `ORA-${100 + nextIssueSeq++}`
 }
 
-export function workspaceBySlug(slug: string | undefined): Workspace {
-  // The route param is a tenant id in the real app, not a mock slug, so any unknown
-  // value resolves to the default preview workspace rather than breaking mock-feature pages.
-  return db.workspaces.find((w) => w.slug === slug) ?? db.workspace
+export function workspaceBySlug(slug: string | undefined): Workspace | undefined {
+  // The route slug is a mock workspace slug in demo mode; callers fall back to
+  // the seeded workspace where a preview needs one.
+  return db.workspaces.find((w) => w.slug === slug)
 }
 
 let idCounter = 1

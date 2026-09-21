@@ -20,24 +20,42 @@ import { SkillsPage } from '@/features/skills/skills-page'
 import { SpacesPage } from '@/features/spaces/spaces-page'
 import { SquadDetailPage } from '@/features/squads/squad-detail-page'
 import { SquadsPage } from '@/features/squads/squads-page'
+import { useCurrentSpace } from '@/features/spaces/current-space'
+import { db } from '@/mocks/data/store'
 import { useAuthStore } from '@/state/auth-store'
-
-/** Routes `/` to the signed-in tenant's board, or to login when there is no session. */
-function RootRedirect() {
-  const tenantId = useAuthStore((s) => s.tenantId)
-  if (tenantId) return <Navigate to={`/${tenantId}/issues`} replace />
-  return <Navigate to="/login" replace />
-}
+import { useDemoAuthStore } from '@/state/demo-auth-store'
 
 /**
- * DashboardLayout only renders its children once the session is present, so every
- * page under it can trust the `:workspaceSlug` param (a tenant id) and doesn't
- * need to re-validate it — this just forwards it as the `slug` prop each page expects.
+ * DashboardLayout only renders its children once :workspaceSlug matches a real
+ * workspace, so every page under it can trust the param. Demo/preview pages
+ * forward the space slug; real-backend pages are wrapped in {@link CloudScope},
+ * which forwards the resolved tenant id instead.
  */
 function WithSlug({ component: Component }: { component: ComponentType<{ slug: string }> }) {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
   if (!workspaceSlug) throw new Error('workspace route must provide a slug')
   return <Component slug={workspaceSlug} />
+}
+
+/**
+ * Resolves the current collaboration space to its tenant id and forwards it as
+ * the `slug` prop, so tenant-scoped real-backend pages (Issues, members, …) can
+ * keep their `{ slug }` contract. In demo mode there is no tenant; the demo
+ * plane has no real Issues, so redirect to its own issue board.
+ */
+function CloudScope({ component: Component }: { component: ComponentType<{ slug: string }> }) {
+  const { tenantId } = useCurrentSpace()
+  if (!tenantId) return <Navigate to={`/${db.workspace.slug}/issues`} replace />
+  return <Component slug={tenantId} />
+}
+
+/** Lands each session plane on its home route; otherwise the sign-in screen. */
+function RootRedirect() {
+  const tenantId = useAuthStore((s) => s.tenantId)
+  const demoToken = useDemoAuthStore((s) => s.token)
+  if (tenantId) return <Navigate to="/default/projects" replace />
+  if (demoToken) return <Navigate to={`/${db.workspace.slug}/issues`} replace />
+  return <Navigate to="/login" replace />
 }
 
 export const router = createBrowserRouter([
@@ -48,12 +66,12 @@ export const router = createBrowserRouter([
     element: <DashboardLayout />,
     children: [
       { index: true, element: <Navigate to="issues" replace /> },
-      { path: 'issues', element: <WithSlug component={IssuesPage} /> },
-      { path: 'issues/:issueId', element: <WithSlug component={IssueDetailPage} /> },
-      { path: 'my-issues', element: <WithSlug component={MyIssuesPage} /> },
+      { path: 'issues', element: <CloudScope component={IssuesPage} /> },
+      { path: 'issues/:issueId', element: <CloudScope component={IssueDetailPage} /> },
+      { path: 'my-issues', element: <CloudScope component={MyIssuesPage} /> },
+      { path: 'spaces', element: <SpacesPage /> },
       { path: 'projects', element: <WithSlug component={ProjectsPage} /> },
       { path: 'projects/:projectId', element: <WithSlug component={ProjectDetailPage} /> },
-      { path: 'spaces', element: <SpacesPage /> },
       { path: 'squads', element: <WithSlug component={SquadsPage} /> },
       { path: 'squads/:squadId', element: <WithSlug component={SquadDetailPage} /> },
       { path: 'agents', element: <WithSlug component={AgentsPage} /> },
@@ -68,7 +86,7 @@ export const router = createBrowserRouter([
         element: <WithSlug component={SettingsLayout} />,
         children: [
           { index: true, element: <GeneralSettingsPage /> },
-          { path: 'members', element: <WithSlug component={MembersPage} /> },
+          { path: 'members', element: <CloudScope component={MembersPage} /> },
           { path: 'billing', element: <WithSlug component={BillingPage} /> },
         ],
       },

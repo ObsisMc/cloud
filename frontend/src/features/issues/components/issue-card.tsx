@@ -2,7 +2,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { ActorAvatar } from '@/components/common/actor-avatar'
 import { PriorityIcon, StatusIcon } from '@/components/common/issue-badges'
 import { cn } from '@/lib/utils'
@@ -31,7 +31,10 @@ export function IssueCard({
   /** Number of direct sub-issues; shown as a badge so a parent reads at a glance. */
   subCount?: number
 }) {
-  const p = workspacePaths(slug)
+  // The `slug` prop is the tenant id (forwarded by CloudScope); nav links must
+  // carry the space slug from the route.
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
+  const p = workspacePaths(workspaceSlug ?? slug)
   const type = assigneeType(issue)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: issue.id,

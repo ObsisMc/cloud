@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { ActorAvatar } from '@/components/common/actor-avatar'
 import { PriorityIcon, StatusIcon } from '@/components/common/issue-badges'
 import { Badge } from '@/components/ui/badge'
@@ -15,7 +15,10 @@ export function IssueRow({
   slug: string
   members: ReadonlyMap<string, string>
 }) {
-  const p = workspacePaths(slug)
+  // The `slug` prop is the tenant id (forwarded by CloudScope); nav links must
+  // carry the space slug from the route.
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
+  const p = workspacePaths(workspaceSlug ?? slug)
   const type = assigneeType(issue)
 
   return (
