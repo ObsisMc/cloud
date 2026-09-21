@@ -1,13 +1,10 @@
-import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { fetchLoginProviders, startLogin, type LoginProvider } from '@/features/auth/api'
+import { signOutOfGitHub, startLogin, type LoginProvider } from '@/features/auth/api'
+import { useLoginProviders } from '@/features/auth/providers'
 import { useSession } from '@/features/auth/session'
 import { safeReturnTo } from '@/lib/paths'
-
-/** Query key of the provider list; it only changes with the gateway configuration. */
-const PROVIDERS_QUERY_KEY = ['login-providers'] as const
 
 const PROVIDER_LABELS: Record<LoginProvider, { idle: string; pending: string }> = {
   github: { idle: '使用 GitHub 登录', pending: '正在跳转到 GitHub…' },
@@ -24,12 +21,7 @@ export function LoginPage() {
   const { session } = useSession()
   const [params] = useSearchParams()
   const returnTo = safeReturnTo(params.get('returnTo'))
-  const providers = useQuery({
-    queryKey: PROVIDERS_QUERY_KEY,
-    queryFn: ({ signal }) => fetchLoginProviders(signal),
-    retry: false,
-    staleTime: Infinity,
-  })
+  const providers = useLoginProviders()
   const [pending, setPending] = useState<LoginProvider | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -73,6 +65,19 @@ export function LoginPage() {
             </Button>
           ))}
         </div>
+        {providers.data?.includes('github') && (
+          <p className="text-center text-xs text-muted-foreground">
+            想换一个 GitHub 账号？
+            <button
+              type="button"
+              className="ml-1 underline underline-offset-2 hover:text-foreground"
+              disabled={busy}
+              onClick={() => void signOutOfGitHub()}
+            >
+              先退出 GitHub
+            </button>
+          </p>
+        )}
         {providers.data?.length === 0 && (
           <p className="text-center text-xs text-muted-foreground">认证网关未配置任何登录方式</p>
         )}

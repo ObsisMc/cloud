@@ -38,6 +38,8 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
+import { signOutOfGitHub } from '@/features/auth/api'
+import { useLoginProviders } from '@/features/auth/providers'
 import { useSession } from '@/features/auth/session'
 import { useInboxItems } from '@/features/inbox/api'
 import { CreateSpaceDialog } from '@/features/spaces/create-space-dialog'
@@ -66,6 +68,7 @@ export function AppSidebar({ slug }: { slug: string }) {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { session, signOut } = useSession()
+  const { data: providers = [] } = useLoginProviders()
   const user = session.status === 'signed-in' ? session.user : undefined
   const { spaces = [], space, tenantId } = useCurrentSpace()
   const { data: inboxItems = [] } = useInboxItems(slug)
@@ -138,6 +141,12 @@ export function AppSidebar({ slug }: { slug: string }) {
                   <LogOut className="size-3.5" />
                   退出登录
                 </DropdownMenuItem>
+                {providers.includes('github') && (
+                  <DropdownMenuItem variant="destructive" onClick={() => void signOutOfGitHub()}>
+                    <LogOut className="size-3.5" />
+                    退出并注销 GitHub
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>

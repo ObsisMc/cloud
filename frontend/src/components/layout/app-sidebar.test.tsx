@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
+import { GITHUB_SIGN_OUT_URL } from '@/features/auth/api'
 import { RequireSession } from '@/features/auth/require-session'
 import {
   installSignedInSession,
@@ -10,6 +11,7 @@ import {
   TEST_TENANT_ID,
   TEST_USER_ID,
 } from '@/test/cloud-handlers'
+import { installFakeNavigation } from '@/test/navigation'
 import { renderRoutes } from '@/test/render'
 import { server } from '@/test/msw-server'
 
@@ -118,5 +120,38 @@ describe('AppSidebar workspace switcher', () => {
 
     expect(await screen.findByText('Login screen')).toBeInTheDocument()
     expect(loggedOut).toBe(true)
+  })
+
+  it('offers a GitHub sign-out that revokes the Ora session first, only when GitHub login exists', async () => {
+    installTwoSpaces()
+    let loggedOut = false
+    server.use(
+      http.post('/auth/logout', () => {
+        loggedOut = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const navigation = installFakeNavigation()
+    const user = userEvent.setup()
+    renderDashboard('/w/cloud-dev/issues')
+    await screen.findByText('Issues screen')
+
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    await user.click(await screen.findByRole('menuitem', { name: /退出并注销 GitHub/ }))
+
+    await waitFor(() => expect(navigation.destinations).toEqual([GITHUB_SIGN_OUT_URL]))
+    expect(loggedOut).toBe(true)
+  })
+
+  it('hides the GitHub sign-out when the gateway has no GitHub login', async () => {
+    installTwoSpaces()
+    server.use(http.get('/auth/providers', () => HttpResponse.json({ providers: ['dev'] })))
+    const user = userEvent.setup()
+    renderDashboard('/w/cloud-dev/issues')
+    await screen.findByText('Issues screen')
+
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    expect(await screen.findByRole('menuitem', { name: /退出登录/ })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /退出并注销 GitHub/ })).not.toBeInTheDocument()
   })
 })

@@ -10,7 +10,14 @@ import { installSignedInSession, TEST_USER } from '@/test/cloud-handlers'
 import { installFakeNavigation } from '@/test/navigation'
 import { renderRoutes, renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw-server'
-import { fetchLoginProviders, fetchSessionUser, logoutSession, startLogin } from './api'
+import {
+  fetchLoginProviders,
+  fetchSessionUser,
+  GITHUB_SIGN_OUT_URL,
+  logoutSession,
+  signOutOfGitHub,
+  startLogin,
+} from './api'
 import { LoginPage } from './login-page'
 import { RequireSession } from './require-session'
 import { SessionProvider, useSession } from './session'
@@ -63,6 +70,22 @@ describe('gateway auth api', () => {
       ),
     )
     await expect(fetchLoginProviders()).resolves.toEqual(['github', 'dev'])
+  })
+
+  it("signs out of Ora before leaving for GitHub's own sign-out page", async () => {
+    const order: string[] = []
+    server.use(
+      http.post('/auth/logout', () => {
+        order.push('logout')
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const navigation = installFakeNavigation()
+
+    await signOutOfGitHub()
+
+    expect(order).toEqual(['logout'])
+    expect(navigation.destinations).toEqual([GITHUB_SIGN_OUT_URL])
   })
 
   it('treats a 401 from the session probe as signed out and any other failure as an error', async () => {
@@ -257,6 +280,23 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage />, { route: '/login' })
     expect(await screen.findByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /开发者登录/ })).not.toBeInTheDocument()
+  })
+
+  it('offers to sign out of GitHub when GitHub login exists', async () => {
+    server.use(http.post('/auth/logout', () => new HttpResponse(null, { status: 204 })))
+    const navigation = installFakeNavigation()
+    const user = userEvent.setup()
+    renderWithProviders(<LoginPage />, { route: '/login' })
+
+    await user.click(await screen.findByRole('button', { name: '先退出 GitHub' }))
+    await waitFor(() => expect(navigation.destinations).toEqual([GITHUB_SIGN_OUT_URL]))
+  })
+
+  it('has no GitHub sign-out when the gateway offers only the developer login', async () => {
+    server.use(http.get('/auth/providers', () => HttpResponse.json({ providers: ['dev'] })))
+    renderWithProviders(<LoginPage />, { route: '/login' })
+    expect(await screen.findByRole('button', { name: /开发者登录/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '先退出 GitHub' })).not.toBeInTheDocument()
   })
 
   it('reports an unreachable gateway when the provider list cannot be loaded', async () => {
