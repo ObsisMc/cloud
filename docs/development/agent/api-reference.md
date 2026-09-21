@@ -159,7 +159,7 @@ workflow_not_available` (3B-1) is **SUPERSEDED**.
 
 | Method | Path | Body fields | Response |
 | --- | --- | --- | --- |
-| GET | `/projects` | — | `{items, nextCursor}` (owner-scoped) |
+| GET | `/projects` | — | `{items, nextCursor}` (tenant-level, **owner-filtered** — see access note) |
 | POST 🔑 | `/projects` | `name`*, `repositoryUrl`*, `defaultBranch`, `credentialRefId` | 202 `{resource, workspace, operation}` |
 | GET | `/projects/{pid}` | — | Project |
 | PATCH | `/projects/{pid}` | `name`, 🔢`version` | Project |
@@ -174,6 +174,28 @@ workflow_not_available` (3B-1) is **SUPERSEDED**.
 | POST 🔑 | `/operations/{oid}/retry` | 🔢`version` | `{operation}` |
 | GET | `/resource-status` | — | `{items}` (admin projection) |
 | POST 🔑 | `/workspaces/{wid}/administrative-stop` | 🔢`version` | 202 `{resource, operation}` (admin) |
+
+### Access model (Project Workspace Sharing, Step 3)
+
+Projects are **workspace-shared**: `CanAccessProject(user, P) = P.space_id = W AND user is an active
+member of W`. Concretely:
+
+- **Space-scoped project** (`space_id` set): `GET /projects/{pid}`, `PATCH`, `DELETE`, the runtime
+  workspace `GET /workspaces/{wid}`, and `GET /projects/{pid}/workspaces` are reachable by **any active
+  workspace member**, regardless of creator. Deleting requires the **project creator OR a workspace
+  owner/admin** (unified rule `CanDeleteWorkspaceResource`): an ordinary member who can read but not
+  delete gets **403 `space_role_required`**; a non-member never reaches the gate (`project()` hides the
+  resource with 404, no existence leak).
+- **Legacy unscoped project** (`space_id` NULL): keeps **owner-only** access end to end (detail, runtime
+  workspaces, delete); no auto-backfill, no scope widening.
+- **Lists**: the space-scoped list `GET /spaces/{sid}/projects` returns every active project in the
+  workspace (membership-gated); the **tenant-level `GET /projects` stays owner-filtered** (the space view
+  is the sharing surface; the frontend does not use the tenant-level list).
+- **Runtime Workspaces inherit the parent Project's access**: `GET /workspaces/{wid}` resolves the parent
+  project's `space_id` and applies the workspace-membership rule; unscoped parents stay owner-only. No
+  per-runtime member table.
+- **No per-project membership**: `project_members` is **NOT used**; `owner_user_id` continues to record
+  the creator.
 
 ## Internal / control API (`/internal/v1`)
 

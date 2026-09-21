@@ -23,13 +23,13 @@ func (f *fixture) callUser(t *testing.T, u core.Claims, method, path string, bod
 	return o
 }
 
-// TestProjectSpaceScopingAndOwnerIsolation covers scenarios 2-4, 9-12 and the
-// current owner-only project boundary. Space membership scopes the member
-// collection and gates the space, while Project / Runtime Workspace visibility
-// stays owner-based — the existing implementation, temporary until the project
-// workspace-sharing migration (next step); a member who did not create a project
-// cannot read, list, patch, or delete it, identically to a non-member of the space.
-func TestProjectSpaceScopingAndOwnerIsolation(t *testing.T) {
+// TestProjectSpaceScopingAndSharing covers scenarios 2-4, 9-12 and the project
+// workspace-sharing boundary (Step 3). Space membership scopes the member
+// collection and gates the space, and Project / Runtime Workspace visibility
+// follows workspace membership: every active member can read a space-scoped
+// project and its runtime workspace, while a non-member stays fully hidden (404).
+// The tenant-level project list keeps its owner filter.
+func TestProjectSpaceScopingAndSharing(t *testing.T) {
 	f := setup(t)
 	space := f.createSpace("Scoped", "scoped", "space-scoped")
 	sid := space.S("id")
@@ -47,29 +47,32 @@ func TestProjectSpaceScopingAndOwnerIsolation(t *testing.T) {
 		t.Fatal("space-scoped project missing spaceId")
 	}
 
-	// Space projects are owner-scoped: the owner sees their project, a fellow
-	// member of the same space sees nothing.
+	// The workspace is the sharing boundary: every member sees every active
+	// project in the space, regardless of creator.
 	bobList := f.callUser(t, bob, "GET", f.path("/spaces/"+sid+"/projects"), nil, "", 200)
 	if len(bobList["items"].([]any)) != 1 || core.Object(bobList["items"].([]any)[0].(map[string]any)).S("id") != pid {
-		t.Fatalf("owner space project list: %v", bobList)
+		t.Fatalf("creator space project list: %v", bobList)
 	}
 	daveList := f.callUser(t, dave, "GET", f.path("/spaces/"+sid+"/projects"), nil, "", 200)
-	if len(daveList["items"].([]any)) != 0 {
-		t.Fatalf("non-owner space project list should be empty: %v", daveList)
+	if len(daveList["items"].([]any)) != 1 || core.Object(daveList["items"].([]any)[0].(map[string]any)).S("id") != pid {
+		t.Fatalf("member space project list should include bob's project: %v", daveList)
 	}
 
-	// Current-state: a space member who is not the owner gets 404 on the project
-	// and its runtime workspace, and on any mutation over them — exactly like a
-	// non-member (owner-only until the workspace-sharing migration).
-	for name, subject := range map[string]core.Claims{"member-not-owner": dave, "non-member": carol} {
-		f.callUser(t, subject, "GET", f.path("/projects/"+pid), nil, "", 404)
-		f.callUser(t, subject, "GET", f.path("/workspaces/"+wid), nil, "", 404)
-		f.callUser(t, subject, "DELETE", f.path("/projects/"+pid), core.Object{"version": 1}, "delete-"+name, 404)
-	}
-	// Owner-based tenant listing excludes other owners' projects too.
+	// A space member who is not the creator can read the project and its runtime
+	// workspace but cannot delete it (delete rule: creator OR owner/admin → 403);
+	// a non-member of the space stays fully hidden (404, no existence leak).
+	f.callUser(t, dave, "GET", f.path("/projects/"+pid), nil, "", 200)
+	f.callUser(t, dave, "GET", f.path("/workspaces/"+wid), nil, "", 200)
+	f.callUser(t, dave, "DELETE", f.path("/projects/"+pid), core.Object{"version": 1}, "member-delete", 403)
+	f.callUser(t, carol, "GET", f.path("/projects/"+pid), nil, "", 404)
+	f.callUser(t, carol, "GET", f.path("/workspaces/"+wid), nil, "", 404)
+	f.callUser(t, carol, "DELETE", f.path("/projects/"+pid), core.Object{"version": 1}, "nonmember-delete", 404)
+	// The tenant-level list keeps its owner filter: dave sees only his own
+	// projects there (empty in this scenario), even though he can see the shared
+	// project in the space view.
 	ownerList := f.callUser(t, dave, "GET", f.path("/projects"), nil, "", 200)
 	if len(ownerList["items"].([]any)) != 0 {
-		t.Fatalf("non-owner tenant project list should be empty: %v", ownerList)
+		t.Fatalf("tenant project list should stay owner-filtered: %v", ownerList)
 	}
 
 	// Drain so the project reaches active and its version moves past the baseline.

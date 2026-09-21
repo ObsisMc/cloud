@@ -95,8 +95,8 @@ func TestSpaceEventsAuthorizationAndCommitOrder(t *testing.T) {
 	nextEvent(t, stream, "space.updated")
 
 	// The authoritative state matches the event the client was told about. The
-	// evented project is bob's, so the owner-scoped list is checked as bob
-	// (current owner-only project access).
+	// evented project is bob's and the list is workspace-shared (Step 3), so it
+	// is checked as bob, the creator.
 	list, status, e := f.client.Call(context.Background(), "GET", f.path("/spaces/"+sid+"/projects"), "gateway", gw, &bob, "", nil)
 	must(t, e)
 	if status != 200 || len(list["items"].([]any)) != 1 {

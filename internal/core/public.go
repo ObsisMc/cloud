@@ -97,6 +97,15 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				}
 			default:
 				require(r.Method == "DELETE", 405, "method_not_allowed")
+				// Delete rule (project workspace-sharing): the project creator may always
+				// delete their own project; otherwise the actor must be a workspace owner
+				// or admin. A member who can read but not delete gets 403; non-members
+				// never reach this gate (project() hides the resource with 404). Unscoped
+				// projects are owner-only in project(), so the creator is the owner and no
+				// extra gate is needed.
+				if sid := p.S("spaceId"); sid != "" {
+					require(workspaceCanDelete(t, sid, uid, p.S("ownerUserId")), 403, "space_role_required")
+				}
 				version(p, r.Body.N("version"))
 				idleProject(t, p.S("id"))
 				require(p.S("lifecycle") == "active", 409, "resource_unavailable")
@@ -271,10 +280,11 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 			return page(t, "SELECT wm.user_id AS id, wm.workspace_id, wm.user_id, wm.role, wm.status, wm.version, wm.joined_at, u.display_name FROM collab_workspace_members wm JOIN users u ON u.id=wm.user_id WHERE wm.workspace_id=$1", []any{r.SpaceID}, "wm.user_id", r)
 		case strings.HasSuffix(r.Path, "/projects"):
 			spaceMember(t, r.SpaceID, uid)
-			// Current-state: space membership gates the collection, but project visibility
-			// inside it stays owner-based — membership alone never exposes another owner's
-			// project (until the project workspace-sharing migration).
-			return page(t, "SELECT p.* FROM projects p WHERE p.space_id=$1 AND p.owner_user_id=$2 AND p.deleted_at IS NULL", []any{r.SpaceID, uid}, "p.id", r)
+			// The Workspace is the sharing boundary: space membership already gates the
+			// collection, and every active project in the space is visible to its members
+			// (project workspace-sharing migration). Unscoped projects have no space_id
+			// and never appear here.
+			return page(t, "SELECT p.* FROM projects p WHERE p.space_id=$1 AND p.deleted_at IS NULL", []any{r.SpaceID}, "p.id", r)
 		default:
 			spaceMember(t, r.SpaceID, uid)
 			return t.one("SELECT * FROM collab_workspaces WHERE id=$1", r.SpaceID)
@@ -327,6 +337,11 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 	case r.ProjectID != "":
 		p := project(t, r.TenantID, uid, r.ProjectID)
 		if strings.HasSuffix(r.Path, "/workspaces") {
+			// A shared (space-scoped) project exposes all of its runtime workspaces to
+			// workspace members; an unscoped (legacy) project stays owner-filtered.
+			if p.S("spaceId") != "" {
+				return page(t, "SELECT w.*,wt.branch_name,wt.base_commit_id,task.title FROM workspaces w JOIN workspace_worktrees wt ON wt.workspace_id=w.id LEFT JOIN tasks task ON task.workspace_id=w.id WHERE w.project_id=$1 AND w.tenant_id=$2 AND w.deleted_at IS NULL", []any{p.S("id"), r.TenantID}, "w.id", r)
+			}
 			return page(t, "SELECT w.*,wt.branch_name,wt.base_commit_id,task.title FROM workspaces w JOIN workspace_worktrees wt ON wt.workspace_id=w.id LEFT JOIN tasks task ON task.workspace_id=w.id WHERE w.project_id=$1 AND w.tenant_id=$2 AND w.owner_user_id=$3 AND w.deleted_at IS NULL", []any{p.S("id"), r.TenantID, uid}, "w.id", r)
 		}
 		return p

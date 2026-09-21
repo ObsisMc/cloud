@@ -218,71 +218,10 @@ func TestEnrollCrossTenantNoExistenceLeak(t *testing.T) {
 	}
 }
 
-// TestProjectAccessOwnerOnlyUntilWorkspaceSharing is a current-state regression:
-// enrolling B into the space makes W visible to B, but B still cannot see or open
-// A's project P inside that space. Project access stays owner-only — this is the
-// CURRENT implementation, kept as a temporary constraint until the project
-// workspace-sharing migration (next step) applies; it is not a product rule.
-func TestProjectAccessOwnerOnlyUntilWorkspaceSharing(t *testing.T) {
-	f := setup(t)
-	gw := core.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "gateway-a"}}
-	space := f.createSpace("Team", "team", "space-create")
-	sid := space.S("id")
-	// A creates a project inside the space.
-	created := f.call("POST", f.path("/spaces/"+sid+"/projects"), core.Object{"name": "P", "repositoryUrl": "https://example.invalid/repo.git"}, "project-create", 202)
-	pid := created.O("resource").S("id")
-
-	// B is enrolled into the space by email.
-	bob, bobID := f.registerUser(t, "bob@example.com", "Bob")
-	f.enrollByEmail(sid, "bob@example.com", "enroll-bob")
-
-	// B sees the space and its members...
-	o, status, e := f.client.Call(context.Background(), "GET", f.path("/spaces/"+sid), "gateway", gw, &bob, "", nil)
-	must(t, e)
-	if status != 200 {
-		t.Fatalf("B read space: want 200 got %d", status)
-	}
-	// ...but the project list inside the space is owner-filtered: empty for B.
-	projects, status, e := f.client.Call(context.Background(), "GET", f.path("/spaces/"+sid+"/projects"), "gateway", gw, &bob, "", nil)
-	must(t, e)
-	if status != 200 {
-		t.Fatalf("B list space projects: want 200 got %d", status)
-	}
-	if len(projects["items"].([]any)) != 0 {
-		t.Fatalf("space membership leaked another owner's project: %v", projects)
-	}
-	// B cannot open A's project directly.
-	o, status, e = f.client.Call(context.Background(), "GET", f.path("/projects/"+pid), "gateway", gw, &bob, "", nil)
-	must(t, e)
-	if status != 404 {
-		t.Fatalf("B read A's project: want 404 got %d %v", status, o)
-	}
-	_ = bobID
-}
-
-// TestRuntimeWorkspaceOwnerOnlyUntilWorkspaceSharing covers §14/§19: even as a
-// space member (and therefore tenant member), B cannot reach A's runtime
-// workspace — the /workspaces/:wid route keeps owner-based authorization.
-// Current-state regression: owner-only runtime access is the existing
-// implementation, temporary until the workspace-sharing migration (next step).
-func TestRuntimeWorkspaceOwnerOnlyUntilWorkspaceSharing(t *testing.T) {
-	f := setup(t)
-	gw := core.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "gateway-a"}}
-	space := f.createSpace("Team", "team", "space-create")
-	sid := space.S("id")
-	// A creates a project at the space level; its main runtime workspace is A-owned.
-	created := f.call("POST", f.path("/spaces/"+sid+"/projects"), core.Object{"name": "P", "repositoryUrl": "https://example.invalid/repo.git"}, "project-create", 202)
-	wid := created.O("workspace").S("id")
-
-	bob, bobID := f.registerUser(t, "bob@example.com", "Bob")
-	f.enrollByEmail(sid, "bob@example.com", "enroll-bob")
-
-	o, status, e := f.client.Call(context.Background(), "GET", f.path("/workspaces/"+wid), "gateway", gw, &bob, "", nil)
-	must(t, e)
-	if status != 404 {
-		t.Fatalf("B read A's runtime workspace: want 404 got %d %v", status, o)
-	}
-	if f.scalar("SELECT count(*) FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", sid, bobID) != 1 {
-		t.Fatal("precondition: bob should be a space member")
-	}
-}
+// TestProjectAccessOwnerOnlyUntilWorkspaceSharing and
+// TestRuntimeWorkspaceOwnerOnlyUntilWorkspaceSharing (the owner-only regressions
+// from Step 2B) were superseded by Step 3 — the project workspace-sharing
+// migration. Their workspace-sharing assertions now live in
+// project_workspace_sharing_test.go:
+//   - TestScopedProjectSharedWithWorkspaceMembers (§14)
+//   - TestRuntimeWorkspaceInheritsProjectAccess (§17)

@@ -5,6 +5,8 @@
 > `main` 保持 `1c5b9b4` 未动（未 merge、未 push、未进入 Final Main Sync）。
 > 关联 ADR：`specs/decisions/cloud/collaboration-workspace/20260921-workspace-sharing-model.md`（SS1–SS5）。
 > 取代：[[workspace-membership]] 的 SD6 产品语义（旧 D1 owner 隔离由产品规则降级为当前实现）。
+> **superseded-by（Step 3）**：Project Workspace Sharing 已实施为 **IMPLEMENTED**，见
+> [[project-workspace-sharing]]（PS1/PS2 落地；SS1/SS2 公式保持不变，作为模型决策记录）。
 > 结束标记：`WORKSPACE ADD MEMBER: PRESERVED` · `WORKSPACE RESOURCE SHARING MODEL: ALIGNED` ·
 > `OLD D1 OWNER-ISOLATION PRODUCT RULE: SUPERSEDED` · `PER-RESOURCE MEMBERSHIP MODEL: NOT USED` ·
 > `PROJECT CURRENT IMPLEMENTATION: OWNER-ONLY / EXISTING STATE` ·
@@ -71,13 +73,13 @@ migration pending」，**不再是**产品规则。本阶段（Step 2B）**只�
 
 ## 4. 已知缺口（诚实记录，沿用 §SS5）
 
-- **PROJECT WORKSPACE SHARING: NOT IMPLEMENTED — NEXT STEP**：Project list/detail/runtime Workspace
-  访问仍 owner-only（当前实现，迁移 pending）。下一步的 Project 权限直接来自 `projects.space_id` +
-  Workspace Membership，**不建** `project_members`。
-- **ISSUE WORKSPACE SCOPING: NOT IMPLEMENTED**：`issues.space_id` 未引入。
+- **PROJECT WORKSPACE SHARING: IMPLEMENTED（Step 3）**：本缺口已被 [[project-workspace-sharing]] 关闭。
+  Project list/detail/runtime Workspace 访问已切换为 workspace-shared（PS1–PS5）；删除规则
+  （creator OR owner/admin）已接入真实资源（PS2）。**不建** `project_members`。
+- **ISSUE WORKSPACE SCOPING: NOT IMPLEMENTED**：`issues.space_id` 未引入 —— NEXT STEP。
 - **AGENT/TEAM/WORKFLOW/MCP/SKILL WORKSPACE SCOPING: NOT IMPLEMENTED**：各资源仍无 Workspace 共享。
-- **删除新规则未接入真实资源**：`CanDeleteWorkspaceResource` 仅作可复用谓词落地；真实资源的删除授权
-  随各资源 Workspace Scoping 迁移进行。
+- **删除新规则其余资源未接入**：`CanDeleteWorkspaceResource` 公式已在 Project 接入（PS2）；Issue /
+  Agent / Team / Workflow / MCP / Skill 的删除授权随各自 Workspace Scoping 迁移进行。
 
 ---
 

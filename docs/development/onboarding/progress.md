@@ -1,9 +1,11 @@
 # 开发进度（新员工向）
 
 一眼看清 Ora Cloud 目前**做到哪了、在进行什么、刻意没做什么**。更新于 **Wave 3B-2 Workflow
-Interaction Shell 实现并验证 + User Registration 落地**之后：`@` 协作链路（Mention / Task / **Workflow Form Mode**）已端到端
+Interaction Shell 实现并验证 + User Registration 落地 + Project Workspace Sharing（Step 3）**之后：`@` 协作链路
+（Mention / Task / **Workflow Form Mode**）已端到端
 打通——`@Workflow → FormDescriptor → 动态表单 → 可选 AI Assist → Review → Confirm → IssueRun → mock
-执行 → Timeline`。契约与实现记录见
+执行 → Timeline`；**Project 已按 Workspace 共享**（同 Workspace 成员互见/互访共享项目，删除需
+creator 或 owner/admin）。契约与实现记录见
 [12-collab §38 / §38.37](../../migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen)，
 下一步是 3C（Issue Detail & Collaboration UI）。
 
@@ -35,6 +37,15 @@ Interaction Shell 实现并验证 + User Registration 落地**之后：`@` 协�
 > **产品规则已取代**：owner-only Project 访问降级为**当前实现**，project workspace-sharing migration
 > pending（下一步）。ADR：`specs/decisions/cloud/collaboration-workspace/20260921-workspace-sharing-model.md`；
 > 记录见 [workspace-sharing-model.md](../../migrations/workspace-sharing-model.md)。
+>
+> **2026-09-21 — Project Workspace Sharing（Step 3）**：实施真正的项目共享迁移 —— `project()` /
+> `workspace()` / 空间项目列表从 owner-only 切换为 **workspace-shared**（`CanAccessProject =
+> space_id 归属 + Workspace 成员资格`；unscoped `space_id=NULL` 保持 owner-only）；运行时 Workspace
+> 继承父 Project 访问；删除规则 `creator OR Workspace owner/admin` 接入真实资源（member 删他人 →
+> `403 space_role_required`，非成员 → 404 隐藏）；tenant 级 `/projects` 列表保持 owner 过滤；
+> **前端零改动**。Issue / Agent / Team / Workflow / MCP / Skill 作用域仍未实施。ADR：
+> `specs/decisions/cloud/collaboration-workspace/20260921-project-workspace-sharing.md`；记录见
+> [project-workspace-sharing.md](../../migrations/project-workspace-sharing.md)。
 
 图例：✅ 已完成 · 🚧 进行中 · 🧭 规划中（仅架构方案，未编码） · ⏸️ 刻意暂缓 · ❌ 未开始
 
@@ -70,10 +81,10 @@ ADR：`specs/decisions/cloud/identity-access/0-user-registration.md`（SD1–SD5
 ## Workspace Add Member — 用 email 添加已注册用户 ✅ IMPLEMENTED
 
 owner/admin 在 Workspace 管理界面用 email 把**已注册用户**添加为普通成员；成员列表立即出现该用户，
-该用户 refresh/re-enter 后能在 Workspace selector 看到并切换。**当前实现：Project 访问 owner-only**
-（新成员可见/可切换 Workspace，但看不到/打不开其他 owner 的 Project —— 旧「Workspace Membership ≠
-Project Access」产品语义已被 [workspace-sharing-model.md](../../migrations/workspace-sharing-model.md)
-取代，owner-only 仅是当前实现，project workspace-sharing migration pending）。
+该用户 refresh/re-enter 后能在 Workspace selector 看到并切换。**当前：Project 按 Workspace 共享**
+（Step 3 已实施项目共享 —— 新成员可见/可切换 Workspace，并能访问该 Workspace 内的共享 Project 及其
+运行时 Workspace；旧「Workspace Membership ≠ Project Access」产品语义已被
+[workspace-sharing-model.md](../../migrations/workspace-sharing-model.md) 取代）。
 ADR：`specs/decisions/cloud/collaboration-workspace/20260921-workspace-add-member.md`（SD1–SD6）；
 记录见 [workspace-membership.md](../../migrations/workspace-membership.md)。
 
@@ -87,11 +98,11 @@ ADR：`specs/decisions/cloud/collaboration-workspace/20260921-workspace-add-memb
 | Idempotency-Key | ✅ | POST 自动继承；前端 mutation 生成/复用 key 防重放 |
 | 前端添加成员 Dialog | ✅ | 邮箱输入 + 本地校验（空/非法提示）+ 服务端 `user_not_registered` →「该邮箱尚未注册，请先完成注册。」；成功关 dialog + 列表刷新；触发器仅 owner/admin 可见 |
 | Selector 反射新 Workspace | ✅ | refresh/re-enter = 新页面加载 → 内存缓存重取 `/spaces`，selector 出现并可切换；未重写 Current Workspace provider |
-| **CURRENT PROJECT ACCESS** | ✅ **OWNER-ONLY（当前实现，迁移 pending）** | B 加入 W 后 `/spaces/:sid/projects` 为空、`/projects/:pid` 404、`/workspaces/:wid` 404 —— owner-only 是当前实现，非产品规则，直到 project workspace-sharing migration（下一步） |
-| 测试 | ✅ | 后端集成 8 用例 + 前端 7 用例全通过；HTTP smoke 通过（A/B 双用户）；2 个 owner-only 回归测试已重命名为 `…OwnerOnlyUntilWorkspaceSharing`（断言保留） |
-| **PROJECT WORKSPACE SHARING** | ❌ **NOT IMPLEMENTED — NEXT STEP** | 项目级分享/授权不在本期；下一步权限来自 `projects.space_id` + Workspace Membership（不建 `project_members`） |
+| **CURRENT PROJECT ACCESS** | ✅ **WORKSPACE MEMBERSHIP** | B 加入 W 后可访问 W 内共享 Project：`/spaces/:sid/projects` 含全部活跃项目、`/projects/:pid` 200、`/workspaces/:wid` 200；unscoped `space_id=NULL` 项目保持 owner-only（无 scope widening） |
+| 测试 | ✅ | 后端集成 8 用例 + 前端 7 用例全通过；HTTP smoke 通过（A/B 双用户）；Step 2B 的两个 owner-only 回归已改写为 Step 3 共享断言（`TestScopedProjectSharedWithWorkspaceMembers` / `TestRuntimeWorkspaceInheritsProjectAccess`） |
+| **PROJECT WORKSPACE SHARING** | ✅ **IMPLEMENTED** | 项目共享已实施（Step 3）：访问 = `space_id` 归属 + Workspace 成员资格；删除 = creator 或 owner/admin（member 删他人 `403 space_role_required`，非成员 404 隐藏）；无 `project_members` |
 | **EMAIL INVITATION** | ❌ **NOT IMPLEMENTED** | 只接受已注册用户，无邀请邮件/pending/自动建号 |
-| **WORKSPACE MEMBER AUTO-PROJECT ACCESS** | ⏳ **NOT YET MIGRATED** | 空间成员身份当前不派生任何 Project visibility（当前实现，迁移 pending） |
+| **WORKSPACE MEMBER AUTO-PROJECT ACCESS** | ✅ **IMPLEMENTED** | 空间成员身份派生共享 Project 的可见/访问/运行时继承（Step 3） |
 
 ## Workspace Resource Sharing Model — Workspace 资源共享边界 ✅ IMPLEMENTED（Step 2B 对齐）
 
@@ -112,7 +123,7 @@ migration pending。ADR：`specs/decisions/cloud/collaboration-workspace/2026092
 | 无通用 RBAC engine | ✅ | 只落地最小谓词 foundation，不建 RBAC 框架 |
 | 测试 | ✅ | `integration/space_permission_test.go` 8+1 用例全通过（真实 PG） |
 | **Workspace Membership** | ✅ **IMPLEMENTED** | Step 2 能力原样保留（添加/幂等/角色门/可见性） |
-| **Project Workspace Scoping** | ❌ **NOT IMPLEMENTED — NEXT STEP** | Project list/detail/runtime 访问仍 owner-only（当前实现） |
+| **Project Workspace Scoping** | ✅ **IMPLEMENTED（Step 3）** | Project list/detail/runtime 访问已切换为 workspace-shared；删除 = creator 或 owner/admin；unscoped 保持 owner-only。见 [project-workspace-sharing.md](../../migrations/project-workspace-sharing.md) |
 | **Issue Workspace Scoping** | ❌ **NOT IMPLEMENTED** | `issues.space_id` 未引入 |
 | **Agent / Team / Workflow / MCP / Skill Workspace Scoping** | ❌ **NOT IMPLEMENTED** | 各资源仍无 Workspace 共享 |
 
@@ -319,7 +330,8 @@ Query），从参考项目 `cloud前端/` 迁移而来，API 层由 orval 从 `a
 | 最近 | **User Registration**（`POST /auth/register` 创建 User Identity + 会话） |
 | 最近 | **Workspace Add Member**（email 添加已注册用户到协作空间；Project 访问 owner-only —— 当前实现） |
 | 最近 | **Workspace Sharing Model（Step 2B 对齐）**（Workspace=资源共享边界；统一删除规则 creator OR owner/admin；最小谓词 foundation；旧 D1 产品规则 superseded） |
-| 下一步 | **3C**（Issue Detail & Collaboration UI）；生产 Substrate / 看板分页与全文搜索 / 实时推送；真实 Agent/Team/Workflow/AI provider（BLOCKED ON EXTERNAL DESIGN） |
+| 最近 | **Project Workspace Sharing（Step 3）**（项目访问切换为 workspace-shared：list/detail/runtime 继承；删除 = creator 或 owner/admin；unscoped 保持 owner-only；前端零改动） |
+| 下一步 | **3C**（Issue Detail & Collaboration UI）；Issue / Agent / Team / Workflow / MCP / Skill Workspace Scoping；生产 Substrate / 看板分页与全文搜索 / 实时推送；真实 Agent/Team/Workflow/AI provider（BLOCKED ON EXTERNAL DESIGN） |
 
 > 想看每个功能对应的接口和表，去 [../agent/api-reference.md](../agent/api-reference.md) 和
 > [../agent/database.md](../agent/database.md)。想看迁移的完整决策记录，去

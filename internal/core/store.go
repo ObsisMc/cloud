@@ -413,31 +413,43 @@ func membership(t *transaction, tid, uid string, admin bool) Object {
 	return m
 }
 
-// project loads a live project in the tenant and requires the caller's
-// ownership. Space membership is not a substitute visibility boundary (current
-// implementation, until the project workspace-sharing migration): projects and
-// runtime workspaces keep their existing owner-based authorization regardless
-// of the owning project's space_id.
+// project loads a live project in the tenant and applies project access:
+// a space-scoped project (space_id set) is reachable by any active member of
+// that workspace (the resource-sharing boundary), while an unscoped (legacy)
+// project keeps owner-only access. Non-members stay hidden (404, no existence
+// leak), identically to the previous owner-filtered lookup.
 func project(t *transaction, tid, uid, pid string) Object {
 	require(validID(pid), 404, "not_found")
-	p := t.one("SELECT * FROM projects WHERE id=$1 AND tenant_id=$2 AND owner_user_id=$3 AND deleted_at IS NULL", pid, tid, uid)
+	p := t.one("SELECT * FROM projects WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", pid, tid)
 	require(p != nil, 404, "not_found")
+	if sid := p.S("spaceId"); sid != "" {
+		require(workspaceRole(t, sid, uid) != "", 404, "not_found")
+	} else if p.S("ownerUserId") != uid {
+		reject(404, "not_found")
+	}
 	return p
 }
 
-// workspace loads a live runtime workspace in the tenant. Non-admin callers are
-// scoped to their own workspaces by owner; the admin form (administrative-stop)
-// requires tenant administration.
+// workspace loads a live runtime workspace in the tenant. Non-admin access
+// inherits the parent project's access: a runtime workspace of a space-scoped
+// project is reachable by any active member of that workspace, while a runtime
+// workspace of an unscoped (legacy) project keeps owner-only access. The admin
+// form (administrative-stop) requires tenant administration.
 func workspace(t *transaction, tid, uid, wid string, admin bool) Object {
 	require(validID(wid), 404, "not_found")
-	q := "SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL"
-	args := []any{wid, tid}
-	if !admin {
-		q += " AND owner_user_id=$3"
-		args = append(args, uid)
+	if admin {
+		w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
+		require(w != nil, 404, "not_found")
+		return w
 	}
-	w := t.one(q, args...)
+	w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
 	require(w != nil, 404, "not_found")
+	proj := t.one("SELECT space_id FROM projects WHERE id=$1 AND tenant_id=$2", w.S("projectId"), tid)
+	if proj == nil || proj.S("spaceId") == "" {
+		require(w.S("ownerUserId") == uid, 404, "not_found")
+	} else {
+		require(workspaceRole(t, proj.S("spaceId"), uid) != "", 404, "not_found")
+	}
 	return w
 }
 

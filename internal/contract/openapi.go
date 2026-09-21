@@ -565,7 +565,7 @@ func summary(r router.Route) string {
 }
 
 func description(r router.Route) string {
-	base := "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. "
+	base := "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. "
 	if r.Action != "" {
 		base = "Controller requests require an independent controller service credential; holder, active database-time lease epoch and operation version are checked. "
 	}
@@ -592,13 +592,13 @@ func description(r router.Route) string {
 	if strings.Contains(r.Path, "/spaces") {
 		switch {
 		case strings.Contains(r.Path, "/members") && r.Method == "POST":
-			base += "Adds an already-registered user to the space as a plain member by email, resolved in the caller's identity source. Admin or owner only. The target is atomically ensured tenant membership (existing role kept) and never granted any Project or Runtime Workspace visibility (current owner-based authorization). Unknown or inactive email is 404 user_not_registered; adding an existing member returns the current membership unchanged. "
+			base += "Adds an already-registered user to the space as a plain member by email, resolved in the caller's identity source. Admin or owner only. The target is atomically ensured tenant membership (existing role kept) and thereby gains access to the Projects and Runtime Workspaces shared in that workspace. Unknown or inactive email is 404 user_not_registered; adding an existing member returns the current membership unchanged. "
 		case strings.Contains(r.Path, "/members"):
 			base += "Admin or owner manages membership; granting owner requires owner. The target user must be an active member of the same tenant. Last owner cannot be demoted or disabled. "
 		case r.Method == "POST" && strings.HasSuffix(r.Path, "/spaces"):
 			base += "Creates the collaboration space and its first owner atomically. slug is lowercase, immutable and unique per tenant. "
 		case strings.Contains(r.Path, "/projects"):
-			base += "Project collection scoped to one collaboration space; membership is required, and project visibility follows owner ownership within it. spaceId on a created project is optional, never forced. "
+			base += "Project collection scoped to one collaboration space; membership is required, and project visibility follows workspace membership — any active member of the space can see every active project in it. Deleting a project requires its creator or a space owner/admin. spaceId on a created project is optional, never forced. "
 		case r.Method == "PATCH":
 			base += "Only name and description may change; slug is immutable. Requires admin or owner and a matching version. "
 		case r.Method == "DELETE":

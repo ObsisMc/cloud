@@ -18,6 +18,8 @@ applied file; add a new `NNNN_*.sql`.
 | `0008_issue_collaboration.sql` | `issues` ALTERs (`assignee_type`/`assignee_id`/`project_ref` + backfill), `issue_comments` ALTERs (`parent_id`/`author_type`/`author_id`/`seq` + backfill + `UNIQUE(issue_id,seq)`), new tables `issue_runs`, `issue_activities`, `issue_context_refs` — formerly `0007_issue_collaboration.sql` |
 | `0009_issue_interactions.sql` | new table `issue_interactions` (the `@` interaction spine) — one row per selected collaboration target: `id, tenant_id, issue_id, comment_id, target_type, target_id, mode, task, run_id, created_at` — formerly `0008_issue_interactions.sql` |
 | `0010_issue_interaction_input.sql` | one generic additive column: `ALTER TABLE issue_interactions ADD COLUMN input jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(input)='object')` — the confirmed form values ([§38.30](../../migrations/multica-issue-board/12-collaboration-architecture.md#3830-does-3b-2-need-a-migration--yes-one-additive-column)). Deliberately excludes `version`, a `status` enum, `confirmed_at` and a separate inputs table. `0009` is not modified. — formerly `0009_issue_interaction_input.sql` |
+| `0011_collab_spaces.sql` | **Collaboration Spaces** (Stage B): new tables `collab_workspaces` (id, tenant_id, name, slug, description, created_by, version, archived_at; `UNIQUE(id,tenant_id)`, `UNIQUE(tenant_id,slug)`) and `collab_workspace_members` (workspace_id, user_id, role owner/admin/member, status active/disabled, version, created_by, joined_at; `PRIMARY KEY(workspace_id,user_id)`) — the Workspace resource-sharing boundary (Step 2B model) |
+| `0012_project_space_scope.sql` | **Project → Space scoping**: seeds a default Collaboration Space for every live tenant (+ its active members as owner/member), adds `projects.space_id uuid` (nullable, FK `(space_id,tenant_id) → collab_workspaces(id,tenant_id)`, index `project_space_list(space_id,id)`). **Projects are intentionally NOT backfilled** — `space_id` stays NULL until a caller opts a project into a space (D2=C: Space is optional, not a mandatory parent). Space-scoped projects are workspace-shared (Step 3 access model); unscoped stay owner-only |
 
 ## Table inventory
 
@@ -33,7 +35,7 @@ applied file; add a new `NNNN_*.sql`.
 ### Projects / workspaces / operations
 | Table | Purpose | Key columns |
 | --- | --- | --- |
-| `projects` | dev-environment repo | tenant_id, owner_user_id, name, repository_url, default_branch, lifecycle |
+| `projects` | dev-environment repo | tenant_id, owner_user_id (creator), name, repository_url, default_branch, lifecycle, **space_id?** (nullable FK → collab_workspaces; set = workspace-shared, NULL = legacy owner-only) |
 | `project_storage` | per-project volume state | project_id, observed_state |
 | `workspaces` | main/isolated worktree env | project_id, tenant_id, owner_user_id, kind, desired/observed_state, runtime_generation |
 | `workspace_worktrees` | git worktree metadata | workspace_id, branch_name, base_commit_id |
@@ -45,6 +47,18 @@ applied file; add a new `NNNN_*.sql`.
 | `node_instances` | registered nodes | connection_state, initialized, heartbeat |
 | `controller_leases` | controller leadership | epoch fencing |
 | `idempotency_records` | POST/DELETE replay | tenant_id, user_id, key, request_hash, response, status |
+
+### Collaboration Spaces (0011) — the resource-sharing boundary
+| Table | Purpose | Key columns |
+| --- | --- | --- |
+| `collab_workspaces` | the Workspace that groups and shares resources | id, tenant_id, name, slug, description, created_by, version, archived_at · `UNIQUE(tenant_id,slug)` |
+| `collab_workspace_members` | Workspace membership (the sharing boundary) | (workspace_id,user_id) PK, role owner/admin/member, status active/disabled, version, joined_at |
+
+**Workspace = resource-sharing boundary** (Step 2B model; implemented on Projects in Step 3):
+`projects.space_id → collab_workspaces` opts a project into a Workspace; any **active member** of that
+Workspace may read the project and its runtime workspaces; the **creator or a workspace owner/admin**
+may delete it. Per-resource membership (`project_members` / …) is **NOT used**. Not every
+`collab_workspaces` column implies an exposed feature — the DB is ahead of the HTTP surface by design.
 
 ### Issue board (0006–0008)
 | Table | Purpose | Key columns |

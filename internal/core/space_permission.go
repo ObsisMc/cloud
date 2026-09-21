@@ -69,13 +69,29 @@ func (s *Store) IsWorkspaceAdmin(ctx context.Context, spaceID, uid string) (bool
 	})
 }
 
+// workspaceCanDelete applies the unified workspace delete rule inside an existing
+// transaction: the creator may always delete their own resource; otherwise the
+// actor must be a workspace owner or admin. Ordinary members cannot delete
+// another member's resource, and non-members have no delete permission. It is the
+// transaction-scoped mirror of CanDeleteWorkspaceResource, reused by the project
+// DELETE path so the rule is decided in the same transact as project().
+func workspaceCanDelete(t *transaction, spaceID, uid, creatorUserID string) bool {
+	if uid == creatorUserID {
+		return true
+	}
+	switch workspaceRole(t, spaceID, uid) {
+	case "owner", "admin":
+		return true
+	}
+	return false
+}
+
 // CanDeleteWorkspaceResource applies the unified workspace delete rule:
 // the creator may always delete their own resource; otherwise the actor must be
 // a workspace owner or admin. Ordinary members cannot delete another member's
 // resource, and non-members have no delete permission.
 func (s *Store) CanDeleteWorkspaceResource(ctx context.Context, spaceID, uid, creatorUserID string) (bool, error) {
-	if uid == creatorUserID {
-		return true, nil
-	}
-	return s.IsWorkspaceAdmin(ctx, spaceID, uid)
+	return s.workspacePerm(ctx, func(t *transaction) bool {
+		return workspaceCanDelete(t, spaceID, uid, creatorUserID)
+	})
 }
