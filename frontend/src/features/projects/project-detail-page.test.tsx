@@ -40,9 +40,9 @@ function installProjectHandlers(role: string, project = cloudProject('Demo')) {
 
 function renderDetail() {
   return renderAtRoute(
-    '/:workspaceSlug/projects/:projectId',
+    '/w/:workspaceSlug/projects/:projectId',
     <ProjectDetailPage slug="cloud-dev" />,
-    `/cloud-dev/projects/${PROJECT_ID}`,
+    `/w/cloud-dev/projects/${PROJECT_ID}`,
   )
 }
 

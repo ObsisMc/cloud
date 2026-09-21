@@ -20,6 +20,7 @@ import (
 
 	"github.com/wanglongan587/cloud/internal/core"
 	"github.com/wanglongan587/cloud/internal/gateway"
+	"github.com/wanglongan587/cloud/internal/gateway/devlogin"
 	"github.com/wanglongan587/cloud/internal/gateway/github"
 	"github.com/wanglongan587/cloud/internal/logger"
 	"github.com/wanglongan587/cloud/internal/repository"
@@ -119,15 +120,28 @@ func buildHandler(cfg *gateway.Config, store *gateway.Store, log *zap.Logger) (h
 	if e != nil {
 		return nil, fmt.Errorf("read PKCE key: %w", e)
 	}
-	clientSecret, e := os.ReadFile(cfg.GitHub.ClientSecretFile)
-	if e != nil {
-		return nil, fmt.Errorf("read github client secret: %w", e)
+	// Config validation guarantees at least one provider; GitHub is skipped without a client id
+	// and the development provider exists only on a loopback development origin.
+	providers := map[string]gateway.Authenticator{}
+	if cfg.GitHub.ClientID != "" {
+		clientSecret, e := os.ReadFile(cfg.GitHub.ClientSecretFile)
+		if e != nil {
+			return nil, fmt.Errorf("read github client secret: %w", e)
+		}
+		providers["github"], e = github.New(&github.Options{ClientID: cfg.GitHub.ClientID, ClientSecret: strings.TrimSpace(string(clientSecret)), AuthorizeURL: cfg.GitHub.AuthorizeURL, TokenURL: cfg.GitHub.TokenURL, UserURL: cfg.GitHub.UserURL, Source: cfg.GitHub.Source, HTTP: github.NewHTTPClient(cfg.Cloud.Timeout)})
+		if e != nil {
+			return nil, e
+		}
 	}
-	provider, e := github.New(&github.Options{ClientID: cfg.GitHub.ClientID, ClientSecret: strings.TrimSpace(string(clientSecret)), AuthorizeURL: cfg.GitHub.AuthorizeURL, TokenURL: cfg.GitHub.TokenURL, UserURL: cfg.GitHub.UserURL, Source: cfg.GitHub.Source, HTTP: github.NewHTTPClient(cfg.Cloud.Timeout)})
-	if e != nil {
-		return nil, e
+	var dev *devlogin.Authenticator
+	if cfg.Login.DevelopmentProvider {
+		if dev, e = devlogin.New(origin, time.Now); e != nil {
+			return nil, e
+		}
+		providers[devlogin.Name] = dev
+		log.Warn("development login provider enabled: any typed identity signs in", zap.String("publicOrigin", origin))
 	}
-	login, e := gateway.NewLogin(store, map[string]gateway.Authenticator{"github": provider}, pkceKey, origin+gateway.CallbackPath, cfg.Login.AttemptTTL, cfg.Session.TTL)
+	login, e := gateway.NewLogin(store, providers, pkceKey, origin+gateway.CallbackPath, cfg.Login.AttemptTTL, cfg.Session.TTL)
 	if e != nil {
 		return nil, e
 	}
@@ -135,7 +149,7 @@ func buildHandler(cfg *gateway.Config, store *gateway.Store, log *zap.Logger) (h
 	if e != nil {
 		return nil, fmt.Errorf("parse cloud upstream: %w", e)
 	}
-	return gateway.NewHandler(&gateway.Options{
+	engine, e := gateway.NewHandler(&gateway.Options{
 		Store:           store,
 		Login:           login,
 		Issuer:          issuer,
@@ -147,4 +161,11 @@ func buildHandler(cfg *gateway.Config, store *gateway.Store, log *zap.Logger) (h
 		Log:             log,
 		Now:             time.Now,
 	})
+	if e != nil {
+		return nil, e
+	}
+	if dev != nil {
+		dev.Routes(engine)
+	}
+	return engine, nil
 }

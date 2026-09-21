@@ -1,4 +1,8 @@
 version: '3'
+# `task setup` (cmd/devsetup) renders config.toml into this file: CLOUD_*/GATEWAY_* overrides for the
+# services plus TEST_DATABASE_URL for the test tasks. Missing file: nothing is loaded; shell
+# environment always wins over it.
+dotenv: ['.local/dev.env']
 tasks:
   default:
     cmds: [task --list]
@@ -38,19 +42,28 @@ tasks:
       - task: test
   build:
     cmds:
-      - go build -o bin/ ./cmd/server ./cmd/gateway ./cmd/cloudctl ./cmd/simulator ./cmd/devkeys
+      - go build -o bin/ ./cmd/server ./cmd/gateway ./cmd/cloudctl ./cmd/simulator ./cmd/devsetup
   run:
     desc: Go API server on :8080
     cmds: [go run ./cmd/server]
   run:gateway:
     desc: Authentication gateway on :8081, proxying /api/v1 to the Go server; see docs/gateway.md
-    deps: [dev:keys]
+    preconditions:
+      - sh: test -f .local/dev.env
+        msg: 'No .local/dev.env yet: copy config.toml.template to config.toml, fill it in, then run `task setup`'
     cmds: [go run ./cmd/gateway]
-  dev:keys:
-    desc: Generate the local Gateway/Cloud key material under .local/gateway (idempotent)
-    cmds: [go run ./cmd/devkeys]
+  setup:
+    desc: 'Local setup from config.toml (copy config.toml.template): keys, GitHub secret file, .local/dev.env, migrations; rerunnable'
+    cmds: [go run ./cmd/devsetup]
   dev:
     desc: Go API server, authentication gateway and Vite dev server together; open http://localhost:5173
+    preconditions:
+      - sh: test -f .local/dev.env
+        msg: 'No .local/dev.env yet: copy config.toml.template to config.toml, fill it in, then run `task setup`'
+    cmds:
+      - task: dev:services
+  dev:services:
+    internal: true
     deps: [run, run:gateway, frontend:dev]
   migrate:
     cmds: [go run ./cmd/cloudctl -command migrate]

@@ -13,7 +13,7 @@ function renderSettingsPage() {
   return renderRoutes(
     [
       {
-        path: '/:workspaceSlug/settings',
+        path: '/w/:workspaceSlug/settings',
         element: (
           <CurrentSpaceProvider slug="cloud-dev">
             <SettingsLayout slug="cloud-dev" />
@@ -22,7 +22,7 @@ function renderSettingsPage() {
         children: [{ index: true, element: <GeneralSettingsPage /> }],
       },
     ],
-    '/cloud-dev/settings',
+    '/w/cloud-dev/settings',
   )
 }
 

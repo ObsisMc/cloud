@@ -1,0 +1,29 @@
+# Ora Cloud local development configuration.
+#
+#   cp config.toml.template config.toml   # config.toml is git-ignored: it may hold a secret, never commit it
+#   task setup                            # keys, GitHub secret file, .local/dev.env, migrations (rerunnable)
+#   task dev                              # Cloud :8080 + Gateway :8081 + frontend :5173
+#
+# configs/config.yaml and configs/gateway.yaml remain the authoritative service configuration.
+# `task setup` (cmd/devsetup) only turns the values below into what those services already accept:
+# CLOUD_*/GATEWAY_* environment overrides and TEST_DATABASE_URL in .local/dev.env, which
+# Taskfile.yml loads for every task, plus the client secret file the Gateway reads.
+
+[database]
+# PostgreSQL DSN shared by Cloud, the Gateway, `task migrate` and the test suite. Any PostgreSQL 17
+# works; the role must own the database (migrations create tables, tests create schemas).
+#   docker compose up -d --wait   -> the default below
+#   scripts/postgres.ps1 (Windows) -> "host=127.0.0.1 port=55432 user=postgres dbname=ora_test sslmode=disable"
+#   your own server                -> "host=<host> port=5432 user=<role> password=<password> dbname=<db> sslmode=<disable|require>"
+#     e.g. psql -U postgres -c "CREATE ROLE ora LOGIN PASSWORD 'ora-local' CREATEDB;" -c "CREATE DATABASE ora OWNER ora;"
+dsn = "host=127.0.0.1 port=55432 user=ora password=ora-local dbname=ora sslmode=disable"
+
+[github]
+# Optional. Leave both empty to develop with the Gateway's built-in development login only (any
+# typed identity signs in; see docs/gateway.md). To test real GitHub login, create an OAuth App at
+# https://github.com/settings/developers ("New OAuth App") with
+#   Homepage URL:               http://localhost:5173
+#   Authorization callback URL: http://localhost:5173/auth/callback/github
+# The callback must match exactly: the Gateway derives it from public.base_url, never from headers.
+client_id = ""
+client_secret = ""

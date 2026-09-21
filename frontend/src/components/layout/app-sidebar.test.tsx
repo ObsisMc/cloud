@@ -57,7 +57,7 @@ function renderDashboard(initialPath: string) {
     [
       { path: '/login', element: <div>Login screen</div> },
       {
-        path: '/:workspaceSlug',
+        path: '/w/:workspaceSlug',
         element: (
           <RequireSession>
             <DashboardLayout />
@@ -74,7 +74,7 @@ describe('AppSidebar workspace switcher', () => {
   it('shows the current space and the signed-in member, and lists every joined space', async () => {
     installTwoSpaces()
     const user = userEvent.setup()
-    renderDashboard('/cloud-dev/issues')
+    renderDashboard('/w/cloud-dev/issues')
     await screen.findByText('Issues screen')
 
     await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
@@ -89,7 +89,7 @@ describe('AppSidebar workspace switcher', () => {
   it('switches to a different space and lands on its issues page', async () => {
     installTwoSpaces()
     const user = userEvent.setup()
-    renderDashboard('/cloud-dev/issues')
+    renderDashboard('/w/cloud-dev/issues')
     await screen.findByText('Issues screen')
 
     await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
@@ -110,7 +110,7 @@ describe('AppSidebar workspace switcher', () => {
       }),
     )
     const user = userEvent.setup()
-    renderDashboard('/cloud-dev/issues')
+    renderDashboard('/w/cloud-dev/issues')
     await screen.findByText('Issues screen')
 
     await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))

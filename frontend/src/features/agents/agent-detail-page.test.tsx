@@ -8,9 +8,9 @@ describe('AgentDetailPage', () => {
   it("renders the agent's name, role, and assigned issues", async () => {
     const agent = db.agents[0]
     renderAtRoute(
-      '/:workspaceSlug/agents/:agentId',
+      '/w/:workspaceSlug/agents/:agentId',
       <AgentDetailPage slug={db.workspace.slug} />,
-      `/${db.workspace.slug}/agents/${agent.id}`,
+      `/w/${db.workspace.slug}/agents/${agent.id}`,
     )
 
     expect(await screen.findAllByText(agent.name)).not.toHaveLength(0)

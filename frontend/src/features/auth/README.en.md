@@ -6,7 +6,7 @@
 
 The only module in the frontend that knows who the user is and whether they are signed in. It:
 
-- completes login and logout through the gateway (`POST /auth/login` → redirect to the provider; `POST /auth/logout`), the one hand-written HTTP surface outside OpenAPI;
+- completes login and logout through the gateway (`GET /auth/providers` to learn which logins exist, `POST /auth/login` → redirect to the provider; `POST /auth/logout`), the one hand-written HTTP surface outside OpenAPI;
 - probes the session with `GET /api/v1/me` and exposes it as a `Session` (`loading` / `signed-out` / `unavailable` / `signed-in`);
 - owns the 401 policy: any request answered with 401 ends the session, so screens redirect to login instead of failing query by query;
 - provides the route gate `RequireSession` and the `LoginPage`.
@@ -17,10 +17,10 @@ It does not resolve tenants or spaces (`features/spaces`) and never holds a toke
 
 | File | Description |
 | --- | --- |
-| `api.ts` | `startLogin` (fetches `authorizationUrl`, then `navigateExternal`), `logoutSession`, `fetchSessionUser` (401 → `null`, anything else throws) |
+| `api.ts` | `fetchLoginProviders` (the gateway's provider list, filtered to `github` / `dev`), `startLogin` (fetches `authorizationUrl`, then `navigateExternal`), `logoutSession`, `fetchSessionUser` (401 → `null`, anything else throws) |
 | `session.tsx` | `SessionProvider` (session query + `onUnauthorized` subscription), `useSession`, the `Session` type, `SESSION_QUERY_KEY` |
 | `require-session.tsx` | `RequireSession`: renders nothing while loading; redirects a signed-out tab to `loginPath(current location)`; reports an unreachable backend in place |
-| `login-page.tsx` | A single "sign in with GitHub" button; `?returnTo=` is narrowed by `safeReturnTo`; a signed-in tab is redirected straight away |
+| `login-page.tsx` | One button per provider the gateway offers: "sign in with GitHub" and, on a local gateway with `login.development_provider`, "developer login" (the gateway's own form where any typed identity signs in); `?returnTo=` is narrowed by `safeReturnTo`; a signed-in tab is redirected straight away |
 | `auth.test.tsx` | Tests for all of the above |
 
 ## Dependency direction
@@ -34,7 +34,7 @@ May be consumed by: `main.tsx` (mounts `SessionProvider`), `routes.tsx`, layout 
 - `SessionProvider` is mounted exactly once, outside the router and inside the QueryClient.
 - `fetchSessionUser` treats only 401 as "signed out"; network errors and 5xx are `unavailable`, so `RequireSession` never mistakes them for a sign-out and never loses `returnTo` over them.
 - `signOut` calls the gateway first, then clears the cache: the session becomes null and every other query is removed, so the next member never sees the previous one's data.
-- The login page never builds a provider URL or parses a callback; that is the gateway's job.
+- The login page never builds a provider URL or parses a callback; that is the gateway's job. It also never decides on its own whether the developer login exists: the button appears only when `/auth/providers` lists `dev`, which the gateway allows solely on loopback development origins.
 
 ## Testing
 

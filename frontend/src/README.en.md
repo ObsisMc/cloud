@@ -11,7 +11,7 @@ Browser entry point and composition root. This layer only wires things together:
 | File | Description |
 | --- | --- |
 | `main.tsx` | Browser entry: starts MSW (for `/mock-api/*` only), creates the `QueryClient`, mounts `SessionProvider` and the router. No exports; not unit-tested. |
-| `routes.tsx` | Route table: `/login`, and `/onboarding` plus `/:workspaceSlug/*` behind `RequireSession`; `/` lands on `/onboarding`. |
+| `routes.tsx` | Route table: `/login`, and `/onboarding` plus `/w/:workspaceSlug/*` (under the reserved prefix, so workspace slugs never collide with top-level routes) behind `RequireSession`; `/` lands on `/onboarding`. |
 | `index.css` | Tailwind entry and design tokens (colors, radius). Global theme variables only; component styles live with components. |
 
 ## Submodules

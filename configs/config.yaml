@@ -15,13 +15,14 @@ logger:
 
 database:
   driver: "postgres"
+  # Locally overridden by CLOUD_DATABASE_DSN from .local/dev.env (`task setup`).
   dsn: "host=127.0.0.1 port=55432 user=postgres dbname=ora_test sslmode=disable"
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 1h
 auth:
   audience: "ora-cloud"
-  # Public keys of the local Gateway; generate them with `task dev:keys`. Production replaces
+  # Public keys of the local Gateway; generate them with `task setup` (config.toml). Production replaces
   # these entries with the deployment's keys; see docs/authentication.md.
   keys:
     - id: gateway-service-2026

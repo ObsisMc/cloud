@@ -14,8 +14,29 @@ import { navigateExternal } from '@/lib/navigation'
  * HTTP surface; everything else goes through the generated client.
  */
 
-/** Login providers the gateway is configured with. */
-export type LoginProvider = 'github'
+/**
+ * Login providers this frontend knows how to present. `github` is the real
+ * external login; `dev` is the gateway's development-only form, registered
+ * solely on loopback development origins, where any typed identity signs in.
+ */
+export type LoginProvider = 'github' | 'dev'
+
+const KNOWN_PROVIDERS: readonly LoginProvider[] = ['github', 'dev']
+
+/**
+ * Asks the gateway which logins it offers, so the sign-in screen shows
+ * exactly the buttons that can succeed (no GitHub button on a machine without
+ * an OAuth App, no developer login in production). Providers this build has
+ * no button for are dropped.
+ */
+export async function fetchLoginProviders(signal?: AbortSignal): Promise<LoginProvider[]> {
+  const { providers } = await customInstance<{ providers: string[] }>({
+    url: '/auth/providers',
+    method: 'GET',
+    signal,
+  })
+  return KNOWN_PROVIDERS.filter((known) => providers.includes(known))
+}
 
 /**
  * Starts an external login and leaves the page. The gateway validates

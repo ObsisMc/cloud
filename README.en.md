@@ -27,7 +27,7 @@ task check
 task test:race
 ```
 
-Each test creates an isolated PostgreSQL schema and cleans it up automatically. The test account requires CREATE SCHEMA permission. `task check/test/test:integration/test:race` sets `REQUIRE_POSTGRES=1`; without a real PostgreSQL configuration, these tasks fail instead of silently skipping tests. A direct `go test ./...` explicitly skips integration tests when PostgreSQL is not configured. Use `task test:unit` to run non-PostgreSQL tests separately.
+After `config.toml` and `task setup` the export is unnecessary: `.local/dev.env` provides `TEST_DATABASE_URL` to every task (a value already set in the shell wins). Each test creates an isolated PostgreSQL schema and cleans it up automatically. The test account requires CREATE SCHEMA permission. `task check/test/test:integration/test:race` sets `REQUIRE_POSTGRES=1`; without a real PostgreSQL configuration, these tasks fail instead of silently skipping tests. A direct `go test ./...` explicitly skips integration tests when PostgreSQL is not configured. Use `task test:unit` to run non-PostgreSQL tests separately.
 
 Race testing on Windows requires a working C compiler:
 
@@ -60,7 +60,15 @@ go run ./cmd/server -config /path/to/config.yaml
 
 The server only checks applied migrations and their checksums; it does not execute DDL. Database, migration, trust, or listen failures cause a non-zero exit. `GET /healthz` checks PostgreSQL reachability.
 
-Local end-to-end development (browser → Gateway → Cloud, see [Authentication Gateway](docs/gateway.md)): `task dev:keys` generates the Gateway private keys, the public keys Cloud trusts and the PKCE key under `.local/gateway/` (`configs/config.yaml` and `configs/gateway.yaml` already point there). Put your GitHub OAuth App client secret in `.local/gateway/github-client-secret`, register `http://localhost:5173/auth/callback/github` as the callback, then run `GATEWAY_GITHUB_CLIENT_ID=<client id> task dev` to start Cloud, the Gateway and the frontend together. A first-time user belongs to no tenant; the frontend guides them to create their first workspace.
+Local end-to-end development (browser → Gateway → Cloud, see [Authentication Gateway](docs/gateway.md)) needs no GitHub account: the Gateway ships a local-only developer login where any typed identity signs in. To exercise real GitHub login, create an OAuth App (callback `http://localhost:5173/auth/callback/github`) and fill in `[github]` in `config.toml`.
+
+```sh
+cp config.toml.template config.toml   # the defaults work as-is; [github] is optional. config.toml is ignored by Git
+task setup                            # keys, secret file, .local/dev.env, migrations; rerunnable
+task dev                              # Cloud :8080 + Gateway :8081 + frontend :5173
+```
+
+`task setup` ([cmd/devsetup](cmd/devsetup/README.en.md)) turns `config.toml` into the `CLOUD_*`/`GATEWAY_*` environment overrides the services already accept (`.local/dev.env`, which `Taskfile.yml` loads for every task and which also provides `TEST_DATABASE_URL`) and the client secret file the Gateway reads; `configs/*.yaml` remain the authoritative configuration. A first-time user belongs to no tenant; the frontend guides them to create their first workspace.
 
 Run the complete creation demo directly; it generates short-lived simulated signing keys independently and uses them only for in-process testing:
 

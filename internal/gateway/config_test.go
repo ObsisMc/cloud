@@ -70,7 +70,9 @@ func TestConfigDefaultsAndSessionLifetimeBounds(t *testing.T) {
 		{"upstream with path", func(c *Config) { c.Cloud.Upstream = "http://127.0.0.1:8080/api" }},
 		{"upstream without scheme", func(c *Config) { c.Cloud.Upstream = "127.0.0.1:8080" }},
 		{"missing pkce key", func(c *Config) { c.Login.PKCEKeyFile = "" }},
-		{"missing github client id", func(c *Config) { c.GitHub.ClientID = "" }},
+		{"no provider at all", func(c *Config) { c.GitHub.ClientID = "" }},
+		{"github client id without secret file", func(c *Config) { c.GitHub.ClientSecretFile = "" }},
+		{"development provider on a production origin", func(c *Config) { c.Login.DevelopmentProvider = true }},
 		{"missing user key id", func(c *Config) { c.Tokens.UserKeyID = "" }},
 		{"non-positive rate limit", func(c *Config) { c.Login.RateLimitPerMinute = -1 }},
 		{"zero cleanup batch", func(c *Config) { c.Session.CleanupBatch = -5 }},
@@ -84,6 +86,16 @@ func TestConfigDefaultsAndSessionLifetimeBounds(t *testing.T) {
 		if e := c.Validate(); e == nil {
 			t.Errorf("%s: expected validation failure", tc.name)
 		}
+	}
+
+	// The development provider alone is a complete login configuration, but only on a loopback
+	// development origin; GitHub then needs no client id.
+	devOnly := validConfig()
+	devOnly.Public = PublicConfig{BaseURL: "http://localhost:5173", Development: true}
+	devOnly.Login.DevelopmentProvider = true
+	devOnly.GitHub = GitHubConfig{}
+	if e := devOnly.applyDefaults(); e != nil {
+		t.Fatalf("development provider without GitHub must be valid on loopback: %v", e)
 	}
 }
 

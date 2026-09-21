@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom'
+import { createMemoryRouter, matchPath, MemoryRouter, RouterProvider } from 'react-router-dom'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { SessionProvider } from '@/features/auth/session'
 import { CurrentSpaceProvider } from '@/features/spaces/current-space'
+import { WORKSPACE_ROUTE_PATTERN } from '@/lib/paths'
 
 /** Fresh QueryClient per render so cached data never leaks between tests. */
 function newQueryClient() {
@@ -36,6 +37,14 @@ export function renderWithProviders(
 }
 
 /**
+ * The workspace slug the app router would read from `path`: the segment after
+ * the reserved `/w/` prefix, or `''` outside the workspace subtree.
+ */
+function slugOf(path: string): string {
+  return matchPath({ path: WORKSPACE_ROUTE_PATTERN, end: false }, path)?.params.workspaceSlug ?? ''
+}
+
+/**
  * Mounts `element` behind a real route match (`path`), so hooks like
  * `useParams` resolve from `initialPath` the way they do in the app router.
  */
@@ -45,7 +54,7 @@ export function renderAtRoute(path: string, element: ReactElement, initialPath: 
     <QueryClientProvider client={newQueryClient()}>
       <SessionProvider>
         <SidebarProvider>
-          <CurrentSpaceProvider slug={initialPath.split('/')[1] ?? ''}>
+          <CurrentSpaceProvider slug={slugOf(initialPath)}>
             <RouterProvider router={router} />
           </CurrentSpaceProvider>
         </SidebarProvider>

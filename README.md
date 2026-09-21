@@ -27,7 +27,7 @@ task check
 task test:race
 ```
 
-测试为每个用例建立独立 PG schema 并自动清理，测试账号需要 CREATE SCHEMA 权限。`task check/test/test:integration/test:race` 会设置 `REQUIRE_POSTGRES=1`；缺少真实 PG 配置会失败，不能静默跳过。直接 `go test ./...` 未配置 PG 时会显式跳过 integration，用 `task test:unit` 可单独运行非 PG 测试。
+配置过 `config.toml` 并执行 `task setup` 后不必再手工 export：`.local/dev.env` 会为每个 task 提供 `TEST_DATABASE_URL`（shell 中已有的值优先）。测试为每个用例建立独立 PG schema 并自动清理，测试账号需要 CREATE SCHEMA 权限。`task check/test/test:integration/test:race` 会设置 `REQUIRE_POSTGRES=1`；缺少真实 PG 配置会失败，不能静默跳过。直接 `go test ./...` 未配置 PG 时会显式跳过 integration，用 `task test:unit` 可单独运行非 PG 测试。
 
 Windows race 需要可用 C 编译器：
 
@@ -60,7 +60,15 @@ go run ./cmd/server -config /path/to/config.yaml
 
 server 只检查已执行迁移及 checksum，不执行 DDL；数据库、迁移、trust 或监听失败会非零退出。`GET /healthz` 检查 PG 可达性。
 
-本地联调（浏览器 → Gateway → Cloud，见 [认证 Gateway](docs/gateway.md)）：`task dev:keys` 在 `.local/gateway/` 生成 Gateway 私钥、Cloud 信任公钥与 PKCE 密钥（`configs/config.yaml` 与 `configs/gateway.yaml` 已指向这些路径）；把 GitHub OAuth App 的 client secret 写入 `.local/gateway/github-client-secret`，callback 登记为 `http://localhost:5173/auth/callback/github`，再 `GATEWAY_GITHUB_CLIENT_ID=<client id> task dev` 同时启动 Cloud、Gateway 与前端。首次登录的用户没有租户，前端会引导其创建第一个工作区。
+本地联调（浏览器 → Gateway → Cloud，见 [认证 Gateway](docs/gateway.md)）不需要 GitHub 账号：Gateway 自带仅限本地的开发者登录，输入任意身份即可进入。要测真实 GitHub 登录时再新建一个 OAuth App（callback 登记为 `http://localhost:5173/auth/callback/github`）并填进 `config.toml` 的 `[github]`。
+
+```sh
+cp config.toml.template config.toml   # 默认值即可用；[github] 可选。config.toml 被 Git 忽略
+task setup                            # 生成密钥、写入 secret 文件与 .local/dev.env、应用迁移，可重复执行
+task dev                              # Cloud :8080 + Gateway :8081 + 前端 :5173
+```
+
+`task setup`（[cmd/devsetup](cmd/devsetup/README.md)）把 `config.toml` 变成服务本来就接受的 `CLOUD_*`/`GATEWAY_*` 环境变量覆盖（`.local/dev.env`，`Taskfile.yml` 为每个 task 自动加载，也提供 `TEST_DATABASE_URL`）与 Gateway 读取的 client secret 文件；`configs/*.yaml` 仍是权威配置。首次登录的用户没有租户，前端会引导其创建第一个工作区。
 
 可直接运行完整创建演示（独立生成短期模拟签名密钥，仅限进程内测试）：
 

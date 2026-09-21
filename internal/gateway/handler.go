@@ -35,9 +35,10 @@ type Options struct {
 // Route paths of the authentication boundary. Everything under /api/v1 is proxied; /internal/v1
 // deliberately has no route and falls through to 404.
 const (
-	LoginPath  = "/auth/login"
-	LogoutPath = "/auth/logout"
-	ProxyPath  = "/api/v1/*path"
+	LoginPath     = "/auth/login"
+	LogoutPath    = "/auth/logout"
+	ProvidersPath = "/auth/providers"
+	ProxyPath     = "/api/v1/*path"
 	// maxBodyBytes matches Cloud's request body limit so the Gateway never relays more than Cloud accepts.
 	maxBodyBytes = 64 << 10
 )
@@ -69,6 +70,7 @@ func NewHandler(o *Options) (*gin.Engine, error) {
 	r := gin.New()
 	r.Use(h.recovery)
 	r.GET("/healthz", h.health)
+	r.GET(ProvidersPath, h.providers)
 	r.POST(LoginPath, h.login)
 	r.GET(o.Cookies.CallbackPath+"/:provider", h.callback)
 	r.POST(LogoutPath, h.logout)
@@ -117,6 +119,12 @@ func clientKey(r *http.Request) string {
 type loginRequest struct {
 	Provider string `json:"provider"`
 	ReturnTo string `json:"returnTo"`
+}
+
+// providers names the logins this deployment offers. It reveals nothing beyond what the sign-in
+// screen must show and takes no input, so it needs no origin proof.
+func (h *handler) providers(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"providers": h.Login.Providers()})
 }
 
 // login starts an external login. It is a same-origin JSON POST so it cannot be triggered by a
