@@ -1,6 +1,8 @@
+import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished } from 'vitest'
+import { AXIOS_INSTANCE } from '@/lib/api-client'
 import { installFakeHttp } from '@/test/http'
 import { renderWithProviders } from '@/test/render'
 import { useAuthStore } from '@/state/auth-store'
@@ -11,6 +13,14 @@ const SESSION = {
   user: { id: 'u1', displayName: 'Alice', subject: 'alice' },
   tenantId: 't1',
   tenantName: 'Acme',
+}
+
+/** Switches the login page into register mode and submits a valid name + email. */
+async function fillRegisterForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: '注册' }))
+  await user.type(screen.getByLabelText('姓名'), 'Alice')
+  await user.type(screen.getByLabelText('邮箱'), 'alice@example.com')
+  await user.click(screen.getByRole('button', { name: '注册' }))
 }
 
 describe('LoginPage', () => {
@@ -86,5 +96,88 @@ describe('LoginPage', () => {
     })
     renderWithProviders(<LoginPage />, { route: '/login' })
     expect(screen.queryByRole('heading', { name: '登录 Ora' })).not.toBeInTheDocument()
+  })
+
+  describe('register mode', () => {
+    it('LoginPageSwitchesToRegisterModeAndShowsNameAndEmailFields', async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<LoginPage />, { route: '/login' })
+
+      await user.click(screen.getByRole('button', { name: '注册' }))
+
+      expect(screen.getByLabelText('姓名')).toBeInTheDocument()
+      expect(screen.getByLabelText('邮箱')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '注册' })).toBeInTheDocument()
+    })
+
+    it('RegisterValidationErrorsVisible', async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<LoginPage />, { route: '/login' })
+
+      await user.click(screen.getByRole('button', { name: '注册' }))
+      await user.click(screen.getByRole('button', { name: '注册' }))
+
+      expect(await screen.findByText('请输入姓名。')).toBeInTheDocument()
+    })
+
+    it('DuplicateEmailShowsUserAlreadyExistsMessage', async () => {
+      installFakeHttp({ code: 'user_already_exists', params: {}, requestId: 'r' }, 409)
+      const user = userEvent.setup()
+      renderWithProviders(<LoginPage />, { route: '/login' })
+
+      await fillRegisterForm(user)
+
+      expect(await screen.findByText('该邮箱已经注册。')).toBeInTheDocument()
+      expect(useAuthStore.getState().tenantId).toBeNull()
+    })
+
+    it('RegisterSuccessStoresSessionAndNavigates', async () => {
+      installFakeHttp(SESSION)
+      const user = userEvent.setup()
+      renderWithProviders(<LoginPage />, { route: '/login' })
+
+      await fillRegisterForm(user)
+
+      await waitFor(() => {
+        expect(useAuthStore.getState().user?.displayName).toBe('Alice')
+        expect(useAuthStore.getState().tenantId).toBe('t1')
+      })
+    })
+
+    it('RegisterSubmitDisabledWhileLoading', async () => {
+      let resolve!: (value: AxiosResponse) => void
+      let requestConfig!: InternalAxiosRequestConfig
+      const adapter: AxiosAdapter = (config) => {
+        requestConfig = config
+        return new Promise<AxiosResponse>((res) => {
+          resolve = res
+        })
+      }
+      const { defaults } = AXIOS_INSTANCE
+      const previous = defaults.adapter
+      defaults.adapter = adapter
+      onTestFinished(() => {
+        if (previous === undefined) {
+          delete defaults.adapter
+        } else {
+          defaults.adapter = previous
+        }
+      })
+
+      const user = userEvent.setup()
+      renderWithProviders(<LoginPage />, { route: '/login' })
+
+      await fillRegisterForm(user)
+
+      expect(await screen.findByRole('button', { name: '注册中…' })).toBeDisabled()
+      resolve({
+        data: SESSION,
+        status: 200,
+        statusText: '',
+        headers: {},
+        config: requestConfig,
+      })
+      await waitFor(() => expect(useAuthStore.getState().tenantId).toBe('t1'))
+    })
   })
 })

@@ -11,6 +11,12 @@ interface LoginResponse {
   tenantName: string
 }
 
+/** Registration inputs; the edge server normalizes the email to lowercase+trimmed. */
+export interface RegisterInput {
+  name: string
+  email: string
+}
+
 /**
  * Signs the email in through the edge server, which provisions the identity into the
  * bootstrap tenant and sets the `ora_subject` session cookie (HttpOnly). The user JWT
@@ -21,6 +27,24 @@ export function useLogin() {
   return useMutation({
     mutationFn: async (email: string) => {
       const { data } = await AXIOS_INSTANCE.post<LoginResponse>('/auth/login', { email })
+      return data
+    },
+    onSuccess: ({ user, tenantId, tenantName }) => setSession({ user, tenantId, tenantName }),
+  })
+}
+
+/**
+ * Creates a new user identity (name + email) through the edge server. The edge
+ * provisions the identity into the bootstrap tenant, sets the `ora_subject`
+ * session cookie, and returns the same session shape as login, so the new user
+ * enters the app immediately. A duplicate email surfaces as a 409 the caller can
+ * read from the mutation error (`user_already_exists`).
+ */
+export function useRegister() {
+  const setSession = useAuthStore((s) => s.setSession)
+  return useMutation({
+    mutationFn: async (input: RegisterInput) => {
+      const { data } = await AXIOS_INSTANCE.post<LoginResponse>('/auth/register', input)
       return data
     },
     onSuccess: ({ user, tenantId, tenantName }) => setSession({ user, tenantId, tenantName }),

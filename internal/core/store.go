@@ -344,6 +344,55 @@ func (s *Store) EnsureMember(ctx context.Context, tid, source, subject, display 
 	})
 }
 
+// validEmail is a deliberately lightweight registration check: a single '@' with
+// non-empty local and domain parts and a dotted domain. It is not a full RFC 5322
+// validator — the system has no mailbox delivery to be strict about.
+func validEmail(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 512 {
+		return false
+	}
+	local, domain, ok := strings.Cut(s, "@")
+	if !ok || local == "" || domain == "" || strings.Contains(domain, "@") {
+		return false
+	}
+	dot := strings.LastIndexByte(domain, '.')
+	return dot > 0 && dot < len(domain)-1
+}
+
+// normalizeEmail folds an address to its canonical form: trimmed and lowercase,
+// so case-variant duplicates ("Alice@Example.com" vs "alice@example.com") collide
+// on the single (source,subject) identity row.
+func normalizeEmail(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+// RegisterIdentity strictly provisions a new user identity and its active
+// membership in the given tenant. Unlike EnsureMember it never reuses an existing
+// identity: a duplicate (source,subject) — after email normalization — is a
+// conflict (409 user_already_exists), not a silent login. It exists only for the
+// local development edge server's registration flow (cmd/ora-web); it is never a
+// public HTTP path. The created user holds only its own tenant membership; no
+// runtime workspace, project ownership, or collaboration-space membership is
+// granted by registration.
+func (s *Store) RegisterIdentity(ctx context.Context, tid, source, subject, name string) (Object, error) {
+	return s.transact(ctx, func(t *transaction) Object {
+		require(validID(tid), 400, "invalid_input")
+		require(source != "" && len(source) <= 128, 400, "invalid_input")
+		subject = normalizeEmail(subject)
+		require(validEmail(subject), 400, "invalid_email")
+		name = strings.TrimSpace(name)
+		require(name != "" && len(name) <= 200, 400, "name_required")
+		// The advisory lock keeps this check + insert atomic, so a concurrent
+		// duplicate cannot slip past the pre-check; the PK(source,subject) remains
+		// the final integrity guard.
+		require(t.one("SELECT user_id FROM user_identities WHERE source=$1 AND subject=$2", source, subject) == nil, 409, "user_already_exists")
+		id := newID()
+		t.exec("INSERT INTO users(id,display_name,status) VALUES($1,$2,'active')", id, name)
+		t.exec("INSERT INTO user_identities(user_id,source,subject) VALUES($1,$2,$3)", id, source, subject)
+		t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'member','active')", tid, id)
+		return t.one("SELECT * FROM users WHERE id=$1", id)
+	})
+}
+
 // ConfigureCredential is deliberately a deployment-only management path, never a public secret API.
 func (s *Store) ConfigureCredential(ctx context.Context, tid, owner, ref string) (Object, error) {
 	return s.transact(ctx, func(t *transaction) Object {

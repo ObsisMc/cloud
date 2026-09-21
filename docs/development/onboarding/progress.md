@@ -1,7 +1,7 @@
 # 开发进度（新员工向）
 
 一眼看清 Ora Cloud 目前**做到哪了、在进行什么、刻意没做什么**。更新于 **Wave 3B-2 Workflow
-Interaction Shell 实现并验证**之后：`@` 协作链路（Mention / Task / **Workflow Form Mode**）已端到端
+Interaction Shell 实现并验证 + User Registration 落地**之后：`@` 协作链路（Mention / Task / **Workflow Form Mode**）已端到端
 打通——`@Workflow → FormDescriptor → 动态表单 → 可选 AI Assist → Review → Confirm → IssueRun → mock
 执行 → Timeline`。契约与实现记录见
 [12-collab §38 / §38.37](../../migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen)，
@@ -11,6 +11,13 @@ Interaction Shell 实现并验证**之后：`@` 协作链路（Mention / Task / 
 > `workspace合并`（main 只读、SHA 不变）；Issues 迁移前移重编号 **0005→0006 … 0009→0010** 以保持上游编号稳定；
 > 前端认证/会话基座 = ora-web cookie 会话（决策 D-Auth=A）。记录见
 > [workspace-integration-stage-a.md](../../migrations/workspace-integration-stage-a.md)。
+>
+> **2026-09-21 — User Registration**：登录页「注册」入口落地 —— `POST /auth/register` 创建 User Identity
+> （姓名 + 邮箱），邮箱 trim + lowercase 大小写不敏感唯一，重复 `409 user_already_exists`，注册成功直接进入
+> 既有 current-user 流程；**AUTHENTICATION NOT FULLY IMPLEMENTED · WORKSPACE ADD MEMBER NOT
+> IMPLEMENTED — NEXT STEP · PROJECT SHARING NOT IMPLEMENTED**。ADR：
+> `specs/decisions/cloud/identity-access/0-user-registration.md`；记录见
+> [user-registration.md](../../migrations/user-registration.md)。
 
 图例：✅ 已完成 · 🚧 进行中 · 🧭 规划中（仅架构方案，未编码） · ⏸️ 刻意暂缓 · ❌ 未开始
 
@@ -25,6 +32,24 @@ Interaction Shell 实现并验证**之后：`@` 协作链路（Mention / Task / 
 | 异步操作（operation） | ✅ | 持久化、可重试、分步推进 |
 | 幂等 + 乐观并发 | ✅ | Idempotency-Key + version |
 | 真实节点 / 沙箱 / 存储 | ⏸️ | 目前用内存模拟器（`internal/simulator`）；生产 Substrate 是后续阶段 |
+
+## 身份与会话 — User Registration ✅ IMPLEMENTED
+
+注册 = **创建 User Identity**（姓名 + 邮箱 → 会话 → 进入既有 current-user 流程），不是密码认证系统。
+ADR：`specs/decisions/cloud/identity-access/0-user-registration.md`（SD1–SD5）；记录见
+[user-registration.md](../../migrations/user-registration.md)。
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| `POST /auth/register`（ora-web 边界） | ✅ | `{name, email}` → 建 user + identity + 租户普通成员 → 设置 `ora_subject` cookie → 返回登录同构响应 |
+| 邮箱规范化 / 大小写不敏感唯一 | ✅ | trim + lowercase；`Alice@Example.com` == `alice@example.com`；`user_identities(PK(source,subject))` 兜底 |
+| 重复邮箱 | ✅ | 稳定 `409 user_already_exists`（精确 + 大小写变体），不静默复用 |
+| 非法邮箱 / 空姓名 | ✅ | `400 invalid_email` / `400 name_required`（轻量门：非 @ 结构 / 空名） |
+| 前端注册模式 | ✅ | 既有 Login 页（Stage D 样式未动）加「注册」切换：姓名 + 邮箱；「该邮箱已经注册。」可见；成功即进 `/default/projects` |
+| 测试 | ✅ | 后端集成 6 用例 + 前端 5 用例全通过；HTTP smoke 通过 |
+| **AUTHENTICATION** | ❌ **NOT FULLY IMPLEMENTED** | `/auth/login` 仍是「任意 email 即登录」，无密码/凭据/OAuth/SSO |
+| **WORKSPACE ADD MEMBER** | ❌ **NOT IMPLEMENTED — NEXT STEP** | 无向 Workspace 添加成员 / 租户成员 enrollment UI / Add Employee |
+| **PROJECT SHARING** | ❌ **NOT IMPLEMENTED** | 无项目分享 |
 
 ## Issue 看板（迁移自 Multica）
 

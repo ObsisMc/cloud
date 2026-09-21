@@ -155,6 +155,35 @@ func run() error {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 
+	// Registration creates a new user identity (name + email) and signs them straight
+	// into the same session the login flow uses, so the new user enters the
+	// current-user flow without a second step. A duplicate email is a 409, not a
+	// silent login. It provisions no password, workspace membership, or project
+	// ownership — registration is account creation only.
+	mux.HandleFunc("POST /auth/register", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Name  string `json:"name"`
+			Email string `json:"email"`
+		}
+		if e := json.NewDecoder(r.Body).Decode(&body); e != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		subject := normalizeEmail(body.Email)
+		u, e := store.RegisterIdentity(ctx, tid, identitySource, subject, body.Name)
+		if e != nil {
+			fault := core.ErrorCode(e)
+			writeJSON(w, fault.Status, map[string]any{"code": fault.Code, "params": fault.Params, "requestId": ""})
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: subject, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int((24 * time.Hour).Seconds())})
+		writeJSON(w, 200, map[string]any{
+			"user":       map[string]any{"id": u.S("id"), "displayName": u.S("displayName"), "subject": subject},
+			"tenantId":   tid,
+			"tenantName": tenant.S("name"),
+		})
+	})
+
 	// API proxy: inject the two credentials the router requires and forward in-process.
 	proxy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gw, e := signGateway()
@@ -238,6 +267,12 @@ func normalizeSubject(email string) string {
 	}
 	return s
 }
+
+// normalizeEmail is the registration variant of normalizeSubject: it folds the
+// address to lowercase+trimmed (so case variants are one identity) but, unlike
+// login, keeps an empty value empty — registration must reject it, not fall back
+// to the "demo" bootstrap.
+func normalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
 func displayName(subject string) string {
 	if i := strings.IndexByte(subject, '@'); i > 0 {
