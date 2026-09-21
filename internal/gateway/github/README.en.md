@@ -6,7 +6,7 @@
 
 ## Behavior
 
-- `AuthorizationURL`: carries `client_id`, the fixed `redirect_uri`, the orchestration-generated `state` and `code_challenge` (`S256`), and `allow_signup=false`; no scope is requested.
+- `AuthorizationURL`: carries `client_id`, the fixed `redirect_uri`, the orchestration-generated `state` and `code_challenge` (`S256`), `allow_signup=false` and `prompt=select_account` (forces GitHub's account picker; otherwise GitHub silently reuses the browser's current github.com session and a different account can never sign in); no scope is requested.
 - `Exchange`: redeems `code` with `code_verifier`, `client_secret`, and `redirect_uri` at the token endpoint (GitHub enforces the verifier once a challenge was sent), then calls `GET /user` and discards the token immediately.
 - Identity normalization: `source` defaults to `github.com` (configure the host for GitHub Enterprise Server), `subject` is the decimal string of the numeric `id`, `displayName` is the non-empty `name` or else `login`. A missing, non-numeric, or non-positive `id` fails the login.
 - Failure classification: GitHub error objects (even with HTTP 200), non-`bearer` tokens, non-200 user responses, and responses over 64 KiB or with malformed JSON are `gateway.ErrProviderRejected`; network, timeout, and cancellation errors are infrastructure failures, letting the orchestration distinguish "login failed" from "login unavailable".
