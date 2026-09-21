@@ -10,6 +10,8 @@ import { setCloudSession, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-ses
 import { server } from '@/test/msw-server'
 import { renderWithProviders } from '@/test/render'
 
+const MEMBERS_KEY = `/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members`
+
 const ALICE_ID = '33333333-3333-3333-3333-333333333333'
 const BOB_ID = '44444444-4444-4444-4444-444444444444'
 
@@ -54,6 +56,29 @@ function installSpaceHandlers(role: string, members: unknown[]) {
   )
 }
 
+/**
+ * Renders the members page for an owner session (Alice as owner), waits for the
+ * list to load, and opens the add-member dialog. Returns the user-event instance
+ * so the test can drive the dialog further.
+ */
+async function renderOwnerWithAddDialog() {
+  installSpaceHandlers('owner', [memberRow(ALICE_ID, 'Alice', 'owner')])
+  const user = userEvent.setup()
+  renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+  await screen.findByText('Alice')
+  await user.click(screen.getByRole('button', { name: '添加成员' }))
+  return user
+}
+
+/** Types an email into the open add-member dialog and submits the add. */
+async function typeAndSubmitEmail(
+  user: ReturnType<typeof userEvent.setup>,
+  email: string,
+): Promise<void> {
+  await user.type(screen.getByLabelText('成员邮箱'), email)
+  await user.click(screen.getByRole('button', { name: '添加' }))
+}
+
 describe('MembersPage', () => {
   beforeEach(() => {
     setCloudSession()
@@ -73,33 +98,79 @@ describe('MembersPage', () => {
     expect(await screen.findByText('Alice')).toBeInTheDocument()
     expect(await screen.findByText('Bob')).toBeInTheDocument()
     expect(screen.getByText('所有者')).toBeInTheDocument()
-    // Members are read-only: no add form, no role selectors, no action column.
-    expect(screen.queryByLabelText('新成员 userId')).not.toBeInTheDocument()
+    // Members are read-only: no add-member trigger, no role selectors, no action column.
+    expect(screen.queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Bob 的角色')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '禁用' })).not.toBeInTheDocument()
   })
 
-  it('lets an owner add a member through the upsert API', async () => {
-    installSpaceHandlers('owner', [memberRow(ALICE_ID, 'Alice', 'owner')])
-    let putBody: unknown = null
+  it('shows the add-member dialog for an owner and adds by email through the API', async () => {
+    let postBody: unknown = null
+    let idempotencyKey = ''
     server.use(
-      http.put(
-        `/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members/:uid`,
-        async ({ request }) => {
-          putBody = await request.json()
-          return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
-        },
+      http.post(MEMBERS_KEY, async ({ request }) => {
+        postBody = await request.json()
+        idempotencyKey = request.headers.get('Idempotency-Key') ?? ''
+        return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
+      }),
+    )
+    const user = await renderOwnerWithAddDialog()
+    expect(screen.getByLabelText('成员邮箱')).toBeInTheDocument()
+
+    await typeAndSubmitEmail(user, 'bob@example.com')
+
+    await waitFor(() => expect(postBody).not.toBeNull())
+    expect(postBody).toEqual({ email: 'bob@example.com' })
+    // POST must carry a non-empty idempotency key so retries dedupe.
+    expect(idempotencyKey.length).toBeGreaterThan(0)
+    // The dialog closes on success.
+    await waitFor(() => expect(screen.queryByLabelText('成员邮箱')).not.toBeInTheDocument())
+  })
+
+  it('rejects an empty or malformed email with a local hint', async () => {
+    let posted = false
+    server.use(
+      http.post(MEMBERS_KEY, async () => {
+        posted = true
+        return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
+      }),
+    )
+    const user = await renderOwnerWithAddDialog()
+
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    expect(await screen.findByText('请输入邮箱地址。')).toBeInTheDocument()
+    expect(posted).toBe(false)
+
+    await typeAndSubmitEmail(user, 'not-an-email')
+    expect(await screen.findByText('请输入有效的邮箱地址。')).toBeInTheDocument()
+    expect(posted).toBe(false)
+  })
+
+  it('shows the not-registered hint when the backend rejects an unknown email', async () => {
+    server.use(
+      http.post(MEMBERS_KEY, () =>
+        HttpResponse.json(
+          { code: 'user_not_registered', params: {}, requestId: 'r' },
+          { status: 404 },
+        ),
       ),
     )
-    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
-    const user = userEvent.setup()
+    const user = await renderOwnerWithAddDialog()
 
-    expect(await screen.findByText('Alice')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('新成员 userId'), BOB_ID)
-    await user.click(screen.getByRole('button', { name: '添加' }))
+    await typeAndSubmitEmail(user, 'ghost@example.com')
 
-    await waitFor(() => expect(putBody).not.toBeNull())
-    expect(putBody).toEqual({ role: 'member', status: 'active', version: 0 })
+    expect(await screen.findByText('该邮箱尚未注册，请先完成注册。')).toBeInTheDocument()
+    // The dialog stays open so the actor can correct the address.
+    expect(screen.getByLabelText('成员邮箱')).toBeInTheDocument()
+  })
+
+  it('closes the dialog when re-adding an existing member succeeds (idempotent)', async () => {
+    server.use(http.post(MEMBERS_KEY, () => HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))))
+    const user = await renderOwnerWithAddDialog()
+
+    await typeAndSubmitEmail(user, 'bob@example.com')
+
+    await waitFor(() => expect(screen.queryByLabelText('成员邮箱')).not.toBeInTheDocument())
   })
 
   it('keeps the demo store table for mock sessions', async () => {
@@ -108,6 +179,6 @@ describe('MembersPage', () => {
     const first = db.users[0]
     if (!first) throw new Error('seed users must not be empty')
     expect(await screen.findByText(first.name)).toBeInTheDocument()
-    expect(screen.queryByLabelText('新成员 userId')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
   })
 })

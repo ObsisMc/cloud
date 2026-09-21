@@ -54,6 +54,9 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 		case r.SpaceID != "" && r.UserID != "" && r.Method == "PUT":
 			out = putSpaceMember(t, r, uid)
 			events = append(events, SpaceEvent{Type: "space.member_updated", SpaceID: r.SpaceID})
+		case r.SpaceID != "" && r.UserID == "" && strings.HasSuffix(r.Path, "/members") && r.Method == "POST":
+			out = enrollSpaceMemberByEmail(t, r, uid)
+			events = append(events, SpaceEvent{Type: "space.member_updated", SpaceID: r.SpaceID})
 		case r.SpaceID == "" && strings.HasSuffix(r.Path, "/spaces") && r.Method == "POST":
 			out = createSpace(t, r, uid)
 		case r.SpaceID != "" && r.Method == "PATCH":

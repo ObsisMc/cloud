@@ -1,9 +1,15 @@
-import { useQuery } from '@tanstack/react-query'
-import type { SpaceMemberListItem } from '@/api/generated.schemas'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { Error as ApiError, SpaceMember, SpaceMemberListItem } from '@/api/generated.schemas'
+import { AXIOS_INSTANCE, type ErrorType } from '@/lib/api-client'
 import { useCurrentSpace } from '@/features/spaces/current-space'
-import { useSpaceMembers } from '@/features/spaces/api'
+import { mutationHeaders, useIdempotencyKeys, useSpaceMembers } from '@/features/spaces/api'
 import { mockApi } from '@/lib/mock-api-client'
 import type { User, WorkspaceMember } from '@/mocks/data/types'
+
+/** Add-by-email inputs; the backend resolves and normalizes the address. */
+export interface AddMemberByEmailInput {
+  email: string
+}
 
 export type MemberWithUser = User &
   Pick<WorkspaceMember, 'role' | 'status' | 'joinedAt'> & {
@@ -86,4 +92,33 @@ export function useMembers(slug: string): {
     }
   }
   return { data: mock.data, isPending: mock.isPending, isError: mock.isError }
+}
+
+/**
+ * Adds an already-registered user to the space as a plain member by email. The
+ * backend resolves the address in the caller's identity source (404
+ * `user_not_registered` when unknown), atomically ensures tenant membership, and
+ * returns the membership — idempotent for an existing member. The POST requires
+ * an `Idempotency-Key`, so one logical add reuses a single key across retries.
+ * The membership list is invalidated on success so the new row appears
+ * immediately.
+ */
+export function useAddSpaceMemberByEmail(tenantId: string, spaceId: string) {
+  const queryClient = useQueryClient()
+  const keyFor = useIdempotencyKeys()
+  return useMutation<SpaceMember, ErrorType<ApiError>, AddMemberByEmailInput>({
+    mutationFn: async (input: AddMemberByEmailInput) => {
+      const { data } = await AXIOS_INSTANCE.post<SpaceMember>(
+        `/api/v1/tenants/${tenantId}/spaces/${spaceId}/members`,
+        { email: input.email },
+        { headers: mutationHeaders(keyFor(input)) },
+      )
+      return data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [`/api/v1/tenants/${tenantId}/spaces/${spaceId}/members`],
+      })
+    },
+  })
 }

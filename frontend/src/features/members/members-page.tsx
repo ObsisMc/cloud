@@ -1,9 +1,16 @@
 import { format } from 'date-fns'
 import { useState } from 'react'
 import { ActorAvatar } from '@/components/common/actor-avatar'
+import { DialogFormField } from '@/components/common/dialog-form-field'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -20,7 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useMembers, type MemberWithUser } from '@/features/members/api'
+import { useAddSpaceMemberByEmail, useMembers, type MemberWithUser } from '@/features/members/api'
 import { normalizeSpaceRole, useUpdateSpaceMember, type SpaceRole } from '@/features/spaces/api'
 import { useCurrentSpace } from '@/features/spaces/current-space'
 
@@ -128,57 +135,87 @@ function MemberStatusCells({ member }: { member: MemberWithUser }) {
   )
 }
 
-/** Adds a member by their local user id; the backend rejects non-tenant users. */
-function AddMemberForm({
-  onSubmit,
-  pending,
-  canGrantOwner,
+/**
+ * Dialog for adding an already-registered user to the space by email. Only
+ * admin/owner actors see the trigger; the new member is always created with the
+ * fixed `member` role (role management is out of scope). The dialog closes on
+ * success and the membership list refreshes via query invalidation. An unknown
+ * email surfaces the backend `user_not_registered` fault as a friendly hint.
+ */
+function AddMemberDialog({
+  open,
+  onOpenChange,
+  tenantId,
+  spaceId,
 }: {
-  onSubmit: (input: { userId: string; role: SpaceRole }) => void
-  pending: boolean
-  canGrantOwner: boolean
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  tenantId: string
+  spaceId: string
 }) {
-  const [userId, setUserId] = useState('')
-  const [role, setRole] = useState<SpaceRole>('member')
+  const [email, setEmail] = useState('')
+  const [attempted, setAttempted] = useState(false)
+  const addMember = useAddSpaceMemberByEmail(tenantId, spaceId)
+  const errorCode = addMember.error?.response?.data?.code
+
+  // Local validation only: empty or malformed addresses stop before the request.
+  // `attempted` gates the hints so a pristine field stays quiet until first submit.
+  let localHint: string | undefined
+  if (attempted && email.trim() === '') {
+    localHint = '请输入邮箱地址。'
+  } else if (attempted && !email.includes('@')) {
+    localHint = '请输入有效的邮箱地址。'
+  }
+  let serverHint: string | undefined
+  if (errorCode === 'user_not_registered') {
+    serverHint = '该邮箱尚未注册，请先完成注册。'
+  } else if (errorCode === 'space_role_required') {
+    serverHint = '你没有权限添加成员。'
+  } else if (errorCode) {
+    serverHint = `添加失败：${errorCode}`
+  }
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (userId.trim() === '' || pending) return
-        onSubmit({ userId: userId.trim(), role })
-        setUserId('')
-      }}
-      className="mb-4 flex items-end gap-2"
-    >
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <p className="text-xs text-muted-foreground">成员 userId（UUID，先经 /me 建号）</p>
-        <Input
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          placeholder="xxxxxxxx-xxxx-…"
-          aria-label="新成员 userId"
-        />
-      </div>
-      <Select
-        value={role}
-        onValueChange={(value) => setRole(normalizeSpaceRole(value ?? 'member'))}
-      >
-        <SelectTrigger className="w-28" aria-label="新成员角色">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {roleOptions(canGrantOwner).map((option) => (
-            <SelectItem key={option} value={option}>
-              {ROLE_LABELS[option]}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Button type="submit" disabled={pending}>
-        添加
-      </Button>
-    </form>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>添加成员</DialogTitle>
+          <DialogDescription>输入已注册用户的邮箱，将其添加为普通成员。</DialogDescription>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!attempted) setAttempted(true)
+            if (email.trim() === '' || !email.includes('@') || addMember.isPending) return
+            addMember.mutate(
+              { email: email.trim() },
+              {
+                onSuccess: () => {
+                  onOpenChange(false)
+                  setEmail('')
+                  setAttempted(false)
+                },
+              },
+            )
+          }}
+          noValidate
+          className="space-y-4"
+        >
+          <DialogFormField
+            id="new-member-email"
+            label="成员邮箱"
+            value={email}
+            onChange={setEmail}
+            placeholder="member@example.com"
+            hint={localHint ?? serverHint}
+            required
+          />
+          <Button type="submit" className="w-full" disabled={addMember.isPending}>
+            {addMember.isPending ? '添加中…' : '添加'}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -199,6 +236,7 @@ function CloudMembersView({
   isPending: boolean
   myRole: SpaceRole
 }) {
+  const [addOpen, setAddOpen] = useState(false)
   const updateMember = useUpdateSpaceMember(tenantId, spaceId)
   const canManage = myRole === 'admin' || myRole === 'owner'
   const errorCode = updateMember.error?.response?.data?.code
@@ -210,13 +248,17 @@ function CloudMembersView({
   return (
     <div className="p-4">
       {canManage && (
-        <AddMemberForm
-          pending={updateMember.isPending}
-          canGrantOwner={myRole === 'owner'}
-          onSubmit={({ userId, role }) =>
-            updateMember.mutate({ userId, role, status: 'active', version: 0 })
-          }
-        />
+        <>
+          <div className="mb-4">
+            <Button onClick={() => setAddOpen(true)}>添加成员</Button>
+            <AddMemberDialog
+              open={addOpen}
+              onOpenChange={setAddOpen}
+              tenantId={tenantId}
+              spaceId={spaceId}
+            />
+          </div>
+        </>
       )}
       {errorCode && <p className="mb-3 text-xs text-destructive">操作失败：{errorCode}</p>}
       {isPending && (

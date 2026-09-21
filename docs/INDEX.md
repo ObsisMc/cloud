@@ -28,6 +28,7 @@ docs/
     workspace-integration-stage-d-coworker-login-workspace.md ← Stage D：同事 Login + Workspace UX 恢复 + SD1–SD7（COMPLETE）
     workspace-integration-stage-d-report.md ← Stage D 最终报告（§38：恢复内容、作用域矩阵、结论）
     user-registration.md              ← User Registration：创建 User Identity（SD1–SD5，IMPLEMENTED）
+    workspace-membership.md           ← Workspace Add Member：email 添加已注册用户（SD1–SD6，IMPLEMENTED）
   acceptance.md                 ← product acceptance criteria (pre-existing)
   authentication.md             ← auth model (pre-existing)
   core-contract.md              ← core behavioural contract (pre-existing)
@@ -51,6 +52,7 @@ docs/
 | **Workspace integration (Stage B)** | [workspace-integration-stage-b.md](migrations/workspace-integration-stage-b.md) | Collaboration Space integration into the merged tree + ADR: decisions D1–D7 (owner authorization, optional Space association, terminology, routing, session, isolation, default-Space protection) |
 | **Workspace integration (Stage D)** | [workspace-integration-stage-d-coworker-login-workspace.md](migrations/workspace-integration-stage-d-coworker-login-workspace.md) | coworker Login + Workspace UX restoration + ADR: SD1–SD7 (product shell, ora-web cookie session, two-plane login, tenant-scoped Issues, space-scoped Projects, switch semantics, demo-mode gating) — **COMPLETE** |
 | **User Registration** | [user-registration.md](migrations/user-registration.md) | create a User Identity (name + email) at the ora-web boundary → session → current-user flow. ADR: SD1–SD5 (ora-web `POST /auth/register`, strict-create store, email trim+lowercase case-insensitive uniqueness, register mode in the existing Login page) — **IMPLEMENTED**; AUTHENTICATION not fully implemented, WORKSPACE ADD MEMBER / PROJECT SHARING not implemented |
+| **Workspace Add Member** | [workspace-membership.md](migrations/workspace-membership.md) | owner/admin adds an already-registered user to a Collaboration Space by email (`POST /spaces/:sid/members`); atomic tenant+space enrollment in one tx, fixed `member` role, idempotent existing-member return, 404 `user_not_registered` for unknown email. ADR: SD1–SD6 (enrollment endpoint, atomic dual-write, fixed role, dispatch/routing, email dialog frontend, **Workspace Membership ≠ Project Access**) — **IMPLEMENTED**; PROJECT SHARING / EMAIL INVITATION not implemented |
 | **How to add code** | [agent/adding-features.md](development/agent/adding-features.md) | endpoint / sub-resource how-to + verify |
 
 ## Repo layout (one glance)
@@ -99,8 +101,16 @@ docs/
   uniqueness (`Alice@Example.com` == `alice@example.com`), stable `409 user_already_exists`,
   and register mode in the existing Login page → new user enters the current-user flow directly.
   Registration is **account creation only** — AUTHENTICATION not fully implemented,
-  WORKSPACE ADD MEMBER / PROJECT SHARING not implemented (see
+  PROJECT SHARING not implemented (see
   [user-registration.md](migrations/user-registration.md)).
+- ✅ **Workspace Add Member** — owner/admin adds an already-registered user to a Collaboration Space by
+  email (`POST /spaces/:sid/members`, SD1–SD6): atomic tenant+space enrollment in one tx (no
+  half-state), fixed `member` role, idempotent existing-member return, 404 `user_not_registered` for
+  unknown/inactive email, business-level role enforcement (owner/admin 200, member 403). The new member
+  sees and can switch to the Workspace after refresh, but **Workspace Membership ≠ Project Access**:
+  owner isolation is preserved (the new member cannot see/open another owner's Projects — expected
+  behavior). PROJECT SHARING / EMAIL INVITATION not implemented (see
+  [workspace-membership.md](migrations/workspace-membership.md)).
 - 🧭 Planned — **Wave 3C** (Issue Detail & Collaboration UI). Real Agent/Team/Workflow modules are
   **blocked on external design**.
 - ⏸️ Deferred: attachments, issue↔project binding, PR links, realtime, bots/squads, Autopilot.

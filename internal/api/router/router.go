@@ -93,6 +93,7 @@ func Routes() []Route {
 		{"PATCH", "/api/v1/tenants/:tid/spaces/:spaceId", "", []string{"name", "description", "version"}},
 		{"DELETE", "/api/v1/tenants/:tid/spaces/:spaceId", "", []string{"version"}},
 		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/members", "", nil},
+		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/members", "", []string{"email"}},
 		{"PUT", "/api/v1/tenants/:tid/spaces/:spaceId/members/:uid", "", []string{"role", "status", "version"}},
 		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/projects", "", nil},
 		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},

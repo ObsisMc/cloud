@@ -14,10 +14,17 @@ Interaction Shell 实现并验证 + User Registration 落地**之后：`@` 协�
 >
 > **2026-09-21 — User Registration**：登录页「注册」入口落地 —— `POST /auth/register` 创建 User Identity
 > （姓名 + 邮箱），邮箱 trim + lowercase 大小写不敏感唯一，重复 `409 user_already_exists`，注册成功直接进入
-> 既有 current-user 流程；**AUTHENTICATION NOT FULLY IMPLEMENTED · WORKSPACE ADD MEMBER NOT
-> IMPLEMENTED — NEXT STEP · PROJECT SHARING NOT IMPLEMENTED**。ADR：
-> `specs/decisions/cloud/identity-access/0-user-registration.md`；记录见
+> 既有 current-user 流程；**AUTHENTICATION NOT FULLY IMPLEMENTED · PROJECT SHARING NOT
+> IMPLEMENTED**。ADR：`specs/decisions/cloud/identity-access/0-user-registration.md`；记录见
 > [user-registration.md](../../migrations/user-registration.md)。
+>
+> **2026-09-21 — Workspace Add Member**：Workspace 管理界面「添加成员」落地 —— owner/admin 用 email 把
+> **已注册用户**添加为普通成员（`POST /spaces/:sid/members`），原子双写（同一事务 ensure 租户成员 +
+> 空间成员），新成员固定 `member`、重复添加幂等返回 existing、未知邮箱 `404 user_not_registered`；
+> 新成员 refresh/re-enter 后能在 selector 看到并切换该 Workspace，但 **Workspace Membership ≠ Project
+> Access**（owner 隔离保留）。**PROJECT SHARING / EMAIL INVITATION NOT IMPLEMENTED**。ADR：
+> `specs/decisions/cloud/collaboration-workspace/20260921-workspace-add-member.md`；记录见
+> [workspace-membership.md](../../migrations/workspace-membership.md)。
 
 图例：✅ 已完成 · 🚧 进行中 · 🧭 规划中（仅架构方案，未编码） · ⏸️ 刻意暂缓 · ❌ 未开始
 
@@ -48,8 +55,31 @@ ADR：`specs/decisions/cloud/identity-access/0-user-registration.md`（SD1–SD5
 | 前端注册模式 | ✅ | 既有 Login 页（Stage D 样式未动）加「注册」切换：姓名 + 邮箱；「该邮箱已经注册。」可见；成功即进 `/default/projects` |
 | 测试 | ✅ | 后端集成 6 用例 + 前端 5 用例全通过；HTTP smoke 通过 |
 | **AUTHENTICATION** | ❌ **NOT FULLY IMPLEMENTED** | `/auth/login` 仍是「任意 email 即登录」，无密码/凭据/OAuth/SSO |
-| **WORKSPACE ADD MEMBER** | ❌ **NOT IMPLEMENTED — NEXT STEP** | 无向 Workspace 添加成员 / 租户成员 enrollment UI / Add Employee |
 | **PROJECT SHARING** | ❌ **NOT IMPLEMENTED** | 无项目分享 |
+
+## Workspace Add Member — 用 email 添加已注册用户 ✅ IMPLEMENTED
+
+owner/admin 在 Workspace 管理界面用 email 把**已注册用户**添加为普通成员；成员列表立即出现该用户，
+该用户 refresh/re-enter 后能在 Workspace selector 看到并切换。**硬约束：Workspace Membership ≠ Project
+Access**（owner 隔离保留：新成员可见/可切换 Workspace，但看不到/打不开其他 owner 的 Project）。
+ADR：`specs/decisions/cloud/collaboration-workspace/20260921-workspace-add-member.md`（SD1–SD6）；
+记录见 [workspace-membership.md](../../migrations/workspace-membership.md)。
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| `POST /spaces/:sid/members`（email 添加） | ✅ | `{email}` → 严格 `users JOIN user_identities`（source=调用者身份源、subject=normalizeEmail）解析；未知/非 active → `404 user_not_registered`（不建号、不邀请、无 pending） |
+| 原子双写 | ✅ | 同一事务先 ensure 租户成员（`ON CONFLICT DO NOTHING` 保留原角色）再建空间成员，无半状态 |
+| 角色门 | ✅ | 业务级强制（后端检查，非仅隐藏按钮）：owner/admin 可添加；member → `403 space_role_required` |
+| 新成员固定 `member` | ✅ | request 不接受 owner/admin；角色调整仍走既有 `PUT /members/:uid` |
+| 重复添加幂等 | ✅ | 返回 existing membership（200，不改 role/status/version，count 仍 1） |
+| Idempotency-Key | ✅ | POST 自动继承；前端 mutation 生成/复用 key 防重放 |
+| 前端添加成员 Dialog | ✅ | 邮箱输入 + 本地校验（空/非法提示）+ 服务端 `user_not_registered` →「该邮箱尚未注册，请先完成注册。」；成功关 dialog + 列表刷新；触发器仅 owner/admin 可见 |
+| Selector 反射新 Workspace | ✅ | refresh/re-enter = 新页面加载 → 内存缓存重取 `/spaces`，selector 出现并可切换；未重写 Current Workspace provider |
+| **Project owner 隔离** | ✅ **PASS** | B 加入 W 后 `/spaces/:sid/projects` 为空、`/projects/:pid` 404、`/workspaces/:wid` 404（预期行为，非 bug） |
+| 测试 | ✅ | 后端集成 8 用例 + 前端 7 用例全通过；HTTP smoke 通过（A/B 双用户） |
+| **PROJECT SHARING** | ❌ **NOT IMPLEMENTED — NEXT STEP** | 项目级分享/授权不在本期 |
+| **EMAIL INVITATION** | ❌ **NOT IMPLEMENTED** | 只接受已注册用户，无邀请邮件/pending/自动建号 |
+| **WORKSPACE MEMBER AUTO-PROJECT ACCESS** | ⛔ **DISABLED BY DESIGN** | 空间成员身份不派生任何 Project visibility |
 
 ## Issue 看板（迁移自 Multica）
 
@@ -251,6 +281,8 @@ Query），从参考项目 `cloud前端/` 迁移而来，API 层由 orval 从 `a
 | 最近 | **Wave 3B-1 协作交互地基**（migration `0008`：`@` 协作端到端链路 + mock 执行） |
 | 最近 | **Wave 3B-2 设计冻结**（仅文档：§38 Issues-facing 契约 + 规划 `0009`） |
 | 最近 | **Wave 3B-2 Workflow Interaction Shell 实现**（migration `0009`：FormDescriptor + 动态表单 + AI Assist + Confirm → IssueRun + Timeline） |
+| 最近 | **User Registration**（`POST /auth/register` 创建 User Identity + 会话） |
+| 最近 | **Workspace Add Member**（email 添加已注册用户到协作空间；Workspace Membership ≠ Project Access） |
 | 下一步 | **3C**（Issue Detail & Collaboration UI）；生产 Substrate / 看板分页与全文搜索 / 实时推送；真实 Agent/Team/Workflow/AI provider（BLOCKED ON EXTERNAL DESIGN） |
 
 > 想看每个功能对应的接口和表，去 [../agent/api-reference.md](../agent/api-reference.md) 和

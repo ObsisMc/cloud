@@ -106,6 +106,33 @@ func archiveSpace(t *transaction, r *PublicRequest, uid string) Object {
 	return t.one("SELECT * FROM collab_workspaces WHERE id=$1", r.SpaceID)
 }
 
+// enrollSpaceMemberByEmail adds an already-registered user to the space as a
+// plain member, resolved by (source, normalized email) in the caller's identity
+// source. It never auto-creates a user, never invites, and never widens Project
+// or Runtime Workspace visibility (D1). Admin or owner may enroll; the target is
+// atomically ensured a tenant membership (keeping an existing role) if they are
+// not already a tenant member. Adding an existing member returns the current
+// membership unchanged — idempotent, no role/status/version mutation.
+func enrollSpaceMemberByEmail(t *transaction, r *PublicRequest, uid string) Object {
+	actor := spaceMember(t, r.SpaceID, uid)
+	requireSpaceRole(actor, "admin", "owner")
+	email := normalizeEmail(r.Body.S("email"))
+	require(validEmail(email), 400, "invalid_email")
+	u := t.one(`SELECT u.id FROM users u
+JOIN user_identities i ON i.user_id=u.id
+WHERE i.source=$1 AND i.subject=$2 AND u.status='active' AND u.deleted_at IS NULL`, r.Identity.Source, email)
+	require(u != nil, 404, "user_not_registered")
+	target := u.S("id")
+	// Atomic with the workspace membership below: a registered user who is not yet
+	// a tenant member is enrolled into the tenant first, then into the space. The
+	// ON CONFLICT keeps an existing tenant role (admin stays admin) untouched.
+	t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'member','active') ON CONFLICT (tenant_id,user_id) DO NOTHING", r.TenantID, target)
+	if t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, target) == nil {
+		t.exec("INSERT INTO collab_workspace_members(workspace_id,user_id,role,status,created_by) VALUES($1,$2,'member','active',$3)", r.SpaceID, target, uid)
+	}
+	return t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, target)
+}
+
 // putSpaceMember upserts one membership with optimistic version checks and the
 // last-owner invariant. Adding members needs admin or owner; granting owner
 // needs owner. The target user must be an active member of the same tenant.
