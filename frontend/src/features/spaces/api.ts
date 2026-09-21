@@ -40,7 +40,7 @@ export function idempotencyKeyFor(
 }
 
 /** Per-hook slot backing {@link idempotencyKeyFor}. */
-function useIdempotencyKeys() {
+export function useIdempotencyKeys() {
   const pending = useRef<{ variables: unknown; key: string } | null>(null)
   return (variables: unknown): string => idempotencyKeyFor(pending, variables)
 }
@@ -53,7 +53,7 @@ function useIdempotencyKeys() {
  * orval mutator spreads these options over the generated request config, which
  * replaces its headers object outright.
  */
-function mutationHeaders(key: string): Record<string, string> {
+export function mutationHeaders(key: string): Record<string, string> {
   return { 'Content-Type': 'application/json', 'Idempotency-Key': key }
 }
 
