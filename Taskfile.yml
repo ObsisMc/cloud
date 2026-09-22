@@ -35,6 +35,8 @@ tasks:
     cmds:
       - task: format:check
       - task: lint
+      - task: proto:lint
+      - task: proto:check
       - task: test
   build:
     cmds:
@@ -55,6 +57,32 @@ tasks:
     cmds: [go run ./cmd/simulator]
   openapi:
     cmds: [go run ./cmd/openapi]
+  proto:lint:
+    desc: Lint the Controller-facing internal control contract under proto/ (STANDARD rules)
+    dir: proto
+    cmds: [buf lint]
+  proto:breaking:
+    desc: Reject breaking changes to the contract against PROTO_BASE_REF (default main); v1 is additive only
+    dir: proto
+    vars:
+      PROTO_BASE_REF: '{{.PROTO_BASE_REF | default "main"}}'
+    cmds:
+      # The first contract commit has no base to compare with; only an existing base module counts.
+      - |
+        if git -C .. cat-file -e "{{.PROTO_BASE_REF}}:proto/buf.yaml" 2>/dev/null; then
+          buf breaking --against "../.git#ref={{.PROTO_BASE_REF}},subdir=proto"
+        else
+          echo "no contract on {{.PROTO_BASE_REF}}; nothing to compare"
+        fi
+  proto:generate:
+    desc: Regenerate internal/controlpb from proto/ (needs buf and network for the pinned remote plugins)
+    dir: proto
+    cmds: [buf generate]
+  proto:check:
+    desc: Fail when the committed internal/controlpb drifts from proto/
+    cmds:
+      - task: proto:generate
+      - git diff --exit-code -- internal/controlpb
   frontend:install:
     desc: Install frontend dependencies from package-lock.json
     cmds: [npm --prefix frontend ci]

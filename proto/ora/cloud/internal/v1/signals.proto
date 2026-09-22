@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package ora.cloud.internal.v1;
+
+// Cloud-to-Controller notifications over a stream the Controller opens. Signals are at-most-once
+// accelerators: Cloud neither persists nor replays them, and none of them changes ownership or
+// state. A Controller that loses the stream falls back to periodic ClaimWork and reopens it.
+service ControlSignalService {
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+}
+
+message WatchRequest {
+  // The caller's current lease epoch; a stale epoch fails with FAILED_PRECONDITION.
+  int64 epoch = 1;
+}
+
+// One signal per stream message.
+message WatchResponse {
+  oneof signal {
+    WorkAvailable work_available = 1;
+    Drain drain = 2;
+    NodeAssignment node_assignment = 3;
+  }
+}
+
+// Hints that work can be claimed; ownership is still decided by ClaimWork.
+message WorkAvailable {
+  // Set when Cloud knows which operation became claimable.
+  optional string operation_id = 1;
+}
+
+// Asks the holder to stop claiming and drain in-flight coordination, then release its lease. It
+// never cancels user work or destroys sandboxes.
+message Drain {}
+
+// Reserved for control ownership changes of a Node; first-version Controllers only log it.
+message NodeAssignment {
+  string node_id = 1;
+}
