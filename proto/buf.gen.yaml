@@ -1,0 +1,24 @@
+# The Controller contract lives in ora-space/desktop under proto/ and is pinned here by git ref;
+# this repository never copies the .proto files. Regenerate with `task proto:generate`, which also
+# accepts CONTROLLER_PROTO_INPUT=<local desktop/proto path> for development before a tag exists.
+version: v2
+managed:
+  enabled: true
+  override:
+    # The contract carries no go_package on purpose; the consumer decides its own import path.
+    - file_option: go_package
+      path: ora/controller/v1/controller.proto
+      value: github.com/wanglongan587/cloud/internal/controllerpb;controllerpb
+inputs:
+  # Pinned to the contract commit until the first `controller-proto/vX.Y.Z` tag exists upstream;
+  # switch git_repo to ora-space/desktop and ref to that tag in the same change as the regeneration.
+  - git_repo: https://github.com/ObsisMc/desktop.git
+    ref: 3bd07a5234c29380f3d23f97f2b2240f0dba7c47
+    subdir: proto
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.11
+    out: .
+    opt: module=github.com/wanglongan587/cloud
+  - remote: buf.build/grpc/go:v1.5.1
+    out: .
+    opt: module=github.com/wanglongan587/cloud

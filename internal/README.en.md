@@ -17,6 +17,8 @@
 - [config](config/README.en.md) loads and validates application configuration files and environment overrides.
 - [logger](logger/README.en.md) provides structured, non-blocking JSON logging via Zap and Lumberjack.
 - [simulator](simulator/README.en.md) implements in-process doubles for the Substrate execution engine, Controller, and Workspace Node.
+- [controllerpb](controllerpb/README.en.md): gRPC Go code generated from the Controller contract at a pinned desktop ref; read-only.
+- [controllerclient](controllerclient/README.en.md): thin Controller gRPC client: address validation, deadlines and error classification, no business logic.
 
 ## Layering and architectural rules
 
