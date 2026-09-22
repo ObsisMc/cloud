@@ -1,8 +1,7 @@
 import { CanceledError } from 'axios'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import { installFakeHttp } from '@/test/http'
-import { customInstance } from './api-client'
-import { mockApi } from './mock-api-client'
+import { customInstance, isUnauthorizedError, onUnauthorized } from './api-client'
 
 describe('customInstance', () => {
   it('unwraps the response body', async () => {
@@ -33,33 +32,70 @@ describe('customInstance', () => {
     await expect(promise).rejects.toBeInstanceOf(CanceledError)
     expect(http.requests[0]?.signal?.aborted).toBe(true)
   })
+})
 
-  it('adds an idempotency key to writes without browser-readable credentials', async () => {
+describe('HTTP policy', () => {
+  it('adds an idempotency key to POST and DELETE but not to GET', async () => {
     const http = installFakeHttp({})
 
-    await customInstance({ url: '/api/v1/projects', method: 'POST' })
+    await customInstance({ url: '/api/v1/tenants', method: 'POST', data: {} })
+    await customInstance({ url: '/api/v1/tenants/x', method: 'DELETE', data: {} })
+    await customInstance({ url: '/api/v1/me', method: 'GET' })
 
-    expect(http.requests[0]?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
-    expect(http.requests[0]?.authorization).toBeUndefined()
-    expect(http.requests[0]?.userToken).toBeUndefined()
+    expect(http.requests.map((r) => typeof r.headers['Idempotency-Key'])).toEqual([
+      'string',
+      'string',
+      'undefined',
+    ])
   })
 
-  it('preserves a caller-provided idempotency key', async () => {
+  it('keeps a caller-supplied idempotency key', async () => {
     const http = installFakeHttp({})
 
     await customInstance({
-      url: '/api/v1/projects',
-      method: 'DELETE',
-      headers: { 'Idempotency-Key': 'operation-1' },
+      url: '/api/v1/tenants',
+      method: 'POST',
+      data: {},
+      headers: { 'Idempotency-Key': 'caller-key' },
     })
 
-    expect(http.requests[0]?.idempotencyKey).toBe('operation-1')
+    expect(http.requests[0]?.headers['Idempotency-Key']).toBe('caller-key')
   })
-})
 
-describe('mockApi', () => {
-  it('isolates simulated business requests without adding authentication state', () => {
-    expect(mockApi.defaults.baseURL).toBe('/mock-api')
-    expect(mockApi.defaults.headers.common.Authorization).toBeUndefined()
+  it('never attaches credential headers; the session is a cookie the browser owns', async () => {
+    const http = installFakeHttp({})
+
+    await customInstance({ url: '/api/v1/me', method: 'GET' })
+
+    expect(http.requests[0]?.headers['Authorization']).toBeUndefined()
+    expect(http.requests[0]?.headers['X-Ora-User-Token']).toBeUndefined()
+  })
+
+  it('notifies unauthorized listeners on 401 and still rejects the caller', async () => {
+    installFakeHttp({ code: 'unauthenticated' }, 401)
+    const seen: number[] = []
+    const stop = onUnauthorized(() => seen.push(1))
+
+    await expect(customInstance({ url: '/api/v1/me', method: 'GET' })).rejects.toSatisfy(
+      isUnauthorizedError,
+    )
+    expect(seen).toEqual([1])
+
+    stop()
+    await expect(customInstance({ url: '/api/v1/me', method: 'GET' })).rejects.toSatisfy(
+      isUnauthorizedError,
+    )
+    expect(seen).toEqual([1])
+  })
+
+  it('does not treat other failures as unauthorized', async () => {
+    installFakeHttp({ code: 'not_found' }, 404)
+    const seen: number[] = []
+    onTestFinished(onUnauthorized(() => seen.push(1)))
+
+    await expect(customInstance({ url: '/api/v1/me', method: 'GET' })).rejects.not.toSatisfy(
+      isUnauthorizedError,
+    )
+    expect(seen).toEqual([])
   })
 })

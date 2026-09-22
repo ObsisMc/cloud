@@ -1,17 +1,22 @@
-import { create, type AxiosError, type AxiosRequestConfig } from 'axios'
+import { create, isAxiosError, type AxiosError, type AxiosRequestConfig } from 'axios'
 
 /**
  * Shared axios instance behind every generated hook in `src/api`.
  *
- * Cross-cutting HTTP policy (base URL, auth headers, interceptors) belongs here
+ * Cross-cutting HTTP policy (base URL, idempotency, interceptors) belongs here
  * so that generated code and hand-written code observe one configuration.
+ *
+ * Authentication is not a header: the browser holds only the gateway's
+ * HttpOnly session cookie, which same-origin requests carry automatically,
+ * and the gateway signs the internal credentials the cloud verifies. Nothing
+ * in the frontend ever sees or attaches a token.
  */
 export const AXIOS_INSTANCE = create({ baseURL: '' })
 
-// The browser carries only the Gateway's HttpOnly Cookie. POST and DELETE
-// additionally receive a fresh idempotency key when the caller did not supply
-// one: the Cloud core rejects them without it. The interceptor is synchronous
-// so an AbortSignal can still win the dispatch race.
+// POST and DELETE receive a fresh idempotency key when the caller did not
+// supply one: the cloud core rejects them without it. The interceptor is
+// synchronous so axios keeps dispatching to the adapter immediately — an
+// abort must still win the race the way it does without interceptors.
 AXIOS_INSTANCE.interceptors.request.use(
   (config) => {
     if (
@@ -25,6 +30,39 @@ AXIOS_INSTANCE.interceptors.request.use(
   undefined,
   { synchronous: true },
 )
+
+type UnauthorizedListener = () => void
+const unauthorizedListeners = new Set<UnauthorizedListener>()
+
+/**
+ * Registers a listener for any 401 the backend returns, and returns the
+ * function that removes it. The session owner subscribes so an expired or
+ * revoked cookie ends the session once, instead of every later query failing
+ * with the same 401. Listeners run synchronously before the error propagates.
+ */
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener)
+  return () => {
+    unauthorizedListeners.delete(listener)
+  }
+}
+
+/** True when `error` is an HTTP 401 from the shared instance. */
+export function isUnauthorizedError(error: unknown): boolean {
+  return isAxiosError(error) && error.response?.status === 401
+}
+
+/** True for a 403: the caller is known but Cloud refuses them (e.g. a disabled user). */
+export function isForbiddenError(error: unknown): boolean {
+  return isAxiosError(error) && error.response?.status === 403
+}
+
+AXIOS_INSTANCE.interceptors.response.use(undefined, (error: unknown) => {
+  if (isUnauthorizedError(error)) {
+    for (const listener of unauthorizedListeners) listener()
+  }
+  throw error
+})
 
 /**
  * Request shape the orval-generated client passes to {@link customInstance}.

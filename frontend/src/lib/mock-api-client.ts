@@ -4,8 +4,13 @@ import { db } from '@/mocks/data/store'
 /**
  * Client for the MSW-mocked domain (`/mock-api/*`), kept separate from the
  * orval-generated client in `src/api` which talks to the real Go backend.
- * Mock pages keep using the seeded workspace even when the authenticated URL
- * carries a real Cloud space slug.
+ *
+ * Pages without a backend counterpart yet (issues, agents, chat, ...) run on
+ * this client. Their routes carry the real space slug, which the demo store
+ * does not know, so the slug is rewritten to the seeded workspace before the
+ * request reaches MSW: every real space shows the same demo data until the
+ * page gets a real API. The mock domain has no authentication; the real
+ * session lives in the gateway cookie and never reaches these handlers.
  */
 export const mockApi = create({ baseURL: '/mock-api' })
 

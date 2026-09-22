@@ -27,7 +27,7 @@ task check
 task test:race
 ```
 
-Each test creates an isolated PostgreSQL schema and cleans it up automatically. The test account requires CREATE SCHEMA permission. `task check/test/test:integration/test:race` sets `REQUIRE_POSTGRES=1`; without a real PostgreSQL configuration, these tasks fail instead of silently skipping tests. A direct `go test ./...` explicitly skips integration tests when PostgreSQL is not configured. Use `task test:unit` to run non-PostgreSQL tests separately.
+After `config.toml` and `task setup` the export is unnecessary: `.local/dev.env` provides `TEST_DATABASE_URL` to every task (a value already set in the shell wins). Each test creates an isolated PostgreSQL schema and cleans it up automatically. The test account requires CREATE SCHEMA permission. `task check/test/test:integration/test:race` sets `REQUIRE_POSTGRES=1`; without a real PostgreSQL configuration, these tasks fail instead of silently skipping tests. A direct `go test ./...` explicitly skips integration tests when PostgreSQL is not configured. Use `task test:unit` to run non-PostgreSQL tests separately.
 
 Race testing on Windows requires a working C compiler:
 
@@ -50,7 +50,7 @@ go run ./cmd/cloudctl -command bootstrap -name 'Engineering Organization' -sourc
 go run ./cmd/cloudctl -command credential-ref -tenant '<tenant UUID>' -owner '<user UUID>' -secret-ref 'infra-secret://git/team/account'
 ```
 
-`bootstrap` atomically creates a tenant and its first administrator and is a deployment operation; running it again creates another tenant (when `-source` is `huawei-corp`, `-subject` must be the stable `uuid` returned by IDaaS rather than the employee number). `credential-ref` stores only an infrastructure reference and never accepts a Git credential value; tenant and owner foreign keys scope the reference. A regular member must first access `/api/v1/me` through an authenticated gateway to create the user, and an administrator must then add that user explicitly through the membership API. There is no self-service organization registration or automatic authorization from external groups.
+`bootstrap` atomically creates a tenant, its first administrator and its `default` space and is a deployment operation; running it again creates another tenant. When `-source` is `huawei-corp`, `-subject` must be the stable `uuid` returned by IDaaS (`uuid~...`), never the employee number or W3 account: otherwise that employee's first login creates a new user, whom the frontend then guides into provisioning a tenant of their own. `credential-ref` stores only an infrastructure reference and never accepts a Git credential value; tenant and owner foreign keys scope the reference. A signed-in user can also provision a tenant for themselves through `POST /api/v1/tenants`: the body carries only the first collaboration space's `name` and `slug`, the tenant borrows that name, and the caller becomes the tenant administrator and the space owner; the tenant is an implicit container the product never shows. Joining an existing tenant still requires the user to access `/api/v1/me` through an authenticated gateway first and an administrator to add them explicitly through the membership API; there is no automatic authorization from external groups.
 
 Before starting production, configure internal verification public keys as described in [Authentication and credentials](docs/authentication.md). Startup fails when the trust configuration is empty:
 
@@ -59,6 +59,16 @@ go run ./cmd/server -config /path/to/config.yaml
 ```
 
 The server only checks applied migrations and their checksums; it does not execute DDL. Database, migration, trust, or listen failures cause a non-zero exit. `GET /healthz` checks PostgreSQL reachability.
+
+Local end-to-end development (browser → Gateway → Cloud, see [Authentication Gateway](docs/gateway.md)) needs no GitHub account: the Gateway ships a local-only developer login where any typed identity signs in. To exercise real GitHub login, create an OAuth App (callback `http://localhost:5173/auth/callback/github`) and fill in `[github]` in `config.toml`.
+
+```sh
+cp config.toml.template config.toml   # the defaults work as-is; [github] is optional. config.toml is ignored by Git
+task setup                            # keys, secret file, .local/dev.env, migrations; rerunnable
+task dev                              # Cloud :8080 + Gateway :8081 + frontend :5173
+```
+
+`task setup` ([cmd/devsetup](cmd/devsetup/README.en.md)) turns `config.toml` into the `CLOUD_*`/`GATEWAY_*` environment overrides the services already accept (`.local/dev.env`, which `Taskfile.yml` loads for every task and which also provides `TEST_DATABASE_URL`) and the client secret file the Gateway reads; `configs/*.yaml` remain the authoritative configuration. A first-time user belongs to no tenant; the frontend guides them to create their first workspace.
 
 Run the complete creation demo directly; it generates short-lived simulated signing keys independently and uses them only for in-process testing:
 

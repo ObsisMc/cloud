@@ -73,6 +73,9 @@ func TestAuthorizationURLBindsStateChallengeAndCallbackWithoutScopes(t *testing.
 	if q.Has("scope") || strings.Contains(raw, "secret") {
 		t.Fatalf("no scope may be requested and the secret must never appear: %s", raw)
 	}
+	if q.Get("prompt") != "select_account" || q.Get("allow_signup") != "false" {
+		t.Fatalf("GitHub must show its account picker and never offer sign-up: %s", raw)
+	}
 	if _, e = a.AuthorizationURL(gateway.AuthorizationRequest{State: "st"}); e == nil {
 		t.Fatal("missing challenge or callback must be rejected")
 	}

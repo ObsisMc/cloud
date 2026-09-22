@@ -2,8 +2,8 @@
 
 [中文](README.md) | [English](README.en.md)
 
-This module composes the sidebar, page header, and route outlet. Before rendering a workspace, `DashboardLayout` verifies the real Cloud session through `/api/v1/me`: a 401 goes to the automatic login screen while preserving the current in-app path, a 403 stops relogin and reports a disabled account, and a transient failure offers only an explicit retry.
+This module composes the sidebar, page header, and route outlet. Authentication is not decided here: the router wraps `DashboardLayout` in `RequireSession` from `features/auth`, which sends a 401 to the login page while preserving the current in-app path, reports a 403 (disabled account) in place, and offers a retry for transient failures. Only once the session is confirmed does this module resolve `:workspaceSlug` against the member's real spaces (`CurrentSpaceProvider`) and subscribe to that space's event stream; a member with no space is sent to `/onboarding`, and an unknown or archived slug falls back to the first space.
 
-`AppSidebar` receives the Cloud `User`, displays the `displayName` snapshotted at first JIT creation, and revokes the Gateway session through the real `POST /auth/logout`. Business navigation may still use simulated data, but this module must never store tokens or duplicate authentication state.
+`AppSidebar` reads the current user through `useSession` (the `displayName` snapshotted at first JIT creation) and offers workspace switching, workspace creation, `sign out` (`POST /auth/logout`) and, when the gateway lists `github`, "sign out and log out of GitHub". Business navigation may still use simulated data, but this module must never store tokens or duplicate authentication state.
 
-Tests cover current-user display, unauthenticated navigation, failure handling, and local logout.
+Tests cover current-user display, space resolution and fallback, event-stream subscription, sign-out and the GitHub sign-out.

@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { ProjectDetailPage } from '@/features/projects/project-detail-page'
-import { db } from '@/mocks/data/store'
 import { installCloudSpaceHandlers, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-handlers'
 import { renderAtRoute } from '@/test/render'
 import { server } from '@/test/msw-server'
@@ -41,32 +40,13 @@ function installProjectHandlers(role: string, project = cloudProject('Demo')) {
 
 function renderDetail() {
   return renderAtRoute(
-    '/:workspaceSlug/projects/:projectId',
+    '/w/:workspaceSlug/projects/:projectId',
     <ProjectDetailPage slug="cloud-dev" />,
-    `/cloud-dev/projects/${PROJECT_ID}`,
-    { authenticated: true },
+    `/w/cloud-dev/projects/${PROJECT_ID}`,
   )
 }
 
 describe('ProjectDetailPage', () => {
-  it('renders the project header and its issues', async () => {
-    const project = db.projects[0]
-    if (!project) throw new Error('project seed data must not be empty')
-    renderAtRoute(
-      '/:workspaceSlug/projects/:projectId',
-      <ProjectDetailPage slug={db.workspace.slug} />,
-      `/${db.workspace.slug}/projects/${project.id}`,
-    )
-
-    expect(await screen.findAllByText(project.title)).not.toHaveLength(0)
-
-    const projectIssue = db.issues.find((i) => i.projectId === project.id)
-    if (!projectIssue) throw new Error('project seed data must contain an issue')
-    expect(await screen.findByText(projectIssue.title)).toBeInTheDocument()
-  })
-})
-
-describe('ProjectDetailPage cloud mode', () => {
   it('renames the project with the optimistic version', async () => {
     installProjectHandlers('owner')
     let patchBody: Record<string, unknown> | null = null

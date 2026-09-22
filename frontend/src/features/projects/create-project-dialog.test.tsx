@@ -12,7 +12,6 @@ const PROJECT_ID = '55555555-5555-5555-5555-555555555555'
 function setupDialog(onCreated = vi.fn<(projectId: string) => void>()) {
   renderWithProviders(<CreateProjectDialog open onOpenChange={() => {}} onCreated={onCreated} />, {
     slug: 'cloud-dev',
-    authenticated: true,
   })
   return { onCreated }
 }

@@ -494,6 +494,11 @@ export interface Tenant {
   status: string;
 }
 
+export interface TenantCreated {
+  space: Space;
+  tenant: Tenant;
+}
+
 export interface Ticket {
   actorUserId: string;
   admissionEpoch: number;
@@ -590,6 +595,15 @@ after?: string;
 export type GetApiV1MeTenants200 = {
   items: Tenant[];
   nextCursor: string;
+};
+
+export type PostApiV1TenantsBody = {
+  name: string;
+  /**
+     * Lowercase, immutable, unique per tenant.
+     * @pattern ^[a-z0-9][a-z0-9-]{0,63}$
+     */
+  slug: string;
 };
 
 export type GetApiV1TenantsTidMembersParams = {
@@ -751,6 +765,10 @@ export type GetApiV1TenantsTidSpaces200 = {
 export type PostApiV1TenantsTidSpacesBody = {
   description: string;
   name: string;
+  /**
+     * Lowercase, immutable, unique per tenant.
+     * @pattern ^[a-z0-9][a-z0-9-]{0,63}$
+     */
   slug: string;
 };
 

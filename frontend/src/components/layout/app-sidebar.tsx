@@ -16,8 +16,6 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import type { User } from '@/api/generated.schemas'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,13 +38,12 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-import type { SpaceListItem } from '@/api/generated.schemas'
-import { useLogout } from '@/features/auth/api'
+import { useLoginProviders } from '@/features/auth/providers'
+import { useSession } from '@/features/auth/session'
 import { useInboxItems } from '@/features/inbox/api'
 import { CreateSpaceDialog } from '@/features/spaces/create-space-dialog'
 import { useCurrentSpace } from '@/features/spaces/current-space'
 import { workspacePaths } from '@/lib/paths'
-import { db, workspaceBySlug } from '@/mocks/data/store'
 
 const workNav = [
   { to: (p: ReturnType<typeof workspacePaths>) => p.issues, label: '任务', icon: Layers },
@@ -64,30 +61,21 @@ const utilityNav = [
   { to: (p: ReturnType<typeof workspacePaths>) => p.settings, label: '设置', icon: Cog },
 ]
 
-/** Workspaces the switcher lists: cloud lists only joined real spaces. */
-function switchableSpaces(cloudMode: boolean, spaces: SpaceListItem[] | undefined) {
-  if (cloudMode) return spaces ?? []
-  return db.workspaces
-}
-
 // oxlint-disable-next-line max-lines-per-function -- this composition root owns the complete sidebar navigation tree.
-export function AppSidebar({ slug, user }: { slug: string; user: User }) {
+export function AppSidebar({ slug }: { slug: string }) {
   const p = workspacePaths(slug)
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const logout = useLogout()
-  const { cloudMode, spaces, tenantId, space } = useCurrentSpace()
+  const { session, signOut, signOutOfGitHub } = useSession()
+  const { data: providers = [] } = useLoginProviders()
+  const user = session.status === 'signed-in' ? session.user : undefined
+  const { spaces = [], space, tenantId } = useCurrentSpace()
   const { data: inboxItems = [] } = useInboxItems(slug)
   const unreadCount = inboxItems.filter((i) => !i.read).length
-  const activeWorkspace = space ?? workspaceBySlug(slug) ?? db.workspace
-  // Cloud sessions switch between real spaces (collaboration pages), mock
-  // sessions between the demo store workspaces.
-  const switchable = switchableSpaces(cloudMode, spaces)
   const [createSpaceOpen, setCreateSpaceOpen] = useState(false)
-
-  function handleLogout() {
-    logout.mutate(undefined, { onSuccess: () => void navigate('/login') })
-  }
+  // The layout only renders the sidebar once the slug resolved, so a missing
+  // space is a programming error rather than a state to design for.
+  if (!space) throw new Error('AppSidebar requires a resolved space')
 
   return (
     <Sidebar variant="inset">
@@ -95,7 +83,7 @@ export function AppSidebar({ slug, user }: { slug: string; user: User }) {
         open={createSpaceOpen}
         onOpenChange={setCreateSpaceOpen}
         tenantId={tenantId}
-        onCreated={(newSlug) => void navigate(`/${newSlug}/projects`)}
+        onCreated={(newSlug) => void navigate(workspacePaths(newSlug).issues)}
       />
       <SidebarHeader className="py-3">
         <SidebarMenu>
@@ -104,35 +92,22 @@ export function AppSidebar({ slug, user }: { slug: string; user: User }) {
               <DropdownMenuTrigger
                 render={
                   <SidebarMenuButton>
-                    <span
-                      className="flex size-5 items-center justify-center rounded-sm text-[11px] font-semibold text-white"
-                      style={{
-                        backgroundColor:
-                          'avatarColor' in activeWorkspace
-                            ? activeWorkspace.avatarColor
-                            : '#3b82f6',
-                      }}
-                    >
-                      {activeWorkspace.name.charAt(0)}
+                    <span className="flex size-5 items-center justify-center rounded-sm bg-primary text-[11px] font-semibold text-primary-foreground">
+                      {space.name.charAt(0)}
                     </span>
-                    <span className="flex-1 truncate font-medium">{activeWorkspace.name}</span>
+                    <span className="flex-1 truncate font-medium">{space.name}</span>
                     <ChevronDown className="size-3 text-muted-foreground" />
                   </SidebarMenuButton>
                 }
               />
               <DropdownMenuContent className="w-56" align="start" side="bottom" sideOffset={4}>
                 <div className="flex items-center gap-2.5 px-2 py-1.5">
-                  <Avatar className="size-10 text-sm">
-                    <AvatarFallback className="bg-primary font-medium text-primary-foreground">
-                      {(user.displayName || user.id).charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
+                  <span className="flex size-7 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                    {user?.displayName.charAt(0) ?? '?'}
+                  </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium leading-tight">
-                      {user.displayName || user.id}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground leading-tight">
-                      已通过统一身份认证
+                      {user?.displayName}
                     </p>
                   </div>
                 </div>
@@ -141,45 +116,35 @@ export function AppSidebar({ slug, user }: { slug: string; user: User }) {
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
                     工作区
                   </DropdownMenuLabel>
-                  {switchable.map((ws) => (
+                  {spaces.map((ws) => (
                     <DropdownMenuItem
                       key={ws.id}
                       onClick={() => {
-                        // Cloud spaces have no mock issue boards; land on projects.
-                        const target = cloudMode ? 'projects' : 'issues'
-                        if (ws.slug !== slug) void navigate(`/${ws.slug}/${target}`)
+                        if (ws.slug !== slug) void navigate(workspacePaths(ws.slug).issues)
                       }}
                     >
-                      <span
-                        className="flex size-5 items-center justify-center rounded-sm text-[10px] font-semibold text-white"
-                        style={{
-                          backgroundColor: 'avatarColor' in ws ? ws.avatarColor : '#3b82f6',
-                        }}
-                      >
+                      <span className="flex size-5 items-center justify-center rounded-sm bg-primary text-[10px] font-semibold text-primary-foreground">
                         {ws.name.charAt(0)}
                       </span>
                       <span className="flex-1 truncate">{ws.name}</span>
                       {ws.slug === slug && <Check className="size-3.5" />}
                     </DropdownMenuItem>
                   ))}
-                  {cloudMode && (
-                    <DropdownMenuItem onClick={() => setCreateSpaceOpen(true)}>
-                      <Plus className="size-3.5" />
-                      新建工作区
-                    </DropdownMenuItem>
-                  )}
+                  <DropdownMenuItem onClick={() => setCreateSpaceOpen(true)}>
+                    <Plus className="size-3.5" />
+                    新建工作区
+                  </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
-                  disabled={logout.isPending}
-                  onClick={handleLogout}
-                >
+                <DropdownMenuItem variant="destructive" onClick={() => void signOut()}>
                   <LogOut className="size-3.5" />
-                  {logout.isPending ? '正在退出…' : '退出登录'}
+                  退出登录
                 </DropdownMenuItem>
-                {logout.isError && (
-                  <p className="px-2 py-1 text-xs text-destructive">退出失败，请重试</p>
+                {providers.includes('github') && (
+                  <DropdownMenuItem variant="destructive" onClick={() => void signOutOfGitHub()}>
+                    <LogOut className="size-3.5" />
+                    退出并注销 GitHub
+                  </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -250,30 +215,28 @@ export function AppSidebar({ slug, user }: { slug: string; user: User }) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {!cloudMode && (
-          <SidebarGroup>
-            <SidebarGroupLabel>AI 团队</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {aiTeamNav.map((item) => {
-                  const href = item.to(p)
-                  const Icon = item.icon
-                  return (
-                    <SidebarMenuItem key={item.label}>
-                      <SidebarMenuButton
-                        isActive={pathname.startsWith(href)}
-                        render={<NavLink to={href} />}
-                      >
-                        <Icon />
-                        <span>{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
+        <SidebarGroup>
+          <SidebarGroupLabel>AI 团队</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-0.5">
+              {aiTeamNav.map((item) => {
+                const href = item.to(p)
+                const Icon = item.icon
+                return (
+                  <SidebarMenuItem key={item.label}>
+                    <SidebarMenuButton
+                      isActive={pathname.startsWith(href)}
+                      render={<NavLink to={href} />}
+                    >
+                      <Icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="p-2">

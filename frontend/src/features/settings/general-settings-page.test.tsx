@@ -1,40 +1,32 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
-import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { SidebarProvider } from '@/components/ui/sidebar'
 import { GeneralSettingsPage } from '@/features/settings/general-settings-page'
 import { SettingsLayout } from '@/features/settings/settings-layout'
 import { CurrentSpaceProvider } from '@/features/spaces/current-space'
 import { installCloudSpaceHandlers, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-handlers'
+import { renderRoutes } from '@/test/render'
 import { server } from '@/test/msw-server'
 
 function renderSettingsPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const router = createMemoryRouter(
+  return renderRoutes(
     [
       {
-        path: '/:workspaceSlug/settings',
-        element: <SettingsLayout slug="cloud-dev" />,
+        path: '/w/:workspaceSlug/settings',
+        element: (
+          <CurrentSpaceProvider slug="cloud-dev">
+            <SettingsLayout slug="cloud-dev" />
+          </CurrentSpaceProvider>
+        ),
         children: [{ index: true, element: <GeneralSettingsPage /> }],
       },
     ],
-    { initialEntries: ['/cloud-dev/settings'] },
-  )
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <SidebarProvider>
-        <CurrentSpaceProvider slug="cloud-dev" authenticated>
-          <RouterProvider router={router} />
-        </CurrentSpaceProvider>
-      </SidebarProvider>
-    </QueryClientProvider>,
+    '/w/cloud-dev/settings',
   )
 }
 
-describe('GeneralSettingsPage cloud mode', () => {
+describe('GeneralSettingsPage', () => {
   it('shows the archive danger zone to owners and archives on confirmation', async () => {
     installCloudSpaceHandlers('owner')
     let deleted = false

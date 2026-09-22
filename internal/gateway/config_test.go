@@ -71,7 +71,10 @@ func TestConfigDefaultsAndSessionLifetimeBounds(t *testing.T) {
 		{"upstream without scheme", func(c *Config) { c.Cloud.Upstream = "127.0.0.1:8080" }},
 		{"missing pkce key", func(c *Config) { c.Login.PKCEKeyFile = "" }},
 		{"missing github client id", func(c *Config) { c.GitHub.ClientID = "" }},
+		{"github client id without secret file", func(c *Config) { c.GitHub.ClientSecretFile = "" }},
 		{"unknown provider", func(c *Config) { c.Login.Provider = "ldap" }},
+		{"no provider at all on a production origin", func(c *Config) { c.Login.Provider = "" }},
+		{"development provider on a production origin", func(c *Config) { c.Login.DevelopmentProvider = true }},
 		{"missing user key id", func(c *Config) { c.Tokens.UserKeyID = "" }},
 		{"non-positive rate limit", func(c *Config) { c.Login.RateLimitPerMinute = -1 }},
 		{"zero cleanup batch", func(c *Config) { c.Session.CleanupBatch = -5 }},
@@ -85,6 +88,27 @@ func TestConfigDefaultsAndSessionLifetimeBounds(t *testing.T) {
 		if e := c.Validate(); e == nil {
 			t.Errorf("%s: expected validation failure", tc.name)
 		}
+	}
+
+	// The development provider alone is a complete login configuration, but only on a loopback
+	// development origin; login.provider then stays empty instead of defaulting to GitHub.
+	devOnly := validConfig()
+	devOnly.Public = PublicConfig{BaseURL: "http://localhost:5173", Development: true}
+	devOnly.Login = LoginConfig{PKCEKeyFile: "/run/pkce", DevelopmentProvider: true}
+	devOnly.GitHub = GitHubConfig{}
+	if e := devOnly.applyDefaults(); e != nil {
+		t.Fatalf("development provider without an external provider must be valid on loopback: %v", e)
+	}
+	if devOnly.Login.Provider != "" || devOnly.Session.TTL != DefaultSessionLifetime {
+		t.Fatalf("dev-only gateway must not invent an external provider: %+v", devOnly.Login)
+	}
+	// With an external provider configured alongside, that provider keeps its own rules.
+	both := devOnly
+	both.Login.Provider = ProviderHuaweiIDaaS
+	both.Session.TTL = 0
+	both.IDaaS = IDaaSConfig{BaseURL: "https://uniportal-beta.huawei.com", ClientID: "client", ClientSecretFile: "/run/idaas-secret"}
+	if e := both.applyDefaults(); e != nil || both.Session.TTL != DefaultIDaaSSessionLifetime {
+		t.Fatalf("IDaaS plus development provider must be valid with the IDaaS session default: %v %s", e, both.Session.TTL)
 	}
 }
 
@@ -147,5 +171,20 @@ github: {client_id: id, client_secret_file: /run/secret}
 	t.Setenv("GATEWAY_SESSION_TTL", "2400h")
 	if _, e = LoadConfig(path); e == nil {
 		t.Fatal("session TTL above 90 days must fail at load")
+	}
+
+	// Keys the file omits are still overridable from the environment: `task setup` selects the
+	// provider with GATEWAY_LOGIN_PROVIDER while the sample gateway.yaml leaves it unset.
+	t.Setenv("GATEWAY_SESSION_TTL", "")
+	t.Setenv("GATEWAY_LOGIN_PROVIDER", ProviderHuaweiIDaaS)
+	t.Setenv("GATEWAY_IDAAS_BASE_URL", "https://uniportal-beta.huawei.com")
+	t.Setenv("GATEWAY_IDAAS_CLIENT_ID", "app")
+	t.Setenv("GATEWAY_IDAAS_CLIENT_SECRET_FILE", "/run/idaas-secret")
+	cfg, e = LoadConfig(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if cfg.Login.Provider != ProviderHuaweiIDaaS || cfg.IDaaS.ClientID != "app" || cfg.Session.TTL != 240*time.Hour {
+		t.Fatalf("environment must supply keys absent from the file: %+v %s", cfg.Login, cfg.Session.TTL)
 	}
 }

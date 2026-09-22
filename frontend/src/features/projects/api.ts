@@ -13,7 +13,6 @@ import { postApiV1TenantsTidSpacesSidProjects } from '@/api/spaces/spaces'
 import { useCurrentSpace } from '@/features/spaces/current-space'
 import { useSpaceProjects } from '@/features/spaces/api'
 import type { ErrorType } from '@/lib/api-client'
-import { mockApi } from '@/lib/mock-api-client'
 import type { Project } from '@/mocks/data/types'
 
 /**
@@ -27,9 +26,9 @@ function statusFor(lifecycle: string): Project['status'] {
 }
 
 /**
- * Maps the cloud project contract onto the UI's project shape so pages render
- * either data source identically. Fields the cloud does not model get stable
- * UI defaults.
+ * Maps the cloud project contract onto the UI's project shape, which the
+ * mock-backed pages (issues, boards) still share. Fields the cloud does not
+ * model get stable UI defaults.
  */
 export function cloudProjectToUI(p: CloudProject): Project {
   return {
@@ -47,33 +46,22 @@ export function cloudProjectToUI(p: CloudProject): Project {
 }
 
 /**
- * Projects of the current space. With a cloud session the generated client
- * fetches the space-scoped project list; without one the mock store keeps
- * powering the demo pages.
+ * Projects of the space at `slug`, fetched through the generated client once
+ * the slug resolved to a joined space. Until then the list is pending, never
+ * demo data.
  */
 export function useProjects(slug: string): {
   data: Project[] | undefined
   isPending: boolean
   isError: boolean
 } {
-  const { cloudMode, tenantId, space } = useCurrentSpace()
+  const { tenantId, space } = useCurrentSpace()
   const cloud = useSpaceProjects(tenantId, space?.slug === slug ? space.id : undefined)
-  const mock = useQuery({
-    queryKey: ['projects', slug],
-    queryFn: async () => {
-      const { data } = await mockApi.get<Project[]>(`/workspaces/${slug}/projects`)
-      return data
-    },
-    enabled: !cloudMode,
-  })
-  if (cloudMode) {
-    return {
-      data: cloud.data?.items.map(cloudProjectToUI),
-      isPending: cloud.isLoading,
-      isError: cloud.isError,
-    }
+  return {
+    data: cloud.data?.items.map(cloudProjectToUI),
+    isPending: cloud.isLoading,
+    isError: cloud.isError,
   }
-  return { data: mock.data, isPending: mock.isPending, isError: mock.isError }
 }
 
 /** One project by id, resolved from the current space's project list. */
@@ -84,21 +72,10 @@ export function useProject(
   data: Project | undefined
   isPending: boolean
 } {
-  const { cloudMode, tenantId, space } = useCurrentSpace()
+  const { tenantId, space } = useCurrentSpace()
   const cloud = useSpaceProjects(tenantId, space?.slug === slug ? space.id : undefined)
-  const mock = useQuery({
-    queryKey: ['project', slug, id],
-    queryFn: async () => {
-      const { data } = await mockApi.get<Project>(`/workspaces/${slug}/projects/${id}`)
-      return data
-    },
-    enabled: !!id && !cloudMode,
-  })
-  if (cloudMode) {
-    const found = cloud.data?.items.find((candidate) => candidate.id === id)
-    return { data: found ? cloudProjectToUI(found) : undefined, isPending: cloud.isLoading }
-  }
-  return { data: mock.data, isPending: mock.isPending }
+  const found = cloud.data?.items.find((candidate) => candidate.id === id)
+  return { data: found ? cloudProjectToUI(found) : undefined, isPending: cloud.isLoading }
 }
 
 /** Input for creating a project; the repository URL is required by the cloud. */

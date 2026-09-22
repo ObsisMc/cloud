@@ -47,11 +47,11 @@ export function ProjectDetailPage({ slug }: { slug: string }) {
   const { data: project, isPending } = useProject(slug, projectId)
   const p = workspacePaths(slug)
   const { tenantId, space } = useCurrentSpace()
-  const cloudMode = space?.slug === slug
-  const detail = useCloudProject(tenantId, cloudMode ? projectId : undefined)
+  const ready = space?.slug === slug
+  const detail = useCloudProject(tenantId, ready ? projectId : undefined)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameDraft, setRenameDraft] = useState('')
-  const role = cloudMode ? normalizeSpaceRole(space.role) : 'member'
+  const role = ready ? normalizeSpaceRole(space.role) : 'member'
   const version = detail.data?.version ?? 0
 
   return (
@@ -60,7 +60,7 @@ export function ProjectDetailPage({ slug }: { slug: string }) {
         title={project?.title ?? '项目'}
         breadcrumb={{ label: '项目', to: p.projects }}
         actions={
-          cloudMode &&
+          ready &&
           project && (
             <ProjectActions
               slug={slug}
@@ -76,7 +76,7 @@ export function ProjectDetailPage({ slug }: { slug: string }) {
           )
         }
       />
-      {cloudMode && projectId && project && (
+      {ready && projectId && project && (
         <RenameProjectDialog
           projectId={projectId}
           title={renameDraft}

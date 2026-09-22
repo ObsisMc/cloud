@@ -20,6 +20,7 @@ import (
 
 	"github.com/wanglongan587/cloud/internal/core"
 	"github.com/wanglongan587/cloud/internal/gateway"
+	"github.com/wanglongan587/cloud/internal/gateway/devlogin"
 	"github.com/wanglongan587/cloud/internal/gateway/github"
 	"github.com/wanglongan587/cloud/internal/gateway/idaas"
 	"github.com/wanglongan587/cloud/internal/logger"
@@ -120,11 +121,23 @@ func buildHandler(cfg *gateway.Config, store *gateway.Store, log *zap.Logger) (h
 	if e != nil {
 		return nil, fmt.Errorf("read PKCE key: %w", e)
 	}
-	provider, e := buildProvider(cfg)
-	if e != nil {
-		return nil, e
+	// Config validation guarantees a usable set: the external provider named by login.provider
+	// (only its secret is read) and, on a loopback development origin only, the "dev" adapter.
+	providers := map[string]gateway.Authenticator{}
+	if cfg.Login.Provider != "" {
+		if providers[cfg.Login.Provider], e = buildProvider(cfg); e != nil {
+			return nil, e
+		}
 	}
-	login, e := gateway.NewLogin(store, map[string]gateway.Authenticator{cfg.Login.Provider: provider}, pkceKey, origin+gateway.CallbackPath, cfg.Login.AttemptTTL, cfg.Session.TTL)
+	var dev *devlogin.Authenticator
+	if cfg.Login.DevelopmentProvider {
+		if dev, e = devlogin.New(origin, time.Now); e != nil {
+			return nil, e
+		}
+		providers[devlogin.Name] = dev
+		log.Warn("development login provider enabled: any typed identity signs in", zap.String("publicOrigin", origin))
+	}
+	login, e := gateway.NewLogin(store, providers, cfg.Login.Provider, pkceKey, origin+gateway.CallbackPath, cfg.Login.AttemptTTL, cfg.Session.TTL)
 	if e != nil {
 		return nil, e
 	}
@@ -132,7 +145,7 @@ func buildHandler(cfg *gateway.Config, store *gateway.Store, log *zap.Logger) (h
 	if e != nil {
 		return nil, fmt.Errorf("parse cloud upstream: %w", e)
 	}
-	return gateway.NewHandler(&gateway.Options{
+	engine, e := gateway.NewHandler(&gateway.Options{
 		Store:           store,
 		Login:           login,
 		Issuer:          issuer,
@@ -144,6 +157,13 @@ func buildHandler(cfg *gateway.Config, store *gateway.Store, log *zap.Logger) (h
 		Log:             log,
 		Now:             time.Now,
 	})
+	if e != nil {
+		return nil, e
+	}
+	if dev != nil {
+		dev.Routes(engine)
+	}
+	return engine, nil
 }
 
 func buildProvider(cfg *gateway.Config) (gateway.Authenticator, error) {

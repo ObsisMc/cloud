@@ -22,9 +22,11 @@ const (
 	MaxSessionLifetime          = 90 * 24 * time.Hour
 	// CallbackPath is the fixed OAuth callback route under the public base URL.
 	CallbackPath = "/auth/callback"
-	// ProviderGitHub and ProviderHuaweiIDaaS are the supported login provider identifiers.
+	// ProviderGitHub and ProviderHuaweiIDaaS are the supported external login providers;
+	// ProviderDevelopment is the loopback-only adapter registered by login.development_provider.
 	ProviderGitHub      = "github"
 	ProviderHuaweiIDaaS = "huawei-idaas"
+	ProviderDevelopment = "dev"
 )
 
 // Config is the complete Gateway process configuration. Secrets are referenced by file path and
@@ -58,12 +60,20 @@ type SessionConfig struct {
 }
 
 // LoginConfig bounds login attempts and the unauthenticated start/callback rate.
+//
+// Provider names the external identity provider of this deployment (ProviderGitHub or
+// ProviderHuaweiIDaaS); it is the default for POST /auth/login and decides the session lifetime
+// default. Only its secret is read. DevelopmentProvider additionally registers the "dev" adapter
+// (internal/gateway/devlogin), which lets a developer type any identity; it is only accepted
+// together with public.development, and with it Provider may be left empty for a dev-only
+// Gateway.
 type LoginConfig struct {
-	Provider           string        `mapstructure:"provider"`
-	AttemptTTL         time.Duration `mapstructure:"attempt_ttl"`
-	RateLimitPerMinute int           `mapstructure:"rate_limit_per_minute"`
-	RateLimitBurst     int           `mapstructure:"rate_limit_burst"`
-	PKCEKeyFile        string        `mapstructure:"pkce_key_file"`
+	Provider            string        `mapstructure:"provider"`
+	AttemptTTL          time.Duration `mapstructure:"attempt_ttl"`
+	RateLimitPerMinute  int           `mapstructure:"rate_limit_per_minute"`
+	RateLimitBurst      int           `mapstructure:"rate_limit_burst"`
+	PKCEKeyFile         string        `mapstructure:"pkce_key_file"`
+	DevelopmentProvider bool          `mapstructure:"development_provider"`
 }
 
 // CloudConfig names the single fixed upstream; requests can never select another.
@@ -84,8 +94,8 @@ type TokenConfig struct {
 	Lifetime              time.Duration `mapstructure:"lifetime"`
 }
 
-// GitHubConfig configures the first adapter. Endpoint overrides exist for GitHub Enterprise Server
-// and tests; the client secret is read from a file.
+// GitHubConfig configures the GitHub adapter; an empty client_id leaves it unregistered. Endpoint
+// overrides exist for GitHub Enterprise Server and tests; the client secret is read from a file.
 type GitHubConfig struct {
 	ClientID         string `mapstructure:"client_id"`
 	ClientSecretFile string `mapstructure:"client_secret_file"`
@@ -122,6 +132,9 @@ func LoadConfig(path string) (*Config, error) {
 	v.SetEnvPrefix("GATEWAY")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	if e := config.BindEnvKeys(v, Config{}); e != nil {
+		return nil, e
+	}
 	if e := v.ReadInConfig(); e != nil {
 		return nil, e
 	}
@@ -136,7 +149,9 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() error {
-	if c.Login.Provider == "" {
+	// A configuration written before login.provider existed is a GitHub deployment; only a
+	// development Gateway may run without any external provider.
+	if c.Login.Provider == "" && !c.Login.DevelopmentProvider {
 		c.Login.Provider = ProviderGitHub
 	}
 	if c.Session.TTL == 0 {
@@ -212,7 +227,14 @@ func (c *Config) Validate() error {
 	if c.Tokens.Lifetime <= 0 || c.Tokens.Lifetime > MaxCredentialLifetime {
 		return fmt.Errorf("tokens.lifetime must be positive and at most %s", MaxCredentialLifetime)
 	}
+	if c.Login.DevelopmentProvider && !c.Public.Development {
+		return fmt.Errorf("login.development_provider requires public.development")
+	}
 	switch c.Login.Provider {
+	case "":
+		if !c.Login.DevelopmentProvider {
+			return fmt.Errorf("login.provider must be %q or %q unless login.development_provider is set", ProviderGitHub, ProviderHuaweiIDaaS)
+		}
 	case ProviderGitHub:
 		if c.GitHub.ClientID == "" || c.GitHub.ClientSecretFile == "" {
 			return fmt.Errorf("github.client_id and github.client_secret_file are required when login.provider is %q", ProviderGitHub)

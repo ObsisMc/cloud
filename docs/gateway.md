@@ -6,13 +6,15 @@ Gateway（`cmd/gateway`）是浏览器可访问的公开认证与反向代理边
 
 | 路由 | 说明 |
 |---|---|
-| `POST /auth/login` | 同源 JSON：`{"returnTo":"/path"}`；兼容显式 `provider`，省略时采用 `login.provider`。校验 `Origin`（或 `Sec-Fetch-Site: same-origin`）、限流后写入 Login Attempt，返回 `{"authorizationUrl"}` 并设置 attempt Cookie。`returnTo` 只接受以单个 `/` 开头且第二个字符不是 `/` 或 `\` 的相对路径；不存在 `GET` 形式。 |
-| `GET /auth/callback/{provider}` | provider 回跳。同时匹配 attempt Cookie、`state`、provider、未过期、未消费；在事务外向 provider 交换 code（GitHub 同时提交 PKCE verifier；IDaaS 以 `client_secret_post` 提交 `grant_type`/`client_id`/`client_secret`/`code`）；再在一个短事务里锁定 attempt、写入 `consumed_at` 并创建 session。成功 `303` 到 attempt 中保存的 `returnTo`，失败统一 `401 login_failed`。无论成败都清除 attempt Cookie。 |
-| `POST /auth/logout` | 同源校验后吊销当前 session（`revoked_reason=logout`）并清除 Cookie；幂等，返回 `204`。不会调用 IDaaS/W3 logout。 |
-| `ANY /api/v1/*` | 解析 session Cookie，失败返回 `401 unauthenticated`。修改状态的方法要求同源证明（`403 origin_forbidden`）。丢弃浏览器提供的 `Authorization`、`X-Ora-User-Token`、`Cookie`、`Forwarded`/`X-Forwarded-*`，用本副本的两把私钥签发 service/user JWT 后转发。Cloud 不可达返回 `502 upstream_unavailable`，session 不受影响。 |
+| `GET /auth/providers` | 返回 `{"providers":[...],"default":"..."}`：本部署注册的 provider 名称（排序后）与省略 `provider` 时采用的外部 provider（`login.provider`，没有时为空串）。前端据此决定显示哪些登录按钮、是否自动跳转。无输入、不泄露配置细节。 |
+| `POST /auth/login` | 同源 JSON：`{"provider":"github","returnTo":"/path"}`；`provider` 可省略，省略时采用 `login.provider`（绝不落到 `dev`）。校验 `Origin`（或 `Sec-Fetch-Site: same-origin`）、限流后写入 Login Attempt，返回 `{"authorizationUrl"}` 并设置 attempt Cookie。`returnTo` 只接受以单个 `/` 开头且第二个字符不是 `/` 或 `\` 的相对路径；不存在 `GET` 形式。 |
+| `GET /auth/callback/{provider}` | provider 回跳。同时匹配 attempt Cookie、`state`、provider、未过期、未消费；在事务外向 provider 交换 code（GitHub 同时提交 PKCE verifier；IDaaS 以 `client_secret_post` 提交 `grant_type`/`client_id`/`client_secret`/`code`；`dev` 在本进程内校验签名与 verifier）；再在一个短事务里锁定 attempt、写入 `consumed_at` 并创建 session。成功 `303` 到 attempt 中保存的 `returnTo`，失败统一 `401 login_failed`。无论成败都清除 attempt Cookie。 |
+| `POST /auth/logout` | 同源校验后吊销当前 session（`revoked_reason=logout`）并清除 Cookie；幂等，返回 `204`。不会调用 IDaaS/W3 或 GitHub 的 logout。 |
+| `ANY /api/v1/*` | 解析 session Cookie，失败返回 `401 unauthenticated`。修改状态的方法要求同源证明（`403 origin_forbidden`）。丢弃浏览器提供的 `Authorization`、`X-Ora-User-Token`、`Cookie`、`Forwarded`/`X-Forwarded-*`，用本副本的两把私钥签发 service/user JWT 后转发。Cloud 不可达或在 `cloud.timeout` 内未完成响应返回 `502 upstream_unavailable`，session 不受影响。Cloud 以 `text/event-stream` 应答时（空间事件流），该连接不再受 `cloud.timeout`、`server.write_timeout` 与 8 MB 响应体上限约束，逐帧转发直到任一方关闭；限制只对已授权的这一个连接放开。 |
 | `GET /healthz` | PostgreSQL 探活。 |
+| `GET`/`POST /auth/dev/authorize` | 仅当 `login.development_provider` 开启时存在：本地开发登录表单，见下文。 |
 
-`/internal/v1/*` 没有路由，落到 `404 not_found`。所有错误使用 `{"code","params","requestId"}`，与 Cloud 一致。
+`/internal/v1/*` 没有路由，落到 `404 not_found`。所有错误使用 `{"code","params","requestId"}`，与 Cloud 一致；唯一例外是 `dev` 表单路由面向人的纯文本/HTML 响应（见下文）。
 
 ## Cookie
 
@@ -35,7 +37,9 @@ PKCE verifier 不落库：由 attempt secret 和 `login.pkce_key_file` 通过带
 - `login.provider` 只能是 `huawei-idaas` 或 `github`；只校验和读取所选 provider 的 secret。`huawei-idaas` 未显式配置 `session.ttl` 时默认为 12 小时，GitHub 缺省仍为 30 天；所有 session TTL 为绝对期限、不会滑动，且不超过 90 天。
 - `login.attempt_ttl` 在 1 分钟到 1 小时之间；`tokens.lifetime` 不超过 5 分钟（Cloud 验证器上限）。
 - `tokens.service_private_key_file` 与 `tokens.user_private_key_file` 是两把不同的 PKCS#8 Ed25519 私钥，分别对应 Cloud `auth.keys` 中 `kind: service, role: gateway` 与 `kind: user` 的公钥条目；一把私钥不能同时承担两个用途。
-- `login.pkce_key_file` 至少 32 字节随机数据，两种 provider 都必须配置：编排层始终派生 verifier。GitHub 会把它发给 provider；IDaaS 不发送。`idaas.client_secret_file` 或 `github.client_secret_file` 只在对应 provider 被选择时读取；这些文件只进入进程内存，从不写日志或数据库。
+- `login.provider` 是本部署的外部 provider，只能是 `huawei-idaas` 或 `github`；只校验和读取所选 provider 的 secret，它也是 `POST /auth/login` 省略 `provider` 时的默认值。`huawei-idaas` 未显式配置 `session.ttl` 时默认为 12 小时，GitHub 缺省仍为 30 天；所有 session TTL 为绝对期限、不会滑动，且不超过 90 天。
+- `login.development_provider: true` 额外注册 `dev` provider（见下文），只在 `public.development: true` 时通过校验，生产配置不得设置。开启它时 `login.provider` 可以留空，此时 Gateway 只提供本地开发登录。
+- `login.pkce_key_file` 至少 32 字节随机数据，所有 provider 都必须配置：编排层始终派生 verifier。GitHub 会把它发给 provider，`dev` 在进程内校验，IDaaS 不发送。`idaas.client_secret_file` 或 `github.client_secret_file` 只在对应 provider 被选择时读取；这些文件只进入进程内存，从不写日志或数据库。
 
 生成密钥示例：
 
@@ -69,13 +73,17 @@ IDaaS 应用登记与上线检查：
 4. **初始管理员预置避坑**：`uuid` 不是员工工号或 W3 账号；若使用 `cloudctl bootstrap` 预置初始管理员，`-subject` 必须传入该员工在 IDaaS 实际返回的 `uuid`（如 `uuid~...`，可通过测试环境登录或 IDaaS 接口确认），**切勿直接填入员工工号或 W3 账号（如 `w00xxxxx`）**，否则首次登录将因 subject 不匹配而建立未授权的新用户。若无法提前获知 `uuid`，建议由管理员先通过 Gateway 完成首次登录创建用户，再由运维在数据库或成员管理中为其授予管理员角色。系统不会模糊合并旧账号，也不会从 IDaaS 群组自动授予 tenant membership。
 5. 先以 beta IDaaS 验证：token/userinfo 接受请求体中的 `client_secret_post` 字段（query 为空）、脱敏 userinfo 含已申请的 `uuid`、callback、原路径恢复、停用用户和本地退出，再切换生产 base URL、client 配置与精确生产 callback。上线后不得把 code、token、userinfo、邮箱或工号加入日志采样。
 
+## 本地开发 provider（`dev`）
+
+`internal/gateway/devlogin` 让前端在没有 IDaaS 应用或 GitHub OAuth App 时也能登录：`POST /auth/login` 传 `provider: "dev"`，`authorizationUrl` 指向 Gateway 自己的 `GET /auth/dev/authorize`（携带 `state` 与 `code_challenge`），开发者在表单里输入 `source` / `subject` / `display_name`（默认 `dev` / `developer` / `Developer`），同源 `POST` 后表单用进程内随机密钥的 HMAC 封装身份、challenge 与 5 分钟有效期得到 code，`303` 回 `/auth/callback/dev`。之后的 attempt 校验、PKCE verifier 校验、session 创建、Cookie 与凭据签发与 GitHub 完全相同；Cloud 仍按 `(source, subject)` 创建或解析用户，membership 与授权不因 provider 而异。输入任意 source 与 subject（例如 `huawei-corp` + 某员工的 IDaaS `uuid`）即可以该身份登录——这正是它只能与 `public.development`（loopback HTTP）同时开启的原因：这条校验是安全边界，不只是便利。启动日志会给出 warning。表单路由自身的错误响应（缺失 `state`/`code_challenge`、跨站提交、身份非法重新渲染表单）是面向人的纯文本/HTML，不采用 JSON fault 形状；`/auth/callback/dev` 的失败仍统一为 JSON `401 login_failed`，编排层不因 provider 而异。
+
 ## GitHub 适配器
 
-`internal/gateway/github` 使用 OAuth App Authorization Code Flow，不请求任何 scope，authorize 请求携带 `state`、`code_challenge`（S256）与固定 `redirect_uri`；GitHub 在收到 challenge 后要求 token exchange 携带 `code_verifier`。适配器读取 `GET /user` 后立即丢弃 access token，只返回 `VerifiedIdentity{source: "github.com", subject: 数字 id 的十进制字符串, displayName: name 或 login}`。`displayName` 在离开编排层前按字节截断到 200，与 Cloud `identity()` 的上限一致。配置 `authorize_url`/`token_url`/`user_url`/`source` 可指向 GitHub Enterprise Server，此时 `source` 是该 host。
+`internal/gateway/github` 使用 OAuth App Authorization Code Flow，不请求任何 scope，authorize 请求携带 `state`、`code_challenge`（S256）、固定 `redirect_uri`、`allow_signup=false` 与 `prompt=select_account`（每次都让 GitHub 弹出账号选择器，便于换账号登录）；GitHub 在收到 challenge 后要求 token exchange 携带 `code_verifier`。适配器读取 `GET /user` 后立即丢弃 access token，只返回 `VerifiedIdentity{source: "github.com", subject: 数字 id 的十进制字符串, displayName: name 或 login}`。`displayName` 在离开编排层前按字节截断到 200，与 Cloud `identity()` 的上限一致。配置 `authorize_url`/`token_url`/`user_url`/`source` 可指向 GitHub Enterprise Server，此时 `source` 是该 host。
 
 ## 浏览器自动登录
 
-前端以 HttpOnly session Cookie 和 `GET /api/v1/me` 为唯一认证事实。目标页面得到 401 后把当前站内相对路径放入 `returnTo` 并进入登录过渡页；该页自动 `POST /auth/login`，再用 `location.replace(authorizationUrl)` 进入 IDaaS/W3，成功后由 callback 根据 Login Attempt 中保存的 `returnTo` 以 303 返回原页面。callback 不接受新的跳转参数。
+前端以 HttpOnly session Cookie 和 `GET /api/v1/me` 为唯一认证事实。目标页面得到 401 后把当前站内相对路径放入 `returnTo` 并进入登录过渡页；当 `GET /auth/providers` 只列出一个外部 provider（没有 `dev`）时，该页自动 `POST /auth/login`，再用 `location.replace(authorizationUrl)` 进入 IDaaS/W3；否则显示每个 provider 一个按钮，成功后由 callback 根据 Login Attempt 中保存的 `returnTo` 以 303 返回原页面。callback 不接受新的跳转参数。
 
 403 表示 Cloud 用户已停用，不再次登录；5xx 或登录启动失败会停止自动重试并展示显式重试入口。有效 session 访问登录页时直接返回目标页面。退出成功后清除当前用户查询缓存，再进入同一自动登录流程。前端与 Gateway 在开发和生产中必须对浏览器表现为同一 origin；Vite 仅把 `/auth`、`/api`、`/healthz` 代理至 `:8081`，从不暴露 `/internal`。
 
@@ -86,7 +94,7 @@ IDaaS 应用登记与上线检查：
 ## 本地运行
 
 ```bash
-task run:gateway
+cp config.toml.template config.toml && task setup && task dev
 ```
 
-需要 Cloud（`task run`）已启动、数据库已迁移、`configs/gateway.yaml` 指向可用的密钥文件，且 Cloud `auth.keys` 登记了 Gateway 的两把公钥。完整本地联调可用 `task dev` 同时启动 Cloud、Gateway 与 Vite，并从 `http://localhost:5173` 访问。
+`config.toml`（被 Git 忽略）集中填写 PostgreSQL DSN；GitHub OAuth App 或华为 IDaaS 应用可选（`[github]` / `[idaas]` 段），留空则只有本地开发登录（`configs/gateway.yaml` 已开启 `login.development_provider`）。`task setup`（`cmd/devsetup`）据此在 `.local/gateway/` 生成两把 Ed25519 私钥、对应公钥与 PKCE 密钥（重复执行不会覆盖已有密钥），把所选 provider 的 client secret（若有）写入 `.local/gateway/<provider>-client-secret`，写出 `.local/dev.env`（`GATEWAY_LOGIN_PROVIDER`、`GATEWAY_GITHUB_CLIENT_ID` 或 `GATEWAY_IDAAS_*`、`GATEWAY_DATABASE_DSN`、`CLOUD_DATABASE_DSN`、`TEST_DATABASE_URL`，`Taskfile.yml` 为每个 task 自动加载）并应用迁移；`configs/config.yaml` 的 `auth.keys` 与 `configs/gateway.yaml` 已指向这些文件，仍是权威配置。`task dev` 同时启动 Cloud（:8080）、Gateway（:8081）与 Vite 前端（:5173）。浏览器只访问 `http://localhost:5173`：Vite 把 `/auth`、`/api`、`/healthz` 代理到 Gateway，因此 `public.base_url` 是 `http://localhost:5173`，Cookie、同源校验与 OAuth callback（`http://localhost:5173/auth/callback/github`，需在 GitHub OAuth App 中登记）都以它为准。登录页会向 `GET /auth/providers` 询问可用的登录方式：本地默认只显示"开发者登录"，配置了外部 provider 后再多一个对应按钮；当只有一个外部 provider 且没有 `dev` 时（生产形态），登录页按上文"浏览器自动登录"直接跳转，不显示按钮。真实 IDaaS 的 callback 必须与登记值逐字一致且为 https，因此本地一般无法直连 IDaaS，靠 `dev` provider 覆盖前端开发。前端页面见 `frontend/src/features/auth`。

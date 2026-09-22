@@ -1,110 +1,160 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
-import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { describe, expect, it } from 'vitest'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
-import { TEST_TENANT_ID } from '@/test/cloud-handlers'
+import { GITHUB_SIGN_OUT_URL } from '@/features/auth/api'
+import { RequireSession } from '@/features/auth/require-session'
+import {
+  installSignedInSession,
+  TEST_SPACE_ID,
+  TEST_TENANT_ID,
+  TEST_USER_ID,
+} from '@/test/cloud-handlers'
+import { installFakeNavigation } from '@/test/navigation'
+import { renderRoutes } from '@/test/render'
 import { server } from '@/test/msw-server'
 
-const currentUser = {
-  id: '00000000-0000-4000-8000-000000000001',
-  displayName: 'Wang Longan',
-  status: 'active',
-  version: 1,
-  createdAt: '2026-09-21T00:00:00Z',
-  deletedAt: null,
+const SECOND_SPACE_ID = '77777777-7777-7777-7777-777777777777'
+
+function space(id: string, name: string, slug: string) {
+  return {
+    id,
+    tenantId: TEST_TENANT_ID,
+    name,
+    slug,
+    description: '',
+    createdBy: TEST_USER_ID,
+    version: 1,
+    createdAt: '2026-09-20T10:00:00+08:00',
+    updatedAt: '2026-09-20T10:00:00+08:00',
+    archivedAt: null,
+    role: 'owner',
+  }
+}
+
+function installTwoSpaces() {
+  installSignedInSession()
+  server.use(
+    http.get('/api/v1/me/tenants', () =>
+      HttpResponse.json({
+        items: [{ id: TEST_TENANT_ID, name: '研发组织', status: 'active', role: 'admin' }],
+        nextCursor: '',
+      }),
+    ),
+    http.get(`/api/v1/tenants/${TEST_TENANT_ID}/spaces`, () =>
+      HttpResponse.json({
+        items: [
+          space(TEST_SPACE_ID, 'Cloud Dev', 'cloud-dev'),
+          space(SECOND_SPACE_ID, 'Ops', 'ops'),
+        ],
+        nextCursor: '',
+      }),
+    ),
+  )
 }
 
 function renderDashboard(initialPath: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const router = createMemoryRouter(
+  return renderRoutes(
     [
       { path: '/login', element: <div>Login screen</div> },
       {
-        path: '/:workspaceSlug',
-        element: <DashboardLayout />,
-        children: [
-          { path: 'issues', element: <div>Issues screen</div> },
-          { path: 'projects', element: <div>Projects screen</div> },
-        ],
+        path: '/w/:workspaceSlug',
+        element: (
+          <RequireSession>
+            <DashboardLayout />
+          </RequireSession>
+        ),
+        children: [{ path: 'issues', element: <div>Issues screen</div> }],
       },
     ],
-    { initialEntries: [initialPath] },
-  )
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
+    initialPath,
   )
 }
 
 describe('AppSidebar workspace switcher', () => {
-  beforeEach(() => {
-    server.use(
-      http.get('/api/v1/me', () => HttpResponse.json(currentUser)),
-      http.get('/api/v1/me/tenants', () =>
-        HttpResponse.json({
-          items: [{ id: TEST_TENANT_ID, name: '研发组织', status: 'active', role: 'admin' }],
-          nextCursor: '',
-        }),
-      ),
-      http.get(`/api/v1/tenants/${TEST_TENANT_ID}/spaces`, () =>
-        HttpResponse.json({
-          items: [
-            { id: 'space-1', name: 'Cloud Dev', slug: 'cloud-dev', role: 'owner' },
-            { id: 'space-2', name: 'Platform', slug: 'platform', role: 'member' },
-          ],
-          nextCursor: '',
-        }),
-      ),
-    )
-  })
-
-  it('opens without crashing and lists every workspace', async () => {
+  it('shows the current space and the signed-in member, and lists every joined space', async () => {
+    installTwoSpaces()
     const user = userEvent.setup()
-    renderDashboard('/cloud-dev/issues')
+    renderDashboard('/w/cloud-dev/issues')
     await screen.findByText('Issues screen')
 
-    await user.click(await screen.findByRole('button', { name: /Cloud Dev/ }))
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
 
-    const menu = await screen.findByRole('menu')
+    expect(await screen.findByRole('menu')).toBeInTheDocument()
+    expect(screen.getByText('Alice')).toBeInTheDocument()
     expect(await screen.findByRole('menuitem', { name: /Cloud Dev/ })).toBeInTheDocument()
-    expect(await screen.findByRole('menuitem', { name: /Platform/ })).toBeInTheDocument()
-    expect(screen.getByText('Wang Longan')).toBeInTheDocument()
-    expect(menu).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: /Ops/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /新建工作区/ })).toBeInTheDocument()
   })
 
-  it('switches to a different workspace and lands on its projects page', async () => {
+  it('switches to a different space and lands on its issues page', async () => {
+    installTwoSpaces()
     const user = userEvent.setup()
-    renderDashboard('/cloud-dev/issues')
+    renderDashboard('/w/cloud-dev/issues')
     await screen.findByText('Issues screen')
 
-    await user.click(await screen.findByRole('button', { name: /Cloud Dev/ }))
-    await user.click(await screen.findByRole('menuitem', { name: /Platform/ }))
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    await user.click(await screen.findByRole('menuitem', { name: /Ops/ }))
 
     await waitFor(() => {
-      expect(screen.getByText('Projects screen')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Ops/ })).toBeInTheDocument()
     })
   })
 
-  it('revokes the Gateway session before returning to login', async () => {
-    let logoutCalls = 0
+  it('signs out through the gateway and returns to the login screen', async () => {
+    installTwoSpaces()
+    let loggedOut = false
     server.use(
       http.post('/auth/logout', () => {
-        logoutCalls += 1
+        loggedOut = true
         return new HttpResponse(null, { status: 204 })
       }),
     )
     const user = userEvent.setup()
-    renderDashboard('/cloud-dev/issues')
+    renderDashboard('/w/cloud-dev/issues')
     await screen.findByText('Issues screen')
 
-    await user.click(await screen.findByRole('button', { name: /Cloud Dev/ }))
-    await user.click(await screen.findByRole('menuitem', { name: '退出登录' }))
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    await user.click(await screen.findByRole('menuitem', { name: /退出登录/ }))
 
     expect(await screen.findByText('Login screen')).toBeInTheDocument()
-    expect(logoutCalls).toBe(1)
+    expect(loggedOut).toBe(true)
+  })
+
+  it('offers a GitHub sign-out that revokes the Ora session first, only when GitHub login exists', async () => {
+    installTwoSpaces()
+    let loggedOut = false
+    server.use(
+      http.post('/auth/logout', () => {
+        loggedOut = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const navigation = installFakeNavigation()
+    const user = userEvent.setup()
+    renderDashboard('/w/cloud-dev/issues')
+    await screen.findByText('Issues screen')
+
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    await user.click(await screen.findByRole('menuitem', { name: /退出并注销 GitHub/ }))
+
+    // Ora signs out in this tab (back to the login screen); GitHub's page opens beside it.
+    expect(await screen.findByText('Login screen')).toBeInTheDocument()
+    await waitFor(() => expect(navigation.openedTabs).toEqual([GITHUB_SIGN_OUT_URL]))
+    expect(navigation.destinations).toEqual([])
+    expect(loggedOut).toBe(true)
+  })
+
+  it('hides the GitHub sign-out when the gateway has no GitHub login', async () => {
+    installTwoSpaces()
+    server.use(http.get('/auth/providers', () => HttpResponse.json({ providers: ['dev'] })))
+    const user = userEvent.setup()
+    renderDashboard('/w/cloud-dev/issues')
+    await screen.findByText('Issues screen')
+
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    expect(await screen.findByRole('menuitem', { name: /退出登录/ })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /退出并注销 GitHub/ })).not.toBeInTheDocument()
   })
 })

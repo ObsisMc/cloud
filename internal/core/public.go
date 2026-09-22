@@ -30,7 +30,19 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 			return u
 		}
 		if r.Path == "/api/v1/me/tenants" {
-			return page(t, "SELECT t.id,t.name,t.status,m.role FROM tenants t JOIN tenant_memberships m ON m.tenant_id=t.id WHERE m.user_id=$1 AND m.status='active' AND t.status='active' AND t.deleted_at IS NULL", []any{uid}, "t.id", r)
+			// Creation order makes `items[0]` the member's earliest tenant: the product
+			// treats that one as the implicit workspace container, and a member of several
+			// tenants must not see an arbitrary one first. pageByCreation keeps the cursor
+			// an opaque tenant UUID, so the published pagination contract is unchanged.
+			return pageByCreation(t, "SELECT t.id,t.name,t.status,m.role FROM tenants t JOIN tenant_memberships m ON m.tenant_id=t.id WHERE m.user_id=$1 AND m.status='active' AND t.status='active' AND t.deleted_at IS NULL", []any{uid}, r)
+		}
+		if r.Path == "/api/v1/tenants" {
+			// Tenant provisioning is the one mutation with no tenant scope to
+			// check membership against: the caller's verified identity is the
+			// whole authorization.
+			var out Object
+			out, status = createTenant(t, r, uid)
+			return out
 		}
 		isAdmin := r.SpaceID == "" && (strings.HasSuffix(r.Path, "/resource-status") || strings.HasSuffix(r.Path, "/administrative-stop") || (r.UserID != "" && r.Method == "PUT") || strings.HasSuffix(r.Path, "/members"))
 		membership(t, r.TenantID, uid, isAdmin)
@@ -129,18 +141,38 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 }
 
 func page(t *transaction, q string, args []any, col string, r *PublicRequest) Object {
-	limit := r.Limit
-	if limit == 0 {
-		limit = 50
-	}
-	require(limit > 0 && limit <= 100, 400, "invalid_pagination")
 	if r.After != "" {
 		require(validID(r.After), 400, "invalid_cursor")
 		args = append(args, r.After)
 		q += " AND " + col + " > $" + itoa(len(args)) + "::uuid"
 	}
+	return window(t, q+" ORDER BY "+col, args, r)
+}
+
+// pageByCreation pages a member-facing list in ascending creation order with the
+// row UUID as the tiebreaker. Unlike page the ordering column is not unique, so
+// the cursor predicate resolves the anchor row's created_at from the tenants
+// table instead of comparing the UUID alone; the public cursor therefore stays
+// an opaque tenant UUID. An anchor row that no longer exists compares as NULL,
+// which ends the walk with an empty page rather than skipping or repeating rows.
+func pageByCreation(t *transaction, q string, args []any, r *PublicRequest) Object {
+	if r.After != "" {
+		require(validID(r.After), 400, "invalid_cursor")
+		args = append(args, r.After)
+		q += " AND (t.created_at, t.id) > ((SELECT a.created_at FROM tenants a WHERE a.id=$" + itoa(len(args)) + "::uuid), $" + itoa(len(args)) + "::uuid)"
+	}
+	return window(t, q+" ORDER BY t.created_at, t.id", args, r)
+}
+
+// window applies the bounded limit, runs the query and reports the next cursor.
+func window(t *transaction, q string, args []any, r *PublicRequest) Object {
+	limit := r.Limit
+	if limit == 0 {
+		limit = 50
+	}
+	require(limit > 0 && limit <= 100, 400, "invalid_pagination")
 	args = append(args, limit+1)
-	q += " ORDER BY " + col + " LIMIT $" + itoa(len(args))
+	q += " LIMIT $" + itoa(len(args))
 	items := t.list(q, args...)
 	next := ""
 	if len(items) > limit {

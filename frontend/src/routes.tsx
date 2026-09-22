@@ -4,6 +4,7 @@ import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import { AgentDetailPage } from '@/features/agents/agent-detail-page'
 import { AgentsPage } from '@/features/agents/agents-page'
 import { LoginPage } from '@/features/auth/login-page'
+import { RequireSession } from '@/features/auth/require-session'
 import { BillingPage } from '@/features/billing/billing-page'
 import { ChatPage } from '@/features/chat/chat-page'
 import { InboxPage } from '@/features/inbox/inbox-page'
@@ -11,6 +12,7 @@ import { IssueDetailPage } from '@/features/issues/issue-detail-page'
 import { IssuesPage } from '@/features/issues/issues-page'
 import { MembersPage } from '@/features/members/members-page'
 import { MyIssuesPage } from '@/features/my-issues/my-issues-page'
+import { OnboardingPage } from '@/features/onboarding/onboarding-page'
 import { ProjectDetailPage } from '@/features/projects/project-detail-page'
 import { ProjectsPage } from '@/features/projects/projects-page'
 import { RuntimesPage } from '@/features/runtimes/runtimes-page'
@@ -19,7 +21,7 @@ import { SettingsLayout } from '@/features/settings/settings-layout'
 import { SkillsPage } from '@/features/skills/skills-page'
 import { SquadDetailPage } from '@/features/squads/squad-detail-page'
 import { SquadsPage } from '@/features/squads/squads-page'
-import { db } from '@/mocks/data/store'
+import { WORKSPACE_ROUTE_PATTERN } from '@/lib/paths'
 
 /**
  * DashboardLayout only renders its children once :workspaceSlug matches a
@@ -33,12 +35,31 @@ function WithSlug({ component: Component }: { component: ComponentType<{ slug: s
   return <Component slug={workspaceSlug} />
 }
 
+/**
+ * `/` and `/onboarding` both resolve to "the member's first workspace, or the
+ * screen that creates one": the onboarding page redirects members who already
+ * have a workspace, so it doubles as the signed-in landing route. Workspaces
+ * live under the reserved `/w/` prefix, so top-level routes and slugs never
+ * compete for the same path.
+ */
 export const router = createBrowserRouter([
-  { path: '/', element: <Navigate to={`/${db.workspace.slug}/issues`} replace /> },
+  { path: '/', element: <Navigate to="/onboarding" replace /> },
   { path: '/login', element: <LoginPage /> },
   {
-    path: '/:workspaceSlug',
-    element: <DashboardLayout />,
+    path: '/onboarding',
+    element: (
+      <RequireSession>
+        <OnboardingPage />
+      </RequireSession>
+    ),
+  },
+  {
+    path: WORKSPACE_ROUTE_PATTERN,
+    element: (
+      <RequireSession>
+        <DashboardLayout />
+      </RequireSession>
+    ),
     children: [
       { index: true, element: <Navigate to="issues" replace /> },
       { path: 'issues', element: <WithSlug component={IssuesPage} /> },

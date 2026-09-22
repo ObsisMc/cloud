@@ -9,8 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useCreateSpace } from '@/features/spaces/api'
-
-const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
+import { isValidSlug } from '@/features/spaces/slug'
 
 /**
  * Form fields for creating a collaboration space. The slug is normalized to
@@ -28,7 +27,7 @@ function CreateSpaceFields({
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
   const [description, setDescription] = useState('')
-  const slugValid = slug === '' || SLUG_PATTERN.test(slug)
+  const slugValid = slug === '' || isValidSlug(slug)
   const submittable = name.trim() !== '' && slugValid && !pending
 
   return (

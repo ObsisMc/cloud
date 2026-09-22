@@ -61,6 +61,9 @@ func Load(configPath string) (*Config, error) {
 	v.SetEnvPrefix("CLOUD")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	if err := BindEnvKeys(v, Config{}); err != nil {
+		return nil, err
+	}
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, err

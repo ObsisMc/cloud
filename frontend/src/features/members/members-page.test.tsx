@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { MembersPage } from '@/features/members/members-page'
-import { db } from '@/mocks/data/store'
 import { installCloudSpaceHandlers, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-handlers'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw-server'
@@ -32,17 +31,14 @@ function installMembersHandler(members: unknown[]) {
   )
 }
 
-describe('MembersPage cloud mode', () => {
+describe('MembersPage', () => {
   it('renders real members and hides management controls from members', async () => {
     installCloudSpaceHandlers('member')
     installMembersHandler([
       memberRow(ALICE_ID, 'Alice', 'owner'),
       memberRow(BOB_ID, 'Bob', 'member'),
     ])
-    renderWithProviders(<MembersPage slug="cloud-dev" />, {
-      slug: 'cloud-dev',
-      authenticated: true,
-    })
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
 
     expect(await screen.findByText('Alice')).toBeInTheDocument()
     expect(await screen.findByText('Bob')).toBeInTheDocument()
@@ -66,10 +62,7 @@ describe('MembersPage cloud mode', () => {
         },
       ),
     )
-    renderWithProviders(<MembersPage slug="cloud-dev" />, {
-      slug: 'cloud-dev',
-      authenticated: true,
-    })
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
     const user = userEvent.setup()
 
     expect(await screen.findByText('Alice')).toBeInTheDocument()
@@ -80,11 +73,59 @@ describe('MembersPage cloud mode', () => {
     expect(putBody).toEqual({ role: 'member', status: 'active', version: 0 })
   })
 
-  it('keeps the demo store table for mock sessions', async () => {
-    renderWithProviders(<MembersPage slug={db.workspace.slug} />, { slug: db.workspace.slug })
-    const first = db.users[0]
-    if (!first) throw new Error('seed users must not be empty')
-    expect(await screen.findByText(first.name)).toBeInTheDocument()
-    expect(screen.queryByLabelText('新成员 userId')).not.toBeInTheDocument()
+  it('lets an admin disable and re-enable a member and shows the backend fault code', async () => {
+    installCloudSpaceHandlers('admin')
+    installMembersHandler([
+      memberRow(ALICE_ID, 'Alice', 'owner'),
+      memberRow(BOB_ID, 'Bob', 'member'),
+      {
+        ...memberRow('55555555-5555-5555-5555-555555555555', 'Carol', 'member'),
+        status: 'disabled',
+      },
+    ])
+    const bodies: unknown[] = []
+    server.use(
+      http.put(
+        `/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members/:uid`,
+        async ({ request, params }) => {
+          const body = await request.json()
+          bodies.push({ uid: params['uid'], body })
+          if (params['uid'] === BOB_ID) {
+            return HttpResponse.json(
+              { code: 'space_last_owner', params: {}, requestId: 'r' },
+              { status: 409 },
+            )
+          }
+          return HttpResponse.json(memberRow(String(params['uid']), 'Carol', 'member'))
+        },
+      ),
+    )
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
+    const user = userEvent.setup()
+
+    expect(await screen.findByText('Bob')).toBeInTheDocument()
+    // The owner row cannot be disabled by anyone; a member row can.
+    const buttons = screen.getAllByRole('button', { name: /禁用|启用/ })
+    const [ownerButton, memberButton, disabledButton] = buttons
+    if (!ownerButton || !memberButton || !disabledButton) throw new Error('expected three rows')
+    expect(ownerButton).toBeDisabled()
+    expect(memberButton).toBeEnabled()
+    expect(disabledButton).toHaveTextContent('启用')
+
+    await user.click(memberButton)
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({
+      uid: BOB_ID,
+      body: { role: 'member', status: 'disabled', version: 1 },
+    })
+    expect(await screen.findByText(/操作失败：space_last_owner/)).toBeInTheDocument()
+
+    const enable = screen.getAllByRole('button', { name: /禁用|启用/ })[2]
+    if (!enable) throw new Error('expected a third member row')
+    await user.click(enable)
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[1]).toMatchObject({ body: { role: 'member', status: 'active', version: 1 } })
+    // Admins see role selectors but cannot grant owner.
+    expect(screen.getByLabelText('Bob 的角色')).toBeInTheDocument()
   })
 })

@@ -22,7 +22,7 @@ export function ProjectsPage({ slug }: { slug: string }) {
   const p = workspacePaths(slug)
   const navigate = useNavigate()
   const { space } = useCurrentSpace()
-  const cloudMode = space?.slug === slug
+  const ready = space?.slug === slug
   const [createOpen, setCreateOpen] = useState(false)
 
   return (
@@ -30,7 +30,7 @@ export function ProjectsPage({ slug }: { slug: string }) {
       <PageHeader
         title="项目"
         actions={
-          cloudMode && (
+          ready && (
             <Button size="sm" onClick={() => setCreateOpen(true)}>
               <Plus className="size-3.5" />
               新建项目
@@ -38,7 +38,7 @@ export function ProjectsPage({ slug }: { slug: string }) {
           )
         }
       />
-      {cloudMode && (
+      {ready && (
         <CreateProjectDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
