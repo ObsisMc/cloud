@@ -50,7 +50,7 @@ go run ./cmd/cloudctl -command bootstrap -name '研发组织' -source 'huawei-co
 go run ./cmd/cloudctl -command credential-ref -tenant '<tenant UUID>' -owner '<user UUID>' -secret-ref 'infra-secret://git/team/account'
 ```
 
-`bootstrap` 原子创建租户、首位管理员与 `default` 空间，是部署操作；重复执行会新建租户。`credential-ref` 只保存基础设施引用，不接收 Git 密钥值；引用受 tenant+owner 外键约束。已登录用户也可以通过 `POST /api/v1/tenants` 为自己创建租户：请求体只有第一个协作空间的 `name` 与 `slug`，租户借用该名称，调用者成为租户管理员和空间 owner；租户是产品不展示的隐式容器。加入已有租户仍须先经有效 gateway 身份访问 `/api/v1/me` 建立 user，再由管理员通过成员 API 显式添加；没有外部组自动授权。
+`bootstrap` 原子创建租户、首位管理员与 `default` 空间，是部署操作；重复执行会新建租户。当 `-source` 为 `huawei-corp` 时，`-subject` 必须传入 IDaaS 返回的稳定 `uuid`（形如 `uuid~...`），勿填工号或 W3 账号——否则该员工首次登录会被当成新用户，并在前端被引导去创建自己的新租户。`credential-ref` 只保存基础设施引用，不接收 Git 密钥值；引用受 tenant+owner 外键约束。已登录用户也可以通过 `POST /api/v1/tenants` 为自己创建租户：请求体只有第一个协作空间的 `name` 与 `slug`，租户借用该名称，调用者成为租户管理员和空间 owner；租户是产品不展示的隐式容器。加入已有租户仍须先经有效 gateway 身份访问 `/api/v1/me` 建立 user，再由管理员通过成员 API 显式添加；没有外部组自动授权。
 
 生产启动前在配置中设置内部验证公钥，见 [认证配置与凭据](docs/authentication.md)。空 trust 配置会启动失败：
 
@@ -93,7 +93,7 @@ go run ./cmd/simulator
 
 - **命令与运维入口 (`cmd/`)**：[入口总览 (`cmd/`)](cmd/README.md)
   - [服务守护进程 (`cmd/server`)](cmd/server/README.md)：生产环境 HTTP Daemon 核心。
-  - [认证 Gateway (`cmd/gateway`)](cmd/gateway/README.md)：GitHub OAuth 登录、PostgreSQL 浏览器会话与 `/api/v1` 反向代理。
+  - [认证 Gateway (`cmd/gateway`)](cmd/gateway/README.md)：华为 IDaaS 或 GitHub OAuth 登录、PostgreSQL 浏览器会话与 `/api/v1` 反向代理。
   - [运维管理工具 (`cmd/cloudctl`)](cmd/cloudctl/README.md)：迁移执行、初始租户引导与凭据引用配置。
   - [本地执行模拟器 (`cmd/simulator`)](cmd/simulator/README.md)：内存与磁盘执行双工演示。
   - [OpenAPI 同步工具 (`cmd/openapi`)](cmd/openapi/README.md)：从 Go 契约自动编译导出 `api/openapi.json`。
@@ -102,7 +102,7 @@ go run ./cmd/simulator
   - [领域状态机引擎 (`internal/core`)](internal/core/README.md)：聚合根、事务与全局锁、乐观版本控制、租约与幂等。
   - [PostgreSQL 迁移目录 (`internal/core/migrations`)](internal/core/migrations/README.md)：0001~0005 线性 SQL 迁移与校验和防篡改校验。
   - [HTTP 路由网关 (`internal/api/router`)](internal/api/router/README.md)：Gin 路由分流、双重 JWT 校验、白名单与 Fault 映射。
-  - [认证边界 (`internal/gateway`)](internal/gateway/README.md)：登录编排、Login Attempt/Session 存储、内部凭据签发、Cookie/CSRF 与代理；[GitHub 适配器 (`internal/gateway/github`)](internal/gateway/github/README.md)。
+  - [认证边界 (`internal/gateway`)](internal/gateway/README.md)：登录编排、Login Attempt/Session 存储、内部凭据签发、Cookie/CSRF 与代理；[华为 IDaaS 适配器 (`internal/gateway/idaas`)](internal/gateway/idaas/README.md)；[GitHub 适配器 (`internal/gateway/github`)](internal/gateway/github/README.md)。
   - [API 契约定义 (`internal/contract`)](internal/contract/README.md)：OpenAPI 3.0 数据模型与测试。
   - [数据库连接池管理 (`internal/repository`)](internal/repository/README.md)：GORM 连接池、快速探活与安全约束。
   - [配置解析与加载 (`internal/config`)](internal/config/README.md)：Viper 强类型配置与环境变量映射。

@@ -29,25 +29,33 @@ public:
   # Production requires https. development: true permits http on localhost/127.0.0.1 only and
   # drops the Secure cookie attributes.
   # Locally the Vite dev server on :5173 is the browser-facing origin and proxies /auth, /api and
-  # /healthz here, so cookies and the same-origin check are evaluated against it; register
-  # http://localhost:5173/auth/callback/github as the GitHub OAuth App callback.
+  # /healthz here, so cookies and the same-origin check are evaluated against it; an external
+  # provider's callback is http://localhost:5173/auth/callback/<provider>.
   base_url: "http://localhost:5173"
   development: true
 
 session:
-  ttl: 720h            # absolute browser session lifetime; default 30 days, hard maximum 90 days
+  # Absolute, non-sliding browser session lifetime. Unset it defaults by login.provider: 12h for
+  # huawei-idaas, 30 days otherwise; the hard maximum is 90 days.
+  # ttl: 12h
   cleanup_interval: 10m
   retention: 168h      # audit window before expired/revoked rows are deleted
   cleanup_batch: 500
 
 login:
+  # External provider of this deployment: huawei-idaas | github. It is the default for
+  # POST /auth/login and the only one whose secret is read. Locally `task setup` sets
+  # GATEWAY_LOGIN_PROVIDER from config.toml when [github] or [idaas] is filled in; left unset with
+  # development_provider, the Gateway offers only the development login.
+  # provider: "huawei-idaas"
   attempt_ttl: 10m     # 1m..1h
   rate_limit_per_minute: 30
   rate_limit_burst: 30
   pkce_key_file: ".local/gateway/gateway-pkce.key" # at least 32 random bytes; `task setup`
-  # Registers the "dev" provider: a local form where any typed identity signs in, so the
-  # frontend can be developed without a GitHub OAuth App. Only valid with public.development;
-  # production configurations must not set it.
+  # Registers the "dev" provider: a local form where any typed identity (including a
+  # huawei-corp uuid) signs in, so the frontend can be developed without an IDaaS application or
+  # GitHub OAuth App. Only valid with public.development; production configurations must not
+  # set it.
   development_provider: true
 
 cloud:
@@ -65,9 +73,8 @@ tokens:
   lifetime: 60s        # at most 5m; Cloud rejects longer credentials
 
 github:
-  # Optional locally: `task setup` supplies GATEWAY_GITHUB_CLIENT_ID and writes the secret file
-  # from config.toml when [github] is filled in; an empty client_id leaves GitHub unregistered.
-  # The secret file holds only the secret value.
+  # Read only when login.provider is github. Locally `task setup` supplies GATEWAY_GITHUB_CLIENT_ID
+  # and writes the secret file from config.toml; the secret file holds only the secret value.
   client_id: ""
   client_secret_file: ".local/gateway/github-client-secret"
   # Override for GitHub Enterprise Server; source then names that host.
@@ -75,3 +82,14 @@ github:
   # token_url: "https://github.example.com/login/oauth/access_token"
   # user_url: "https://github.example.com/api/v3/user"
   # source: "github.example.com"
+
+idaas:
+  # Read only when login.provider is huawei-idaas. Test environment: https://uniportal-beta.huawei.com.
+  # Locally `task setup` supplies GATEWAY_IDAAS_BASE_URL / GATEWAY_IDAAS_CLIENT_ID and writes the
+  # secret file from config.toml; production mounts it read-only, e.g. /run/ora-keys/idaas-client-secret.
+  base_url: "https://uniportal.huawei.com"
+  client_id: ""
+  client_secret_file: ".local/gateway/idaas-client-secret"
+  # Optional top-level userinfo field. Missing/empty/non-string values fall back to uuid.
+  display_name_field: "userName"
+  timeout: 10s

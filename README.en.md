@@ -50,7 +50,7 @@ go run ./cmd/cloudctl -command bootstrap -name 'Engineering Organization' -sourc
 go run ./cmd/cloudctl -command credential-ref -tenant '<tenant UUID>' -owner '<user UUID>' -secret-ref 'infra-secret://git/team/account'
 ```
 
-`bootstrap` atomically creates a tenant, its first administrator and its `default` space and is a deployment operation; running it again creates another tenant. `credential-ref` stores only an infrastructure reference and never accepts a Git credential value; tenant and owner foreign keys scope the reference. A signed-in user can also provision a tenant for themselves through `POST /api/v1/tenants`: the body carries only the first collaboration space's `name` and `slug`, the tenant borrows that name, and the caller becomes the tenant administrator and the space owner; the tenant is an implicit container the product never shows. Joining an existing tenant still requires the user to access `/api/v1/me` through an authenticated gateway first and an administrator to add them explicitly through the membership API; there is no automatic authorization from external groups.
+`bootstrap` atomically creates a tenant, its first administrator and its `default` space and is a deployment operation; running it again creates another tenant. When `-source` is `huawei-corp`, `-subject` must be the stable `uuid` returned by IDaaS (`uuid~...`), never the employee number or W3 account: otherwise that employee's first login creates a new user, whom the frontend then guides into provisioning a tenant of their own. `credential-ref` stores only an infrastructure reference and never accepts a Git credential value; tenant and owner foreign keys scope the reference. A signed-in user can also provision a tenant for themselves through `POST /api/v1/tenants`: the body carries only the first collaboration space's `name` and `slug`, the tenant borrows that name, and the caller becomes the tenant administrator and the space owner; the tenant is an implicit container the product never shows. Joining an existing tenant still requires the user to access `/api/v1/me` through an authenticated gateway first and an administrator to add them explicitly through the membership API; there is no automatic authorization from external groups.
 
 Before starting production, configure internal verification public keys as described in [Authentication and credentials](docs/authentication.md). Startup fails when the trust configuration is empty:
 
@@ -93,7 +93,7 @@ Every subsystem, service command, and tool follows the same rigorous architectur
 
 - **Command and operations entrypoints (`cmd/`)**: [entrypoint overview (`cmd/`)](cmd/README.en.md)
   - [Service daemon (`cmd/server`)](cmd/server/README.en.md): core production HTTP daemon.
-  - [Authentication gateway (`cmd/gateway`)](cmd/gateway/README.en.md): GitHub OAuth login, PostgreSQL browser sessions, and the `/api/v1` reverse proxy.
+  - [Authentication gateway (`cmd/gateway`)](cmd/gateway/README.en.md): Huawei IDaaS or GitHub OAuth login, PostgreSQL browser sessions, and the `/api/v1` reverse proxy.
   - [Operations CLI (`cmd/cloudctl`)](cmd/cloudctl/README.en.md): migrations, initial tenant bootstrap, and credential-reference configuration.
   - [Local execution simulator (`cmd/simulator`)](cmd/simulator/README.en.md): in-memory and disk-backed execution-double demo.
   - [OpenAPI synchronization tool (`cmd/openapi`)](cmd/openapi/README.en.md): automatically compiles the Go contract into `api/openapi.json`.
@@ -102,7 +102,7 @@ Every subsystem, service command, and tool follows the same rigorous architectur
   - [Domain state-machine engine (`internal/core`)](internal/core/README.en.md): aggregates, transactions and global locking, optimistic versioning, leases, and idempotency.
   - [PostgreSQL migration catalog (`internal/core/migrations`)](internal/core/migrations/README.en.md): linear migrations 0001–0005 and checksum integrity verification.
   - [HTTP routing gateway (`internal/api/router`)](internal/api/router/README.en.md): Gin dispatch, two-tier JWT validation, allowlisting, and Fault projection.
-  - [Authentication boundary (`internal/gateway`)](internal/gateway/README.en.md): login orchestration, Login Attempt/Session store, internal credential issuance, cookie/CSRF policy, and the proxy; [GitHub adapter (`internal/gateway/github`)](internal/gateway/github/README.en.md).
+  - [Authentication boundary (`internal/gateway`)](internal/gateway/README.en.md): login orchestration, Login Attempt/Session store, internal credential issuance, cookie/CSRF policy, and the proxy; [Huawei IDaaS adapter (`internal/gateway/idaas`)](internal/gateway/idaas/README.en.md); [GitHub adapter (`internal/gateway/github`)](internal/gateway/github/README.en.md).
   - [API contract definitions (`internal/contract`)](internal/contract/README.en.md): OpenAPI 3.0 data models and tests.
   - [Database pool management (`internal/repository`)](internal/repository/README.en.md): GORM connection pooling, fail-fast health checks, and security constraints.
   - [Configuration parsing and loading (`internal/config`)](internal/config/README.en.md): strongly typed Viper configuration and environment-variable mapping.

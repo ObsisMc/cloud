@@ -71,11 +71,18 @@ describe('gateway auth api', () => {
     await expect(fetchLoginProviders()).resolves.toEqual(['github', 'dev'])
   })
 
-  it('treats a 401 from the session probe as signed out and any other failure as an error', async () => {
-    await expect(fetchSessionUser()).resolves.toBeNull()
+  it('classifies the session probe: 401 signed out, 403 disabled, anything else an error', async () => {
+    await expect(fetchSessionUser()).resolves.toEqual({ kind: 'signed-out' })
 
     installSignedInSession()
-    await expect(fetchSessionUser()).resolves.toEqual(TEST_USER)
+    await expect(fetchSessionUser()).resolves.toEqual({ kind: 'signed-in', user: TEST_USER })
+
+    server.use(
+      http.get('/api/v1/me', () =>
+        HttpResponse.json({ code: 'user_disabled', params: {}, requestId: 'r' }, { status: 403 }),
+      ),
+    )
+    await expect(fetchSessionUser()).resolves.toEqual({ kind: 'disabled' })
 
     server.use(
       http.get('/api/v1/me', () =>
@@ -111,6 +118,16 @@ describe('SessionProvider', () => {
     await waitFor(() =>
       expect(result.current.session).toEqual({ status: 'signed-in', user: TEST_USER }),
     )
+  })
+
+  it('reports a disabled account distinctly from signed out', async () => {
+    server.use(
+      http.get('/api/v1/me', () =>
+        HttpResponse.json({ code: 'user_disabled', params: {}, requestId: 'r' }, { status: 403 }),
+      ),
+    )
+    const { result } = renderHook(() => useSession(), { wrapper })
+    await waitFor(() => expect(result.current.session).toEqual({ status: 'disabled' }))
   })
 
   it('reports unavailable, not signed out, when the probe fails for another reason', async () => {
@@ -200,6 +217,17 @@ describe('RequireSession', () => {
     expect(await screen.findByText('Private screen')).toBeInTheDocument()
   })
 
+  it('reports a disabled account in place instead of redirecting to login', async () => {
+    server.use(
+      http.get('/api/v1/me', () =>
+        HttpResponse.json({ code: 'user_disabled', params: {}, requestId: 'r' }, { status: 403 }),
+      ),
+    )
+    renderRoutes(routes, '/private')
+    expect(await screen.findByText(/账号已被停用/)).toBeInTheDocument()
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument()
+  })
+
   it('reports an unreachable backend instead of redirecting', async () => {
     server.use(http.get('/api/v1/me', () => HttpResponse.error()))
     renderRoutes(routes, '/private')
@@ -214,22 +242,45 @@ function LocationEcho() {
 }
 
 describe('LoginPage', () => {
-  it('starts the GitHub login with the requested returnTo', async () => {
+  it('starts the only external login by itself with the requested returnTo', async () => {
+    let calls = 0
     let body: unknown = null
     server.use(
       http.post('/auth/login', async ({ request }) => {
+        calls += 1
         body = await request.json()
         return HttpResponse.json({ authorizationUrl: 'https://github.com/login/oauth/authorize' })
       }),
     )
     const navigation = installFakeNavigation()
-    const user = userEvent.setup()
-    renderWithProviders(<LoginPage />, { route: '/login?returnTo=%2Facme%2Fprojects' })
-
-    await user.click(await screen.findByRole('button', { name: '使用 GitHub 登录' }))
+    renderWithProviders(<LoginPage />, { route: '/login?returnTo=%2Fw%2Facme%2Fprojects' })
 
     await waitFor(() => expect(navigation.destinations).toHaveLength(1))
-    expect(body).toEqual({ provider: 'github', returnTo: '/acme/projects' })
+    expect(body).toEqual({ provider: 'github', returnTo: '/w/acme/projects' })
+    expect(calls).toBe(1)
+    expect(screen.getByText('正在跳转到 GitHub…')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /登录/ })).not.toBeInTheDocument()
+  })
+
+  it('auto-starts the corporate login for an IDaaS-only gateway', async () => {
+    let body: unknown = null
+    server.use(
+      http.get('/auth/providers', () =>
+        HttpResponse.json({ providers: ['huawei-idaas'], default: 'huawei-idaas' }),
+      ),
+      http.post('/auth/login', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({
+          authorizationUrl: 'https://uniportal.huawei.com/saaslogin1/oauth2/v1/authorize?x',
+        })
+      }),
+    )
+    const navigation = installFakeNavigation()
+    renderWithProviders(<LoginPage />, { route: '/login' })
+
+    await waitFor(() => expect(navigation.destinations).toHaveLength(1))
+    expect(body).toEqual({ provider: 'huawei-idaas', returnTo: '/' })
+    expect(screen.getByText('正在跳转华为统一登录…')).toBeInTheDocument()
   })
 
   it('falls back to / for a returnTo that is not a same-origin path', async () => {
@@ -241,29 +292,63 @@ describe('LoginPage', () => {
       }),
     )
     installFakeNavigation()
-    const user = userEvent.setup()
     renderWithProviders(<LoginPage />, { route: '/login?returnTo=//evil.example' })
-
-    await user.click(await screen.findByRole('button', { name: '使用 GitHub 登录' }))
 
     await waitFor(() => expect(body).toEqual({ provider: 'github', returnTo: '/' }))
   })
 
-  it('reports a gateway failure and re-enables the button', async () => {
-    server.use(http.post('/auth/login', () => HttpResponse.error()))
+  it('stops after one failed automatic start and offers an explicit retry', async () => {
+    let calls = 0
+    server.use(
+      http.post('/auth/login', () => {
+        calls += 1
+        return HttpResponse.error()
+      }),
+    )
+    const navigation = installFakeNavigation()
     const user = userEvent.setup()
     renderWithProviders(<LoginPage />, { route: '/login' })
 
-    await user.click(await screen.findByRole('button', { name: '使用 GitHub 登录' }))
-
     expect(await screen.findByText(/无法开始登录/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '使用 GitHub 登录' })).toBeEnabled()
+    expect(calls).toBe(1)
+    const retry = screen.getByRole('button', { name: '重新登录' })
+    expect(retry).toBeEnabled()
+
+    server.use(
+      http.post('/auth/login', () =>
+        HttpResponse.json({ authorizationUrl: 'https://github.com/login/oauth/authorize' }),
+      ),
+    )
+    await user.click(retry)
+    await waitFor(() => expect(navigation.destinations).toHaveLength(1))
   })
 
-  it('offers the developer login only when the gateway registers it, and starts it as "dev"', async () => {
+  it('tells a disabled account so instead of starting another login', async () => {
+    let calls = 0
+    server.use(
+      http.get('/api/v1/me', () =>
+        HttpResponse.json({ code: 'user_disabled', params: {}, requestId: 'r' }, { status: 403 }),
+      ),
+      http.post('/auth/login', () => {
+        calls += 1
+        return HttpResponse.json({ authorizationUrl: 'https://github.com/login/oauth/authorize' })
+      }),
+    )
+    const navigation = installFakeNavigation()
+    renderWithProviders(<LoginPage />, { route: '/login' })
+
+    expect(await screen.findByText('账号已被停用')).toBeInTheDocument()
+    expect(calls).toBe(0)
+    expect(navigation.destinations).toEqual([])
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('offers a choice, and starts nothing by itself, when the developer login is registered', async () => {
     let body: unknown = null
     server.use(
-      http.get('/auth/providers', () => HttpResponse.json({ providers: ['dev', 'github'] })),
+      http.get('/auth/providers', () =>
+        HttpResponse.json({ providers: ['dev', 'github'], default: 'github' }),
+      ),
       http.post('/auth/login', async ({ request }) => {
         body = await request.json()
         return HttpResponse.json({ authorizationUrl: 'http://localhost:5173/auth/dev/authorize?s' })
@@ -273,21 +358,23 @@ describe('LoginPage', () => {
     const user = userEvent.setup()
     renderWithProviders(<LoginPage />, { route: '/login?returnTo=%2Fw%2Facme%2Fissues' })
 
-    await user.click(await screen.findByRole('button', { name: '开发者登录（仅本地）' }))
+    const dev = await screen.findByRole('button', { name: '开发者登录（仅本地）' })
+    expect(screen.getByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument()
+    expect(navigation.destinations).toEqual([])
+
+    await user.click(dev)
 
     await waitFor(() => expect(navigation.destinations).toHaveLength(1))
     expect(body).toEqual({ provider: 'dev', returnTo: '/w/acme/issues' })
-    expect(screen.getByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument()
-  })
-
-  it('shows no developer login against a production-shaped gateway', async () => {
-    renderWithProviders(<LoginPage />, { route: '/login' })
-    expect(await screen.findByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /开发者登录/ })).not.toBeInTheDocument()
   })
 
   it('offers to sign out of GitHub when GitHub login exists', async () => {
-    server.use(http.post('/auth/logout', () => new HttpResponse(null, { status: 204 })))
+    server.use(
+      http.get('/auth/providers', () =>
+        HttpResponse.json({ providers: ['dev', 'github'], default: 'github' }),
+      ),
+      http.post('/auth/logout', () => new HttpResponse(null, { status: 204 })),
+    )
     const navigation = installFakeNavigation()
     const user = userEvent.setup()
     renderWithProviders(<LoginPage />, { route: '/login' })
@@ -318,9 +405,9 @@ describe('LoginPage', () => {
     renderRoutes(
       [
         { path: '/login', element: <LoginPage /> },
-        { path: '/acme/issues', element: <div>Issues screen</div> },
+        { path: '/w/acme/issues', element: <div>Issues screen</div> },
       ],
-      '/login?returnTo=%2Facme%2Fissues',
+      '/login?returnTo=%2Fw%2Facme%2Fissues',
     )
     expect(await screen.findByText('Issues screen')).toBeInTheDocument()
   })

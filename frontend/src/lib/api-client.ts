@@ -52,6 +52,11 @@ export function isUnauthorizedError(error: unknown): boolean {
   return isAxiosError(error) && error.response?.status === 401
 }
 
+/** True for a 403: the caller is known but Cloud refuses them (e.g. a disabled user). */
+export function isForbiddenError(error: unknown): boolean {
+  return isAxiosError(error) && error.response?.status === 403
+}
+
 AXIOS_INSTANCE.interceptors.response.use(undefined, (error: unknown) => {
   if (isUnauthorizedError(error)) {
     for (const listener of unauthorizedListeners) listener()

@@ -18,12 +18,25 @@
 #     e.g. psql -U postgres -c "CREATE ROLE ora LOGIN PASSWORD 'ora-local' CREATEDB;" -c "CREATE DATABASE ora OWNER ora;"
 dsn = "host=127.0.0.1 port=55432 user=ora password=ora-local dbname=ora sslmode=disable"
 
+# The Gateway has one external login provider; fill in at most one of [github] and [idaas].
+# Leave both empty to develop with the Gateway's built-in development login only (any typed
+# identity, including a huawei-corp uuid, signs in; see docs/gateway.md).
+
 [github]
-# Optional. Leave both empty to develop with the Gateway's built-in development login only (any
-# typed identity signs in; see docs/gateway.md). To test real GitHub login, create an OAuth App at
-# https://github.com/settings/developers ("New OAuth App") with
+# To test real GitHub login, create an OAuth App at https://github.com/settings/developers
+# ("New OAuth App") with
 #   Homepage URL:               http://localhost:5173
 #   Authorization callback URL: http://localhost:5173/auth/callback/github
 # The callback must match exactly: the Gateway derives it from public.base_url, never from headers.
 client_id = ""
 client_secret = ""
+
+[idaas]
+# Huawei IDaaS 2.0 application (client_secret_post). Its registered callback must match
+# <base_url>/auth/callback/huawei-idaas exactly and the Gateway requires an https base_url, so
+# this is for a deployed test environment rather than a laptop; see docs/gateway.md.
+base_url = "https://uniportal-beta.huawei.com"
+client_id = ""
+client_secret = ""
+# Top-level userinfo field shown as the display name; leave empty to fall back to the uuid.
+display_name_field = "userName"

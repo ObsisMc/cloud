@@ -1,18 +1,26 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import type { User } from '@/api/generated.schemas'
-import { fetchSessionUser, GITHUB_SIGN_OUT_URL, logoutSession } from '@/features/auth/api'
+import {
+  fetchSessionUser,
+  GITHUB_SIGN_OUT_URL,
+  logoutSession,
+  type SessionProbe,
+} from '@/features/auth/api'
 import { onUnauthorized } from '@/lib/api-client'
 import { openExternalTab } from '@/lib/navigation'
 
 /**
  * The tab's authentication state. `loading` lasts until the first
- * `GET /api/v1/me` settles; `unavailable` means that probe failed for a
- * reason other than 401, so the UI must not pretend the user is signed out.
+ * `GET /api/v1/me` settles; `disabled` is a valid gateway session whose user
+ * Cloud refuses (403), which a new login cannot fix; `unavailable` means the
+ * probe failed for another reason, so the UI must not pretend the user is
+ * signed out.
  */
 export type Session =
   | { status: 'loading' }
   | { status: 'signed-out' }
+  | { status: 'disabled' }
   | { status: 'unavailable' }
   | { status: 'signed-in'; user: User }
 
@@ -51,13 +59,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   })
 
   useEffect(
-    () => onUnauthorized(() => queryClient.setQueryData(SESSION_QUERY_KEY, null)),
+    () =>
+      onUnauthorized(() =>
+        queryClient.setQueryData<SessionProbe>(SESSION_QUERY_KEY, { kind: 'signed-out' }),
+      ),
     [queryClient],
   )
 
   const signOut = useCallback(async () => {
     await logoutSession()
-    queryClient.setQueryData(SESSION_QUERY_KEY, null)
+    queryClient.setQueryData<SessionProbe>(SESSION_QUERY_KEY, { kind: 'signed-out' })
     // Everything else in the cache belongs to the member who just left.
     queryClient.removeQueries({
       predicate: (cached) => cached.queryKey[0] !== SESSION_QUERY_KEY[0],
@@ -80,11 +91,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }
 
-function toSession(user: User | null | undefined, pending: boolean, failed: boolean): Session {
+function toSession(probe: SessionProbe | undefined, pending: boolean, failed: boolean): Session {
   if (pending) return { status: 'loading' }
-  if (failed) return { status: 'unavailable' }
-  if (!user) return { status: 'signed-out' }
-  return { status: 'signed-in', user }
+  if (failed || !probe) return { status: 'unavailable' }
+  if (probe.kind === 'signed-in') return { status: 'signed-in', user: probe.user }
+  return { status: probe.kind }
 }
 
 /** Reads the tab's session; throws outside {@link SessionProvider}. */

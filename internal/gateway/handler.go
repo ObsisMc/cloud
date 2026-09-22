@@ -121,10 +121,11 @@ type loginRequest struct {
 	ReturnTo string `json:"returnTo"`
 }
 
-// providers names the logins this deployment offers. It reveals nothing beyond what the sign-in
-// screen must show and takes no input, so it needs no origin proof.
+// providers names the logins this deployment offers and which one a start request without a
+// provider uses. It reveals nothing beyond what the sign-in screen must show and takes no input,
+// so it needs no origin proof.
 func (h *handler) providers(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"providers": h.Login.Providers()})
+	c.JSON(http.StatusOK, gin.H{"providers": h.Login.Providers(), "default": h.Login.DefaultProvider()})
 }
 
 // login starts an external login. It is a same-origin JSON POST so it cannot be triggered by a

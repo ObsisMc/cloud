@@ -1,6 +1,6 @@
 // devsetup turns config.toml into everything the local development stack
 // needs: the purpose-separated Ed25519 key pairs and PKCE key the Gateway and
-// Cloud share, the GitHub client secret file the Gateway reads, the
+// Cloud share, the external provider's client secret file the Gateway reads, the
 // environment file Taskfile.yml loads (CLOUD_*/GATEWAY_* overrides plus
 // TEST_DATABASE_URL), and the applied database schema.
 //
@@ -31,6 +31,7 @@ import (
 
 	"github.com/wanglongan587/cloud/internal/config"
 	"github.com/wanglongan587/cloud/internal/core"
+	"github.com/wanglongan587/cloud/internal/gateway"
 	"github.com/wanglongan587/cloud/internal/repository"
 )
 
@@ -43,6 +44,12 @@ type devConfig struct {
 		ClientID     string `toml:"client_id"`
 		ClientSecret string `toml:"client_secret"`
 	} `toml:"github"`
+	IDaaS struct {
+		BaseURL          string `toml:"base_url"`
+		ClientID         string `toml:"client_id"`
+		ClientSecret     string `toml:"client_secret"`
+		DisplayNameField string `toml:"display_name_field"`
+	} `toml:"idaas"`
 }
 
 func main() {
@@ -61,7 +68,7 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	if e := materialize(cfg, *dir, *envPath); e != nil {
+	if e := materialize(&cfg, *dir, *envPath); e != nil {
 		return e
 	}
 	if e := migrate(context.Background(), cfg.Database.DSN); e != nil {
@@ -72,9 +79,10 @@ func run() error {
 }
 
 // loadConfig decodes config.toml strictly so a misspelled key fails here
-// instead of silently leaving GitHub login unconfigured. [github] is optional
-// as a whole: the Gateway's development provider signs developers in without
-// it, but a half-filled section is a mistake, not a choice.
+// instead of silently leaving an external login unconfigured. [github] and
+// [idaas] are optional as a whole and mutually exclusive (the Gateway has one
+// external provider): the development provider signs developers in without
+// either, but a half-filled section is a mistake, not a choice.
 func loadConfig(path string) (devConfig, error) {
 	var cfg devConfig
 	f, e := os.Open(path)
@@ -97,22 +105,42 @@ func loadConfig(path string) (devConfig, error) {
 	cfg.Database.DSN = strings.TrimSpace(cfg.Database.DSN)
 	cfg.GitHub.ClientID = strings.TrimSpace(cfg.GitHub.ClientID)
 	cfg.GitHub.ClientSecret = strings.TrimSpace(cfg.GitHub.ClientSecret)
+	cfg.IDaaS.BaseURL = strings.TrimSpace(cfg.IDaaS.BaseURL)
+	cfg.IDaaS.ClientID = strings.TrimSpace(cfg.IDaaS.ClientID)
+	cfg.IDaaS.ClientSecret = strings.TrimSpace(cfg.IDaaS.ClientSecret)
+	cfg.IDaaS.DisplayNameField = strings.TrimSpace(cfg.IDaaS.DisplayNameField)
 	if cfg.Database.DSN == "" {
 		return cfg, fmt.Errorf("%s: database.dsn must be set (see config.toml.template)", path)
 	}
 	if (cfg.GitHub.ClientID == "") != (cfg.GitHub.ClientSecret == "") {
-		return cfg, fmt.Errorf("%s: github.client_id and github.client_secret must be set together, or both left empty for the development login only", path)
+		return cfg, fmt.Errorf("%s: github.client_id and github.client_secret must be set together, or both left empty", path)
+	}
+	if (cfg.IDaaS.ClientID == "") != (cfg.IDaaS.ClientSecret == "") {
+		return cfg, fmt.Errorf("%s: idaas.client_id and idaas.client_secret must be set together, or both left empty", path)
+	}
+	if cfg.GitHub.ClientID != "" && cfg.IDaaS.ClientID != "" {
+		return cfg, fmt.Errorf("%s: the Gateway has one external provider; fill in [github] or [idaas], not both", path)
 	}
 	return cfg, nil
 }
 
-// githubConfigured reports whether config.toml enables GitHub login.
-func (c devConfig) githubConfigured() bool { return c.GitHub.ClientID != "" }
+// externalProvider is the Gateway's login.provider implied by config.toml: the section that is
+// filled in, or none for a development-login-only Gateway.
+func (c *devConfig) externalProvider() string {
+	switch {
+	case c.GitHub.ClientID != "":
+		return gateway.ProviderGitHub
+	case c.IDaaS.ClientID != "":
+		return gateway.ProviderHuaweiIDaaS
+	default:
+		return ""
+	}
+}
 
 // materialize writes the files the services and Taskfile read. Keys are only
 // ever created; the secret and env files are derived from config.toml on
 // every run so editing config.toml is enough to change them.
-func materialize(cfg devConfig, dir, envPath string) error {
+func materialize(cfg *devConfig, dir, envPath string) error {
 	if e := os.MkdirAll(dir, 0o700); e != nil {
 		return e
 	}
@@ -132,18 +160,23 @@ func materialize(cfg devConfig, dir, envPath string) error {
 		return e
 	}
 	report("PKCE key", created)
-	secretPath := filepath.Join(dir, "github-client-secret")
-	if cfg.githubConfigured() {
-		if e := writePrivate(secretPath, []byte(cfg.GitHub.ClientSecret)); e != nil {
+	// Exactly the selected provider's secret exists afterwards: a stale secret from an earlier
+	// config.toml must not outlive its client id.
+	for name, secret := range map[string]string{"github-client-secret": cfg.GitHub.ClientSecret, "idaas-client-secret": cfg.IDaaS.ClientSecret} {
+		secretPath := filepath.Join(dir, name)
+		if secret == "" {
+			if e := os.Remove(secretPath); e != nil && !errors.Is(e, fs.ErrNotExist) {
+				return e
+			}
+			continue
+		}
+		if e := writePrivate(secretPath, []byte(secret)); e != nil {
 			return e
 		}
 		fmt.Printf("wrote %s\n", secretPath)
-	} else {
-		// A stale secret from an earlier config.toml must not outlive its client id.
-		if e := os.Remove(secretPath); e != nil && !errors.Is(e, fs.ErrNotExist) {
-			return e
-		}
-		fmt.Println("GitHub login not configured ([github] empty): only the development login is available")
+	}
+	if cfg.externalProvider() == "" {
+		fmt.Println("no external login configured ([github] and [idaas] empty): only the development login is available")
 	}
 	if e := os.MkdirAll(filepath.Dir(envPath), 0o700); e != nil {
 		return e
@@ -158,16 +191,21 @@ func materialize(cfg devConfig, dir, envPath string) error {
 // renderEnv produces the dotenv file Taskfile.yml loads. Values are
 // double-quoted because the DSN contains spaces; the escaping matches the
 // dotenv dialect Task parses.
-func renderEnv(cfg devConfig) string {
+func renderEnv(cfg *devConfig) string {
 	var b strings.Builder
 	b.WriteString("# Generated by `task setup` from config.toml; edit config.toml and rerun instead.\n")
-	// The client id line is written even when empty so the file always lists every variable it
-	// owns; the Gateway treats an empty id as "GitHub not configured".
+	// Every variable the file owns is written even when empty so a rerun never leaves a stale
+	// value behind; the Gateway treats an empty login.provider (with development_provider) as
+	// "development login only".
 	for _, kv := range [][2]string{
 		{"CLOUD_DATABASE_DSN", cfg.Database.DSN},
 		{"GATEWAY_DATABASE_DSN", cfg.Database.DSN},
 		{"TEST_DATABASE_URL", cfg.Database.DSN},
+		{"GATEWAY_LOGIN_PROVIDER", cfg.externalProvider()},
 		{"GATEWAY_GITHUB_CLIENT_ID", cfg.GitHub.ClientID},
+		{"GATEWAY_IDAAS_BASE_URL", cfg.IDaaS.BaseURL},
+		{"GATEWAY_IDAAS_CLIENT_ID", cfg.IDaaS.ClientID},
+		{"GATEWAY_IDAAS_DISPLAY_NAME_FIELD", cfg.IDaaS.DisplayNameField},
 	} {
 		fmt.Fprintf(&b, "%s=%s\n", kv[0], quoteEnv(kv[1]))
 	}

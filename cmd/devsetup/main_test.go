@@ -31,6 +31,8 @@ func TestLoadConfigRejectsMissingFileUnknownKeysAndEmptyValues(t *testing.T) {
 		{"empty secret", "[database]\ndsn='x'\n[github]\nclient_id='a'\nclient_secret='  '\n", "must be set together"},
 		{"secret without id", "[database]\ndsn='x'\n[github]\nclient_secret='b'\n", "must be set together"},
 		{"everything empty", "[database]\n[github]\n", "database.dsn must be set"},
+		{"idaas secret without id", "[database]\ndsn='x'\n[idaas]\nclient_secret='b'\n", "must be set together"},
+		{"two external providers", "[database]\ndsn='x'\n[github]\nclient_id='a'\nclient_secret='b'\n[idaas]\nclient_id='c'\nclient_secret='d'\n", "not both"},
 		{"not toml", "database: {dsn: x}\n", "parse"},
 	}
 	for _, tc := range cases {
@@ -46,19 +48,23 @@ func TestLoadConfigRejectsMissingFileUnknownKeysAndEmptyValues(t *testing.T) {
 		t.Fatalf("missing file must point at the template, got %v", e)
 	}
 	cfg, e := loadConfig(writeConfig(t, "[database]\ndsn = 'host=h dbname=d'\n[github]\nclient_id = 'id'\nclient_secret = 'sec'\n"))
-	if e != nil || cfg.Database.DSN != "host=h dbname=d" || cfg.GitHub.ClientID != "id" || cfg.GitHub.ClientSecret != "sec" || !cfg.githubConfigured() {
+	if e != nil || cfg.Database.DSN != "host=h dbname=d" || cfg.GitHub.ClientID != "id" || cfg.GitHub.ClientSecret != "sec" || cfg.externalProvider() != "github" {
 		t.Fatalf("valid config not decoded: %+v %v", cfg, e)
 	}
 	cfg, e = loadConfig(writeConfig(t, "[database]\ndsn = 'host=h dbname=d'\n"))
-	if e != nil || cfg.githubConfigured() {
-		t.Fatalf("config without [github] must be valid for the development login: %+v %v", cfg, e)
+	if e != nil || cfg.externalProvider() != "" {
+		t.Fatalf("config without an external provider must be valid for the development login: %+v %v", cfg, e)
+	}
+	cfg, e = loadConfig(writeConfig(t, "[database]\ndsn = 'host=h dbname=d'\n[idaas]\nbase_url = 'https://uniportal-beta.huawei.com'\nclient_id = 'app'\nclient_secret = 'sec'\ndisplay_name_field = 'userName'\n"))
+	if e != nil || cfg.externalProvider() != "huawei-idaas" || cfg.IDaaS.BaseURL != "https://uniportal-beta.huawei.com" {
+		t.Fatalf("IDaaS config not decoded: %+v %v", cfg, e)
 	}
 }
 
 func TestTemplateIsCompleteWithGitHubLeftForTheDeveloper(t *testing.T) {
 	cfg, e := loadConfig(filepath.Join("..", "..", "config.toml.template"))
-	if e != nil || cfg.githubConfigured() {
-		t.Fatalf("template must be usable as-is with GitHub unset, got %+v %v", cfg, e)
+	if e != nil || cfg.externalProvider() != "" {
+		t.Fatalf("template must be usable as-is with no external provider, got %+v %v", cfg, e)
 	}
 	if !strings.Contains(cfg.Database.DSN, "port=55432") {
 		t.Fatalf("template DSN must match compose.yaml, got %q", cfg.Database.DSN)
@@ -69,12 +75,15 @@ func TestRenderEnvQuotesValuesForTask(t *testing.T) {
 	var cfg devConfig
 	cfg.Database.DSN = `host=127.0.0.1 password=p"a\ss dbname=ora`
 	cfg.GitHub.ClientID = "Iv1.abc"
-	got := renderEnv(cfg)
+	got := renderEnv(&cfg)
+	cfg.GitHub.ClientSecret = "s"
 	for _, line := range []string{
 		`CLOUD_DATABASE_DSN="host=127.0.0.1 password=p\"a\\ss dbname=ora"`,
 		`GATEWAY_DATABASE_DSN="host=127.0.0.1 password=p\"a\\ss dbname=ora"`,
 		`TEST_DATABASE_URL="host=127.0.0.1 password=p\"a\\ss dbname=ora"`,
+		`GATEWAY_LOGIN_PROVIDER="github"`,
 		`GATEWAY_GITHUB_CLIENT_ID="Iv1.abc"`,
+		`GATEWAY_IDAAS_CLIENT_ID=""`,
 	} {
 		if !strings.Contains(got, line+"\n") {
 			t.Fatalf("env file missing %s:\n%s", line, got)
@@ -90,7 +99,7 @@ func TestMaterializeKeepsKeysAndRewritesDerivedFiles(t *testing.T) {
 	cfg.Database.DSN = "host=h dbname=d"
 	cfg.GitHub.ClientID = "id"
 	cfg.GitHub.ClientSecret = "first-secret"
-	if e := materialize(cfg, dir, envPath); e != nil {
+	if e := materialize(&cfg, dir, envPath); e != nil {
 		t.Fatal(e)
 	}
 	read := func(name string) []byte {
@@ -133,7 +142,7 @@ func TestMaterializeKeepsKeysAndRewritesDerivedFiles(t *testing.T) {
 
 	cfg.GitHub.ClientSecret = "rotated-secret"
 	cfg.GitHub.ClientID = "id2"
-	if e := materialize(cfg, dir, envPath); e != nil {
+	if e := materialize(&cfg, dir, envPath); e != nil {
 		t.Fatal(e)
 	}
 	if string(read(filepath.Join(dir, "gateway-service.key"))) != string(privPEM) {
@@ -147,20 +156,31 @@ func TestMaterializeKeepsKeysAndRewritesDerivedFiles(t *testing.T) {
 	}
 
 	cfg.GitHub.ClientID, cfg.GitHub.ClientSecret = "", ""
-	if e := materialize(cfg, dir, envPath); e != nil {
+	if e := materialize(&cfg, dir, envPath); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := os.Stat(filepath.Join(dir, "github-client-secret")); !errors.Is(e, fs.ErrNotExist) {
 		t.Fatalf("dropping [github] must remove the stale secret file, got %v", e)
 	}
-	if !strings.Contains(string(read(envPath)), `GATEWAY_GITHUB_CLIENT_ID=""`) {
-		t.Fatal("dropping [github] must leave an empty client id in the env file")
+	if env := string(read(envPath)); !strings.Contains(env, `GATEWAY_GITHUB_CLIENT_ID=""`) || !strings.Contains(env, `GATEWAY_LOGIN_PROVIDER=""`) {
+		t.Fatal("dropping [github] must leave an empty client id and provider in the env file")
+	}
+
+	cfg.IDaaS.BaseURL, cfg.IDaaS.ClientID, cfg.IDaaS.ClientSecret = "https://uniportal-beta.huawei.com", "app", "idaas-secret"
+	if e := materialize(&cfg, dir, envPath); e != nil {
+		t.Fatal(e)
+	}
+	if got := string(read(filepath.Join(dir, "idaas-client-secret"))); got != "idaas-secret" {
+		t.Fatalf("idaas secret file = %q", got)
+	}
+	if env := string(read(envPath)); !strings.Contains(env, `GATEWAY_LOGIN_PROVIDER="huawei-idaas"`) || !strings.Contains(env, `GATEWAY_IDAAS_BASE_URL="https://uniportal-beta.huawei.com"`) {
+		t.Fatalf("IDaaS config must reach the env file:\n%s", env)
 	}
 
 	if e := os.Remove(filepath.Join(dir, "user-identity.pem")); e != nil {
 		t.Fatal(e)
 	}
-	if e := materialize(cfg, dir, envPath); e == nil || !strings.Contains(e.Error(), "must exist together") {
+	if e := materialize(&cfg, dir, envPath); e == nil || !strings.Contains(e.Error(), "must exist together") {
 		t.Fatalf("a half-present pair must be refused, got %v", e)
 	}
 }

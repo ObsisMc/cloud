@@ -7,7 +7,8 @@ import { loginPath } from '@/lib/paths'
  * Route gate: renders `children` only for a signed-in session. While the
  * probe is pending nothing is rendered, so a page never flashes with an
  * unknown identity; a signed-out tab goes to the login page with the current
- * location as `returnTo`; an unreachable backend is reported in place.
+ * location as `returnTo`; a disabled account and an unreachable backend are
+ * reported in place, because neither is fixed by logging in again.
  */
 export function RequireSession({ children }: { children: ReactNode }) {
   const { session } = useSession()
@@ -15,6 +16,13 @@ export function RequireSession({ children }: { children: ReactNode }) {
   if (session.status === 'loading') return null
   if (session.status === 'signed-out') {
     return <Navigate to={loginPath(location.pathname + location.search)} replace />
+  }
+  if (session.status === 'disabled') {
+    return (
+      <div className="flex h-svh items-center justify-center bg-muted/30">
+        <p className="text-sm text-muted-foreground">账号已被停用，请联系管理员恢复访问</p>
+      </div>
+    )
   }
   if (session.status === 'unavailable') {
     return (

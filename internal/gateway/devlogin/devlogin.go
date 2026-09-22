@@ -34,7 +34,7 @@ import (
 // treat it like every other Gateway route.
 const (
 	// Name is the provider identifier browsers pass to POST /auth/login.
-	Name = "dev"
+	Name = gateway.ProviderDevelopment
 	// AuthorizePath serves the identity form (GET) and turns it into a code (POST).
 	AuthorizePath = "/auth/dev/authorize"
 	// DefaultSource is the identity namespace the form proposes; it never collides with

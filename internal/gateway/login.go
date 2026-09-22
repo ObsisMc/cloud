@@ -22,12 +22,13 @@ var ErrLoginFailed = errors.New("login failed")
 // Login orchestrates external authentication: it owns attempts, state, PKCE, return_to, failure
 // mapping, and session creation. Adapters only translate provider protocols.
 type Login struct {
-	store        *Store
-	providers    map[string]Authenticator
-	pkceKey      []byte
-	callbackBase string
-	attemptTTL   time.Duration
-	sessionTTL   time.Duration
+	store           *Store
+	providers       map[string]Authenticator
+	defaultProvider string
+	pkceKey         []byte
+	callbackBase    string
+	attemptTTL      time.Duration
+	sessionTTL      time.Duration
 }
 
 // Started is the result of a successful start: where to send the browser and the attempt secret it
@@ -45,11 +46,16 @@ type Completed struct {
 }
 
 // NewLogin validates the orchestration configuration. callbackBase is the public callback URL
-// prefix; each provider's callback is callbackBase + "/" + provider. The PKCE key must hold at
+// prefix; each provider's callback is callbackBase + "/" + provider. defaultProvider is the
+// deployment's external provider, used when a start request names none; it may be empty (the
+// request must then name one) but otherwise has to be registered. The PKCE key must hold at
 // least 256 bits so derived verifiers keep the entropy of the attempt secret.
-func NewLogin(store *Store, providers map[string]Authenticator, pkceKey []byte, callbackBase string, attemptTTL, sessionTTL time.Duration) (*Login, error) {
+func NewLogin(store *Store, providers map[string]Authenticator, defaultProvider string, pkceKey []byte, callbackBase string, attemptTTL, sessionTTL time.Duration) (*Login, error) {
 	if store == nil || len(providers) == 0 || callbackBase == "" {
 		return nil, fmt.Errorf("store, at least one provider and callback base URL are required")
+	}
+	if _, ok := providers[defaultProvider]; defaultProvider != "" && !ok {
+		return nil, fmt.Errorf("default provider %q is not registered", defaultProvider)
 	}
 	if len(pkceKey) < 32 {
 		return nil, fmt.Errorf("PKCE derivation key must hold at least 32 bytes")
@@ -65,11 +71,15 @@ func NewLogin(store *Store, providers map[string]Authenticator, pkceKey []byte, 
 			return nil, fmt.Errorf("provider names must be 1-64 characters")
 		}
 	}
-	return &Login{store: store, providers: providers, pkceKey: pkceKey, callbackBase: callbackBase, attemptTTL: attemptTTL, sessionTTL: sessionTTL}, nil
+	return &Login{store: store, providers: providers, defaultProvider: defaultProvider, pkceKey: pkceKey, callbackBase: callbackBase, attemptTTL: attemptTTL, sessionTTL: sessionTTL}, nil
 }
 
 // CallbackURL is the fixed, configuration-derived redirect URI for one provider.
 func (l *Login) CallbackURL(provider string) string { return l.callbackBase + "/" + provider }
+
+// DefaultProvider is the provider a start request without an explicit one uses; empty when the
+// deployment has no external provider.
+func (l *Login) DefaultProvider() string { return l.defaultProvider }
 
 // Providers lists the registered adapter names in a stable order so the sign-in screen can offer
 // exactly the logins this deployment supports.
@@ -82,8 +92,12 @@ func (l *Login) Providers() []string {
 	return names
 }
 
-// Start creates a login attempt and the provider redirect. Nothing external is called.
+// Start creates a login attempt and the provider redirect. Nothing external is called. A request
+// naming no provider goes to the deployment's external provider, never to the development one.
 func (l *Login) Start(ctx context.Context, provider, returnTo string) (Started, error) {
+	if provider == "" {
+		provider = l.defaultProvider
+	}
 	adapter, ok := l.providers[provider]
 	if !ok {
 		return Started{}, ErrUnknownProvider

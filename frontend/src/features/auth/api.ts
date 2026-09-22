@@ -1,6 +1,6 @@
 import type { User } from '@/api/generated.schemas'
 import { getApiV1Me } from '@/api/me/me'
-import { customInstance, isUnauthorizedError } from '@/lib/api-client'
+import { customInstance, isForbiddenError, isUnauthorizedError } from '@/lib/api-client'
 import { navigateExternal } from '@/lib/navigation'
 
 /**
@@ -15,13 +15,19 @@ import { navigateExternal } from '@/lib/navigation'
  */
 
 /**
- * Login providers this frontend knows how to present. `github` is the real
- * external login; `dev` is the gateway's development-only form, registered
- * solely on loopback development origins, where any typed identity signs in.
+ * Login providers this frontend knows how to present. `huawei-idaas` and
+ * `github` are external logins (a deployment configures one of them); `dev`
+ * is the gateway's development-only form, registered solely on loopback
+ * development origins, where any typed identity signs in.
  */
-export type LoginProvider = 'github' | 'dev'
+export type LoginProvider = 'huawei-idaas' | 'github' | 'dev'
 
-const KNOWN_PROVIDERS: readonly LoginProvider[] = ['github', 'dev']
+const KNOWN_PROVIDERS: readonly LoginProvider[] = ['huawei-idaas', 'github', 'dev']
+
+/** True for a provider a member signs in with for real, as opposed to the development form. */
+export function isExternalProvider(provider: LoginProvider): boolean {
+  return provider !== 'dev'
+}
 
 /**
  * Asks the gateway which logins it offers, so the sign-in screen shows
@@ -71,17 +77,22 @@ export async function logoutSession(): Promise<void> {
  */
 export const GITHUB_SIGN_OUT_URL = 'https://github.com/logout'
 
+/** What the session probe learned: a member, no session, or a member Cloud has disabled. */
+export type SessionProbe =
+  { kind: 'signed-in'; user: User } | { kind: 'signed-out' } | { kind: 'disabled' }
+
 /**
- * Resolves the signed-in user, or `null` when the browser holds no valid
- * session. A 401 is the session's normal "signed out" answer, not a failure;
- * every other error propagates so the UI can distinguish "not signed in"
- * from "backend unreachable".
+ * Probes the session. A 401 is the normal "signed out" answer and a 403 means
+ * the gateway session is valid but Cloud has disabled the user, so signing in
+ * again would not help; neither is a failure. Every other error propagates so
+ * the UI can distinguish those from "backend unreachable".
  */
-export async function fetchSessionUser(signal?: AbortSignal): Promise<User | null> {
+export async function fetchSessionUser(signal?: AbortSignal): Promise<SessionProbe> {
   try {
-    return await getApiV1Me(undefined, signal)
+    return { kind: 'signed-in', user: await getApiV1Me(undefined, signal) }
   } catch (error) {
-    if (isUnauthorizedError(error)) return null
+    if (isUnauthorizedError(error)) return { kind: 'signed-out' }
+    if (isForbiddenError(error)) return { kind: 'disabled' }
     throw error
   }
 }
