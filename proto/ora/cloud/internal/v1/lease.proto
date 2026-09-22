@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package ora.cloud.internal.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// The single global coordination lease. Every state-changing call carries the holder's `epoch`;
+// Cloud rejects writes whose epoch is not the current valid lease so a stale Controller cannot
+// overwrite newer state. Expiry is measured on the database clock, never the caller's.
+service ControllerLeaseService {
+  // Takes the lease when it is free or expired, or confirms it when the caller already holds it.
+  // A valid lease held by someone else fails with FAILED_PRECONDITION (LEASE_HELD).
+  rpc AcquireLease(AcquireLeaseRequest) returns (AcquireLeaseResponse);
+  // Extends the caller's valid lease; a stale epoch fails with FAILED_PRECONDITION (STALE_CONTROLLER).
+  rpc RenewLease(RenewLeaseRequest) returns (RenewLeaseResponse);
+  // Ends the caller's valid lease immediately so another worker can acquire it.
+  rpc ReleaseLease(ReleaseLeaseRequest) returns (ReleaseLeaseResponse);
+}
+
+message Lease {
+  // Service principal of the current holder, as verified from the caller's credential.
+  string holder_id = 1;
+  // Monotonic fencing token; increases every time the lease changes hands.
+  int64 epoch = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message AcquireLeaseRequest {}
+
+message AcquireLeaseResponse {
+  Lease lease = 1;
+}
+
+message RenewLeaseRequest {
+  int64 epoch = 1;
+}
+
+message RenewLeaseResponse {
+  Lease lease = 1;
+}
+
+message ReleaseLeaseRequest {
+  int64 epoch = 1;
+}
+
+message ReleaseLeaseResponse {
+  Lease lease = 1;
+}

@@ -37,6 +37,9 @@ jobs:
       CGO_ENABLED: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `buf breaking` compares against the base branch, which needs history beyond the merge commit.
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -44,6 +47,26 @@ jobs:
           cache: true
       - run: go mod download
       - run: go run ./cmd/checkformat
+      # proto/ is the single source of the internal control contract; internal/controlpb is generated
+      # from it with pinned remote plugins. Lint, reject breaking changes to v1 against the base
+      # branch, then regenerate and fail on drift, same as `task proto:lint` / `proto:breaking` / `proto:check`.
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+          version: 1.73.0
+      - run: buf lint
+        working-directory: proto
+      - run: |
+          base="${{ github.base_ref || 'main' }}"
+          if git cat-file -e "origin/$base:proto/buf.yaml" 2>/dev/null; then
+            buf breaking --against "../.git#ref=origin/$base,subdir=proto"
+          else
+            echo "no contract on origin/$base; nothing to compare"
+          fi
+        working-directory: proto
+      - run: buf generate
+        working-directory: proto
+      - run: git diff --exit-code -- internal/controlpb
       # Same pinned golangci-lint (go.mod `tool` directive) and config as `task lint` locally.
       - run: go tool golangci-lint config verify
       - run: go tool golangci-lint run

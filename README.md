@@ -4,7 +4,7 @@
 
 阶段一实现：Go/Gin cloud 核心、PostgreSQL 权威持久化、内部认证和有限控制契约，以及使用真实 HTTP、PG、磁盘和 Git 的模拟执行组件。此仓库尚未完成 Rust Controller/Workspace Node 拆分、Desktop 重构或 Kubernetes 部署。
 
-需要 Go 1.27.1、Git、PostgreSQL 17 和可选的 Task。数据库通过 GORM 初始化并注入，事务层执行参数化 PostgreSQL SQL；没有全局 DB、SQLite/MySQL 示例用户 CRUD，也没有生产启动 AutoMigrate。
+需要 Go 1.27.1、Git、PostgreSQL 17、可选的 Task，以及 `buf`（≥ 1.73；`task check` 会 lint 契约并重新生成 `internal/controlpb` 检查漂移，见 [`proto/`](proto/README.md)）。数据库通过 GORM 初始化并注入，事务层执行参数化 PostgreSQL SQL；没有全局 DB、SQLite/MySQL 示例用户 CRUD，也没有生产启动 AutoMigrate。
 
 ## 本地验证
 

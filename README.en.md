@@ -4,7 +4,7 @@
 
 Phase-one implementation of the Go/Gin cloud core, authoritative PostgreSQL persistence, internal authentication and bounded control contracts, plus simulated execution components that use real HTTP, PostgreSQL, disk, and Git boundaries. This repository does not yet include the Rust Controller/Workspace Node split, the Desktop refactor, or Kubernetes deployment.
 
-Requires Go 1.27.1, Git, PostgreSQL 17, and optionally Task. The database is initialized through GORM and injected into the application, while the transaction layer executes parameterized PostgreSQL SQL. There is no global database handle, SQLite/MySQL sample user CRUD, or production-startup AutoMigrate.
+Requires Go 1.27.1, Git, PostgreSQL 17, optionally Task, and `buf` (≥ 1.73; `task check` lints the contract and regenerates `internal/controlpb` to detect drift, see [`proto/`](proto/README.en.md)). The database is initialized through GORM and injected into the application, while the transaction layer executes parameterized PostgreSQL SQL. There is no global database handle, SQLite/MySQL sample user CRUD, or production-startup AutoMigrate.
 
 ## Local validation
 
