@@ -30,6 +30,7 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger) *grpc.Ser
 	server := grpc.NewServer(grpc.ChainUnaryInterceptor(unaryAuth(auth, log)), grpc.ChainStreamInterceptor(streamAuth(auth, log)))
 	controlpb.RegisterControllerLeaseServiceServer(server, &leaseService{store: store})
 	controlpb.RegisterExecutionServiceServer(server, &executionService{store: store})
+	controlpb.RegisterControlSignalServiceServer(server, &signalService{store: store})
 	return server
 }
 

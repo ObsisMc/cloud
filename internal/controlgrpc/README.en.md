@@ -43,5 +43,9 @@ The status code is the primary classification and `ErrorDetail{ErrorCode}` is at
   Input and result are stored in fixed JSON shapes (`{kind, repositoryUrl, branch}`;
   `{node, outcome, path, commit | reason, retainedPath}`) and conflicts are compared on those shapes.
 
-`ControlSignalService` is registered by a later change. The listen address comes
+- `ControlSignalService.Watch`: the Controller-opened server stream. Opening verifies the epoch with
+  `lease_check` (read-only, no renewal); afterwards it forwards signals from the in-process
+  `core.ControlHub`: `WorkAvailable{operation_id}` after a `clone_requests` row commits, `Drain` before
+  the server stops. At-most-once, not persisted, a slow subscriber loses signals; after `Drain` the
+  stream ends cleanly (EOF) and new `Watch` calls during shutdown return `UNAVAILABLE`. The listen address comes
 from `control.grpc_addr` and must stay on a loopback or private network until TLS lands.

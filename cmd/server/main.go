@@ -89,6 +89,9 @@ func run() (runErr error) {
 		defer stop()
 		// In-flight control calls finish or are cut at the same deadline as HTTP; a Controller
 		// retries with the same submission identity, so cutting them loses nothing durable.
+		// Tell the lease holder to stop claiming before its stream is cut; the Drain signal is a
+		// hint, so a Controller that misses it simply fails its next claim against a stopped server.
+		store.Signals.Drain()
 		stopped := make(chan struct{})
 		go func() {
 			grpcServer.GracefulStop()

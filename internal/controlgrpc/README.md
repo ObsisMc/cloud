@@ -38,5 +38,8 @@
   `ListPendingDispatches` 是恢复读取，不要求持有租约。输入与结果以固定 JSON 形状落库
   （`{kind, repositoryUrl, branch}`；`{node, outcome, path, commit | reason, retainedPath}`），冲突按该形状比较。
 
-`ControlSignalService` 随后续变更注册。监听地址由 `control.grpc_addr` 配置，
+- `ControlSignalService.Watch`：Controller 发起的服务端流。打开时以 `lease_check` 校验 epoch（只读，不续期）；
+  之后从进程内 `core.ControlHub` 转发信号：`clone_requests` 提交后的 `WorkAvailable{operation_id}`、
+  服务关停前的 `Drain`。至多一次、不持久化、慢订阅者丢信号；`Drain` 后流干净结束（EOF），
+  关停期间新的 `Watch` 返回 `UNAVAILABLE`。监听地址由 `control.grpc_addr` 配置，
 在 TLS 落地前只应绑定回环或私网地址。

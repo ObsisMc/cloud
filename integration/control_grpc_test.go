@@ -2,8 +2,11 @@ package integration
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
@@ -246,4 +249,52 @@ func TestControlGRPCCloneLoopWithSubmissionReplay(t *testing.T) {
 	if state != "succeeded" || receipts != 1 {
 		t.Fatalf("request state %q with %d receipts; want succeeded with exactly one receipt", state, receipts)
 	}
+}
+
+// Watch is an accelerator: it needs the current epoch to open, delivers WorkAvailable after a clone
+// request commits, and ends cleanly with Drain when Cloud shuts the hub.
+func TestControlGRPCWatchDeliversWorkAndDrain(t *testing.T) {
+	h := newControlHarness(t)
+	ctx := context.Background()
+	bootstrap, e := h.store.Bootstrap(ctx, "Watch tenant", "corp", "alice", "Alice")
+	must(t, e)
+	lease := controlpb.NewControllerLeaseServiceClient(h.conn)
+	signals := controlpb.NewControlSignalServiceClient(h.conn)
+	holder := h.as(t, "controller", "controller-a")
+	acquired, e := lease.AcquireLease(holder, &controlpb.AcquireLeaseRequest{})
+	must(t, e)
+	epoch := acquired.GetLease().GetEpoch()
+
+	stale, e := signals.Watch(holder, &controlpb.WatchRequest{Epoch: epoch + 1})
+	must(t, e)
+	_, e = stale.Recv()
+	expectStatus(t, e, codes.FailedPrecondition, controlpb.ErrorCode_ERROR_CODE_STALE_CONTROLLER)
+
+	watchCtx, stop := context.WithTimeout(holder, 10*time.Second)
+	defer stop()
+	stream, e := signals.Watch(watchCtx, &controlpb.WatchRequest{Epoch: epoch})
+	must(t, e)
+	// The server sends headers once the subscription exists; nothing published after that is missed.
+	_, e = stream.Header()
+	must(t, e)
+	request, e := h.store.EnqueueClone(ctx, bootstrap.S("tenantId"), bootstrap.S("userId"), "watched", "https://example.invalid/repo.git", "main")
+	must(t, e)
+	msg, e := stream.Recv()
+	must(t, e)
+	if msg.GetWorkAvailable() == nil || msg.GetWorkAvailable().GetOperationId() != request.S("id") {
+		t.Fatalf("expected WorkAvailable for %s, got %v", request.S("id"), msg)
+	}
+	h.store.Signals.Drain()
+	msg, e = stream.Recv()
+	must(t, e)
+	if msg.GetDrain() == nil {
+		t.Fatalf("expected Drain, got %v", msg)
+	}
+	if _, e = stream.Recv(); !errors.Is(e, io.EOF) {
+		t.Fatalf("stream must end cleanly after Drain, got %v", e)
+	}
+	late, e := signals.Watch(holder, &controlpb.WatchRequest{Epoch: epoch})
+	must(t, e)
+	_, e = late.Recv()
+	expectStatus(t, e, codes.Unavailable, controlpb.ErrorCode_ERROR_CODE_UNSPECIFIED)
 }
