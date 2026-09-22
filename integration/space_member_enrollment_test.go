@@ -120,13 +120,15 @@ func TestEnrollAlreadyMemberIdempotent(t *testing.T) {
 	if f.workspaceMemberCount(sid, bobID) != 1 {
 		t.Fatal("duplicate add created a second membership row")
 	}
-	// A space owner can never be silently demoted to member by a re-add.
-	_, ownerID := f.registerUser(t, "owner2@example.com", "Owner2")
-	f.enrollByEmail(sid, "owner2@example.com", "enroll-owner2")
-	f.call("PUT", f.path("/spaces/"+sid+"/members/"+ownerID), core.Object{"role": "owner", "status": "active", "version": 1}, "", 200)
-	again := f.enrollByEmail(sid, "owner2@example.com", "enroll-owner2-again")
-	if again.S("role") != "owner" {
-		t.Fatalf("re-add demoted an owner: %v", again)
+	// A re-add never mutates an existing member's role. (Under Step 3A the owner
+	// role is immutable — only the creator is ever an owner, never granted via the
+	// member API — so an admin is the highest role a re-add could touch.)
+	_, adminID := f.registerUser(t, "admin2@example.com", "Admin2")
+	f.enrollByEmail(sid, "admin2@example.com", "enroll-admin2")
+	f.call("PUT", f.path("/spaces/"+sid+"/members/"+adminID), core.Object{"role": "admin", "status": "active", "version": 1}, "", 200)
+	again := f.enrollByEmail(sid, "admin2@example.com", "enroll-admin2-again")
+	if again.S("role") != "admin" {
+		t.Fatalf("re-add demoted an admin: %v", again)
 	}
 }
 

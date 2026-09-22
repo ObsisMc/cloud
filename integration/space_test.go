@@ -52,7 +52,7 @@ func TestSpaceLifecycleMembershipAndOwnerInvariants(t *testing.T) {
 	f.call("PUT", f.path("/spaces/"+sid+"/members/"+bobID), core.Object{"role": "member", "status": "active", "version": 0}, "", 200)
 
 	// Scenario 6: a member cannot add members.
-	carol, carolID := f.addUser(t, "carol", "Carol")
+	carol, carolID := f.registerUser(t, "carol@example.com", "Carol")
 	_, status, e := f.client.Call(context.Background(), "PUT", f.path("/spaces/"+sid+"/members/"+carolID), "gateway", gw, &bob, "", core.Object{"role": "member", "status": "active", "version": 0})
 	must(t, e)
 	if status != 403 {
@@ -64,35 +64,42 @@ func TestSpaceLifecycleMembershipAndOwnerInvariants(t *testing.T) {
 	if status != 403 {
 		t.Fatalf("member self-promoted: want 403 got %d", status)
 	}
-	// Scenario 5: admin can add members.
+	// Scenario 5 (owner-immutable): the owner promotes bob to admin (role
+	// changes are owner-only), and admin add-by-email is preserved for admins.
 	_, status, e = f.client.Call(context.Background(), "PUT", f.path("/spaces/"+sid+"/members/"+bobID), "gateway", gw, &f.user, "", core.Object{"role": "admin", "status": "active", "version": 1})
 	must(t, e)
 	if status != 200 {
 		t.Fatalf("owner promoted member: want 200 got %d", status)
 	}
-	_, status, e = f.client.Call(context.Background(), "PUT", f.path("/spaces/"+sid+"/members/"+carolID), "gateway", gw, &bob, "", core.Object{"role": "member", "status": "active", "version": 0})
+	_, status, e = f.client.Call(context.Background(), "POST", f.path("/spaces/"+sid+"/members"), "gateway", gw, &bob, "admin-add-carol", core.Object{"email": "carol@example.com"})
 	must(t, e)
 	if status != 200 {
-		t.Fatalf("admin added member: want 200 got %d", status)
+		t.Fatalf("admin added member by email: want 200 got %d", status)
 	}
 
-	// Scenarios 7-8: the last owner can never be demoted, by admin or by owner.
+	// Scenarios 7-8 (owner immutable): the owner role can never be demoted or
+	// granted through the member API, not even by the owner. An admin touching an
+	// owner row is 403; owner transitions on an owner row are 409.
 	_, status, e = f.client.Call(context.Background(), "PUT", f.path("/spaces/"+sid+"/members/"+f.uid), "gateway", gw, &bob, "", core.Object{"role": "member", "status": "active", "version": 1})
 	must(t, e)
-	if status != 409 {
-		t.Fatalf("admin demoted last owner: want 409 got %d", status)
+	if status != 403 {
+		t.Fatalf("admin demoted owner: want 403 got %d", status)
 	}
-	f.call("PUT", f.path("/spaces/"+sid+"/members/"+f.uid), core.Object{"role": "member", "status": "active", "version": 1}, "", 409)
-	// An owner grant by an owner is allowed; a second owner can demote the first.
-	_, status, e = f.client.Call(context.Background(), "PUT", f.path("/spaces/"+sid+"/members/"+bobID), "gateway", gw, &f.user, "", core.Object{"role": "owner", "status": "active", "version": 2})
-	must(t, e)
-	if status != 200 {
-		t.Fatalf("owner granted owner: want 200 got %d", status)
+	o := f.call("PUT", f.path("/spaces/"+sid+"/members/"+f.uid), core.Object{"role": "member", "status": "active", "version": 1}, "", 409)
+	if o.S("code") != "ownership_transfer_not_supported" {
+		t.Fatalf("owner self-demotion: want ownership_transfer_not_supported got %v", o)
 	}
-	_, status, e = f.client.Call(context.Background(), "PUT", f.path("/spaces/"+sid+"/members/"+f.uid), "gateway", gw, &f.user, "", core.Object{"role": "member", "status": "active", "version": 1})
+	// An owner grant by an owner is rejected; the owner role is not grantable.
+	o = f.call("PUT", f.path("/spaces/"+sid+"/members/"+bobID), core.Object{"role": "owner", "status": "active", "version": 2}, "", 409)
+	if o.S("code") != "ownership_transfer_not_supported" {
+		t.Fatalf("owner grant: want ownership_transfer_not_supported got %v", o)
+	}
+	// The second-owner demotion path no longer exists: an admin cannot demote the
+	// owner row either (403), so alice remains the sole owner throughout.
+	_, status, e = f.client.Call(context.Background(), "PUT", f.path("/spaces/"+sid+"/members/"+f.uid), "gateway", gw, &bob, "", core.Object{"role": "member", "status": "active", "version": 1})
 	must(t, e)
-	if status != 200 {
-		t.Fatalf("owner demoted with second owner present: want 200 got %d", status)
+	if status != 403 {
+		t.Fatalf("admin demoted the owner row: want 403 got %d", status)
 	}
 
 	// Scenario 13: lists contain only joined spaces.
@@ -111,13 +118,14 @@ func TestSpaceLifecycleMembershipAndOwnerInvariants(t *testing.T) {
 	}
 
 	// Scenario 14: archive is owner-only and removes the space from lists.
-	// bob is the sole owner after alice's demotion; alice (member) cannot archive.
-	_, status, e = f.client.Call(context.Background(), "DELETE", f.path("/spaces/"+sid), "gateway", gw, &f.user, "alice-archive", core.Object{"version": space.N("version")})
+	// alice remains the owner throughout (the owner role has no demotion path);
+	// a member (carol) cannot archive, the owner (alice) can.
+	_, status, e = f.client.Call(context.Background(), "DELETE", f.path("/spaces/"+sid), "gateway", gw, &carol, "carol-archive", core.Object{"version": space.N("version")})
 	must(t, e)
 	if status != 403 {
 		t.Fatalf("member archived space: want 403 got %d", status)
 	}
-	_, status, e = f.client.Call(context.Background(), "DELETE", f.path("/spaces/"+sid), "gateway", gw, &bob, "bob-archive", core.Object{"version": space.N("version")})
+	_, status, e = f.client.Call(context.Background(), "DELETE", f.path("/spaces/"+sid), "gateway", gw, &f.user, "alice-archive", core.Object{"version": space.N("version")})
 	must(t, e)
 	if status != 200 {
 		t.Fatalf("owner archive: want 200 got %d", status)

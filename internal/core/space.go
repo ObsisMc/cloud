@@ -134,17 +134,21 @@ WHERE i.source=$1 AND i.subject=$2 AND u.status='active' AND u.deleted_at IS NUL
 	return t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, target)
 }
 
-// putSpaceMember upserts one membership with optimistic version checks and the
-// last-owner invariant. Adding members needs admin or owner; granting owner
-// needs owner. The target user must be an active member of the same tenant.
+// putSpaceMember updates one membership's role/status with optimistic version
+// checks. Role management is owner-only (MM3): admins add members through
+// enrollSpaceMemberByEmail but cannot change roles. The owner role is immutable
+// through this API (MM4, ownership transfer NOT implemented): no transition
+// into or out of owner is allowed — granting owner, or any write touching an
+// owner row, is 409 ownership_transfer_not_supported. Because owner rows can
+// never be modified away, the last-owner invariant is preserved by
+// construction (no space_last_owner guard needed). The target user must be an
+// active member of the same tenant.
 func putSpaceMember(t *transaction, r *PublicRequest, uid string) Object {
 	actor := spaceMember(t, r.SpaceID, uid)
-	requireSpaceRole(actor, "admin", "owner")
+	requireSpaceRole(actor, "owner")
 	role, status := r.Body.S("role"), r.Body.S("status")
 	require((role == "owner" || role == "admin" || role == "member") && (status == "active" || status == "disabled"), 400, "invalid_member")
-	if role == "owner" {
-		requireSpaceRole(actor, "owner")
-	}
+	require(role != "owner", 409, "ownership_transfer_not_supported")
 	require(validID(r.UserID), 400, "invalid_user")
 	require(t.one(`SELECT u.id FROM users u
 JOIN tenant_memberships tm ON tm.user_id=u.id
@@ -153,14 +157,34 @@ WHERE u.id=$1 AND tm.tenant_id=$2 AND tm.status='active' AND u.status='active' A
 	require(w != nil, 404, "not_found")
 	old := t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
 	if old != nil {
+		require(old.S("role") != "owner", 409, "ownership_transfer_not_supported")
 		version(old, r.Body.N("version"))
-		if old.S("role") == "owner" && old.S("status") == "active" && (role != "owner" || status != "active") {
-			require(t.one("SELECT user_id FROM collab_workspace_members WHERE workspace_id=$1 AND user_id<>$2 AND role='owner' AND status='active'", r.SpaceID, r.UserID) != nil, 409, "space_last_owner")
-		}
 		t.exec("UPDATE collab_workspace_members SET role=$3,status=$4,version=version+1 WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID, role, status)
 	} else {
 		require(r.Body.N("version") == 0, 409, "version_conflict")
 		t.exec("INSERT INTO collab_workspace_members(workspace_id,user_id,role,status,created_by) VALUES($1,$2,$3,$4,$5)", r.SpaceID, r.UserID, role, status, uid)
 	}
 	return t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
+}
+
+// removeSpaceMember removes a member's Workspace membership (hard delete, MM5).
+// Owner only; admins and members cannot remove anyone. The owner role is
+// immutable, so an owner row — including the actor themselves — can never be
+// removed (409 cannot_remove_workspace_owner). The user account, tenant
+// membership and any resources they created are untouched: the workspace and
+// its projects remain, and the removed member's access to the workspace, its
+// projects and their runtime workspaces is revoked by the membership gate.
+func removeSpaceMember(t *transaction, r *PublicRequest, uid string) Object {
+	actor := spaceMember(t, r.SpaceID, uid)
+	requireSpaceRole(actor, "owner")
+	require(validID(r.UserID), 400, "invalid_user")
+	require(t.one(`SELECT u.id FROM users u
+JOIN tenant_memberships tm ON tm.user_id=u.id
+WHERE u.id=$1 AND tm.tenant_id=$2 AND tm.status='active' AND u.status='active' AND u.deleted_at IS NULL`, r.UserID, r.TenantID) != nil, 404, "not_found")
+	old := t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
+	require(old != nil, 404, "not_found")
+	require(old.S("role") != "owner", 409, "cannot_remove_workspace_owner")
+	version(old, r.Body.N("version"))
+	t.exec("DELETE FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
+	return old
 }

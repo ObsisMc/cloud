@@ -123,38 +123,45 @@ func TestProjectSpaceOptionalScope(t *testing.T) {
 	}
 }
 
-// TestSpaceMemberConcurrentPatchAndLastOwnerRace mirrors the tenant last-admin
-// protection for spaces: concurrent demotion of the last owner must fail.
+// TestSpaceMemberLastOwnerRace covers the owner-immutable invariant under
+// concurrency (Step 3A): the owner role can never be demoted or granted through
+// the member API, so concurrent attempts to destroy the ownership (owner
+// self-demote -> 409 ownership_transfer_not_supported) or to create a second
+// owner (member self-promote -> 403) are all rejected, leaving exactly one
+// owner. Ownership transfer is NOT implemented.
 func TestSpaceMemberLastOwnerRace(t *testing.T) {
 	f := setup(t)
 	gw := core.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "gateway-a"}}
 	space := f.createSpace("Race", "race", "space-race")
 	sid := space.S("id")
 	bob, bobID := f.addUser(t, "bob", "Bob")
-	f.call("PUT", f.path("/spaces/"+sid+"/members/"+bobID), core.Object{"role": "owner", "status": "active", "version": 0}, "", 200)
-	// Two owners; demoting both concurrently must leave exactly one owner.
+	f.call("PUT", f.path("/spaces/"+sid+"/members/"+bobID), core.Object{"role": "member", "status": "active", "version": 0}, "", 200)
+	// Alice (owner) self-demotes while bob (member) self-promotes — fired
+	// concurrently; both must be rejected, and exactly one owner remains.
 	subjects := []core.Claims{f.user, bob}
 	ids := []string{f.uid, bobID}
+	bodies := []core.Object{
+		{"role": "member", "status": "active", "version": 1}, // owner self-demote
+		{"role": "admin", "status": "active", "version": 1},  // member self-promote
+	}
 	statuses := make(chan int, 2)
 	for i := range subjects {
 		go func(i int) {
-			_, status, _ := f.client.Call(context.Background(), "PUT", f.path("/spaces/"+sid+"/members/"+ids[i]), "gateway", gw, &subjects[i], "", core.Object{"role": "member", "status": "active", "version": 1})
+			_, status, _ := f.client.Call(context.Background(), "PUT", f.path("/spaces/"+sid+"/members/"+ids[i]), "gateway", gw, &subjects[i], "", bodies[i])
 			statuses <- status
 		}(i)
 	}
-	success, conflict := 0, 0
+	got := map[int]int{}
 	for range 2 {
-		switch <-statuses {
-		case 200:
-			success++
-		case 409:
-			conflict++
-		}
+		got[<-statuses]++
 	}
-	if success != 1 || conflict != 1 {
-		t.Fatalf("last owner race: success=%d conflict=%d", success, conflict)
+	if got[409] != 1 || got[403] != 1 {
+		t.Fatalf("owner-immutable race: want one 409 and one 403 got %v", got)
 	}
 	if f.scalar("SELECT count(*) FROM collab_workspace_members WHERE workspace_id=$1 AND role='owner' AND status='active'", sid) != 1 {
 		t.Fatal("space lost its last owner")
+	}
+	if f.scalar("SELECT count(*) FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2 AND role='owner'", sid, f.uid) != 1 {
+		t.Fatal("alice is no longer the owner")
 	}
 }

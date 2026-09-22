@@ -95,6 +95,7 @@ func Routes() []Route {
 		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/members", "", nil},
 		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/members", "", []string{"email"}},
 		{"PUT", "/api/v1/tenants/:tid/spaces/:spaceId/members/:uid", "", []string{"role", "status", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/spaces/:spaceId/members/:uid", "", []string{"version"}},
 		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/projects", "", nil},
 		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},
 		{"POST", "/internal/v1/access", "access", []string{"tenantId", "workspaceId", "action", "epoch"}},

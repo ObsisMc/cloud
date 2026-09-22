@@ -593,8 +593,12 @@ func description(r router.Route) string {
 		switch {
 		case strings.Contains(r.Path, "/members") && r.Method == "POST":
 			base += "Adds an already-registered user to the space as a plain member by email, resolved in the caller's identity source. Admin or owner only. The target is atomically ensured tenant membership (existing role kept) and thereby gains access to the Projects and Runtime Workspaces shared in that workspace. Unknown or inactive email is 404 user_not_registered; adding an existing member returns the current membership unchanged. "
+		case strings.Contains(r.Path, "/members") && r.Method == "PUT":
+			base += "Updates a member's role (admin/member) or status. Role management is owner-only — admins add members through POST, they cannot change roles. The owner role is immutable: granting owner or any write touching an owner row is 409 ownership_transfer_not_supported (ownership transfer is not implemented). The target user must be an active member of the same tenant; a matching version is required. "
+		case strings.Contains(r.Path, "/members") && r.Method == "DELETE":
+			base += "Removes a member's workspace membership (hard delete); owner only, admins and members cannot remove anyone. The user account, tenant membership and their resources are untouched and remain in the workspace; the removed member's access to the workspace, its projects and runtime workspaces is revoked. An owner row can never be removed, including self-removal (409 cannot_remove_workspace_owner). Requires a matching version and an idempotency key. "
 		case strings.Contains(r.Path, "/members"):
-			base += "Admin or owner manages membership; granting owner requires owner. The target user must be an active member of the same tenant. Last owner cannot be demoted or disabled. "
+			base += "Lists the space's members; any active member of the space can read the member list. "
 		case r.Method == "POST" && strings.HasSuffix(r.Path, "/spaces"):
 			base += "Creates the collaboration space and its first owner atomically. slug is lowercase, immutable and unique per tenant. "
 		case strings.Contains(r.Path, "/projects"):
