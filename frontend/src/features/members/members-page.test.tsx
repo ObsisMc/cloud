@@ -14,6 +14,8 @@ const MEMBERS_KEY = `/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/m
 
 const ALICE_ID = '33333333-3333-3333-3333-333333333333'
 const BOB_ID = '44444444-4444-4444-4444-444444444444'
+// memberRow() seeds every member with version 1.
+const BOB_VERSION = 1
 
 function spaceItem(role: string): SpaceListItem {
   return {
@@ -237,10 +239,12 @@ describe('MembersPage', () => {
     ])
     let deleted = false
     let idempotencyKey = ''
+    let bodyVersion: unknown
     server.use(
       http.delete(`${MEMBERS_KEY}/${BOB_ID}`, async ({ request }) => {
         deleted = true
         idempotencyKey = request.headers.get('Idempotency-Key') ?? ''
+        bodyVersion = (await request.clone().json())['version']
         return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
       }),
     )
@@ -258,5 +262,8 @@ describe('MembersPage', () => {
     await waitFor(() => expect(deleted).toBe(true))
     // DELETE must carry a non-empty idempotency key so retries dedupe.
     expect(idempotencyKey.length).toBeGreaterThan(0)
+    // The optimistic lock reads `version` from the JSON body (the router
+    // requires a body on non-GET), so it must not be missing.
+    expect(bodyVersion).toBe(BOB_VERSION)
   })
 })

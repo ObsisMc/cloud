@@ -141,7 +141,9 @@ export function useRemoveSpaceMember(tenantId: string, spaceId: string) {
     mutationFn: async (input: { userId: string; version: number }) => {
       const { data } = await AXIOS_INSTANCE.delete<SpaceMember>(
         `/api/v1/tenants/${tenantId}/spaces/${spaceId}/members/${input.userId}`,
-        { headers: mutationHeaders(keyFor(input)) },
+        // The DELETE route's optimistic lock reads `version` from the JSON body
+        // (the router requires a body on non-GET), not from the query string.
+        { headers: mutationHeaders(keyFor(input)), data: { version: input.version } },
       )
       return data
     },
