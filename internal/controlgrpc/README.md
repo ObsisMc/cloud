@@ -32,5 +32,11 @@
 - `ControllerLeaseService`：`AcquireLease`／`RenewLease`／`ReleaseLease` 直接对应 `lease_acquire`／
   `lease_renew`／`lease_release`；全局单租约、30 秒过期、`epoch` 单调递增，过期由数据库时钟判定。
 
-`ExecutionService` 与 `ControlSignalService` 随后续变更注册。监听地址由 `control.grpc_addr` 配置，
+- `ExecutionService`：clone 闭环的执行登记，对应 `core` 的 `clone_*` 动作。`ClaimWork` 是纯读（归属在
+  `RecordDispatch` 事务中决定）；`RecordDispatch`／`TakeOverNodeEvent`／`RecordQueriedResult` 携带
+  `submission_id`，同身份同内容回放记录的响应、不同内容 `ABORTED+CONFLICT`；`GetDispatch`／
+  `ListPendingDispatches` 是恢复读取，不要求持有租约。输入与结果以固定 JSON 形状落库
+  （`{kind, repositoryUrl, branch}`；`{node, outcome, path, commit | reason, retainedPath}`），冲突按该形状比较。
+
+`ControlSignalService` 随后续变更注册。监听地址由 `control.grpc_addr` 配置，
 在 TLS 落地前只应绑定回环或私网地址。

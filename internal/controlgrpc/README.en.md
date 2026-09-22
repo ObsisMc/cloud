@@ -35,5 +35,13 @@ The status code is the primary classification and `ErrorDetail{ErrorCode}` is at
   `lease_renew` / `lease_release`; one global lease, 30-second expiry, monotonic `epoch`, expiry judged
   by the database clock.
 
-`ExecutionService` and `ControlSignalService` are registered by later changes. The listen address comes
+- `ExecutionService`: the execution registry of the clone loop, mapping to the `clone_*` control
+  actions. `ClaimWork` is a pure read (ownership is decided inside the `RecordDispatch` transaction);
+  `RecordDispatch` / `TakeOverNodeEvent` / `RecordQueriedResult` carry a `submission_id`: the same
+  identity with the same content replays the recorded response, different content fails with
+  `ABORTED+CONFLICT`; `GetDispatch` / `ListPendingDispatches` are recovery reads that need no lease.
+  Input and result are stored in fixed JSON shapes (`{kind, repositoryUrl, branch}`;
+  `{node, outcome, path, commit | reason, retainedPath}`) and conflicts are compared on those shapes.
+
+`ControlSignalService` is registered by a later change. The listen address comes
 from `control.grpc_addr` and must stay on a loopback or private network until TLS lands.

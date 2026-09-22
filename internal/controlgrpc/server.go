@@ -29,6 +29,7 @@ type claimsKey struct{}
 func New(store *core.Store, auth *core.Authenticator, log *zap.Logger) *grpc.Server {
 	server := grpc.NewServer(grpc.ChainUnaryInterceptor(unaryAuth(auth, log)), grpc.ChainStreamInterceptor(streamAuth(auth, log)))
 	controlpb.RegisterControllerLeaseServiceServer(server, &leaseService{store: store})
+	controlpb.RegisterExecutionServiceServer(server, &executionService{store: store})
 	return server
 }
 
