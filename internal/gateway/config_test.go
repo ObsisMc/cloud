@@ -172,4 +172,19 @@ github: {client_id: id, client_secret_file: /run/secret}
 	if _, e = LoadConfig(path); e == nil {
 		t.Fatal("session TTL above 90 days must fail at load")
 	}
+
+	// Keys the file omits are still overridable from the environment: `task setup` selects the
+	// provider with GATEWAY_LOGIN_PROVIDER while the sample gateway.yaml leaves it unset.
+	t.Setenv("GATEWAY_SESSION_TTL", "")
+	t.Setenv("GATEWAY_LOGIN_PROVIDER", ProviderHuaweiIDaaS)
+	t.Setenv("GATEWAY_IDAAS_BASE_URL", "https://uniportal-beta.huawei.com")
+	t.Setenv("GATEWAY_IDAAS_CLIENT_ID", "app")
+	t.Setenv("GATEWAY_IDAAS_CLIENT_SECRET_FILE", "/run/idaas-secret")
+	cfg, e = LoadConfig(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if cfg.Login.Provider != ProviderHuaweiIDaaS || cfg.IDaaS.ClientID != "app" || cfg.Session.TTL != 240*time.Hour {
+		t.Fatalf("environment must supply keys absent from the file: %+v %s", cfg.Login, cfg.Session.TTL)
+	}
 }

@@ -132,6 +132,9 @@ func LoadConfig(path string) (*Config, error) {
 	v.SetEnvPrefix("GATEWAY")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	if e := config.BindEnvKeys(v, Config{}); e != nil {
+		return nil, e
+	}
 	if e := v.ReadInConfig(); e != nil {
 		return nil, e
 	}
