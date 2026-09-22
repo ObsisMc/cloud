@@ -8,7 +8,7 @@
 
 ### Route allowlist and dispatch
 - `Routes()` declares the explicit allowlist of supported endpoints:
-  - **Public API (`/api/v1/...`)**: 19 endpoints for users, tenants, memberships, projects, workspaces, operations, and status queries.
+  - **Public API (`/api/v1/...`)**: 22 endpoints for users, tenants, memberships, projects, workspaces, operations, status queries, and clone requests as independent work items (`/tenants/:tid/clones`: submit, list, read one; unrelated to the project/workspace operation model).
   - **Internal Control API (`/internal/v1/...`)**: 15 endpoints for controller leasing, operation claiming/advancing, node registration, and ticket admissions.
   - **Health check (`/healthz`)**: Verifies database reachability via `store.Pool.PingContext`.
 - Any unregistered endpoint is caught by `r.NoRoute` and returns `404 not_found`.

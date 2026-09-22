@@ -11,10 +11,10 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // PublicRequest is populated only after service and final-user credentials are verified.
 type PublicRequest struct {
-	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, UserID, Key, After string
-	Limit                                                                                    int
-	Body                                                                                     Object
-	Identity                                                                                 *Claims
+	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, CloneID, UserID, Key, After string
+	Limit                                                                                             int
+	Body                                                                                              Object
+	Identity                                                                                          *Claims
 }
 
 // Public executes one authorized public request in a short database transaction.
@@ -23,6 +23,7 @@ type PublicRequest struct {
 func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, error) {
 	status := 200
 	var events []SpaceEvent
+	var accepted []string
 	result, e := s.transact(ctx, func(t *transaction) Object {
 		u := identity(t, r.Identity.Source, r.Identity.Subject, r.Identity.DisplayName)
 		uid := u.S("id")
@@ -83,6 +84,15 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 			out = createProject(t, r, uid, hash)
 			status = 202
 			events = append(events, SpaceEvent{Type: "project.created", SpaceID: out.O("resource").S("spaceId"), ProjectID: out.O("resource").S("id")})
+		case strings.HasSuffix(r.Path, "/clones"):
+			// Clone requests are accepted work items outside the operation model; they share the
+			// public idempotency scope but never create an operation or effect.
+			var queued string
+			out, queued = clonesPublic(t, r, uid)
+			status = 202
+			if queued != "" {
+				accepted = append(accepted, queued)
+			}
 		case r.OperationID != "":
 			out = retryOperation(t, r, uid)
 			status = 202
@@ -135,6 +145,11 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 	if e == nil && s.Events != nil {
 		for _, ev := range events {
 			s.Events.Publish(ev)
+		}
+	}
+	if e == nil {
+		for _, id := range accepted {
+			s.signalWork(id)
 		}
 	}
 	return result, status, e
@@ -197,6 +212,9 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 		}
 	}
 	switch {
+	case r.CloneID != "" || strings.HasSuffix(r.Path, "/clones"):
+		out, _ := clonesPublic(t, r, uid)
+		return out
 	case strings.HasSuffix(r.Path, "/spaces"):
 		return listSpaces(t, r, uid)
 	case strings.HasSuffix(r.Path, "/members"):
