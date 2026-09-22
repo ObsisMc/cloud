@@ -42,51 +42,35 @@ import { useCurrentSpace } from '@/features/spaces/current-space'
 import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
 import type { Project } from '@/mocks/data/types'
+import { useAuthStore } from '@/state/auth-store'
 
 export function ProjectDetailPage({ slug }: { slug: string }) {
   const { projectId } = useParams<{ projectId: string }>()
   const { data: project, isPending } = useProject(slug, projectId)
-  const p = workspacePaths(slug)
   const { tenantId, space } = useCurrentSpace()
   const cloudMode = space?.slug === slug
   const detail = useCloudProject(tenantId, cloudMode ? projectId : undefined)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameDraft, setRenameDraft] = useState('')
   const role = cloudMode ? normalizeSpaceRole(space.role) : 'member'
+  const currentUserId = useAuthStore((s) => s.user)?.id
   const version = detail.data?.version ?? 0
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader
-        title={project?.title ?? '项目'}
-        breadcrumb={{ label: '项目', to: p.projects }}
-        actions={
-          cloudMode &&
-          project && (
-            <ProjectActions
-              slug={slug}
-              projectId={project.id}
-              projectTitle={project.title}
-              version={version}
-              canDelete={canDeleteProject(role)}
-              onRename={() => {
-                setRenameDraft(project.title)
-                setRenameOpen(true)
-              }}
-            />
-          )
-        }
+      <ProjectChrome
+        slug={slug}
+        projectId={projectId}
+        project={project}
+        cloudMode={cloudMode}
+        role={role}
+        currentUserId={currentUserId}
+        version={version}
+        renameOpen={renameOpen}
+        renameDraft={renameDraft}
+        onRenameDraftChange={setRenameDraft}
+        onRenameOpenChange={setRenameOpen}
       />
-      {cloudMode && projectId && project && (
-        <RenameProjectDialog
-          projectId={projectId}
-          title={renameDraft}
-          onTitleChange={setRenameDraft}
-          version={version}
-          open={renameOpen}
-          onOpenChange={setRenameOpen}
-        />
-      )}
       {isPending || !project ? (
         <div className="space-y-3 p-6">
           <Skeleton className="h-6 w-1/2" />
@@ -99,9 +83,87 @@ export function ProjectDetailPage({ slug }: { slug: string }) {
   )
 }
 
-/** True for roles allowed to delete projects in the space. */
-function canDeleteProject(role: SpaceRole): boolean {
-  return role === 'admin' || role === 'owner'
+/**
+ * Page header with the rename/delete actions plus the rename dialog, extracted
+ * so the cloud-mode gating does not inflate ProjectDetailPage's complexity.
+ */
+function ProjectChrome({
+  slug,
+  projectId,
+  project,
+  cloudMode,
+  role,
+  currentUserId,
+  version,
+  renameOpen,
+  renameDraft,
+  onRenameDraftChange,
+  onRenameOpenChange,
+}: {
+  slug: string
+  projectId: string | undefined
+  project: Project | undefined
+  cloudMode: boolean
+  role: SpaceRole
+  currentUserId: string | undefined
+  version: number
+  renameOpen: boolean
+  renameDraft: string
+  onRenameDraftChange: (title: string) => void
+  onRenameOpenChange: (open: boolean) => void
+}) {
+  const p = workspacePaths(slug)
+  return (
+    <>
+      <PageHeader
+        title={project?.title ?? '项目'}
+        breadcrumb={{ label: '项目', to: p.projects }}
+        actions={
+          cloudMode &&
+          project && (
+            <ProjectActions
+              slug={slug}
+              projectId={project.id}
+              projectTitle={project.title}
+              version={version}
+              canDelete={canDeleteProject(role, currentUserId, project.leadId)}
+              onRename={() => {
+                onRenameDraftChange(project.title)
+                onRenameOpenChange(true)
+              }}
+            />
+          )
+        }
+      />
+      {cloudMode && projectId && project && (
+        <RenameProjectDialog
+          projectId={projectId}
+          title={renameDraft}
+          onTitleChange={onRenameDraftChange}
+          version={version}
+          open={renameOpen}
+          onOpenChange={onRenameOpenChange}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * True when this member may delete the project in the space (Step 3 backend
+ * rule): the project creator may always delete their own project, otherwise a
+ * workspace owner or admin may. A member who merely reads stays hidden.
+ */
+function canDeleteProject(
+  role: SpaceRole,
+  currentUserId: string | undefined,
+  projectOwnerId: string | undefined,
+): boolean {
+  return (
+    role === 'owner' ||
+    role === 'admin' ||
+    (currentUserId != null && currentUserId === projectOwnerId)
+  )
 }
 
 /**

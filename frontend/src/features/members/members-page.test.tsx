@@ -181,4 +181,82 @@ describe('MembersPage', () => {
     expect(await screen.findByText(first.name)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
   })
+
+  it('shows role select and remove for members when the actor is the owner; owner rows are read-only', async () => {
+    installSpaceHandlers('owner', [
+      memberRow(ALICE_ID, 'Alice', 'owner'),
+      memberRow(BOB_ID, 'Bob', 'member'),
+    ])
+    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+    await screen.findByText('Alice')
+
+    // The member row gets a role selector (owner-only) and a remove action.
+    expect(screen.getByLabelText('Bob 的角色')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '移除' })).toBeInTheDocument()
+    // The owner row (Alice) renders a plain Owner label with no management
+    // actions, so exactly one row carries remove/disable.
+    expect(screen.getByText('所有者')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Alice 的角色')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '移除' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '禁用' })).toHaveLength(1)
+  })
+
+  it('keeps admin to add-only: no role select, no remove, add trigger preserved', async () => {
+    installSpaceHandlers('admin', [
+      memberRow(ALICE_ID, 'Alice', 'owner'),
+      memberRow(BOB_ID, 'Bob', 'member'),
+    ])
+    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+    await screen.findByText('Alice')
+
+    expect(screen.getByRole('button', { name: '添加成员' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Bob 的角色')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '移除' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '禁用' })).not.toBeInTheDocument()
+  })
+
+  it('does not offer the owner role in the role selector', async () => {
+    installSpaceHandlers('owner', [memberRow(BOB_ID, 'Bob', 'member')])
+    const user = userEvent.setup()
+    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+    await screen.findByText('Bob')
+
+    await user.click(screen.getByLabelText('Bob 的角色'))
+    expect(await screen.findByText('管理员')).toBeInTheDocument()
+    // '成员' renders in both the select trigger and the open item, so assert on
+    // the multiple match.
+    expect(screen.getAllByText('成员')).not.toHaveLength(0)
+    // Ownership is immutable through the member API: never offered.
+    expect(screen.queryAllByText('所有者')).toHaveLength(0)
+  })
+
+  it('confirms membership-only removal before calling the DELETE member endpoint', async () => {
+    installSpaceHandlers('owner', [
+      memberRow(ALICE_ID, 'Alice', 'owner'),
+      memberRow(BOB_ID, 'Bob', 'member'),
+    ])
+    let deleted = false
+    let idempotencyKey = ''
+    server.use(
+      http.delete(`${MEMBERS_KEY}/${BOB_ID}`, async ({ request }) => {
+        deleted = true
+        idempotencyKey = request.headers.get('Idempotency-Key') ?? ''
+        return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+    await screen.findByText('Alice')
+
+    await user.click(screen.getByRole('button', { name: '移除' }))
+    expect(await screen.findByText('从工作区移除「Bob」？')).toBeInTheDocument()
+    // The confirm copy explains workspace-membership-only removal, not account
+    // or tenant-membership deletion, and that created resources remain.
+    expect(screen.getByText(/账号与租户成员关系不受影响/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '确认移除' }))
+    await waitFor(() => expect(deleted).toBe(true))
+    // DELETE must carry a non-empty idempotency key so retries dedupe.
+    expect(idempotencyKey.length).toBeGreaterThan(0)
+  })
 })

@@ -2,6 +2,17 @@ import { format } from 'date-fns'
 import { useState } from 'react'
 import { ActorAvatar } from '@/components/common/actor-avatar'
 import { DialogFormField } from '@/components/common/dialog-form-field'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,7 +38,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useAddSpaceMemberByEmail, useMembers, type MemberWithUser } from '@/features/members/api'
+import {
+  useAddSpaceMemberByEmail,
+  useMembers,
+  useRemoveSpaceMember,
+  type MemberWithUser,
+} from '@/features/members/api'
 import { normalizeSpaceRole, useUpdateSpaceMember, type SpaceRole } from '@/features/spaces/api'
 import { useCurrentSpace } from '@/features/spaces/current-space'
 
@@ -43,10 +59,11 @@ const STATUS_LABELS: Record<string, string> = {
 }
 const SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five']
 
-/** Role options an actor may grant; only owners may grant owner. */
-function roleOptions(canGrantOwner: boolean): SpaceRole[] {
-  return canGrantOwner ? ['owner', 'admin', 'member'] : ['admin', 'member']
-}
+/**
+ * Roles the member API may grant. The owner role is immutable through this API
+ * (Step 3A, ownership transfer NOT implemented), so it is never offered.
+ */
+const GRANTABLE_ROLES: SpaceRole[] = ['admin', 'member']
 
 /**
  * Members page. Cloud sessions render the real membership list with
@@ -220,8 +237,11 @@ function AddMemberDialog({
 }
 
 /**
- * Cloud membership table with management controls. Actors without admin or
- * owner see a read-only table; owners alone can grant owner.
+ * Cloud membership table with management controls (Step 3A). Adding members is
+ * open to admins and owners; changing roles and removing members is owner-only.
+ * Members and admins see a read-only table with the add trigger preserved for
+ * admins. The owner role is immutable: it is never offered in the role selector
+ * and owner rows carry no management actions.
  */
 function CloudMembersView({
   tenantId,
@@ -238,8 +258,11 @@ function CloudMembersView({
 }) {
   const [addOpen, setAddOpen] = useState(false)
   const updateMember = useUpdateSpaceMember(tenantId, spaceId)
-  const canManage = myRole === 'admin' || myRole === 'owner'
-  const errorCode = updateMember.error?.response?.data?.code
+  const removeMember = useRemoveSpaceMember(tenantId, spaceId)
+  const canAdd = myRole === 'admin' || myRole === 'owner'
+  const isOwner = myRole === 'owner'
+  const errorCode =
+    updateMember.error?.response?.data?.code ?? removeMember.error?.response?.data?.code
 
   function update(role: SpaceRole, status: 'active' | 'disabled', member: MemberWithUser) {
     updateMember.mutate({ userId: member.id, role, status, version: member.version ?? 0 })
@@ -247,18 +270,16 @@ function CloudMembersView({
 
   return (
     <div className="p-4">
-      {canManage && (
-        <>
-          <div className="mb-4">
-            <Button onClick={() => setAddOpen(true)}>添加成员</Button>
-            <AddMemberDialog
-              open={addOpen}
-              onOpenChange={setAddOpen}
-              tenantId={tenantId}
-              spaceId={spaceId}
-            />
-          </div>
-        </>
+      {canAdd && (
+        <div className="mb-4">
+          <Button onClick={() => setAddOpen(true)}>添加成员</Button>
+          <AddMemberDialog
+            open={addOpen}
+            onOpenChange={setAddOpen}
+            tenantId={tenantId}
+            spaceId={spaceId}
+          />
+        </div>
       )}
       {errorCode && <p className="mb-3 text-xs text-destructive">操作失败：{errorCode}</p>}
       {isPending && (
@@ -276,7 +297,7 @@ function CloudMembersView({
               <TableHead>角色</TableHead>
               <TableHead>状态</TableHead>
               <TableHead>加入时间</TableHead>
-              {canManage && <TableHead>操作</TableHead>}
+              {isOwner && <TableHead>操作</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -284,10 +305,10 @@ function CloudMembersView({
               <CloudMemberRow
                 key={member.id}
                 member={member}
-                canManage={canManage}
-                canGrantOwner={myRole === 'owner'}
-                pending={updateMember.isPending}
+                isOwner={isOwner}
+                pending={updateMember.isPending || removeMember.isPending}
                 onUpdate={update}
+                onRemove={(userId, version) => removeMember.mutate({ userId, version })}
               />
             ))}
           </TableBody>
@@ -297,21 +318,22 @@ function CloudMembersView({
   )
 }
 
-/** One cloud membership row with role selector and disable/enable controls. */
+/** One cloud membership row. Owners manage roles and removals; owner rows are read-only. */
 function CloudMemberRow({
   member,
-  canManage,
-  canGrantOwner,
+  isOwner,
   pending,
   onUpdate,
+  onRemove,
 }: {
   member: MemberWithUser
-  canManage: boolean
-  canGrantOwner: boolean
+  isOwner: boolean
   pending: boolean
   onUpdate: (role: SpaceRole, status: 'active' | 'disabled', member: MemberWithUser) => void
+  onRemove: (userId: string, version: number) => void
 }) {
   const role = normalizeSpaceRole(member.role)
+  const isOwnerRow = role === 'owner'
   return (
     <TableRow>
       <TableCell>
@@ -324,7 +346,7 @@ function CloudMemberRow({
         </div>
       </TableCell>
       <TableCell>
-        {canManage ? (
+        {isOwner && !isOwnerRow ? (
           <Select
             value={role}
             onValueChange={(value) =>
@@ -335,7 +357,7 @@ function CloudMemberRow({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {roleOptions(canGrantOwner).map((option) => (
+              {GRANTABLE_ROLES.map((option) => (
                 <SelectItem key={option} value={option}>
                   {ROLE_LABELS[option]}
                 </SelectItem>
@@ -347,20 +369,73 @@ function CloudMemberRow({
         )}
       </TableCell>
       <MemberStatusCells member={member} />
-      {canManage && (
+      {isOwner && (
         <TableCell>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pending || role === 'owner'}
-            onClick={() =>
-              onUpdate(role, member.status === 'active' ? 'disabled' : 'active', member)
-            }
-          >
-            {member.status === 'active' ? '禁用' : '启用'}
-          </Button>
+          {isOwnerRow ? null : (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={() =>
+                  onUpdate(role, member.status === 'active' ? 'disabled' : 'active', member)
+                }
+              >
+                {member.status === 'active' ? '禁用' : '启用'}
+              </Button>
+              <RemoveMemberDialog
+                member={member}
+                pending={pending}
+                onRemove={() => onRemove(member.id, member.version ?? 0)}
+              />
+            </div>
+          )}
         </TableCell>
       )}
     </TableRow>
+  )
+}
+
+/**
+ * Owner-only removal of a member's workspace membership, confirmed in a dialog.
+ * Removal is a hard delete of the workspace membership alone — the user
+ * account, their tenant membership and any resources they created are
+ * untouched and remain in the workspace. The owner row can never be removed
+ * (the backend rejects it with 409 cannot_remove_workspace_owner, surfaced
+ * above the table).
+ */
+function RemoveMemberDialog({
+  member,
+  pending,
+  onRemove,
+}: {
+  member: MemberWithUser
+  pending: boolean
+  onRemove: () => void
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger
+        render={
+          <Button variant="destructive" size="sm">
+            移除
+          </Button>
+        }
+      />
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>从工作区移除「{member.name}」？</AlertDialogTitle>
+          <AlertDialogDescription>
+            该成员将无法再访问此工作区及其项目。其创建的资源会保留在工作区中，账号与租户成员关系不受影响。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction disabled={pending} onClick={onRemove}>
+            确认移除
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

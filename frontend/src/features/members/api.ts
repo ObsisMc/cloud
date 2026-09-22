@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Error as ApiError, SpaceMember, SpaceMemberListItem } from '@/api/generated.schemas'
+import { getGetApiV1TenantsTidSpacesQueryKey } from '@/api/spaces/spaces'
 import { AXIOS_INSTANCE, type ErrorType } from '@/lib/api-client'
 import { useCurrentSpace } from '@/features/spaces/current-space'
 import { mutationHeaders, useIdempotencyKeys, useSpaceMembers } from '@/features/spaces/api'
@@ -118,6 +119,38 @@ export function useAddSpaceMemberByEmail(tenantId: string, spaceId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: [`/api/v1/tenants/${tenantId}/spaces/${spaceId}/members`],
+      })
+    },
+  })
+}
+
+/**
+ * Removes a member's Workspace membership (DELETE, owner only). Removal is a
+ * hard delete of the workspace membership alone — the user account, their
+ * tenant membership and any resources they created are untouched and remain in
+ * the workspace. The backend rejects removing an owner row (409
+ * `cannot_remove_workspace_owner`) and any non-owner actor (403). DELETE
+ * requires an `Idempotency-Key`, so one logical removal reuses a single key
+ * across retries; the member list and the space list are invalidated on
+ * success.
+ */
+export function useRemoveSpaceMember(tenantId: string, spaceId: string) {
+  const queryClient = useQueryClient()
+  const keyFor = useIdempotencyKeys()
+  return useMutation<SpaceMember, ErrorType<ApiError>, { userId: string; version: number }>({
+    mutationFn: async (input: { userId: string; version: number }) => {
+      const { data } = await AXIOS_INSTANCE.delete<SpaceMember>(
+        `/api/v1/tenants/${tenantId}/spaces/${spaceId}/members/${input.userId}`,
+        { headers: mutationHeaders(keyFor(input)) },
+      )
+      return data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [`/api/v1/tenants/${tenantId}/spaces/${spaceId}/members`],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: getGetApiV1TenantsTidSpacesQueryKey(tenantId),
       })
     },
   })
