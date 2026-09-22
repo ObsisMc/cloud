@@ -14,6 +14,9 @@
 > `ISSUE WORKSPACE SCOPING: NOT IMPLEMENTED` ·
 > `AGENT/TEAM/WORKFLOW/MCP/SKILL WORKSPACE SCOPING: NOT IMPLEMENTED` ·
 > `DOCUMENTATION: SYNCED`
+> ⚠️ **Step 3A rollout**（[[workspace-member-management]] MM3–MM7）：member 角色管理 + 成员移除已实现 ——
+> `putSpaceMember` 收紧为 owner-only、owner 角色 immutable、新增 owner-only `DELETE /members/:uid` 硬删。
+> 本模型的共享边界 / 统一删除规则 / 禁止逐资源 membership 不变。
 
 ---
 
@@ -45,7 +48,7 @@ migration pending」，**不再是**产品规则。本阶段（Step 2B）**只�
 | SS2 — 删除规则 | **`CanDeleteWorkspaceResource(user, workspace, creator) = (user == creator) OR (user 是 owner/admin)`** | creator 永远可删自己创建的资源；workspace owner/admin 可删任意成员创建的资源；普通 member 不能删他人资源；非成员无权限。本阶段只落地可复用谓词，不接入真实资源的删除授权。 |
 | SS3 — 旧 D1 superseded | **不改写历史，只加 superseded 记录** | 旧 D1「Space membership must NOT grant access to others' Projects / Runtime Workspaces」是 Stage B 产品决策，现被本 ADR 取代。相关文档/测试标签/状态行一律从「预期行为，非 bug / 刻意保留 / DISABLED BY DESIGN / PASS」改写为「CURRENT IMPLEMENTATION: owner-only — temporary until the project workspace-sharing migration (next step)」。 |
 | SS4 — 权限 foundation | **3 个可复用谓词，无通用 RBAC engine** | `IsWorkspaceMember(userID, workspaceID)`（活跃成员）；`IsWorkspaceAdmin(userID, workspaceID)`（owner OR admin）；`CanDeleteWorkspaceResource(userID, workspaceID, creatorUserID)`（SS2 公式）。事务内以非 panic 谓词 `workspaceRole(t, spaceID, uid)`（返回 `""`/`owner`/`admin`/`member`）为基础，供未来 delete-authorization 在同一 `transact` 内复用；对外暴露为 **Store 方法**（集成测试直调 `f.store.*`）。 |
-| SS5 — rollout 状态 | **诚实记录** | Workspace Membership：**IMPLEMENTED**（Step 2，旧能力原样保留）。Project / Issue / Agent / Team / Workflow / MCP / Skill Workspace Scoping：**PENDING**（各自列出 NOT IMPLEMENTED / NOT YET MIGRATED）。 |
+| SS5 — rollout 状态 | **诚实记录** | Workspace Membership：**IMPLEMENTED**（Step 2，旧能力原样保留）；**member 角色管理 / 移除：IMPLEMENTED（Step 3A）** —— 角色变更 owner-only、owner immutable、移除 owner-only 硬删。Project Workspace Scoping：**IMPLEMENTED（Step 3）**。Issue / Agent / Team / Workflow / MCP / Skill Workspace Scoping：**PENDING**（各自列出 NOT IMPLEMENTED / NOT YET MIGRATED）。 |
 
 ## 2. 实施内容
 

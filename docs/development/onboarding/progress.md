@@ -1,13 +1,15 @@
 # 开发进度（新员工向）
 
 一眼看清 Ora Cloud 目前**做到哪了、在进行什么、刻意没做什么**。更新于 **Wave 3B-2 Workflow
-Interaction Shell 实现并验证 + User Registration 落地 + Project Workspace Sharing（Step 3）**之后：`@` 协作链路
+Interaction Shell 实现并验证 + User Registration 落地 + Project Workspace Sharing（Step 3）+
+Workspace Member Management & Onboarding（Step 3A）**之后：`@` 协作链路
 （Mention / Task / **Workflow Form Mode**）已端到端
 打通——`@Workflow → FormDescriptor → 动态表单 → 可选 AI Assist → Review → Confirm → IssueRun → mock
 执行 → Timeline`；**Project 已按 Workspace 共享**（同 Workspace 成员互见/互访共享项目，删除需
-creator 或 owner/admin）。契约与实现记录见
+creator 或 owner/admin）；**Workspace foundation 已收口**（0-Workspace onboarding + 可选创建；成员
+角色 owner-only、owner immutable；移除 owner-only 且仅移除成员资格）。契约与实现记录见
 [12-collab §38 / §38.37](../../migrations/multica-issue-board/12-collaboration-architecture.md#38-wave-3b-2--workflow-interaction-design-frozen)，
-下一步是 3C（Issue Detail & Collaboration UI）。
+下一步是 3C（Issue Detail & Collaboration UI）与 Issue Workspace Scoping。
 
 > **2026-09-21 — Workspace Integration Stage A**：`origin/main`（含 `cmd/gateway`、`0005_gateway_auth`）已受控融合进
 > `workspace合并`（main 只读、SHA 不变）；Issues 迁移前移重编号 **0005→0006 … 0009→0010** 以保持上游编号稳定；
@@ -46,6 +48,17 @@ creator 或 owner/admin）。契约与实现记录见
 > **前端零改动**。Issue / Agent / Team / Workflow / MCP / Skill 作用域仍未实施。ADR：
 > `specs/decisions/cloud/collaboration-workspace/20260921-project-workspace-sharing.md`；记录见
 > [project-workspace-sharing.md](../../migrations/project-workspace-sharing.md)。
+>
+> **2026-09-22 — Workspace Member Management & Onboarding（Step 3A）**：Workspace foundation 收口 ——
+> 注册用户 0 Workspace 是**合法状态**：前端 onboarding 空态（「创建工作区」复用 `POST /spaces`，creator
+> 自动成为 owner，或「请工作区所有者通过邮箱添加你」），不再只是退出登录死胡同；成员角色管理 **owner-only**
+> （`PUT /members/:uid` 收紧，admin↔member；**owner 角色 immutable** —— 任何所有权转移 →
+> `409 ownership_transfer_not_supported`）；新增 **owner-only** `DELETE /members/:uid` 硬删成员（owner
+> 行不可移除 → `409 cannot_remove_workspace_owner`；移除 = 仅移除工作区成员资格，账号/租户成员/资源保留，
+> 访问自然撤销）；Project delete UI 对齐后端 `creator OR owner/admin`。**PROJECT WORKSPACE SHARING:
+> UNCHANGED**；Issue / Agent / Team / Workflow / MCP / Skill 作用域仍未实施。ADR：
+> `specs/decisions/cloud/collaboration-workspace/20260922-workspace-member-management.md`；记录见
+> [workspace-member-management.md](../../migrations/workspace-member-management.md)。
 
 图例：✅ 已完成 · 🚧 进行中 · 🧭 规划中（仅架构方案，未编码） · ⏸️ 刻意暂缓 · ❌ 未开始
 
@@ -126,6 +139,30 @@ migration pending。ADR：`specs/decisions/cloud/collaboration-workspace/2026092
 | **Project Workspace Scoping** | ✅ **IMPLEMENTED（Step 3）** | Project list/detail/runtime 访问已切换为 workspace-shared；删除 = creator 或 owner/admin；unscoped 保持 owner-only。见 [project-workspace-sharing.md](../../migrations/project-workspace-sharing.md) |
 | **Issue Workspace Scoping** | ❌ **NOT IMPLEMENTED** | `issues.space_id` 未引入 |
 | **Agent / Team / Workflow / MCP / Skill Workspace Scoping** | ❌ **NOT IMPLEMENTED** | 各资源仍无 Workspace 共享 |
+
+## Workspace Member Management & Onboarding — Step 3A ✅ IMPLEMENTED
+
+Workspace foundation 收口：**0-Workspace 是合法状态**（注册用户可选创建自己的 Workspace，或等待被添加）；
+成员角色管理 **owner-only**（owner 角色经 member API **immutable**，禁止所有权转移）；移除成员
+**owner-only 硬删**（仅移除工作区成员资格，不删账号/租户成员/资源，访问自然撤销）；Project delete UI
+对齐后端 `creator OR owner/admin`。ADR：`specs/decisions/cloud/collaboration-workspace/20260922-workspace-member-management.md`
+（MM1–MM9）；记录见 [workspace-member-management.md](../../migrations/workspace-member-management.md)。
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| 0-Workspace onboarding | ✅ | 注册后无 W：前端空态「你还没有加入任何工作区」+「创建工作区」（复用 `POST /spaces`，creator 自动成为 owner）或「请工作区所有者通过邮箱添加你」；不 crash / 白屏 / redirect / fake workspace；新注册用户不自动加入 default space |
+| 角色变更 = owner-only | ✅ | `PUT /members/:uid` actor 收紧为 owner；admin 保留 Add Member，不扩大为改角色/删成员 |
+| owner 角色 immutable | ✅ | 任何所有权转移（member→owner、admin→owner、owner 自降）→ `409 ownership_transfer_not_supported`；last-owner 死分支删除 |
+| Remove member | ✅ | 新增 `DELETE /members/:uid`（owner-only、Idempotency-Key + version、硬删）；owner 行不可移除 → `409 cannot_remove_workspace_owner`（含 owner 自移除） |
+| 移除语义 = membership-only | ✅ | 只删 `collab_workspace_members` 行；用户账号、租户成员关系、`projects.owner_user_id`（creator 身份）与 W 内资源均保留；其余成员仍可访问 |
+| 访问自然撤销 | ✅ | 移除后 `listSpaces`/`spaceMember`/`workspaceRole` 无活跃行 → W / P / Runtime 自动隐藏；被移除 creator 不能绕过成员资格（scoped 授权先满足活跃成员） |
+| 能力矩阵 | ✅ | Owner {Add ✓, Change role ✓, Remove ✓}；Admin {Add ✓, Change role ✕, Remove ✕}；Member {全 ✕}；前端 UI 与后端独立强制一致 |
+| Project delete UI 对齐 | ✅ | `canDeleteProject = owner/admin OR currentUser == project.ownerUserId`（member+creator 可见；后端 Project delete 授权 UNCHANGED） |
+| 前端成员管理 UI | ✅ | 角色 Select 仅 owner 显示且无 owner 项；Remove AlertDialog（「从工作区移除「{name}」？」+ membership-only 文案）；owner 行只读 |
+| 测试 | ✅ | 后端集成 8 用例（注册三态 / owner 增升降删 / 移除撤销+资源保留 / 授权矩阵 / owner 保护 / 跨 tenant 无泄漏）+ 3 个既有测试改写；前端 18/18（onboarding / members owner-only / project delete UI）；HTTP smoke 通过 |
+| **PROJECT WORKSPACE SHARING** | ✅ **UNCHANGED** | 后端共享模型（Step 3）未动，仅前端删除按钮门对齐 |
+| **ISSUE WORKSPACE SCOPING** | ❌ **NOT IMPLEMENTED — NEXT STEP** | `issues.space_id` 未引入 |
+| **AGENT/TEAM/WORKFLOW/MCP/SKILL WORKSPACE SCOPING** | ❌ **NOT IMPLEMENTED** | 各资源仍无 Workspace 共享 |
 
 ## Issue 看板（迁移自 Multica）
 
@@ -331,7 +368,8 @@ Query），从参考项目 `cloud前端/` 迁移而来，API 层由 orval 从 `a
 | 最近 | **Workspace Add Member**（email 添加已注册用户到协作空间；Project 访问 owner-only —— 当前实现） |
 | 最近 | **Workspace Sharing Model（Step 2B 对齐）**（Workspace=资源共享边界；统一删除规则 creator OR owner/admin；最小谓词 foundation；旧 D1 产品规则 superseded） |
 | 最近 | **Project Workspace Sharing（Step 3）**（项目访问切换为 workspace-shared：list/detail/runtime 继承；删除 = creator 或 owner/admin；unscoped 保持 owner-only；前端零改动） |
-| 下一步 | **3C**（Issue Detail & Collaboration UI）；Issue / Agent / Team / Workflow / MCP / Skill Workspace Scoping；生产 Substrate / 看板分页与全文搜索 / 实时推送；真实 Agent/Team/Workflow/AI provider（BLOCKED ON EXTERNAL DESIGN） |
+| 最近 | **Workspace Member Management & Onboarding（Step 3A）**（0-Workspace onboarding + 可选创建；成员角色 owner-only + owner immutable；移除 owner-only 硬删、membership-only；Project delete UI 对齐） |
+| 下一步 | **3C**（Issue Detail & Collaboration UI）；**Issue Workspace Scoping**（`issues.space_id`）；Agent / Team / Workflow / MCP / Skill Workspace Scoping；生产 Substrate / 看板分页与全文搜索 / 实时推送；真实 Agent/Team/Workflow/AI provider（BLOCKED ON EXTERNAL DESIGN） |
 
 > 想看每个功能对应的接口和表，去 [../agent/api-reference.md](../agent/api-reference.md) 和
 > [../agent/database.md](../agent/database.md)。想看迁移的完整决策记录，去

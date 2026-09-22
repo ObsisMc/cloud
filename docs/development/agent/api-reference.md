@@ -16,6 +16,40 @@ Legend: 🔑 = `Idempotency-Key` required · 🔢 = `version` precondition (428/
 | GET | `/tenants/{tid}/members` | — | `{items, nextCursor}` |
 | PUT | `/tenants/{tid}/members/{uid}` | `role`, `status`, 🔢`version` | membership (admin only) |
 
+## Workspace members (`/spaces/{sid}/members`)
+
+`SpaceMember`: `id, workspaceId, userId, role, status, version, displayName, joinedAt`.
+`role ∈ owner|admin|member` (schema-level); `status ∈ active|disabled`.
+
+| Method | Path | Body fields | Response |
+| --- | --- | --- | --- |
+| GET | `/spaces/{sid}/members` | — | `{items:[SpaceMember], nextCursor}` (workspace members) |
+| POST 🔑 | `/spaces/{sid}/members` | `email`* | SpaceMember (admin or owner; fixed `member` role; unknown email → 404 `user_not_registered`; idempotent re-add) |
+| PUT | `/spaces/{sid}/members/{uid}` | `role`, `status`, 🔢`version` | SpaceMember (**owner-only**) |
+| DELETE 🔑 | `/spaces/{sid}/members/{uid}` | 🔢`version` | SpaceMember (**owner-only**; hard delete) |
+
+### Access model (Workspace member management, Step 3A)
+
+- **Change role — owner-only** (`PUT`): the actor must be the workspace **owner** (admin/member → 403
+  `space_role_required`). Only `admin↔member` transitions are allowed: the **owner role is immutable**
+  through this API — any write targeting an owner row, or any transition *to* owner (member→owner,
+  admin→owner, owner self-demote) → **409 `ownership_transfer_not_supported`**. Ownership transfer is a
+  separate, not-yet-designed feature; the last-owner invariant is guaranteed by owner-immutability (a
+  workspace always has exactly one owner).
+- **Remove member — owner-only** (`DELETE`): the actor must be the workspace **owner**; removing the
+  owner (including self-removal) → **409 `cannot_remove_workspace_owner`**. Removal is a **hard delete of
+  the workspace membership row only** — the user account, their tenant membership, and any resources they
+  created (e.g. `projects.owner_user_id` keeps recording the creator) are untouched and remain in the
+  workspace. The removed member's workspace access is revoked naturally: `listSpaces`/`spaceMember`/
+  `workspaceRole` are all backed by the active membership row, so after removal the workspace, its
+  projects, and their runtime workspaces become invisible (404) — with no creator backdoor, since
+  space-scoped resource access first requires active workspace membership.
+- **Add member — admin or owner** (`POST`): unchanged from the enrollment step; unknown email → 404
+  `user_not_registered`; re-adding an existing member is idempotent (returns the existing row without
+  mutating role/status/version). A disabled membership can be toggled back via `PUT` (`status`).
+- Both `PUT` and `DELETE` need the current `version` (428/409 on conflict); `POST`/`DELETE` need an
+  `Idempotency-Key`.
+
 ## Issues (board)
 
 `Issue`: `id, tenantId, creatorUserId, assigneeType, assigneeId?, assigneeUserId?, parentIssueId?,
@@ -196,6 +230,9 @@ member of W`. Concretely:
   per-runtime member table.
 - **No per-project membership**: `project_members` is **NOT used**; `owner_user_id` continues to record
   the creator.
+- **Frontend delete button (Step 3A)**: the detail page's delete button gate now mirrors the backend rule
+  (`creator OR workspace owner/admin`), so a member who created a project sees their own delete button;
+  the backend delete authorization is unchanged.
 
 ## Internal / control API (`/internal/v1`)
 

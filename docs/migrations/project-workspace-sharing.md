@@ -11,6 +11,8 @@
 > `RUNTIME WORKSPACE INHERITANCE: COMPLETE` · `PER-PROJECT MEMBERSHIP: NOT USED` ·
 > `LEGACY UNSCOPED PROJECT: OWNER-ONLY` · `ISSUE WORKSPACE SCOPING: NOT IMPLEMENTED — NEXT STEP` ·
 > `DOCUMENTATION: SYNCED`
+> ⚠️ **PS6 前端零改动已在 Step 3A 对齐**（[[workspace-member-management]] MM8）：删除按钮门改为
+> `creator OR workspace owner/admin`，与后端一致 —— member 创建者现在也能在 UI 删除自己的项目。
 
 ---
 
@@ -31,7 +33,7 @@ Step 2B（[[workspace-sharing-model]]）冻结了模型并落地了权限 founda
 | PS3 — legacy 兼容 | **不自动回填 / 不 NOT NULL / 本阶段不迁移 legacy** | `space_id = NULL` 保持 owner-only，无 scope widening（§16 回归证明）。 |
 | PS4 — Runtime 继承 | **`workspace()` 解析父 Project 的 `space_id` 判定** | scoped → workspace 成员可访问（含 `access()` node 准入、start/stop、列表、detail）；unscoped → owner-only。不新增 `runtime_workspace_members`，不发明独立 Runtime ACL。 |
 | PS5 — 列表语义 | **空间级列表 workspace-shared；tenant 级列表保持 owner 过滤** | `/spaces/:sid/projects` 返回该空间全部活跃 Project；`/projects/:pid/workspaces` 对 scoped 返回全部运行时；`/projects`（tenant 级）保持 owner 过滤（空间视图才是目标，前端不使用 tenant 级列表）。 |
-| PS6 — 前端 | **零代码改动** | space 查询 key 已含 tenant+spaceId（切换重建、无跨区泄漏）；无 tenant 级列表在用；无 per-project membership 缓存；无 Share/Members/Add Project Member UI；无 owner-only/私有措辞。删除按钮 `canDeleteProject`（space role admin\|\|owner）保持不动 —— 已知 UI gap（member 创建者在 UI 看不到自己的删除按钮，API 允许）。 |
+| PS6 — 前端 | **零代码改动（本阶段）；删除按钮门已由 Step 3A 对齐** | space 查询 key 已含 tenant+spaceId（切换重建、无跨区泄漏）；无 tenant 级列表在用；无 per-project membership 缓存；无 Share/Members/Add Project Member UI；无 owner-only/私有措辞。删除按钮 `canDeleteProject`（space role admin\|\|owner）在本阶段保持不动 —— 已知 UI gap（member 创建者在 UI 看不到自己的删除按钮，API 允许）。**Step 3A（[[workspace-member-management]] MM8）已关闭此 gap**：改为 `creator OR owner/admin`，member+creator 可见删除按钮；后端 Project delete 授权模型 UNCHANGED。 |
 | PS7 — rollout | **诚实记录** | Project Workspace Sharing：**IMPLEMENTED**；Issue / Agent / Team / Workflow / MCP / Skill：**NOT IMPLEMENTED — PENDING**；Per-project membership：**NOT USED**；Legacy `space_id=NULL`：owner-only compatibility。 |
 
 ## 2. 实施内容
@@ -81,8 +83,9 @@ Step 2B（[[workspace-sharing-model]]）冻结了模型并落地了权限 founda
 
 - **Tenant 级 `/projects` 列表保持 owner 过滤**：共享项目只在空间视图可见（PS5 最小化；前端不使用
   tenant 级列表）。
-- **前端删除按钮 UI 门**：`canDeleteProject` = space role admin||owner（比后端规则更严）；member 创建者
-  在 UI 看不到自己的删除按钮（API 允许删除）。
+- **前端删除按钮 UI 门（已由 Step 3A 关闭）**：本阶段 `canDeleteProject` = space role admin||owner（比
+  后端规则更严），member 创建者在 UI 看不到自己的删除按钮（API 允许删除）。**Step 3A（MM8）已对齐**为
+  `creator OR owner/admin`，与后端一致。
 - **无 editor/viewer 角色区分**：共享项目 member 的 mutation 能力 = 当前 Project mutation 语义
   （PATCH 改名 / 建运行时经 `project()` 放行），未细分角色。
 - **Operations 访问保持 owner 作用域**：`ownedOperation` 仍按 `p.owner_user_id`（本项目范围外，随

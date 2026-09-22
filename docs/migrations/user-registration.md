@@ -6,6 +6,10 @@
 > 关联 ADR：`specs/decisions/cloud/identity-access/0-user-registration.md`（SD1–SD5）。
 > 结束标记：`USER REGISTRATION: COMPLETE` · `AUTHENTICATION: NOT FULLY IMPLEMENTED` ·
 > `WORKSPACE ADD MEMBER: NOT IMPLEMENTED — NEXT STEP` · `PROJECT SHARING: NOT IMPLEMENTED`
+> ⚠️ **后续步骤已关闭部分缺口**：Workspace Add Member（Step 2）、Project Workspace Sharing（Step 3）、
+> **注册后可选创建 Workspace（Step 3A，[[workspace-member-management]] MM1/MM2）** 均已实现 —— 新注册
+> 用户 0 Workspace 是合法状态，前端显示 onboarding（「创建工作区」或等待被添加），不再只是死胡同。
+> AUTHENTICATION 措辞保持原样（NOT FULLY IMPLEMENTED）。
 
 ---
 
@@ -66,9 +70,13 @@ bcrypt / JWT 认证 / OAuth / SSO。
 
 - **AUTHENTICATION NOT FULLY IMPLEMENTED**：注册 = 创建 User Identity + 会话，**无密码**
   （`/auth/login` 仍是「任意 email 即登录」）。密码 / 凭据 / OAuth / SSO 均未实现。
-- **WORKSPACE ADD MEMBER NOT IMPLEMENTED — NEXT STEP**：注册用户自动成为 bootstrap 租户普通成员，
-  但「向 Workspace 添加成员 / 租户成员 enrollment UI / Add Employee」未实现。
-- **PROJECT SHARING NOT IMPLEMENTED**：无项目分享。
+- **WORKSPACE ADD MEMBER：已由后续步骤关闭**（当时未实现）：注册用户自动成为 bootstrap 租户普通成员，
+  「向 Workspace 添加成员」已在 Step 2（[[workspace-membership]]）实现。
+- **PROJECT SHARING：已由后续步骤关闭**（当时未实现）：Project 已在 Step 3（[[project-workspace-sharing]]）
+  按 Workspace 共享。
+- **可选创建 Workspace：已由 Step 3A 关闭**（[[workspace-member-management]] MM1/MM2）：注册后 0 Workspace
+  是合法状态，前端 onboarding 提供「创建工作区」（复用 `POST /spaces`，creator 自动成为 owner）或等待
+  被添加；新注册用户不自动加入 default space。
 - 注册用户跨租户可见性、通知、邮箱验证邮件均不在本期范围。
 
 ---

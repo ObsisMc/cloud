@@ -11,6 +11,9 @@
 > `PROJECT WORKSPACE SHARING: NOT YET MIGRATED` · `CURRENT PROJECT ACCESS: OWNER-ONLY — TEMPORARY UNTIL STEP 3` ·
 > `PROJECT SHARING: NOT IMPLEMENTED — NEXT STEP` · `EMAIL INVITATION: NOT IMPLEMENTED` ·
 > `DOCUMENTATION: SYNCED`
+> ⚠️ **后续步骤已补齐**：角色管理 / 成员移除已在 **Step 3A**（[[workspace-member-management]] MM3–MM7）
+> 实现 —— `PUT /members/:uid` 收紧为 **owner-only**、owner 角色 immutable（禁止所有权转移）、新增
+> owner-only `DELETE /members/:uid`（硬删，非禁用）。本记录的 Add Member（SD1–SD5）语义不变。
 
 ---
 
@@ -90,8 +93,10 @@ Registration；**不新建**第二套 membership 系统 —— 复用 Stage B �
   无邀请邮件 / pending member / 自动建号。
 - **WORKSPACE MEMBER AUTO-PROJECT ACCESS: NOT YET MIGRATED**：空间成员身份目前不派生任何 Project
   visibility（当前实现，见 §0/SD6 + workspace-sharing-model）。
-- **角色管理不在本期**：新成员固定 `member`，添加时不能指定 owner/admin；角色调整仍走既有
-  `PUT /members/:uid`。
+- **角色管理（已由 Step 3A 补齐）**：本阶段新成员固定 `member`、添加时不能指定 owner/admin（SD3 保留）；
+  角色调整已由 Step 3A 实现为 **owner-only**：`PUT /members/:uid` 仅 owner 可执行、admin↔member 互转、
+  owner 角色 immutable（任何所有权转移 → 409 `ownership_transfer_not_supported`）；新增 owner-only
+  `DELETE /members/:uid` 硬删成员（owner 行不可移除 → 409 `cannot_remove_workspace_owner`）。
 
 ---
 

@@ -31,6 +31,7 @@ docs/
     workspace-membership.md           ← Workspace Add Member：email 添加已注册用户（SD1–SD6，IMPLEMENTED；SD6 已被取代）
     workspace-sharing-model.md        ← Workspace Sharing Model：Workspace=资源共享边界 + 统一删除规则（SS1–SS5，IMPLEMENTED；PS 已落地）
     project-workspace-sharing.md      ← Project Workspace Sharing：Project/Runtime 访问切换为 workspace-shared（PS1–PS7，IMPLEMENTED）
+    workspace-member-management.md    ← Workspace Member Management & Onboarding：0-Workspace onboarding + 成员角色 owner-only + owner immutable + 移除 owner-only + Project delete UI 对齐（MM1–MM9，IMPLEMENTED）
   acceptance.md                 ← product acceptance criteria (pre-existing)
   authentication.md             ← auth model (pre-existing)
   core-contract.md              ← core behavioural contract (pre-existing)
@@ -111,8 +112,9 @@ docs/
   email (`POST /spaces/:sid/members`, SD1–SD6): atomic tenant+space enrollment in one tx (no
   half-state), fixed `member` role, idempotent existing-member return, 404 `user_not_registered` for
   unknown/inactive email, business-level role enforcement (owner/admin 200, member 403). The new member
-  sees and can switch to the Workspace after refresh. PROJECT SHARING / EMAIL INVITATION not implemented
-  (see [workspace-membership.md](migrations/workspace-membership.md)).
+  sees and can switch to the Workspace after refresh. PROJECT SHARING was implemented in Step 3 (see the
+  next rows); EMAIL INVITATION remains not implemented (see
+  [workspace-membership.md](migrations/workspace-membership.md)).
 - ✅ **Workspace Sharing Model (Step 2B)** — alignment, not resource migration. Workspace is now the
   **resource-sharing boundary** (member may access the Workspace's shared resources); per-resource
   membership is **not used**; the unified delete rule is **creator OR workspace owner/admin**, backed by
@@ -126,6 +128,15 @@ docs/
   Projects stay **owner-only** (no auto-backfill, no scope widening); `owner_user_id` continues as
   creator; **no** `project_members`; frontend zero code change. (see
   [project-workspace-sharing.md](migrations/project-workspace-sharing.md)).
+- ✅ **Workspace Member Management & Onboarding (Step 3A)** — Workspace foundation 收口: new registered
+  users start with **0 workspaces (a legal state)** and see an onboarding empty state with a Create
+  Workspace CTA (reusing `POST /spaces`; the creator becomes owner) plus "ask a workspace owner to add
+  you"; role changes are **owner-only** (`PUT /members/:uid`), the **owner role is immutable** through
+  the member API (any ownership transfer → 409 `ownership_transfer_not_supported`), and removal is an
+  **owner-only hard delete** (`DELETE /members/:uid`, 409 `cannot_remove_workspace_owner`) that removes
+  workspace membership alone — the user account, tenant membership, and created resources remain.
+  Project delete UI now matches the backend (`creator OR owner/admin`). (see
+  [workspace-member-management.md](migrations/workspace-member-management.md)).
 - 🧭 Planned — **Wave 3C** (Issue Detail & Collaboration UI). Real Agent/Team/Workflow modules are
   **blocked on external design**.
 - ⏸️ Deferred: attachments, issue↔project binding, PR links, realtime, bots/squads, Autopilot.
