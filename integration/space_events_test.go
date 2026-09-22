@@ -36,20 +36,29 @@ func (f *fixture) subscribe(t *testing.T, u core.Claims, sid string, want int) *
 	return res
 }
 
-// nextEvent waits for one SSE data line and requires it to carry the type.
+// nextEvent waits for one SSE data line and requires it to carry the type. The bounded read is
+// itself part of the assertion: a connection closed by either side surfaces as an immediate read
+// error instead of blocking until the timeout.
 func nextEvent(t *testing.T, res *http.Response, wantType string) {
 	t.Helper()
-	lines := make(chan string, 1)
+	type lineOrError struct {
+		line string
+		e    error
+	}
+	lines := make(chan lineOrError, 1)
 	go func() {
-		line, _ := bufio.NewReader(res.Body).ReadString('\n')
-		lines <- line
+		line, e := bufio.NewReader(res.Body).ReadString('\n')
+		lines <- lineOrError{line, e}
 	}()
 	select {
 	case <-time.After(5 * time.Second):
 		t.Fatalf("no %s event within 5s", wantType)
-	case line := <-lines:
-		if !strings.Contains(line, wantType) {
-			t.Fatalf("event mismatch: want %s got %q", wantType, line)
+	case got := <-lines:
+		if got.e != nil {
+			t.Fatalf("stream ended before the %s event: %v", wantType, got.e)
+		}
+		if !strings.Contains(got.line, wantType) {
+			t.Fatalf("event mismatch: want %s got %q", wantType, got.line)
 		}
 	}
 }

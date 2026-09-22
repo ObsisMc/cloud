@@ -144,7 +144,7 @@ export function useGetApiV1Me<TData = Awaited<ReturnType<typeof getApiV1Me>>, TE
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists page in ascending creation order; the after cursor is an exclusive tenant UUID.
  * @summary GET /api/v1/me/tenants
  */
 export const getApiV1MeTenants = (

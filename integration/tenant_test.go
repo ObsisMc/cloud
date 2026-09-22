@@ -96,6 +96,27 @@ func TestSelfServeTenantProvisioning(t *testing.T) {
 	if status != 201 || second.O("tenant").S("id") == tid {
 		t.Fatalf("second tenant: want fresh 201 got %d %v", status, second)
 	}
+	secondID := second.O("tenant").S("id")
+
+	// The member's tenant list is ordered by creation, so the earliest tenant is
+	// first; pagination keeps the cursor an opaque tenant UUID.
+	tenants, status, e = f.client.Call(context.Background(), "GET", "/api/v1/me/tenants", "gateway", gw, &dave, "", nil)
+	must(t, e)
+	items = tenants["items"].([]any)
+	if status != 200 || len(items) != 2 || items[0].(map[string]any)["id"] != tid || items[1].(map[string]any)["id"] != secondID {
+		t.Fatalf("tenants must list the earliest-created first: %d %v", status, tenants)
+	}
+	firstPage, status, e := f.client.Call(context.Background(), "GET", "/api/v1/me/tenants?limit=1", "gateway", gw, &dave, "", nil)
+	must(t, e)
+	if status != 200 || firstPage.S("nextCursor") != tid {
+		t.Fatalf("first page must end at the earliest tenant: %d %v", status, firstPage)
+	}
+	rest, status, e := f.client.Call(context.Background(), "GET", "/api/v1/me/tenants?limit=1&after="+firstPage.S("nextCursor"), "gateway", gw, &dave, "", nil)
+	must(t, e)
+	restItems, _ := rest["items"].([]any)
+	if status != 200 || len(restItems) != 1 || restItems[0].(map[string]any)["id"] != secondID {
+		t.Fatalf("cursor must resume at the second tenant: %d %v", status, rest)
+	}
 
 	// The fixture tenant is untouched and stays invisible to the new user.
 	if _, status, e = f.client.Call(context.Background(), "GET", f.path("/spaces"), "gateway", gw, &dave, "", nil); e != nil || status != 403 {

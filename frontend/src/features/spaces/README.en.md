@@ -4,7 +4,7 @@
 
 Wraps the generated orval client into domain hooks and owns the "current space" context and the SSE subscription. It:
 
-- once the session is signed in, resolves the tenant via `GET /api/v1/me/tenants` (the product never shows tenants, so the first one is taken) and loads the `GET /spaces` list (`useJoinedSpaces`);
+- once the session is signed in, resolves the tenant via `GET /api/v1/me/tenants` (the product never shows tenants, so the earliest-created one is taken; the backend lists tenants in ascending creation order, making the pick deterministic) and loads the `GET /spaces` list (`useJoinedSpaces`);
 - offers `useCreateTenant` (`POST /api/v1/tenants`) for a first-time member without a tenant; the backend creates the first space alongside and makes the caller its owner;
 - resolves the route's `:workspaceSlug` against real spaces (an unjoined slug resolves to nothing);
 - queries and mutates space members and space-scoped projects (create / rename / archive / member upsert), invalidating the affected queries on success;

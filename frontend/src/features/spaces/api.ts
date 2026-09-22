@@ -74,7 +74,9 @@ export function useSpaces(tenantId: string | undefined) {
 /**
  * Everything the signed-in member joined, resolved in two hops: the tenant
  * list, then that tenant's spaces. The product shows only spaces; the tenant
- * is an implicit container, so the first tenant is taken without a choice.
+ * is an implicit container, so the earliest-created tenant is taken without a
+ * choice (the backend lists tenants in ascending creation order, so the pick
+ * is deterministic, never a random member tenant).
  * `spaces` is `[]` (not `undefined`) for a member with no tenant, so callers
  * can tell "nothing joined" from "still loading" by `isPending` alone.
  */

@@ -9,6 +9,7 @@
 - `AuthorizationURL`: points at `<public origin>/auth/dev/authorize?state=…&code_challenge=…`, refusing any callback URL other than its own.
 - `GET /auth/dev/authorize`: renders the form with `state` and `code_challenge` as hidden fields and `source` / `subject` / `display_name` inputs (defaults `dev` / `developer` / `Developer`). `Cache-Control: no-store`.
 - `POST /auth/dev/authorize`: same-origin only (`gateway.SameOrigin`); normalizes the identity with `gateway.Normalize` (source and subject required, Cloud's byte limits), seals `{source, subject, displayName, challenge, expires}` with an HMAC-SHA256 keyed by a random per-process secret, and `303`s to `<callback>?state=…&code=…`. Codes live 5 minutes.
+- The form routes' own error responses (missing `state`/`code_challenge`, a cross-site submission, an invalid identity re-rendering the form) are human-facing plain text/HTML and exempt from the JSON fault shape; `/auth/callback/dev` failures remain the uniform fault, the orchestration does not special-case providers.
 - `Exchange`: verifies the callback URL, the signature, the expiry and that `S256(code_verifier)` equals the sealed challenge, then returns the typed identity. Every failure is `gateway.ErrProviderRejected`, so the orchestration answers the uniform `401 login_failed`.
 
 ## Invariants

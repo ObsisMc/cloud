@@ -9,6 +9,7 @@
 - `AuthorizationURL`：指向 `<public origin>/auth/dev/authorize?state=…&code_challenge=…`，拒绝任何不是自己的 callback URL。
 - `GET /auth/dev/authorize`：渲染表单，`state` 与 `code_challenge` 为隐藏字段，可填 `source` / `subject` / `display_name`（默认 `dev` / `developer` / `Developer`）。`Cache-Control: no-store`。
 - `POST /auth/dev/authorize`：仅限同源（`gateway.SameOrigin`）；用 `gateway.Normalize` 规范化身份（source 与 subject 必填，遵守 Cloud 的字节上限），用进程内随机密钥的 HMAC-SHA256 封装 `{source, subject, displayName, challenge, expires}`，`303` 到 `<callback>?state=…&code=…`。code 有效期 5 分钟。
+- 表单路由自身的错误响应（缺失 `state`/`code_challenge`、跨站提交、身份非法时重新渲染表单）是面向人的纯文本/HTML，不走 JSON fault 形状；`/auth/callback/dev` 的失败仍统一为 fault，编排层不因 provider 而异。
 - `Exchange`：校验 callback URL、签名、有效期，以及 `S256(code_verifier)` 等于封装的 challenge，然后返回输入的身份。任何失败都是 `gateway.ErrProviderRejected`，编排层统一回答 `401 login_failed`。
 
 ## 不变量

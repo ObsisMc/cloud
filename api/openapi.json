@@ -1704,7 +1704,7 @@
     },
     "/api/v1/me/tenants": {
       "get": {
-        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.",
+        "description": "Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists page in ascending creation order; the after cursor is an exclusive tenant UUID.",
         "operationId": "get_api_v1_me_tenants",
         "parameters": [
           {

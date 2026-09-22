@@ -9,7 +9,7 @@ import { useJoinedSpaces } from '@/features/spaces/api'
  * touching routing or the tenant list themselves.
  */
 export interface CurrentSpaceValue {
-  /** Tenant id of the session (the product shows only spaces, so the first tenant is used). */
+  /** Tenant id of the session (the product shows only spaces, so the earliest-created tenant is used). */
   tenantId: string | undefined
   /** Spaces the signed-in member joined; `[]` once resolved for a member with none. */
   spaces: SpaceListItem[] | undefined

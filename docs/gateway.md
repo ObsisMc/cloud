@@ -14,7 +14,7 @@ Gateway（`cmd/gateway`）是浏览器可访问的公开认证与反向代理边
 | `GET /healthz` | PostgreSQL 探活。 |
 | `GET`/`POST /auth/dev/authorize` | 仅当 `login.development_provider` 开启时存在：本地开发登录表单，见下文。 |
 
-`/internal/v1/*` 没有路由，落到 `404 not_found`。所有错误使用 `{"code","params","requestId"}`，与 Cloud 一致。
+`/internal/v1/*` 没有路由，落到 `404 not_found`。所有错误使用 `{"code","params","requestId"}`，与 Cloud 一致；唯一例外是 `dev` 表单路由面向人的纯文本/HTML 响应（见下文）。
 
 ## Cookie
 
@@ -75,7 +75,7 @@ IDaaS 应用登记与上线检查：
 
 ## 本地开发 provider（`dev`）
 
-`internal/gateway/devlogin` 让前端在没有 IDaaS 应用或 GitHub OAuth App 时也能登录：`POST /auth/login` 传 `provider: "dev"`，`authorizationUrl` 指向 Gateway 自己的 `GET /auth/dev/authorize`（携带 `state` 与 `code_challenge`），开发者在表单里输入 `source` / `subject` / `display_name`（默认 `dev` / `developer` / `Developer`），同源 `POST` 后表单用进程内随机密钥的 HMAC 封装身份、challenge 与 5 分钟有效期得到 code，`303` 回 `/auth/callback/dev`。之后的 attempt 校验、PKCE verifier 校验、session 创建、Cookie 与凭据签发与 GitHub 完全相同；Cloud 仍按 `(source, subject)` 创建或解析用户，membership 与授权不因 provider 而异。输入任意 source 与 subject（例如 `huawei-corp` + 某员工的 IDaaS `uuid`）即可以该身份登录——这正是它只能与 `public.development`（loopback HTTP）同时开启的原因：这条校验是安全边界，不只是便利。启动日志会给出 warning。
+`internal/gateway/devlogin` 让前端在没有 IDaaS 应用或 GitHub OAuth App 时也能登录：`POST /auth/login` 传 `provider: "dev"`，`authorizationUrl` 指向 Gateway 自己的 `GET /auth/dev/authorize`（携带 `state` 与 `code_challenge`），开发者在表单里输入 `source` / `subject` / `display_name`（默认 `dev` / `developer` / `Developer`），同源 `POST` 后表单用进程内随机密钥的 HMAC 封装身份、challenge 与 5 分钟有效期得到 code，`303` 回 `/auth/callback/dev`。之后的 attempt 校验、PKCE verifier 校验、session 创建、Cookie 与凭据签发与 GitHub 完全相同；Cloud 仍按 `(source, subject)` 创建或解析用户，membership 与授权不因 provider 而异。输入任意 source 与 subject（例如 `huawei-corp` + 某员工的 IDaaS `uuid`）即可以该身份登录——这正是它只能与 `public.development`（loopback HTTP）同时开启的原因：这条校验是安全边界，不只是便利。启动日志会给出 warning。表单路由自身的错误响应（缺失 `state`/`code_challenge`、跨站提交、身份非法重新渲染表单）是面向人的纯文本/HTML，不采用 JSON fault 形状；`/auth/callback/dev` 的失败仍统一为 JSON `401 login_failed`，编排层不因 provider 而异。
 
 ## GitHub 适配器
 

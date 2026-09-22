@@ -433,7 +433,13 @@ func description(r router.Route) string {
 	if strings.HasSuffix(r.Path, "/workspaces") && r.Method == "POST" {
 		base += "Creates one isolated Workspace and Task display identity. title/baseRef required; branch and relative path are server-generated. "
 	}
-	return base + "Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination."
+	pagination := "Lists use ascending UUID pagination."
+	if r.Path == "/api/v1/me/tenants" {
+		// The member's tenant list orders by creation so items[0] is the earliest
+		// tenant deterministically; the cursor stays an exclusive tenant UUID.
+		pagination = "Lists page in ascending creation order; the after cursor is an exclusive tenant UUID."
+	}
+	return base + "Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. " + pagination
 }
 
 func errorDescription(code string) string {

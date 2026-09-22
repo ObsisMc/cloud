@@ -16,7 +16,7 @@ Cloud 是唯一业务权威存储。Gateway 转发查询/生命周期到 cloud�
 
 POST/DELETE 需要 `Idempotency-Key`，范围是 tenant+user，保留原始 HTTP 状态与响应。hash 由 method、path、规范化 JSON map 组成；相同 key 不同内容为 409。同 key 同请求首先重放，再检查当前资源版本，因此响应丢失后的旧 version 重试不会创建第二份资源。停用成员仍先被拒绝。`POST /api/v1/tenants` 在租户存在之前执行，因此按 user+key 在该用户所属的全部租户中匹配重放，并把记录写在新建租户名下；同 key 不同内容同样为 409。
 
-PATCH 与生命周期动作携带整数 `version`；现存 membership PUT/operation retry/Node status/idle/ticket finish 同样使用 version。缺失必需版本为 428，不匹配为 409；已经 finished 的同版本请求重放不产生第二次写入。列表按 UUID 升序，`limit` 1–100，`after` 是排他 UUID cursor；身份过滤在分页前执行。
+PATCH 与生命周期动作携带整数 `version`；现存 membership PUT/operation retry/Node status/idle/ticket finish 同样使用 version。缺失必需版本为 428，不匹配为 409；已经 finished 的同版本请求重放不产生第二次写入。列表按 UUID 升序，`limit` 1–100，`after` 是排他 UUID cursor；身份过滤在分页前执行。`GET /api/v1/me/tenants` 例外：按租户创建时间升序（`created_at`，`id` 为决胜负列），`items[0]` 因此是成员最早创建的租户；`after` 仍是排他租户 UUID cursor。
 
 首版所有核心事务共用 PG transaction advisory lock，每个 Project 最多一个 queued/running/retry_wait/blocked operation。创建 isolated 与删除 Project 竞争同一锁和 lifecycle 检查；先建立的 intent 获得操作权，另一方冲突。全局锁是一项明确吞吐限制，不是跨 HTTP 长事务。未来细化锁时必须保持直接约束与并发测试。
 

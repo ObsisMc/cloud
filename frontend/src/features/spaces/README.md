@@ -4,7 +4,7 @@
 
 把生成的 orval 客户端包装为页面可用的领域 hooks，并维护"当前空间"上下文与 SSE 订阅。它负责：
 
-- 会话确认已登录后，从 `GET /api/v1/me/tenants` 解析租户（产品不展示租户，取第一个），再加载 `GET /spaces` 空间列表（`useJoinedSpaces`）；
+- 会话确认已登录后，从 `GET /api/v1/me/tenants` 解析租户（产品不展示租户，取最早创建的一个；后端按创建时间升序返回，选择是确定的），再加载 `GET /spaces` 空间列表（`useJoinedSpaces`）；
 - 为无租户的首次登录用户提供 `useCreateTenant`（`POST /api/v1/tenants`，后端顺带建首个空间并把调用者设为 owner）；
 - 把路由的 `:workspaceSlug` 解析为真实空间（未加入的 slug 解析为空）；
 - 空间成员 / 空间内项目的查询与变更（创建/改名/归档/成员 upsert），成功后失效对应查询；

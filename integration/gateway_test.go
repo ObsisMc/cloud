@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"maps"
 	"net"
 	"net/http"
@@ -991,6 +992,9 @@ func TestGatewaySchemaConstraints(t *testing.T) {
 // past both the upstream timeout and the server write timeout, while bounded responses still honor
 // the upstream timeout. The signed-in user also provisions their own tenant through the Gateway,
 // which is the path a first-time browser user takes.
+//
+// Evidence for specs/test-cases/cloud/identity-access/proxy-and-credentials.md
+// (#authorized-event-streams-outlive-proxy-timeouts).
 func TestGatewayRelaysEventStreamsBeyondTimeouts(t *testing.T) {
 	f := setupGateway(t)
 	const timeout = 200 * time.Millisecond
@@ -1015,14 +1019,34 @@ func TestGatewayRelaysEventStreamsBeyondTimeouts(t *testing.T) {
 	if stream.StatusCode != http.StatusOK || !strings.HasPrefix(stream.Header.Get("Content-Type"), "text/event-stream") {
 		t.Fatalf("event stream through gateway: %d %s", stream.StatusCode, stream.Header.Get("Content-Type"))
 	}
-	// The subscription must outlive both timeouts; the wait is the assertion.
-	time.Sleep(5 * timeout)
-
-	resp, _ = gw.do(browser, http.MethodPatch, "/api/v1/tenants/"+tid+"/spaces/"+sid, map[string]any{"name": "Stream Renamed", "description": "", "version": space.N("version")}, gw.origin())
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("patch space through gateway: %d", resp.StatusCode)
-	}
+	// The subscription must outlive both timeouts: the space update is dispatched
+	// only once they have elapsed, and nextEvent's bounded read is the assertion —
+	// a connection wrongly cut at either timeout surfaces immediately instead of
+	// after a blind sleep.
+	patchOutcome := make(chan int, 1)
+	timer := time.AfterFunc(2*timeout, func() {
+		body, _ := json.Marshal(map[string]any{"name": "Stream Renamed", "description": "", "version": space.N("version")})
+		req, e := http.NewRequestWithContext(context.Background(), http.MethodPatch, gw.server.URL+"/api/v1/tenants/"+tid+"/spaces/"+sid, bytes.NewReader(body))
+		if e != nil {
+			patchOutcome <- 0
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", gw.server.URL)
+		resp, e := browser.Do(req)
+		if e != nil || resp == nil {
+			patchOutcome <- 0
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		patchOutcome <- resp.StatusCode
+	})
+	defer timer.Stop()
 	nextEvent(t, stream, "space.updated")
+	if code := <-patchOutcome; code != http.StatusOK {
+		t.Fatalf("patch space through gateway: %d", code)
+	}
 
 	// A bounded response that never arrives is still cut off by the upstream timeout.
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1041,8 +1065,8 @@ func TestGatewayRelaysEventStreamsBeyondTimeouts(t *testing.T) {
 	}
 }
 
-// Evidence for specs/test-cases/cloud/identity-access/proxy-and-credentials.md
-// (#cloud-only-receives-gateway-issued-short-lived-credentials): the development provider is a
+// Evidence for specs/test-cases/cloud/identity-access/login-attempt.md
+// (#development-provider-sign-in-and-its-loopback-boundary): the development provider is a
 // provider like any other to the orchestration, so a typed identity ends in a real session and
 // Gateway-issued credentials, and a forged code cannot.
 func TestGatewayDevelopmentProviderSignsInTypedIdentity(t *testing.T) {
@@ -1072,17 +1096,22 @@ func TestGatewayDevelopmentProviderSignsInTypedIdentity(t *testing.T) {
 	if page.StatusCode != http.StatusOK || !strings.HasPrefix(page.Header.Get("Content-Type"), "text/html") {
 		t.Fatalf("authorize form: %d %s", page.StatusCode, page.Header.Get("Content-Type"))
 	}
-	form := url.Values{
-		"state": {authorize.Query().Get("state")}, "code_challenge": {authorize.Query().Get("code_challenge")},
-		"source": {"acme-corp"}, "subject": {"stable-account-id"}, "display_name": {"Ada"},
+	// submitDevForm posts the authorize form for the typed identity and returns the
+	// consumed hop to the dev callback redirect.
+	submitDevForm := func(state, challenge string) reply {
+		form := url.Values{
+			"state": {state}, "code_challenge": {challenge},
+			"source": {"acme-corp"}, "subject": {"stable-account-id"}, "display_name": {"Ada"},
+		}
+		req, e := http.NewRequestWithContext(context.Background(), http.MethodPost, gw.server.URL+devlogin.AuthorizePath, strings.NewReader(form.Encode()))
+		must(t, e)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", gw.server.URL)
+		submitted, e := browser.Do(req)
+		must(t, e)
+		return consume(t, submitted)
 	}
-	req, e := http.NewRequestWithContext(context.Background(), http.MethodPost, gw.server.URL+devlogin.AuthorizePath, strings.NewReader(form.Encode()))
-	must(t, e)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Origin", gw.server.URL)
-	submitted, e := browser.Do(req)
-	must(t, e)
-	hop := consume(t, submitted)
+	hop := submitDevForm(authorize.Query().Get("state"), authorize.Query().Get("code_challenge"))
 	if hop.StatusCode != http.StatusSeeOther || !strings.HasPrefix(hop.Header.Get("Location"), gw.server.URL+gateway.CallbackPath+"/dev?") {
 		t.Fatalf("form must redirect to the dev callback: %d %q", hop.StatusCode, hop.Header.Get("Location"))
 	}
@@ -1105,15 +1134,7 @@ func TestGatewayDevelopmentProviderSignsInTypedIdentity(t *testing.T) {
 	_, out = gw.do(browser, http.MethodPost, gateway.LoginPath, map[string]string{"provider": "dev", "returnTo": "/w/acme/issues"}, gw.origin())
 	authorize, e = url.Parse(out.S("authorizationUrl"))
 	must(t, e)
-	form.Set("state", authorize.Query().Get("state"))
-	form.Set("code_challenge", authorize.Query().Get("code_challenge"))
-	req, e = http.NewRequestWithContext(context.Background(), http.MethodPost, gw.server.URL+devlogin.AuthorizePath, strings.NewReader(form.Encode()))
-	must(t, e)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Origin", gw.server.URL)
-	submitted, e = browser.Do(req)
-	must(t, e)
-	hop = consume(t, submitted)
+	hop = submitDevForm(authorize.Query().Get("state"), authorize.Query().Get("code_challenge"))
 	done := gw.callback(browser, hop.Header.Get("Location"))
 	if done.StatusCode != http.StatusSeeOther || done.Header.Get("Location") != "/w/acme/issues" {
 		t.Fatalf("dev callback must sign in and honor return_to: %d %q %v", done.StatusCode, done.Header.Get("Location"), done.body)
