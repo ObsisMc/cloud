@@ -13,6 +13,11 @@ import (
 // belongs to no tenant provisions one for themselves, becomes its
 // administrator and the first space's owner, replays through the idempotency
 // key, and cannot reuse the key with a different body.
+//
+// Evidence for specs/test-cases/cloud/tenancy/self-serve-provisioning.md
+// (#a-signed-in-member-provisions-exactly-one-tenant-and-its-first-space,
+// #idempotency-key-matches-per-user-across-tenants,
+// #the-members-tenant-list-pages-in-ascending-creation-order).
 func TestSelfServeTenantProvisioning(t *testing.T) {
 	f := setup(t)
 	gw := core.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "gateway-a"}}
