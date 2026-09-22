@@ -9,7 +9,7 @@ import (
 // queued work. Repeating (tenant, user, requestId) with the same input returns the original
 // request; different input is a conflict. Nothing is dispatched here: a Controller claims it.
 func (s *Store) EnqueueClone(ctx context.Context, tenantID, userID, requestID, repositoryURL, branch string) (Object, error) {
-	return s.transact(ctx, func(t *transaction) Object {
+	out, err := s.transact(ctx, func(t *transaction) Object {
 		require(requestID != "" && repositoryURL != "" && branch != "", 400, "invalid_clone_request")
 		membership(t, tenantID, userID, false)
 		if existing := t.one("SELECT * FROM clone_requests WHERE tenant_id=$1 AND actor_user_id=$2 AND request_id=$3", tenantID, userID, requestID); existing != nil {
@@ -20,6 +20,11 @@ func (s *Store) EnqueueClone(ctx context.Context, tenantID, userID, requestID, r
 		t.exec("INSERT INTO clone_requests(id,tenant_id,actor_user_id,request_id,repository_url,branch,state) VALUES($1,$2,$3,$4,$5,$6,'queued')", id, tenantID, userID, requestID, repositoryURL, branch)
 		return t.one("SELECT * FROM clone_requests WHERE id=$1", id)
 	})
+	// Signal only after commit so a Controller that claims immediately finds the row.
+	if err == nil && out.S("state") == "queued" && s.Signals != nil {
+		s.Signals.Publish(ControlSignal{Kind: SignalWorkAvailable, OperationID: out.S("id")})
+	}
+	return out, err
 }
 
 // submitted wraps one state-changing control action in its submission identity. The identity is

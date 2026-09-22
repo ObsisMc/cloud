@@ -71,8 +71,9 @@ type databaseFailure struct{ err error }
 
 // Store is injected; there is no global database handle.
 type Store struct {
-	Pool   *sql.DB
-	Events *SpaceHub
+	Pool    *sql.DB
+	Events  *SpaceHub
+	Signals *ControlHub
 }
 
 // NewStore obtains the injected SQL pool without creating or migrating schema.
@@ -84,7 +85,7 @@ func NewStore(db *gorm.DB) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get database pool: %w", err)
 	}
-	return &Store{Pool: pool, Events: NewSpaceHub()}, nil
+	return &Store{Pool: pool, Events: NewSpaceHub(), Signals: NewControlHub()}, nil
 }
 
 type transaction struct {

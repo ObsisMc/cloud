@@ -85,11 +85,15 @@ func lease(t *transaction, r *ControlRequest) Object {
 		}
 	} else {
 		leaseValid(t, r)
-		if r.Action == "lease_renew" {
+		switch r.Action {
+		case "lease_renew":
 			t.exec("UPDATE controller_leases SET expires_at=clock_timestamp()+interval '30 seconds' WHERE name='global'")
-		} else {
-			require(r.Action == "lease_release", 404, "not_found")
+		case "lease_release":
 			t.exec("UPDATE controller_leases SET expires_at=clock_timestamp() WHERE name='global'")
+		case "lease_check":
+			// Read-only: proves the caller holds the current lease without extending it.
+		default:
+			reject(404, "not_found")
 		}
 	}
 	return t.one("SELECT * FROM controller_leases WHERE name='global'")
