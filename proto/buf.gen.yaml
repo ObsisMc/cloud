@@ -10,9 +10,10 @@ managed:
       path: ora/controller/v1/controller.proto
       value: github.com/wanglongan587/cloud/internal/controllerpb;controllerpb
 inputs:
-  # Pinned to the contract commit until the first `controller-proto/vX.Y.Z` tag exists upstream;
-  # switch git_repo to ora-space/desktop and ref to that tag in the same change as the regeneration.
-  - git_repo: https://github.com/ObsisMc/desktop.git
+  # Pinned to the contract commit until the first `controller-proto/vX.Y.Z` tag exists; switch ref
+  # to that tag in the same change as the regeneration. GitHub serves pull-request commits of the
+  # upstream repository by hash, so the input never points at a fork.
+  - git_repo: https://github.com/ora-space/desktop.git
     ref: 3bd07a5234c29380f3d23f97f2b2240f0dba7c47
     subdir: proto
 plugins:
