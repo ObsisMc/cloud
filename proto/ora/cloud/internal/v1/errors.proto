@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+// Internal control contract between Cloud (API Server, the authoritative persistence) and a
+// Controller (a stateless coordination worker). Cloud is the server for every RPC; a Controller
+// only dials out. Identities are opaque strings Cloud has already authorized: there are no
+// tenant, user or membership fields at this boundary by design.
+package ora.cloud.internal.v1;
+
+// Classification attached to failed calls as a google.rpc.Status detail. The gRPC status code
+// carries the primary classification (ABORTED, FAILED_PRECONDITION, INVALID_ARGUMENT, NOT_FOUND,
+// PERMISSION_DENIED, UNAVAILABLE); the enum refines it so callers branch on neither message text
+// nor HTTP-era string codes. Both are produced in one place on the Cloud side and never disagree.
+message ErrorDetail {
+  ErrorCode code = 1;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  // Submission identity or record content conflicts with the durable record; retrying the same
+  // call cannot succeed. Carried with ABORTED.
+  ERROR_CODE_CONFLICT = 1;
+  // The request itself is malformed. Carried with INVALID_ARGUMENT.
+  ERROR_CODE_INVALID_INPUT = 2;
+  // Persistence is temporarily unavailable; nothing was committed and the same submission may be
+  // retried. Carried with UNAVAILABLE.
+  ERROR_CODE_UNAVAILABLE = 3;
+  // No durable record exists for the given identity. Carried with NOT_FOUND.
+  ERROR_CODE_NOT_FOUND = 4;
+  // The caller's lease epoch is not the current one; it must re-acquire before writing.
+  // Carried with FAILED_PRECONDITION.
+  ERROR_CODE_STALE_CONTROLLER = 5;
+  // Another holder owns a valid lease. Carried with FAILED_PRECONDITION.
+  ERROR_CODE_LEASE_HELD = 6;
+  // The service principal is not allowed to perform this call. Carried with PERMISSION_DENIED.
+  ERROR_CODE_SERVICE_FORBIDDEN = 7;
+}
