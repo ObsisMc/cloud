@@ -35,7 +35,11 @@ Migrations are executed in ascending numerical sequence:
   - Adds existing active tenant members to the default space (admin maps to owner, member maps to member).
   - Backfills `projects.space_id`, then enforces NOT NULL and a composite foreign key `(space_id, tenant_id)` that rejects cross-tenant ownership at the SQL level.
   - Runs `SET CONSTRAINTS ALL IMMEDIATE` before the ALTER to flush deferred constraint triggers queued by the backfill UPDATE.
-
+- **`0008_clone_coordination.sql`**: clone coordination through the internal control contract (independent of the Effect-level `operations` model):
+  - `clone_requests`: work Cloud accepted in its own business transaction, idempotent on `(tenant, user, request_id)`, state `queued→dispatched→succeeded/failed`.
+  - `clone_executions`: executions a Controller registers before dispatching (exactly one per request, Controller-chosen opaque identities), their input, terminal result and the lease epoch at registration.
+  - `clone_event_receipts`: exact receipts `(execution, sequence, event)` of Node events, the only basis for acknowledging a Node.
+  - `control_submissions`: identity, request digest and recorded response of every state-changing submission; the same identity with the same content replays the response instead of reapplying.
 
 ## Checksum integrity and immutability
 

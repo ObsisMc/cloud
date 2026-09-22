@@ -35,6 +35,11 @@
   - 既有 active tenant members 加入默认 Space（admin→owner，member→member）。
   - 既有 Project 回填 `space_id` 并转为 NOT NULL，复合外键 `(space_id, tenant_id)` 在 SQL 级杜绝跨租户归属。
   - `SET CONSTRAINTS ALL IMMEDIATE` 在 ALTER 前触发回填 UPDATE 排队的 deferred 约束触发器。
+- **`0008_clone_coordination.sql`**：经内部控制契约的 clone 协调（与 Effect 级 `operations` 模型独立）：
+  - `clone_requests`：Cloud 在业务事务中接受的工作项，`(tenant, user, request_id)` 幂等，状态 `queued→dispatched→succeeded/failed`。
+  - `clone_executions`：Controller 派发前登记的执行（每个请求恰一个执行，身份为 Controller 选择的 opaque 字符串）、输入与终态结果、登记时的租约 epoch。
+  - `clone_event_receipts`：Node 原事件的精确收据 `(execution, sequence, event)`，是确认 Node 的唯一依据。
+  - `control_submissions`：每个状态变更提交的身份、请求摘要与记录的响应；同身份同内容回放响应，不重新应用。
 
 ## 校验和完整性与不可变性
 
