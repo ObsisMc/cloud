@@ -1,6 +1,6 @@
 # Multica Issue Board — Analysis
 
-Reference repo: `multica-ai/multica` (local copy at `C:\Users\zsl\Desktop\mor\multica`).
+Reference repo: `multica-ai/multica` (local checkout).
 All paths below are relative to that repo root. Line/function references reflect the local
 checkout; they are documentation, not an API promise.
 

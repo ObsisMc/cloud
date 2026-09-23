@@ -17,7 +17,7 @@ creator 或 owner/admin）；**Workspace foundation 已收口**（0-Workspace on
 > [workspace-integration-stage-a.md](../../migrations/workspace-integration-stage-a.md)。
 >
 > **2026-09-23 — 922GithubAuth ← main 会话架构合入**：feature 分支 `922GithubAuth` 合并 main 的
-> **gateway-会话架构**（未 commit，留人工评审）。前端会话/路由采用 main：`SessionProvider`/`useSession`/
+> **gateway-会话架构**（已合并提交 `9e887d4`，待人工测试验收）。前端会话/路由采用 main：`SessionProvider`/`useSession`/
 > `RequireSession`、`/onboarding` + `/w/:workspaceSlug` 路由、onboarding 独立页（`useCreateTenant` /
 > `useCreateSpace`）；删除 feature 的 zustand 商店（`auth-store`/`demo-auth-store`）；保留 Step 3A 能力
 > （members owner-immutable UI、`canDeleteProject = creator OR owner/admin`、issues 接真实后端）。

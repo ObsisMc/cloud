@@ -152,10 +152,10 @@ into the existing collaboration architecture doc (§37) rather than a parallel f
 ### Repository governance follow-up (recorded, not acted on)
 
 `specs/` is described by `cloud/AGENTS.md` as "an independent Git repository" reachable via
-`git -C specs`, but in the current working copy: `cloud/specs` does not exist; `mor/specs` has no
-`.git`; and `mor/.gitignore` ignores `/specs/`. So the ADR deliverable required by the ADR-first rule
-currently has **no version-controlled home**. This was **not** fixed here — no `git init`, no
-`.gitignore` change, no repository restructuring. It needs an owner decision.
+`git -C specs`, but in the working copy at the time, that separate specs checkout was not present.
+So the ADR deliverable required by the ADR-first rule currently had **no version-controlled home** in
+this working copy. This was **not** fixed here — no `git init`, no `.gitignore` change, no repository
+restructuring. It needs an owner decision.
 
 ### Verification performed
 

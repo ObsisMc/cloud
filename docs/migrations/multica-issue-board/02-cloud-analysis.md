@@ -1,6 +1,6 @@
 # Ora Cloud — Analysis (the target)
 
-Target repo root: `C:\Users\zsl\Desktop\mor\cloud`. Go module `github.com/wanglongan587/cloud`.
+Target repo root: the local Ora Cloud checkout. Go module `github.com/wanglongan587/cloud`.
 Go 1.27.1 + Gin + GORM (pool only; business logic uses raw SQL via `*sql.Tx`), PostgreSQL.
 
 ## 1. Request path (public API)

@@ -8,7 +8,7 @@
 
 ## 1. Reference inspected
 
-- **Reference tree**：`C:\Users\zsl\Desktop\cloud`（HEAD `302dc9f`）— 同事的完整代码副本。
+- **Reference tree**：同事的完整代码副本（本地 checkout，HEAD `302dc9f`）。
   本阶段以它作为 Login UX + Workspace UX 的 **authoritative reference**，直接读两棵树对比，
   不再依赖旧 `zpc001/feat/collab-spaces` commit diff 推断产品行为。
 - 关键结论：两棵树同 Go module（`github.com/wanglongan587/cloud`），**数据 API 面 100% 兼容**

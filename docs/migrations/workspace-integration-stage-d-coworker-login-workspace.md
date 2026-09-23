@@ -16,7 +16,7 @@ Workspace 创建入口、左上 Workspace 选择器、Workspace 切换、Workspa
 D4/D5 决策把登录与 Current Workspace shell 排除在外。复盘后确认这是**不完整的集成**：后端功能已合并，
 同事的产品交互未合并。本轮恢复。
 
-- **Reference tree**：`C:\Users\zsl\Desktop\cloud`（HEAD `302dc9f`）— 同事的完整代码副本，Login UX +
+- **Reference tree**：同事的完整代码副本（本地 checkout，HEAD `302dc9f`），Login UX +
   Workspace UX 的 authoritative reference。不再依赖旧 `zpc001/feat/collab-spaces` commit diff 推断
   产品行为，直接读两棵树对比。
 - **数据面**：两棵树同 Go module（`github.com/wanglongan587/cloud`），数据 API 100% 兼容
