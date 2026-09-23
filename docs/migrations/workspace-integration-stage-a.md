@@ -4,6 +4,11 @@
 > 集成顺序固定为：**Stage A（origin/main → workspace合并）先行，Stage B（zpc001/feat/collab-spaces → workspace合并）后续**。
 > 本报告只覆盖 Stage A；Stage B 的已知候选决策见文末预告。
 
+> **⚠️ 迁移序列状态（2026-09-23 reconciliation 后）**：本文 §4 的编号是**当时的历史开发序列**。
+> 当前 upstream-ready 序列已重组为 append-only：`0001–0007` = upstream 原样（含 `0006_collab_spaces`
+> / `0007_project_space_scope`），本地 Issue 迁移前移至 `0008–0012`，`0013_project_space_optional`
+> 恢复 `projects.space_id` 可空。见 `docs/development/agent/database.md` 的迁移表（当前权威）。
+
 ## 0. 约束（铁律）
 
 - **main 只读**：整个过程中 `main` 指针不动（Stage A 前后均为 `1c5b9b4`，SHA 已校验）。

@@ -122,7 +122,7 @@ Wave 3B-1 (the "collaboration interaction foundation") and Wave 3B-2 (the "workf
 shell") are **IMPLEMENTED + VERIFIED**; the full Issue Detail projection and real Agent/Team/Workflow
 execution have not.
 
-**Implemented (Wave 3A, migration `0008` — formerly `0007`; renumbered in the workspace integration):**
+**Implemented (Wave 3A, migration `0010` — formerly `0008`/`0007`; renumbered in the workspace integration):**
 
 - Polymorphic `assignee_type/assignee_id` (user/agent/team) + `project_ref` on `issues`.
 - Comment threading (`parent_id`) + author ActorRef (`author_type/author_id`, user/agent/team/system).
@@ -132,7 +132,7 @@ execution have not.
 - API/contract spine for `GET/POST /issues/{iid}/runs`, `GET /issues/{iid}/runs/{rid}`,
   `GET/POST/DELETE /issues/{iid}/context-refs`.
 
-**Implemented (Wave 3B-1, migration `0009` — formerly `0008`; renumbered in the workspace integration):**
+**Implemented (Wave 3B-1, migration `0011` — formerly `0009`/`0008`; renumbered in the workspace integration):**
 
 - The interaction spine table `issue_interactions` (one row per selected `@` target) + the first real
   end-to-end collaboration chain: directory → picker → mention/task → deterministic context → mock
@@ -170,7 +170,7 @@ the same API also serves the fixture targets with stable IDs
 - `issue_comments.author_type = system` is CHECK-allowed but nothing writes a `system` comment yet.
 - `ConversationTarget` remains **not implemented** (left open in §37.17).
 
-**Implemented (Wave 3B-2, migration `0010` — formerly `0009`; renumbered in the workspace integration):**
+**Implemented (Wave 3B-2, migration `0012` — formerly `0010`/`0009`; renumbered in the workspace integration):**
 
 - Workflow Form Mode end-to-end: `@Workflow` → `GET /collaboration/forms/{formRef}` → dynamic form →
   optional AI Assist → **explicit Confirm** → `IssueRun` → mock execution → Timeline.

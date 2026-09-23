@@ -6,6 +6,12 @@
 > 所有 CLASS D（设计）冲突已按下列决策解决，CLASS M/S 已完成。
 > 结束标记：`WORKSPACE INTEGRATION STAGE B: COMPLETE`
 
+> **⚠️ 迁移序列状态（2026-09-23 reconciliation 后）**：§2 描述的 `0011_collab_spaces` /
+> `0012_project_space_scope`（Stage A Issues 前移重编号）已被**当前 upstream-ready 序列取代**：
+> `0006_collab_spaces` / `0007_project_space_scope` 恢复 upstream 原样，Issue 迁移为 `0008–0012`，
+> `0013_project_space_optional` 恢复 `projects.space_id` 可空（`0013` 不改动 `0007` 已绑定的项目）。
+> D2=C（`space_id` 可空）产品语义不变；迁移载体改变。当前权威见 `docs/development/agent/database.md`。
+
 ---
 
 ## 1. 决策结论（CLASS D — 已决）

@@ -22,7 +22,8 @@ creator 或 owner/admin）；**Workspace foundation 已收口**（0-Workspace on
 > `useCreateSpace`）；删除 feature 的 zustand 商店（`auth-store`/`demo-auth-store`）；保留 Step 3A 能力
 > （members owner-immutable UI、`canDeleteProject = creator OR owner/admin`、issues 接真实后端）。
 > 开发拓扑 = **双入口**（ora-web :8080 DEV-only + gateway :8081 生产规范）；项目模型 = **混合/optional
-> space**（`space_id` 可空，默认空间；保留 `0012_project_space_scope`）。注册 UI 移除（见
+> space**（`space_id` 可空，默认空间；reconciliation 后由 upstream `0007` + `0013_project_space_optional`
+> 承载：`0007` 绑定既有项目，`0013` 恢复可空、不解绑）。注册 UI 移除（见
 > [user-registration.md](../../migrations/user-registration.md) 合并注记）。
 >
 > **2026-09-21 — User Registration**：登录页「注册」入口落地 —— `POST /auth/register` 创建 User Identity
