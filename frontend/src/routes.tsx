@@ -15,6 +15,7 @@ import { MyIssuesPage } from '@/features/my-issues/my-issues-page'
 import { OnboardingPage } from '@/features/onboarding/onboarding-page'
 import { ProjectDetailPage } from '@/features/projects/project-detail-page'
 import { ProjectsPage } from '@/features/projects/projects-page'
+import { RepositoriesPage } from '@/features/clones/repositories-page'
 import { RuntimesPage } from '@/features/runtimes/runtimes-page'
 import { GeneralSettingsPage } from '@/features/settings/general-settings-page'
 import { SettingsLayout } from '@/features/settings/settings-layout'
@@ -67,6 +68,7 @@ export const router = createBrowserRouter([
       { path: 'my-issues', element: <WithSlug component={MyIssuesPage} /> },
       { path: 'projects', element: <WithSlug component={ProjectsPage} /> },
       { path: 'projects/:projectId', element: <WithSlug component={ProjectDetailPage} /> },
+      { path: 'repositories', element: <WithSlug component={RepositoriesPage} /> },
       { path: 'squads', element: <WithSlug component={SquadsPage} /> },
       { path: 'squads/:squadId', element: <WithSlug component={SquadDetailPage} /> },
       { path: 'agents', element: <WithSlug component={AgentsPage} /> },
