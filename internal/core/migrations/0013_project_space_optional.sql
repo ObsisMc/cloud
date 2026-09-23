@@ -1,0 +1,12 @@
+-- Project collaboration-space association becomes optional again.
+--
+-- Upstream 0007 made projects.space_id NOT NULL and bound every existing project to its tenant's
+-- default Collaboration Space. The product decision (PS3 / D2=C, see docs/migrations/project-workspace-sharing.md)
+-- keeps a Collaboration Space an *optional* grouping: a project may legitimately remain unscoped.
+-- This append-only migration restores the nullable column so future projects can stay unscoped where
+-- current application semantics allow it (internal/core/space.go, createProject).
+--
+-- It deliberately does NOT unbind projects that 0007 already assigned to their default space, and it
+-- performs no data backfill reversal: upstream data ownership is preserved, no scope shrink. It only
+-- relaxes the NOT NULL constraint 0007 imposed.
+ALTER TABLE projects ALTER COLUMN space_id DROP NOT NULL;

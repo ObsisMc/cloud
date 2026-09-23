@@ -78,6 +78,114 @@ export interface AdminResource {
   version: number;
 }
 
+/**
+ * @nullable
+ */
+export type AssistSuggestionExplanations = { [key: string]: unknown } | null;
+
+export type AssistSuggestionSuggestedValues = { [key: string]: unknown };
+
+export type ContextRefRefRefType = typeof ContextRefRefRefType[keyof typeof ContextRefRefRefType];
+
+
+export const ContextRefRefRefType = {
+  parent_issue: 'parent_issue',
+  run: 'run',
+  timeline_message: 'timeline_message',
+  pull_request: 'pull_request',
+  project: 'project',
+  workspace: 'workspace',
+  acceptance_criteria: 'acceptance_criteria',
+} as const;
+
+export interface ContextRefRef {
+  refId: string;
+  refType: ContextRefRefRefType;
+}
+
+export interface AssistSuggestion {
+  /** @nullable */
+  explanations?: AssistSuggestionExplanations;
+  suggestedContextRefs: ContextRefRef[];
+  suggestedValues: AssistSuggestionSuggestedValues;
+}
+
+export type CollaborationTargetType = typeof CollaborationTargetType[keyof typeof CollaborationTargetType];
+
+
+export const CollaborationTargetType = {
+  user: 'user',
+  agent: 'agent',
+  team: 'team',
+  workflow: 'workflow',
+} as const;
+
+export type InteractionDescriptorMode = typeof InteractionDescriptorMode[keyof typeof InteractionDescriptorMode];
+
+
+export const InteractionDescriptorMode = {
+  mention: 'mention',
+  task: 'task',
+  form: 'form',
+} as const;
+
+export interface InteractionDescriptor {
+  /** @nullable */
+  formRef?: string | null;
+  mode: InteractionDescriptorMode;
+  requiresTask: boolean;
+}
+
+export interface CollaborationTarget {
+  description: string;
+  displayName: string;
+  id: string;
+  interactionDescriptor: InteractionDescriptor;
+  type: CollaborationTargetType;
+}
+
+export interface Comment {
+  /** @nullable */
+  authorId: string | null;
+  authorType: string;
+  /** @nullable */
+  authorUserId: string | null;
+  body: string;
+  createdAt: string;
+  /** @nullable */
+  deletedAt: string | null;
+  id: string;
+  issueId: string;
+  /** @nullable */
+  parentId: string | null;
+  seq: number;
+  tenantId: string;
+  updatedAt: string;
+  version: number;
+}
+
+export type ContextRefRefType = typeof ContextRefRefType[keyof typeof ContextRefRefType];
+
+
+export const ContextRefRefType = {
+  parent_issue: 'parent_issue',
+  run: 'run',
+  timeline_message: 'timeline_message',
+  pull_request: 'pull_request',
+  project: 'project',
+  workspace: 'workspace',
+  acceptance_criteria: 'acceptance_criteria',
+} as const;
+
+export interface ContextRef {
+  createdAt: string;
+  id: string;
+  issueId: string;
+  refId: string;
+  refType: ContextRefRefType;
+  tenantId: string;
+}
+
 export interface ControllerProject {
   createdAt: string;
   /** @nullable */
@@ -92,7 +200,8 @@ export interface ControllerProject {
   repositoryUrl: string;
   /** @nullable */
   secretRef: string | null;
-  spaceId: string;
+  /** @nullable */
+  spaceId: string | null;
   tenantId: string;
   version: number;
 }
@@ -193,6 +302,47 @@ export interface Error {
   requestId: string;
 }
 
+export interface FormOption {
+  label: string;
+  value: string;
+}
+
+export type FormFieldType = typeof FormFieldType[keyof typeof FormFieldType];
+
+
+export const FormFieldType = {
+  text: 'text',
+  textarea: 'textarea',
+  number: 'number',
+  boolean: 'boolean',
+  select: 'select',
+  multi_select: 'multi_select',
+} as const;
+
+export interface FormField {
+  /** Type-consistent with `type`; an array of strings for multi_select. */
+  defaultValue?: unknown | null;
+  /** @nullable */
+  description?: string | null;
+  key: string;
+  label: string;
+  /** @nullable */
+  options?: FormOption[] | null;
+  /** @nullable */
+  placeholder?: string | null;
+  required: boolean;
+  type: FormFieldType;
+}
+
+export interface FormDescriptor {
+  /** @nullable */
+  description?: string | null;
+  fields: FormField[];
+  formRef: string;
+  /** @nullable */
+  title?: string | null;
+}
+
 export type IdleRefusalErrorCode = typeof IdleRefusalErrorCode[keyof typeof IdleRefusalErrorCode];
 
 
@@ -203,6 +353,226 @@ export const IdleRefusalErrorCode = {
 export interface IdleRefusal {
   accepted: boolean;
   errorCode: IdleRefusalErrorCode;
+}
+
+export type IssueAssigneeType = typeof IssueAssigneeType[keyof typeof IssueAssigneeType];
+
+
+export const IssueAssigneeType = {
+  user: 'user',
+  agent: 'agent',
+  team: 'team',
+} as const;
+
+export type IssuePriority = typeof IssuePriority[keyof typeof IssuePriority];
+
+
+export const IssuePriority = {
+  urgent: 'urgent',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  none: 'none',
+} as const;
+
+export type IssueProperties = { [key: string]: unknown };
+
+export interface Label {
+  color: string;
+  createdAt: string;
+  /** @nullable */
+  deletedAt: string | null;
+  id: string;
+  name: string;
+  tenantId: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface Issue {
+  /** @nullable */
+  assigneeId: string | null;
+  assigneeType: IssueAssigneeType;
+  /** @nullable */
+  assigneeUserId: string | null;
+  createdAt: string;
+  creatorUserId: string;
+  /** @nullable */
+  deletedAt: string | null;
+  description: string;
+  id: string;
+  labels: Label[];
+  number: number;
+  /** @nullable */
+  parentIssueId: string | null;
+  position: number;
+  priority: IssuePriority;
+  /** @nullable */
+  projectRef: string | null;
+  properties: IssueProperties;
+  /** @pattern ^[a-z0-9][a-z0-9_]{0,31}$ */
+  status: string;
+  tenantId: string;
+  title: string;
+  updatedAt: string;
+  version: number;
+}
+
+export type IssueInteractionInput = { [key: string]: unknown };
+
+export type IssueInteractionMode = typeof IssueInteractionMode[keyof typeof IssueInteractionMode];
+
+
+export const IssueInteractionMode = {
+  mention: 'mention',
+  task: 'task',
+  form: 'form',
+} as const;
+
+export type IssueInteractionTargetType = typeof IssueInteractionTargetType[keyof typeof IssueInteractionTargetType];
+
+
+export const IssueInteractionTargetType = {
+  user: 'user',
+  agent: 'agent',
+  team: 'team',
+  workflow: 'workflow',
+} as const;
+
+export interface IssueInteraction {
+  commentId: string;
+  createdAt: string;
+  id: string;
+  input: IssueInteractionInput;
+  issueId: string;
+  mode: IssueInteractionMode;
+  /** @nullable */
+  runId: string | null;
+  targetId: string;
+  targetType: IssueInteractionTargetType;
+  task: string;
+  tenantId: string;
+}
+
+export type IssueRunExecutorType = typeof IssueRunExecutorType[keyof typeof IssueRunExecutorType];
+
+
+export const IssueRunExecutorType = {
+  agent: 'agent',
+  team: 'team',
+  workflow: 'workflow',
+} as const;
+
+export type IssueRunInput = { [key: string]: unknown };
+
+/**
+ * @nullable
+ */
+export type IssueRunResult = { [key: string]: unknown } | null;
+
+export type IssueRunStatus = typeof IssueRunStatus[keyof typeof IssueRunStatus];
+
+
+export const IssueRunStatus = {
+  queued: 'queued',
+  dispatched: 'dispatched',
+  running: 'running',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'cancelled',
+  deferred: 'deferred',
+} as const;
+
+export interface IssueRun {
+  attempt: number;
+  /** @nullable */
+  completedAt: string | null;
+  createdAt: string;
+  /** @nullable */
+  delegatedFromRunId: string | null;
+  /** @nullable */
+  deletedAt: string | null;
+  /** @nullable */
+  dispatchedAt: string | null;
+  error: string;
+  /** @nullable */
+  executionContextRef: string | null;
+  executorId: string;
+  executorType: IssueRunExecutorType;
+  externalExecutionId: string;
+  failureReason: string;
+  /** @nullable */
+  fireAt: string | null;
+  id: string;
+  input: IssueRunInput;
+  issueId: string;
+  /** @nullable */
+  leaseExpiresAt: string | null;
+  maxAttempts: number;
+  /** @nullable */
+  parentRunId: string | null;
+  queuedAt: string;
+  /** @nullable */
+  rerunOfRunId: string | null;
+  /** @nullable */
+  result: IssueRunResult;
+  /** @nullable */
+  retryOfRunId: string | null;
+  /** @nullable */
+  startedAt: string | null;
+  status: IssueRunStatus;
+  tenantId: string;
+  triggerEvidenceKind: string;
+  /** @nullable */
+  triggerEvidenceRefId: string | null;
+  triggerSummary: string;
+  updatedAt: string;
+  version: number;
+  /** @nullable */
+  workflowInvocationRef: string | null;
+}
+
+export type IssueStatusCategory = typeof IssueStatusCategory[keyof typeof IssueStatusCategory];
+
+
+export const IssueStatusCategory = {
+  unstarted: 'unstarted',
+  started: 'started',
+  done: 'done',
+  closed: 'closed',
+} as const;
+
+export interface IssueStatus {
+  category: IssueStatusCategory;
+  color: string;
+  createdAt: string;
+  /** @nullable */
+  deletedAt: string | null;
+  description: string;
+  icon: string;
+  id: string;
+  isSystem: boolean;
+  key: string;
+  name: string;
+  position: number;
+  tenantId: string;
+  updatedAt: string;
+  version: number;
+}
+
+export type IssueViewFilter = { [key: string]: unknown };
+
+export interface IssueView {
+  createdAt: string;
+  /** @nullable */
+  deletedAt: string | null;
+  filter: IssueViewFilter;
+  id: string;
+  name: string;
+  ownerUserId: string;
+  tenantId: string;
+  updatedAt: string;
+  version: number;
 }
 
 export interface Lease {
@@ -370,7 +740,8 @@ export interface Project {
   name: string;
   ownerUserId: string;
   repositoryUrl: string;
-  spaceId: string;
+  /** @nullable */
+  spaceId: string | null;
   tenantId: string;
   version: number;
 }
@@ -514,6 +885,49 @@ export interface Ticket {
   workspaceId: string;
 }
 
+export type TimelineEntryAuthorType = typeof TimelineEntryAuthorType[keyof typeof TimelineEntryAuthorType];
+
+
+export const TimelineEntryAuthorType = {
+  user: 'user',
+  agent: 'agent',
+  team: 'team',
+  system: 'system',
+} as const;
+
+/**
+ * @nullable
+ */
+export type TimelineEntryDetails = { [key: string]: unknown } | null;
+
+export type TimelineEntryKind = typeof TimelineEntryKind[keyof typeof TimelineEntryKind];
+
+
+export const TimelineEntryKind = {
+  comment: 'comment',
+  activity: 'activity',
+} as const;
+
+export interface TimelineEntry {
+  /** @nullable */
+  action: string | null;
+  /** @nullable */
+  authorId: string | null;
+  authorType: TimelineEntryAuthorType;
+  /** @nullable */
+  authorUserId: string | null;
+  /** @nullable */
+  body: string | null;
+  createdAt: string;
+  /** @nullable */
+  details: TimelineEntryDetails;
+  id: string;
+  kind: TimelineEntryKind;
+  /** @nullable */
+  parentId: string | null;
+  seq: number;
+}
+
 export interface User {
   createdAt: string;
   /** @nullable */
@@ -604,6 +1018,484 @@ export type PostApiV1TenantsBody = {
      * @pattern ^[a-z0-9][a-z0-9-]{0,63}$
      */
   slug: string;
+};
+
+export type GetApiV1TenantsTidCollaborationTargets200 = {
+  items: CollaborationTarget[];
+  nextCursor: string;
+};
+
+export type GetApiV1TenantsTidIssueGroups200GroupsItem = {
+  items: Issue[];
+  key: string;
+};
+
+export type GetApiV1TenantsTidIssueGroups200 = {
+  groups: GetApiV1TenantsTidIssueGroups200GroupsItem[];
+};
+
+export type GetApiV1TenantsTidIssueStatusesParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Exclusive UUID cursor, ascending stable ordering.
+ */
+after?: string;
+};
+
+export type GetApiV1TenantsTidIssueStatuses200 = {
+  items: IssueStatus[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidIssueStatusesBodyCategory = typeof PostApiV1TenantsTidIssueStatusesBodyCategory[keyof typeof PostApiV1TenantsTidIssueStatusesBodyCategory];
+
+
+export const PostApiV1TenantsTidIssueStatusesBodyCategory = {
+  unstarted: 'unstarted',
+  started: 'started',
+  done: 'done',
+  closed: 'closed',
+} as const;
+
+export type PostApiV1TenantsTidIssueStatusesBody = {
+  category?: PostApiV1TenantsTidIssueStatusesBodyCategory;
+  color?: string;
+  description?: string;
+  icon?: string;
+  key: string;
+  name: string;
+};
+
+export type PostApiV1TenantsTidIssueStatuses200 = {
+  resource: IssueStatus;
+};
+
+export type DeleteApiV1TenantsTidIssueStatusesSidBody = {
+  /** @minimum 0 */
+  version: number;
+};
+
+export type PutApiV1TenantsTidIssueStatusesSidBodyCategory = typeof PutApiV1TenantsTidIssueStatusesSidBodyCategory[keyof typeof PutApiV1TenantsTidIssueStatusesSidBodyCategory];
+
+
+export const PutApiV1TenantsTidIssueStatusesSidBodyCategory = {
+  unstarted: 'unstarted',
+  started: 'started',
+  done: 'done',
+  closed: 'closed',
+} as const;
+
+export type PutApiV1TenantsTidIssueStatusesSidBody = {
+  category?: PutApiV1TenantsTidIssueStatusesSidBodyCategory;
+  color?: string;
+  description?: string;
+  icon?: string;
+  name: string;
+  position?: number;
+  /** @minimum 0 */
+  version?: number;
+};
+
+export type GetApiV1TenantsTidIssueViewsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Exclusive UUID cursor, ascending stable ordering.
+ */
+after?: string;
+};
+
+export type GetApiV1TenantsTidIssueViews200 = {
+  items: IssueView[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidIssueViewsBodyFilter = { [key: string]: unknown };
+
+export type PostApiV1TenantsTidIssueViewsBody = {
+  filter?: PostApiV1TenantsTidIssueViewsBodyFilter;
+  name: string;
+};
+
+export type PostApiV1TenantsTidIssueViews200 = {
+  resource: IssueView;
+};
+
+export type DeleteApiV1TenantsTidIssueViewsVidBody = {
+  /** @minimum 0 */
+  version: number;
+};
+
+export type PutApiV1TenantsTidIssueViewsVidBodyFilter = { [key: string]: unknown };
+
+export type PutApiV1TenantsTidIssueViewsVidBody = {
+  filter?: PutApiV1TenantsTidIssueViewsVidBodyFilter;
+  name: string;
+  /** @minimum 0 */
+  version?: number;
+};
+
+export type GetApiV1TenantsTidIssues200 = {
+  items: Issue[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidIssuesBodyAssigneeType = typeof PostApiV1TenantsTidIssuesBodyAssigneeType[keyof typeof PostApiV1TenantsTidIssuesBodyAssigneeType];
+
+
+export const PostApiV1TenantsTidIssuesBodyAssigneeType = {
+  user: 'user',
+  agent: 'agent',
+  team: 'team',
+} as const;
+
+export type PostApiV1TenantsTidIssuesBodyPriority = typeof PostApiV1TenantsTidIssuesBodyPriority[keyof typeof PostApiV1TenantsTidIssuesBodyPriority];
+
+
+export const PostApiV1TenantsTidIssuesBodyPriority = {
+  urgent: 'urgent',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  none: 'none',
+} as const;
+
+export type PostApiV1TenantsTidIssuesBodyProperties = { [key: string]: unknown };
+
+export type PostApiV1TenantsTidIssuesBody = {
+  assigneeId?: string;
+  assigneeType?: PostApiV1TenantsTidIssuesBodyAssigneeType;
+  assigneeUserId?: string;
+  description?: string;
+  parentIssueId?: string;
+  priority?: PostApiV1TenantsTidIssuesBodyPriority;
+  projectRef?: string;
+  properties?: PostApiV1TenantsTidIssuesBodyProperties;
+  /** @pattern ^[a-z0-9][a-z0-9_]{0,31}$ */
+  status?: string;
+  title: string;
+};
+
+export type PostApiV1TenantsTidIssues200 = {
+  resource: Issue;
+};
+
+export type PostApiV1TenantsTidIssuesBatchBodyPriority = typeof PostApiV1TenantsTidIssuesBatchBodyPriority[keyof typeof PostApiV1TenantsTidIssuesBatchBodyPriority];
+
+
+export const PostApiV1TenantsTidIssuesBatchBodyPriority = {
+  urgent: 'urgent',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  none: 'none',
+} as const;
+
+export type PostApiV1TenantsTidIssuesBatchBody = {
+  assigneeUserId?: string;
+  ids: string[];
+  priority?: PostApiV1TenantsTidIssuesBatchBodyPriority;
+  /** @pattern ^[a-z0-9][a-z0-9_]{0,31}$ */
+  status?: string;
+};
+
+export type PostApiV1TenantsTidIssuesBatch200 = {
+  items: Issue[];
+  nextCursor: string;
+};
+
+export type DeleteApiV1TenantsTidIssuesIidBody = {
+  /** @minimum 0 */
+  version: number;
+};
+
+export type PutApiV1TenantsTidIssuesIidBodyAssigneeType = typeof PutApiV1TenantsTidIssuesIidBodyAssigneeType[keyof typeof PutApiV1TenantsTidIssuesIidBodyAssigneeType];
+
+
+export const PutApiV1TenantsTidIssuesIidBodyAssigneeType = {
+  user: 'user',
+  agent: 'agent',
+  team: 'team',
+} as const;
+
+export type PutApiV1TenantsTidIssuesIidBodyPriority = typeof PutApiV1TenantsTidIssuesIidBodyPriority[keyof typeof PutApiV1TenantsTidIssuesIidBodyPriority];
+
+
+export const PutApiV1TenantsTidIssuesIidBodyPriority = {
+  urgent: 'urgent',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  none: 'none',
+} as const;
+
+export type PutApiV1TenantsTidIssuesIidBodyProperties = { [key: string]: unknown };
+
+export type PutApiV1TenantsTidIssuesIidBody = {
+  assigneeId?: string;
+  assigneeType?: PutApiV1TenantsTidIssuesIidBodyAssigneeType;
+  assigneeUserId?: string;
+  description?: string;
+  parentIssueId?: string;
+  priority?: PutApiV1TenantsTidIssuesIidBodyPriority;
+  projectRef?: string;
+  properties?: PutApiV1TenantsTidIssuesIidBodyProperties;
+  /** @pattern ^[a-z0-9][a-z0-9_]{0,31}$ */
+  status?: string;
+  title?: string;
+  /** @minimum 0 */
+  version?: number;
+};
+
+export type PostApiV1TenantsTidIssuesIidCollaborationAssistBodyValues = { [key: string]: unknown };
+
+export type PostApiV1TenantsTidIssuesIidCollaborationAssistBody = {
+  targetId: string;
+  values?: PostApiV1TenantsTidIssuesIidCollaborationAssistBodyValues;
+};
+
+export type GetApiV1TenantsTidIssuesIidCommentsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Exclusive UUID cursor, ascending stable ordering.
+ */
+after?: string;
+};
+
+export type GetApiV1TenantsTidIssuesIidComments200 = {
+  items: Comment[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidIssuesIidCommentsBodyTargetsItemType = typeof PostApiV1TenantsTidIssuesIidCommentsBodyTargetsItemType[keyof typeof PostApiV1TenantsTidIssuesIidCommentsBodyTargetsItemType];
+
+
+export const PostApiV1TenantsTidIssuesIidCommentsBodyTargetsItemType = {
+  user: 'user',
+  agent: 'agent',
+  team: 'team',
+  workflow: 'workflow',
+} as const;
+
+export type PostApiV1TenantsTidIssuesIidCommentsBodyTargetsItem = {
+  id: string;
+  task?: string;
+  type: PostApiV1TenantsTidIssuesIidCommentsBodyTargetsItemType;
+};
+
+export type PostApiV1TenantsTidIssuesIidCommentsBody = {
+  body: string;
+  parentId?: string;
+  targets?: PostApiV1TenantsTidIssuesIidCommentsBodyTargetsItem[];
+};
+
+export type PostApiV1TenantsTidIssuesIidComments200 = {
+  resource: Comment;
+};
+
+export type DeleteApiV1TenantsTidIssuesIidCommentsCidBody = {
+  /** @minimum 0 */
+  version: number;
+};
+
+export type PutApiV1TenantsTidIssuesIidCommentsCidBody = {
+  body: string;
+  /** @minimum 0 */
+  version?: number;
+};
+
+export type GetApiV1TenantsTidIssuesIidContextRefs200 = {
+  items: ContextRef[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidIssuesIidContextRefsBodyRefType = typeof PostApiV1TenantsTidIssuesIidContextRefsBodyRefType[keyof typeof PostApiV1TenantsTidIssuesIidContextRefsBodyRefType];
+
+
+export const PostApiV1TenantsTidIssuesIidContextRefsBodyRefType = {
+  parent_issue: 'parent_issue',
+  run: 'run',
+  timeline_message: 'timeline_message',
+  pull_request: 'pull_request',
+  project: 'project',
+  workspace: 'workspace',
+  acceptance_criteria: 'acceptance_criteria',
+} as const;
+
+export type PostApiV1TenantsTidIssuesIidContextRefsBody = {
+  refId: string;
+  refType: PostApiV1TenantsTidIssuesIidContextRefsBodyRefType;
+};
+
+export type PostApiV1TenantsTidIssuesIidContextRefs200 = {
+  resource: ContextRef;
+};
+
+export type DeleteApiV1TenantsTidIssuesIidContextRefsCridBody = { [key: string]: unknown };
+
+export type GetApiV1TenantsTidIssuesIidInteractions200 = {
+  items: IssueInteraction[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidIssuesIidInteractionsIxidConfirmBodyValues = { [key: string]: unknown };
+
+export type PostApiV1TenantsTidIssuesIidInteractionsIxidConfirmBody = {
+  contextRefs?: ContextRefRef[];
+  values: PostApiV1TenantsTidIssuesIidInteractionsIxidConfirmBodyValues;
+};
+
+export type PostApiV1TenantsTidIssuesIidInteractionsIxidConfirm200 = {
+  resource: IssueRun;
+};
+
+export type GetApiV1TenantsTidIssuesIidLabelsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Exclusive UUID cursor, ascending stable ordering.
+ */
+after?: string;
+};
+
+export type GetApiV1TenantsTidIssuesIidLabels200 = {
+  items: Label[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidIssuesIidLabelsBody = {
+  labelId: string;
+};
+
+export type PostApiV1TenantsTidIssuesIidLabels200 = {
+  resource: Label;
+};
+
+export type DeleteApiV1TenantsTidIssuesIidLabelsLidBody = { [key: string]: unknown };
+
+export type PostApiV1TenantsTidIssuesIidMoveBody = {
+  afterId?: string;
+  beforeId?: string;
+  /** @pattern ^[a-z0-9][a-z0-9_]{0,31}$ */
+  status?: string;
+  /** @minimum 0 */
+  version: number;
+};
+
+export type GetApiV1TenantsTidIssuesIidRuns200 = {
+  items: IssueRun[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidIssuesIidRunsBodyExecutorType = typeof PostApiV1TenantsTidIssuesIidRunsBodyExecutorType[keyof typeof PostApiV1TenantsTidIssuesIidRunsBodyExecutorType];
+
+
+export const PostApiV1TenantsTidIssuesIidRunsBodyExecutorType = {
+  agent: 'agent',
+  team: 'team',
+  workflow: 'workflow',
+} as const;
+
+export type PostApiV1TenantsTidIssuesIidRunsBodyInput = { [key: string]: unknown };
+
+export type PostApiV1TenantsTidIssuesIidRunsBody = {
+  executorId: string;
+  executorType: PostApiV1TenantsTidIssuesIidRunsBodyExecutorType;
+  input?: PostApiV1TenantsTidIssuesIidRunsBodyInput;
+};
+
+export type PostApiV1TenantsTidIssuesIidRuns200 = {
+  resource: IssueRun;
+};
+
+export type DeleteApiV1TenantsTidIssuesIidSubscribersBody = {
+  userId: string;
+};
+
+export type DeleteApiV1TenantsTidIssuesIidSubscribers200 = {
+  resource: User;
+};
+
+export type GetApiV1TenantsTidIssuesIidSubscribersParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Exclusive UUID cursor, ascending stable ordering.
+ */
+after?: string;
+};
+
+export type GetApiV1TenantsTidIssuesIidSubscribers200 = {
+  items: User[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidIssuesIidSubscribersBody = {
+  userId: string;
+};
+
+export type PostApiV1TenantsTidIssuesIidSubscribers200 = {
+  resource: User;
+};
+
+export type GetApiV1TenantsTidIssuesIidTimeline200 = {
+  items: TimelineEntry[];
+  nextCursor: string;
+};
+
+export type GetApiV1TenantsTidLabelsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Exclusive UUID cursor, ascending stable ordering.
+ */
+after?: string;
+};
+
+export type GetApiV1TenantsTidLabels200 = {
+  items: Label[];
+  nextCursor: string;
+};
+
+export type PostApiV1TenantsTidLabelsBody = {
+  color?: string;
+  name: string;
+};
+
+export type PostApiV1TenantsTidLabels200 = {
+  resource: Label;
+};
+
+export type DeleteApiV1TenantsTidLabelsLidBody = {
+  /** @minimum 0 */
+  version: number;
+};
+
+export type PutApiV1TenantsTidLabelsLidBody = {
+  color?: string;
+  name: string;
+  /** @minimum 0 */
+  version?: number;
 };
 
 export type GetApiV1TenantsTidMembersParams = {
@@ -763,7 +1655,7 @@ export type GetApiV1TenantsTidSpaces200 = {
 };
 
 export type PostApiV1TenantsTidSpacesBody = {
-  description: string;
+  description?: string;
   name: string;
   /**
      * Lowercase, immutable, unique per tenant.
@@ -772,19 +1664,19 @@ export type PostApiV1TenantsTidSpacesBody = {
   slug: string;
 };
 
-export type DeleteApiV1TenantsTidSpacesSidBody = {
+export type DeleteApiV1TenantsTidSpacesSpaceIdBody = {
   /** @minimum 0 */
   version: number;
 };
 
-export type PatchApiV1TenantsTidSpacesSidBody = {
-  description: string;
+export type PatchApiV1TenantsTidSpacesSpaceIdBody = {
+  description?: string;
   name: string;
   /** @minimum 0 */
   version: number;
 };
 
-export type GetApiV1TenantsTidSpacesSidMembersParams = {
+export type GetApiV1TenantsTidSpacesSpaceIdMembersParams = {
 /**
  * @minimum 1
  * @maximum 100
@@ -796,36 +1688,45 @@ limit?: number;
 after?: string;
 };
 
-export type GetApiV1TenantsTidSpacesSidMembers200 = {
+export type GetApiV1TenantsTidSpacesSpaceIdMembers200 = {
   items: SpaceMemberListItem[];
   nextCursor: string;
 };
 
-export type PutApiV1TenantsTidSpacesSidMembersUidBodyRole = typeof PutApiV1TenantsTidSpacesSidMembersUidBodyRole[keyof typeof PutApiV1TenantsTidSpacesSidMembersUidBodyRole];
+export type PostApiV1TenantsTidSpacesSpaceIdMembersBody = {
+  email: string;
+};
+
+export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody = {
+  /** @minimum 0 */
+  version: number;
+};
+
+export type PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole = typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole[keyof typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole];
 
 
-export const PutApiV1TenantsTidSpacesSidMembersUidBodyRole = {
+export const PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole = {
   owner: 'owner',
   admin: 'admin',
   member: 'member',
 } as const;
 
-export type PutApiV1TenantsTidSpacesSidMembersUidBodyStatus = typeof PutApiV1TenantsTidSpacesSidMembersUidBodyStatus[keyof typeof PutApiV1TenantsTidSpacesSidMembersUidBodyStatus];
+export type PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus = typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus[keyof typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus];
 
 
-export const PutApiV1TenantsTidSpacesSidMembersUidBodyStatus = {
+export const PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus = {
   active: 'active',
   disabled: 'disabled',
 } as const;
 
-export type PutApiV1TenantsTidSpacesSidMembersUidBody = {
-  role: PutApiV1TenantsTidSpacesSidMembersUidBodyRole;
-  status: PutApiV1TenantsTidSpacesSidMembersUidBodyStatus;
+export type PutApiV1TenantsTidSpacesSpaceIdMembersUidBody = {
+  role: PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole;
+  status: PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyStatus;
   /** @minimum 0 */
   version?: number;
 };
 
-export type GetApiV1TenantsTidSpacesSidProjectsParams = {
+export type GetApiV1TenantsTidSpacesSpaceIdProjectsParams = {
 /**
  * @minimum 1
  * @maximum 100
@@ -837,19 +1738,19 @@ limit?: number;
 after?: string;
 };
 
-export type GetApiV1TenantsTidSpacesSidProjects200 = {
+export type GetApiV1TenantsTidSpacesSpaceIdProjects200 = {
   items: Project[];
   nextCursor: string;
 };
 
-export type PostApiV1TenantsTidSpacesSidProjectsBody = {
+export type PostApiV1TenantsTidSpacesSpaceIdProjectsBody = {
   credentialRefId?: string;
   defaultBranch?: string;
   name: string;
   repositoryUrl: string;
 };
 
-export type PostApiV1TenantsTidSpacesSidProjects202 = {
+export type PostApiV1TenantsTidSpacesSpaceIdProjects202 = {
   operation: Operation;
   resource: Project;
   workspace: Workspace;

@@ -47,6 +47,8 @@ linters:
       disable-all: false
     misspell:
       locale: US
+      ignore-rules:
+        - cancelled
     revive:
       confidence: 0.8
       rules:

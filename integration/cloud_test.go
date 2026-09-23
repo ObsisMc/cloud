@@ -30,6 +30,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/wanglongan587/cloud/internal/api/router"
+	"github.com/wanglongan587/cloud/internal/collab"
 	"github.com/wanglongan587/cloud/internal/core"
 	"github.com/wanglongan587/cloud/internal/simulator"
 )
@@ -89,6 +90,12 @@ func setup(t *testing.T) *fixture {
 	must(t, e)
 	store, e := core.NewStore(db)
 	must(t, e)
+	// Wire the dev/demo collaboration fixtures so the mock execution path is exercised.
+	store.Directory = collab.FixtureCollaborationDirectory{}
+	store.Context = collab.DeterministicContextBuilder{}
+	store.Dispatcher = collab.MockExecutionDispatcher{}
+	store.Forms = collab.FixtureFormDescriptorProvider{}
+	store.Assist = collab.MockInputAssistProvider{}
 	must(t, store.Migrate(context.Background()))
 	must(t, store.Migrate(context.Background()))
 	credentials, e := simulator.NewCredentials()
@@ -403,13 +410,15 @@ func TestIdentityConcurrencyMembershipAndIsolation(t *testing.T) {
 	pid, wid := created.O("resource").S("id"), created.O("workspace").S("id")
 	f.user.Subject = "new-user"
 	// Joining the tenant grants default-space membership, so the project and its
-	// runtime workspace become shared; operations stay scoped to their actor.
+	// runtime workspace become shared; operations stay scoped to their actor, and
+	// the tenant-level project list keeps its owner filter (the shared project
+	// appears in the default space's own view, not in the personal list).
 	f.call("GET", f.path("/projects/"+pid), nil, "", 200)
 	f.call("GET", f.path("/workspaces/"+wid), nil, "", 200)
 	f.call("GET", f.path("/operations/"+created.O("operation").S("id")), nil, "", 404)
 	list := f.call("GET", f.path("/projects"), nil, "", 200)
-	if len(list["items"].([]any)) != 1 {
-		t.Fatal("space membership must expose the shared project")
+	if len(list["items"].([]any)) != 0 {
+		t.Fatal("list owner filter missing")
 	}
 	f.user.Subject = "alice"
 	f.call("PUT", f.path("/members/"+id), core.Object{"role": "admin", "status": "active", "version": 1}, "", 200)

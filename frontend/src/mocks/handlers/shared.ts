@@ -54,6 +54,9 @@ export function notFound(message = 'not found') {
 }
 
 export function requireWorkspace(slug: string) {
+  // The route slug is a mock workspace slug in demo mode, and the mock-api
+  // interceptor rewrites cloud-mode requests to the seeded workspace, so an
+  // unknown slug genuinely means the workspace does not exist.
   return db.workspaces.find((w) => w.slug === slug) ?? null
 }
 

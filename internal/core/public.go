@@ -11,17 +11,18 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // PublicRequest is populated only after service and final-user credentials are verified.
 type PublicRequest struct {
-	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, UserID, Key, After string
-	Limit                                                                                    int
-	Body                                                                                     Object
-	Identity                                                                                 *Claims
+	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, InteractionID, FormRef, Key, After, Query, GroupBy string
+	Limit                                                                                                                                                                                                int
+	Body                                                                                                                                                                                                 Object
+	Identity                                                                                                                                                                                             *Claims
 }
 
 // Public executes one authorized public request in a short database transaction.
-// Committed collaboration mutations are broadcast to live space subscribers
+// Committed collaboration-space mutations are broadcast to live space subscribers
 // after the transaction succeeds, never before.
 func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, error) {
 	status := 200
+	var dispatches []dispatchTarget
 	var events []SpaceEvent
 	result, e := s.transact(ctx, func(t *transaction) Object {
 		u := identity(t, r.Identity.Source, r.Identity.Subject, r.Identity.DisplayName)
@@ -65,6 +66,12 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 		case r.SpaceID != "" && r.UserID != "" && r.Method == "PUT":
 			out = putSpaceMember(t, r, uid)
 			events = append(events, SpaceEvent{Type: "space.member_updated", SpaceID: r.SpaceID})
+		case r.SpaceID != "" && r.UserID != "" && r.Method == "DELETE":
+			out = removeSpaceMember(t, r, uid)
+			events = append(events, SpaceEvent{Type: "space.member_updated", SpaceID: r.SpaceID})
+		case r.SpaceID != "" && r.UserID == "" && strings.HasSuffix(r.Path, "/members") && r.Method == "POST":
+			out = enrollSpaceMemberByEmail(t, r, uid)
+			events = append(events, SpaceEvent{Type: "space.member_updated", SpaceID: r.SpaceID})
 		case r.SpaceID == "" && strings.HasSuffix(r.Path, "/spaces") && r.Method == "POST":
 			out = createSpace(t, r, uid)
 		case r.SpaceID != "" && r.Method == "PATCH":
@@ -90,7 +97,7 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 			out = workspaceAction(t, r, uid, hash, isAdmin)
 			status = 202
 		case r.ProjectID != "":
-			p, m := projectInSpace(t, r.TenantID, uid, r.ProjectID)
+			p := project(t, r.TenantID, uid, r.ProjectID)
 			switch {
 			case strings.HasSuffix(r.Path, "/workspaces"):
 				out = createWorkspace(t, r, p, uid, hash)
@@ -100,11 +107,21 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				name := validText(r.Body.S("name"), 200)
 				require(p.S("lifecycle") != "deleting", 409, "resource_unavailable")
 				t.exec("UPDATE projects SET name=$2,version=version+1 WHERE id=$1", p.S("id"), name)
-				out = t.one("SELECT * FROM projects WHERE id=$1", p.S("id"))
-				events = append(events, SpaceEvent{Type: "project.updated", SpaceID: p.S("spaceId"), ProjectID: p.S("id"), Version: out.N("version")})
+				out = project(t, r.TenantID, uid, p.S("id"))
+				if p.S("spaceId") != "" {
+					events = append(events, SpaceEvent{Type: "project.updated", SpaceID: p.S("spaceId"), ProjectID: p.S("id"), Version: out.N("version")})
+				}
 			default:
 				require(r.Method == "DELETE", 405, "method_not_allowed")
-				requireSpaceRole(m, "admin", "owner")
+				// Delete rule (project workspace-sharing): the project creator may always
+				// delete their own project; otherwise the actor must be a workspace owner
+				// or admin. A member who can read but not delete gets 403; non-members
+				// never reach this gate (project() hides the resource with 404). Unscoped
+				// projects are owner-only in project(), so the creator is the owner and no
+				// extra gate is needed.
+				if sid := p.S("spaceId"); sid != "" {
+					require(workspaceCanDelete(t, sid, uid, p.S("ownerUserId")), 403, "space_role_required")
+				}
 				version(p, r.Body.N("version"))
 				idleProject(t, p.S("id"))
 				require(p.S("lifecycle") == "active", 409, "resource_unavailable")
@@ -122,7 +139,108 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				op := newOperation(t, r, uid, p.S("id"), "", "delete_project", "quiesce", hash, req)
 				out = Object{"resource": t.one("SELECT * FROM projects WHERE id=$1", p.S("id")), "operation": op}
 				status = 202
-				events = append(events, SpaceEvent{Type: "project.archived", SpaceID: p.S("spaceId"), ProjectID: p.S("id")})
+				if p.S("spaceId") != "" {
+					events = append(events, SpaceEvent{Type: "project.archived", SpaceID: p.S("spaceId"), ProjectID: p.S("id")})
+				}
+			}
+		case r.IssueID != "" || strings.HasSuffix(r.Path, "/issues"):
+			switch {
+			case strings.Contains(r.Path, "/runs"):
+				switch r.Method {
+				case "POST":
+					out = Object{"resource": createRun(t, r, uid)}
+				default:
+					reject(404, "not_found")
+				}
+			case strings.Contains(r.Path, "/context-refs"):
+				switch r.Method {
+				case "POST":
+					out = Object{"resource": createContextRef(t, r)}
+				case "DELETE":
+					out = deleteContextRef(t, r)
+				default:
+					reject(404, "not_found")
+				}
+			case strings.Contains(r.Path, "/collaboration/assist"):
+				require(r.Method == "POST", 404, "not_found")
+				out = assistWorkflow(t, r)
+			case strings.Contains(r.Path, "/interactions"):
+				require(r.Method == "POST" && strings.HasSuffix(r.Path, "/confirm"), 404, "not_found")
+				out = confirmInteraction(t, r, uid, &dispatches)
+			case strings.Contains(r.Path, "/comments"):
+				switch r.Method {
+				case "POST":
+					out = Object{"resource": createComment(t, r, uid, &dispatches)}
+				case "PUT":
+					out = updateComment(t, r)
+				case "DELETE":
+					out = deleteComment(t, r)
+				default:
+					reject(404, "not_found")
+				}
+			case strings.Contains(r.Path, "/subscribers"):
+				switch r.Method {
+				case "POST":
+					out = Object{"resource": subscribe(t, r)}
+				case "DELETE":
+					out = Object{"resource": unsubscribe(t, r)}
+				default:
+					reject(404, "not_found")
+				}
+			case strings.Contains(r.Path, "/labels"):
+				switch r.Method {
+				case "POST":
+					out = Object{"resource": attachLabel(t, r)}
+				case "DELETE":
+					out = detachLabel(t, r)
+				default:
+					reject(404, "not_found")
+				}
+			case r.Method == "POST" && strings.HasSuffix(r.Path, "/move"):
+				out = moveIssue(t, r)
+			case r.Method == "POST":
+				out = Object{"resource": createIssue(t, r, uid)}
+			case r.Method == "PUT":
+				out = updateIssue(t, r)
+			case r.Method == "DELETE":
+				out = deleteIssue(t, r)
+			default:
+				reject(404, "not_found")
+			}
+		case strings.Contains(r.Path, "/issue-statuses"):
+			switch r.Method {
+			case "POST":
+				out = Object{"resource": createIssueStatus(t, r)}
+			case "PUT":
+				out = updateIssueStatus(t, r)
+			case "DELETE":
+				out = deleteIssueStatus(t, r)
+			default:
+				reject(404, "not_found")
+			}
+		case strings.Contains(r.Path, "/issue-views"):
+			switch r.Method {
+			case "POST":
+				out = Object{"resource": createView(t, r, uid)}
+			case "PUT":
+				out = updateView(t, r, uid)
+			case "DELETE":
+				out = deleteView(t, r, uid)
+			default:
+				reject(404, "not_found")
+			}
+		case r.Method == "POST" && strings.HasSuffix(r.Path, "/issues/batch"):
+			out = batchUpdate(t, r)
+		case strings.Contains(r.Path, "/labels"):
+			switch r.Method {
+			case "POST":
+				out = Object{"resource": createLabel(t, r)}
+			case "PUT":
+				out = updateLabel(t, r)
+			case "DELETE":
+				out = deleteLabel(t, r)
+			default:
+				reject(404, "not_found")
 			}
 		default:
 			reject(404, "not_found")
@@ -132,9 +250,17 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 		}
 		return out
 	})
-	if e == nil && s.Events != nil {
-		for _, ev := range events {
-			s.Events.Publish(ev)
+	if e == nil {
+		for _, d := range dispatches {
+			// Task Mode runs are dispatched after the comment transaction commits (the advisory
+			// lock must not span external/observer writes). Best-effort: a failure leaves the run
+			// queued, which is the correct "Unavailable" degradation.
+			_ = s.dispatchRun(ctx, d.tenantID, d.runID)
+		}
+		if s.Events != nil {
+			for _, ev := range events {
+				s.Events.Publish(ev)
+			}
 		}
 	}
 	return result, status, e
@@ -190,6 +316,10 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 			return page(t, "SELECT wm.user_id AS id, wm.workspace_id, wm.user_id, wm.role, wm.status, wm.version, wm.joined_at, u.display_name FROM collab_workspace_members wm JOIN users u ON u.id=wm.user_id WHERE wm.workspace_id=$1", []any{r.SpaceID}, "wm.user_id", r)
 		case strings.HasSuffix(r.Path, "/projects"):
 			spaceMember(t, r.SpaceID, uid)
+			// The Workspace is the sharing boundary: space membership already gates the
+			// collection, and every active project in the space is visible to its members
+			// (project workspace-sharing migration). Unscoped projects have no space_id
+			// and never appear here.
 			return page(t, "SELECT p.* FROM projects p WHERE p.space_id=$1 AND p.deleted_at IS NULL", []any{r.SpaceID}, "p.id", r)
 		default:
 			spaceMember(t, r.SpaceID, uid)
@@ -201,6 +331,39 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 		return listSpaces(t, r, uid)
 	case strings.HasSuffix(r.Path, "/members"):
 		return page(t, "SELECT m.user_id AS id,m.tenant_id,m.user_id,m.role,m.status,m.version,u.display_name FROM tenant_memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1", []any{r.TenantID}, "m.user_id", r)
+	case strings.Contains(r.Path, "/runs"):
+		if r.RunID != "" {
+			return run(t, r.TenantID, r.IssueID, r.RunID)
+		}
+		return runList(t, r)
+	case strings.Contains(r.Path, "/context-refs"):
+		return contextRefList(t, r)
+	case strings.HasSuffix(r.Path, "/timeline"):
+		return timelineList(t, r)
+	case strings.Contains(r.Path, "/interactions"):
+		return interactionList(t, r)
+	case strings.HasSuffix(r.Path, "/collaboration/targets"):
+		return collaborationTargetList(t, r)
+	case strings.Contains(r.Path, "/collaboration/forms/"):
+		return formDescriptorByRef(t, r)
+	case strings.HasSuffix(r.Path, "/comments"):
+		return commentList(t, r)
+	case strings.HasSuffix(r.Path, "/subscribers"):
+		return subscriberList(t, r)
+	case strings.HasSuffix(r.Path, "/labels") && r.IssueID != "":
+		return issueLabelList(t, r)
+	case r.IssueID != "":
+		return issue(t, r.TenantID, r.IssueID)
+	case strings.HasSuffix(r.Path, "/issue-statuses"):
+		return statusCatalogList(t, r)
+	case strings.HasSuffix(r.Path, "/labels"):
+		return labelList(t, r)
+	case strings.HasSuffix(r.Path, "/issue-views"):
+		return viewList(t, r, uid)
+	case strings.HasSuffix(r.Path, "/issue-groups"):
+		return issueGroups(t, r)
+	case strings.HasSuffix(r.Path, "/issues"):
+		return issueList(t, r)
 	case strings.HasSuffix(r.Path, "/resource-status"):
 		return page(t, "SELECT w.id,w.project_id,w.owner_user_id,w.kind,w.desired_state,w.observed_state,w.runtime_generation,w.version FROM workspaces w WHERE w.tenant_id=$1 AND w.deleted_at IS NULL", []any{r.TenantID}, "w.id", r)
 	case r.OperationID != "":
@@ -210,11 +373,19 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 	case r.ProjectID != "":
 		p := project(t, r.TenantID, uid, r.ProjectID)
 		if strings.HasSuffix(r.Path, "/workspaces") {
-			return page(t, "SELECT w.*,wt.branch_name,wt.base_commit_id,task.title FROM workspaces w JOIN workspace_worktrees wt ON wt.workspace_id=w.id LEFT JOIN tasks task ON task.workspace_id=w.id WHERE w.project_id=$1 AND w.tenant_id=$2 AND w.deleted_at IS NULL", []any{p.S("id"), r.TenantID}, "w.id", r)
+			// A shared (space-scoped) project exposes all of its runtime workspaces to
+			// workspace members; an unscoped (legacy) project stays owner-filtered.
+			if p.S("spaceId") != "" {
+				return page(t, "SELECT w.*,wt.branch_name,wt.base_commit_id,task.title FROM workspaces w JOIN workspace_worktrees wt ON wt.workspace_id=w.id LEFT JOIN tasks task ON task.workspace_id=w.id WHERE w.project_id=$1 AND w.tenant_id=$2 AND w.deleted_at IS NULL", []any{p.S("id"), r.TenantID}, "w.id", r)
+			}
+			return page(t, "SELECT w.*,wt.branch_name,wt.base_commit_id,task.title FROM workspaces w JOIN workspace_worktrees wt ON wt.workspace_id=w.id LEFT JOIN tasks task ON task.workspace_id=w.id WHERE w.project_id=$1 AND w.tenant_id=$2 AND w.owner_user_id=$3 AND w.deleted_at IS NULL", []any{p.S("id"), r.TenantID, uid}, "w.id", r)
 		}
 		return p
 	default:
-		return page(t, "SELECT p.* FROM projects p JOIN collab_workspace_members wm ON wm.workspace_id=p.space_id JOIN collab_workspaces w ON w.id=p.space_id WHERE p.tenant_id=$1 AND wm.user_id=$2 AND wm.status='active' AND p.deleted_at IS NULL AND w.archived_at IS NULL", []any{r.TenantID, uid}, "p.id", r)
+		// Tenant-level project list keeps its owner filter (project workspace-sharing
+		// migration): space membership already gates the space-scoped view, and the
+		// tenant view never crosses into shared projects the caller does not own.
+		return page(t, "SELECT * FROM projects WHERE tenant_id=$1 AND owner_user_id=$2 AND deleted_at IS NULL", []any{r.TenantID, uid}, "id", r)
 	}
 }
 
@@ -233,8 +404,11 @@ func putMember(t *transaction, r *PublicRequest, uid string) Object {
 	} else {
 		require(r.Body.N("version") == 0, 409, "version_conflict")
 		t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,$3,$4)", r.TenantID, r.UserID, role, status)
-		// Every tenant member joins the default collaboration space: admins as
-		// owners, members as members. Migration 0006 seeded the same mapping.
+		// Space-level convenience: a new tenant member also joins the default
+		// collaboration space — admins as owners, members as members — mirroring the
+		// mapping migration 0011 seeded for pre-existing members. Space membership is
+		// the sharing boundary only for projects scoped to that space; unscoped
+		// projects stay owner-only.
 		if dw := t.one("SELECT id FROM collab_workspaces WHERE tenant_id=$1 AND slug='default' AND archived_at IS NULL", r.TenantID); dw != nil {
 			spaceRole := "member"
 			if role == "admin" {
@@ -259,8 +433,10 @@ func validRef(s string) string {
 }
 
 func createProject(t *transaction, r *PublicRequest, uid, hash string) Object {
-	// The legacy tenant-level path uses the tenant's default collaboration
-	// space; the space-scoped path requires membership in the given space.
+	// Space is optional at the schema level (projects.space_id is nullable, so
+	// pre-existing unscoped projects keep owner-only access). New projects default
+	// into the tenant's default collaboration space; the space-scoped path
+	// requires active membership in that space.
 	spaceID := r.SpaceID
 	if spaceID == "" {
 		spaceID = defaultSpace(t, r.TenantID).S("id")

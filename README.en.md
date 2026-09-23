@@ -79,6 +79,27 @@ go run ./cmd/simulator
 
 The demo starts isolated loopback HTTP cloud and Substrate services, creates a test tenant, bare repository, main linked worktree, simulated sandbox, and Node, and then outputs the ready Workspace. Disk state remains under `.local/demo/`, and PostgreSQL records are retained; each subsequent run creates another demo tenant. The simulator has no production infrastructure credentials, does not deploy Kubernetes, and does not start real Agent or Deno runtimes.
 
+## Frontend
+
+The official web frontend lives in [`frontend/`](frontend/README.md): React 19 + TypeScript + Vite +
+Tailwind CSS 4 + TanStack Query, with the API layer compiled by [orval](https://orval.dev) from
+[`api/openapi.json`](api/openapi.json). It installs, develops, and builds independently:
+
+```sh
+cd frontend
+npm ci                 # Node >= 24, see frontend/.node-version
+npm run dev            # Vite dev server (:5173); /api, /internal, /healthz proxied to :8080
+npm run build          # tsc -b && vite build
+```
+
+Auth reuses Cloud's dual-JWT: the browser holds only a session cookie + user profile; `cmd/ora-web`
+signs tokens server-side (the browser is untrusted). Dev requires a real PostgreSQL — start the
+database per "Local validation" above and `task run` (:8080), then `npm run dev`.
+
+Demo vs formal: `cmd/demo-issue-board-web` is a single-file HTML Kanban demo (no frontend
+dependency, no CORS, server-side JWT signing) for manual API verification; `frontend/` is the
+formal product UI. The two coexist and are not interchangeable.
+
 ## Contracts and boundaries
 
 - [OpenAPI 3.0](api/openapi.json): all 19 public endpoints, 15 internal endpoints, and health. `task openapi` regenerates it, while tests validate the document, generated output, and actual HTTP response structures.

@@ -25,19 +25,21 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  DeleteApiV1TenantsTidSpacesSidBody,
+  DeleteApiV1TenantsTidSpacesSpaceIdBody,
+  DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody,
   Error,
   GetApiV1TenantsTidSpaces200,
   GetApiV1TenantsTidSpacesParams,
-  GetApiV1TenantsTidSpacesSidMembers200,
-  GetApiV1TenantsTidSpacesSidMembersParams,
-  GetApiV1TenantsTidSpacesSidProjects200,
-  GetApiV1TenantsTidSpacesSidProjectsParams,
-  PatchApiV1TenantsTidSpacesSidBody,
+  GetApiV1TenantsTidSpacesSpaceIdMembers200,
+  GetApiV1TenantsTidSpacesSpaceIdMembersParams,
+  GetApiV1TenantsTidSpacesSpaceIdProjects200,
+  GetApiV1TenantsTidSpacesSpaceIdProjectsParams,
+  PatchApiV1TenantsTidSpacesSpaceIdBody,
   PostApiV1TenantsTidSpacesBody,
-  PostApiV1TenantsTidSpacesSidProjects202,
-  PostApiV1TenantsTidSpacesSidProjectsBody,
-  PutApiV1TenantsTidSpacesSidMembersUidBody,
+  PostApiV1TenantsTidSpacesSpaceIdMembersBody,
+  PostApiV1TenantsTidSpacesSpaceIdProjects202,
+  PostApiV1TenantsTidSpacesSpaceIdProjectsBody,
+  PutApiV1TenantsTidSpacesSpaceIdMembersUidBody,
   Space,
   SpaceEvent,
   SpaceMember
@@ -67,7 +69,7 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
 };
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Only joined members can read a workspace. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Only joined members can read a space. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/spaces
  */
 export const getApiV1TenantsTidSpaces = (
@@ -168,7 +170,7 @@ export function useGetApiV1TenantsTidSpaces<TData = Awaited<ReturnType<typeof ge
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Creates the workspace and its first owner atomically. slug is lowercase, immutable and unique per tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Creates the collaboration space and its first owner atomically. slug is lowercase, immutable and unique per tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/spaces
  */
 export const postApiV1TenantsTidSpaces = (
@@ -237,21 +239,21 @@ export const usePostApiV1TenantsTidSpaces = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidSpacesMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Archives the workspace (soft delete); requires owner and a matching version. Projects are unaffected. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
- * @summary DELETE /api/v1/tenants/:tid/spaces/:sid
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Archives the space (soft delete); requires owner and a matching version. The default space cannot be archived. Projects are unaffected. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary DELETE /api/v1/tenants/:tid/spaces/:spaceId
  */
-export const deleteApiV1TenantsTidSpacesSid = (
+export const deleteApiV1TenantsTidSpacesSpaceId = (
     tid: string,
-    sid: string,
-    deleteApiV1TenantsTidSpacesSidBody: DeleteApiV1TenantsTidSpacesSidBody,
+    spaceId: string,
+    deleteApiV1TenantsTidSpacesSpaceIdBody: DeleteApiV1TenantsTidSpacesSpaceIdBody,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<Space>(
-      {url: `/api/v1/tenants/${tid}/spaces/${sid}`, method: 'DELETE',
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}`, method: 'DELETE',
       headers: {'Content-Type': 'application/json', },
-      data: deleteApiV1TenantsTidSpacesSidBody, signal
+      data: deleteApiV1TenantsTidSpacesSpaceIdBody, signal
     },
       options);
     }
@@ -259,13 +261,13 @@ export const deleteApiV1TenantsTidSpacesSid = (
 
 
 
-export const getDeleteApiV1TenantsTidSpacesSidMutationKey = () => ['deleteApiV1TenantsTidSpacesSid'] as const;
+export const getDeleteApiV1TenantsTidSpacesSpaceIdMutationKey = () => ['deleteApiV1TenantsTidSpacesSpaceId'] as const;
 
-export const getDeleteApiV1TenantsTidSpacesSidMutationOptions = <TError = ErrorType<Error>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSid>>, TError,DeleteApiV1TenantsTidSpacesSidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSid>>, TError,DeleteApiV1TenantsTidSpacesSidMutationVariables, TContext> => {
+export const getDeleteApiV1TenantsTidSpacesSpaceIdMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceId>>, TError,DeleteApiV1TenantsTidSpacesSpaceIdMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceId>>, TError,DeleteApiV1TenantsTidSpacesSpaceIdMutationVariables, TContext> => {
 
-const mutationKey = getDeleteApiV1TenantsTidSpacesSidMutationKey();
+const mutationKey = getDeleteApiV1TenantsTidSpacesSpaceIdMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -275,10 +277,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSid>>, DeleteApiV1TenantsTidSpacesSidMutationVariables> = (props) => {
-          const {tid,sid,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceId>>, DeleteApiV1TenantsTidSpacesSpaceIdMutationVariables> = (props) => {
+          const {tid,spaceId,data} = props ?? {};
 
-          return  deleteApiV1TenantsTidSpacesSid(tid,sid,data,requestOptions)
+          return  deleteApiV1TenantsTidSpacesSpaceId(tid,spaceId,data,requestOptions)
         }
 
 
@@ -288,37 +290,37 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type DeleteApiV1TenantsTidSpacesSidMutationResult = NonNullable<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSid>>>
-    export type DeleteApiV1TenantsTidSpacesSidMutationBody = DeleteApiV1TenantsTidSpacesSidBody
-    export type DeleteApiV1TenantsTidSpacesSidMutationError = ErrorType<Error>
-    export type DeleteApiV1TenantsTidSpacesSidMutationVariables = {tid: string;sid: string;data: DeleteApiV1TenantsTidSpacesSidBody}
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMutationResult = NonNullable<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceId>>>
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMutationBody = DeleteApiV1TenantsTidSpacesSpaceIdBody
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMutationError = ErrorType<Error>
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMutationVariables = {tid: string;spaceId: string;data: DeleteApiV1TenantsTidSpacesSpaceIdBody}
 
     /**
- * @summary DELETE /api/v1/tenants/:tid/spaces/:sid
+ * @summary DELETE /api/v1/tenants/:tid/spaces/:spaceId
  */
-export const useDeleteApiV1TenantsTidSpacesSid = <TError = ErrorType<Error>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSid>>, TError,DeleteApiV1TenantsTidSpacesSidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+export const useDeleteApiV1TenantsTidSpacesSpaceId = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceId>>, TError,DeleteApiV1TenantsTidSpacesSpaceIdMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSid>>,
+        Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceId>>,
         TError,
-        DeleteApiV1TenantsTidSpacesSidMutationVariables,
+        DeleteApiV1TenantsTidSpacesSpaceIdMutationVariables,
         TContext
       > => {
-      return useMutation(getDeleteApiV1TenantsTidSpacesSidMutationOptions(options), queryClient);
+      return useMutation(getDeleteApiV1TenantsTidSpacesSpaceIdMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Only joined members can read a workspace. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
- * @summary GET /api/v1/tenants/:tid/spaces/:sid
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Only joined members can read a space. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary GET /api/v1/tenants/:tid/spaces/:spaceId
  */
-export const getApiV1TenantsTidSpacesSid = (
+export const getApiV1TenantsTidSpacesSpaceId = (
     tid: string,
-    sid: string,
+    spaceId: string,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<Space>(
-      {url: `/api/v1/tenants/${tid}/spaces/${sid}`, method: 'GET', signal
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}`, method: 'GET', signal
     },
       options);
     }
@@ -326,75 +328,75 @@ export const getApiV1TenantsTidSpacesSid = (
 
 
 
-export const getGetApiV1TenantsTidSpacesSidQueryKey = (tid: string,
-    sid: string,) => {
+export const getGetApiV1TenantsTidSpacesSpaceIdQueryKey = (tid: string,
+    spaceId: string,) => {
     return [
-    `/api/v1/tenants/${tid}/spaces/${sid}`
+    `/api/v1/tenants/${tid}/spaces/${spaceId}`
     ] as const;
     }
 
 
-export const getGetApiV1TenantsTidSpacesSidQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError = ErrorType<Error>>(tid: string,
-    sid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+export const getGetApiV1TenantsTidSpacesSpaceIdQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError = ErrorType<Error>>(tid: string,
+    spaceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidSpacesSidQueryKey(tid,sid);
+  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidSpacesSpaceIdQueryKey(tid,spaceId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>> = ({ signal }) => getApiV1TenantsTidSpacesSid(tid,sid, requestOptions, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>> = ({ signal }) => getApiV1TenantsTidSpacesSpaceId(tid,spaceId, requestOptions, signal);
 
 
 
 
 
-   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && sid !== null && sid !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && spaceId !== null && spaceId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type GetApiV1TenantsTidSpacesSidQueryResult = NonNullable<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>>
-export type GetApiV1TenantsTidSpacesSidQueryError = ErrorType<Error>
+export type GetApiV1TenantsTidSpacesSpaceIdQueryResult = NonNullable<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>>
+export type GetApiV1TenantsTidSpacesSpaceIdQueryError = ErrorType<Error>
 
 
-export function useGetApiV1TenantsTidSpacesSid<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceId<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError, TData>> & Pick<
+    spaceId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>,
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>,
           TError,
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetApiV1TenantsTidSpacesSid<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceId<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError, TData>> & Pick<
+    spaceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>,
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>,
           TError,
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetApiV1TenantsTidSpacesSid<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceId<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    spaceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary GET /api/v1/tenants/:tid/spaces/:sid
+ * @summary GET /api/v1/tenants/:tid/spaces/:spaceId
  */
 
-export function useGetApiV1TenantsTidSpacesSid<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceId<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSid>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    spaceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceId>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetApiV1TenantsTidSpacesSidQueryOptions(tid,sid,options)
+  const queryOptions = getGetApiV1TenantsTidSpacesSpaceIdQueryOptions(tid,spaceId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -407,21 +409,21 @@ export function useGetApiV1TenantsTidSpacesSid<TData = Awaited<ReturnType<typeof
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Only name and description may change; slug is immutable. Requires admin or owner and a matching version. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
- * @summary PATCH /api/v1/tenants/:tid/spaces/:sid
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Only name and description may change; slug is immutable. Requires admin or owner and a matching version. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary PATCH /api/v1/tenants/:tid/spaces/:spaceId
  */
-export const patchApiV1TenantsTidSpacesSid = (
+export const patchApiV1TenantsTidSpacesSpaceId = (
     tid: string,
-    sid: string,
-    patchApiV1TenantsTidSpacesSidBody: PatchApiV1TenantsTidSpacesSidBody,
+    spaceId: string,
+    patchApiV1TenantsTidSpacesSpaceIdBody: PatchApiV1TenantsTidSpacesSpaceIdBody,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<Space>(
-      {url: `/api/v1/tenants/${tid}/spaces/${sid}`, method: 'PATCH',
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}`, method: 'PATCH',
       headers: {'Content-Type': 'application/json', },
-      data: patchApiV1TenantsTidSpacesSidBody, signal
+      data: patchApiV1TenantsTidSpacesSpaceIdBody, signal
     },
       options);
     }
@@ -429,13 +431,13 @@ export const patchApiV1TenantsTidSpacesSid = (
 
 
 
-export const getPatchApiV1TenantsTidSpacesSidMutationKey = () => ['patchApiV1TenantsTidSpacesSid'] as const;
+export const getPatchApiV1TenantsTidSpacesSpaceIdMutationKey = () => ['patchApiV1TenantsTidSpacesSpaceId'] as const;
 
-export const getPatchApiV1TenantsTidSpacesSidMutationOptions = <TError = ErrorType<Error>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSid>>, TError,PatchApiV1TenantsTidSpacesSidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
-): UseMutationOptions<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSid>>, TError,PatchApiV1TenantsTidSpacesSidMutationVariables, TContext> => {
+export const getPatchApiV1TenantsTidSpacesSpaceIdMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSpaceId>>, TError,PatchApiV1TenantsTidSpacesSpaceIdMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSpaceId>>, TError,PatchApiV1TenantsTidSpacesSpaceIdMutationVariables, TContext> => {
 
-const mutationKey = getPatchApiV1TenantsTidSpacesSidMutationKey();
+const mutationKey = getPatchApiV1TenantsTidSpacesSpaceIdMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -445,10 +447,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSid>>, PatchApiV1TenantsTidSpacesSidMutationVariables> = (props) => {
-          const {tid,sid,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSpaceId>>, PatchApiV1TenantsTidSpacesSpaceIdMutationVariables> = (props) => {
+          const {tid,spaceId,data} = props ?? {};
 
-          return  patchApiV1TenantsTidSpacesSid(tid,sid,data,requestOptions)
+          return  patchApiV1TenantsTidSpacesSpaceId(tid,spaceId,data,requestOptions)
         }
 
 
@@ -458,37 +460,37 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type PatchApiV1TenantsTidSpacesSidMutationResult = NonNullable<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSid>>>
-    export type PatchApiV1TenantsTidSpacesSidMutationBody = PatchApiV1TenantsTidSpacesSidBody
-    export type PatchApiV1TenantsTidSpacesSidMutationError = ErrorType<Error>
-    export type PatchApiV1TenantsTidSpacesSidMutationVariables = {tid: string;sid: string;data: PatchApiV1TenantsTidSpacesSidBody}
+    export type PatchApiV1TenantsTidSpacesSpaceIdMutationResult = NonNullable<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSpaceId>>>
+    export type PatchApiV1TenantsTidSpacesSpaceIdMutationBody = PatchApiV1TenantsTidSpacesSpaceIdBody
+    export type PatchApiV1TenantsTidSpacesSpaceIdMutationError = ErrorType<Error>
+    export type PatchApiV1TenantsTidSpacesSpaceIdMutationVariables = {tid: string;spaceId: string;data: PatchApiV1TenantsTidSpacesSpaceIdBody}
 
     /**
- * @summary PATCH /api/v1/tenants/:tid/spaces/:sid
+ * @summary PATCH /api/v1/tenants/:tid/spaces/:spaceId
  */
-export const usePatchApiV1TenantsTidSpacesSid = <TError = ErrorType<Error>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSid>>, TError,PatchApiV1TenantsTidSpacesSidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+export const usePatchApiV1TenantsTidSpacesSpaceId = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSpaceId>>, TError,PatchApiV1TenantsTidSpacesSpaceIdMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSid>>,
+        Awaited<ReturnType<typeof patchApiV1TenantsTidSpacesSpaceId>>,
         TError,
-        PatchApiV1TenantsTidSpacesSidMutationVariables,
+        PatchApiV1TenantsTidSpacesSpaceIdMutationVariables,
         TContext
       > => {
-      return useMutation(getPatchApiV1TenantsTidSpacesSidMutationOptions(options), queryClient);
+      return useMutation(getPatchApiV1TenantsTidSpacesSpaceIdMutationOptions(options), queryClient);
     }
     /**
  * Membership is verified before the stream opens. Events are lightweight invalidation notices published after commit; clients refetch authoritative state over REST.
- * @summary Stream workspace events over server-sent events
+ * @summary Stream collaboration space events over server-sent events
  */
 export const getSpaceEvents = (
     tid: string,
-    sid: string,
+    spaceId: string,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<SpaceEvent>(
-      {url: `/api/v1/tenants/${tid}/spaces/${sid}/events`, method: 'GET', signal
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}/events`, method: 'GET', signal
     },
       options);
     }
@@ -497,30 +499,30 @@ export const getSpaceEvents = (
 
 
 export const getGetSpaceEventsQueryKey = (tid: string,
-    sid: string,) => {
+    spaceId: string,) => {
     return [
-    `/api/v1/tenants/${tid}/spaces/${sid}/events`
+    `/api/v1/tenants/${tid}/spaces/${spaceId}/events`
     ] as const;
     }
 
 
 export const getGetSpaceEventsQueryOptions = <TData = Awaited<ReturnType<typeof getSpaceEvents>>, TError = ErrorType<Error>>(tid: string,
-    sid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    spaceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetSpaceEventsQueryKey(tid,sid);
+  const queryKey =  queryOptions?.queryKey ?? getGetSpaceEventsQueryKey(tid,spaceId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSpaceEvents>>> = ({ signal }) => getSpaceEvents(tid,sid, requestOptions, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSpaceEvents>>> = ({ signal }) => getSpaceEvents(tid,spaceId, requestOptions, signal);
 
 
 
 
 
-   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && sid !== null && sid !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && spaceId !== null && spaceId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
 export type GetSpaceEventsQueryResult = NonNullable<Awaited<ReturnType<typeof getSpaceEvents>>>
@@ -529,7 +531,7 @@ export type GetSpaceEventsQueryError = ErrorType<Error>
 
 export function useGetSpaceEvents<TData = Awaited<ReturnType<typeof getSpaceEvents>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>> & Pick<
+    spaceId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getSpaceEvents>>,
           TError,
@@ -540,7 +542,7 @@ export function useGetSpaceEvents<TData = Awaited<ReturnType<typeof getSpaceEven
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetSpaceEvents<TData = Awaited<ReturnType<typeof getSpaceEvents>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>> & Pick<
+    spaceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getSpaceEvents>>,
           TError,
@@ -551,20 +553,20 @@ export function useGetSpaceEvents<TData = Awaited<ReturnType<typeof getSpaceEven
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetSpaceEvents<TData = Awaited<ReturnType<typeof getSpaceEvents>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    spaceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Stream workspace events over server-sent events
+ * @summary Stream collaboration space events over server-sent events
  */
 
 export function useGetSpaceEvents<TData = Awaited<ReturnType<typeof getSpaceEvents>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    spaceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSpaceEvents>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetSpaceEventsQueryOptions(tid,sid,options)
+  const queryOptions = getGetSpaceEventsQueryOptions(tid,spaceId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -577,19 +579,19 @@ export function useGetSpaceEvents<TData = Awaited<ReturnType<typeof getSpaceEven
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Admin or owner manages membership; granting owner requires owner. The target user must be an active member of the same tenant. Last owner cannot be demoted or disabled. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
- * @summary GET /api/v1/tenants/:tid/spaces/:sid/members
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Lists the space's members; any active member of the space can read the member list. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary GET /api/v1/tenants/:tid/spaces/:spaceId/members
  */
-export const getApiV1TenantsTidSpacesSidMembers = (
+export const getApiV1TenantsTidSpacesSpaceIdMembers = (
     tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidMembersParams,
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdMembersParams,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
-      return customInstance<GetApiV1TenantsTidSpacesSidMembers200>(
-      {url: `/api/v1/tenants/${tid}/spaces/${sid}/members`, method: 'GET',
+      return customInstance<GetApiV1TenantsTidSpacesSpaceIdMembers200>(
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}/members`, method: 'GET',
         params, signal
     },
       options);
@@ -598,81 +600,81 @@ export const getApiV1TenantsTidSpacesSidMembers = (
 
 
 
-export const getGetApiV1TenantsTidSpacesSidMembersQueryKey = (tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidMembersParams,) => {
+export const getGetApiV1TenantsTidSpacesSpaceIdMembersQueryKey = (tid: string,
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdMembersParams,) => {
     return [
-    `/api/v1/tenants/${tid}/spaces/${sid}/members`, ...(params ? [params] : [])
+    `/api/v1/tenants/${tid}/spaces/${spaceId}/members`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetApiV1TenantsTidSpacesSidMembersQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError = ErrorType<Error>>(tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidMembersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+export const getGetApiV1TenantsTidSpacesSpaceIdMembersQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError = ErrorType<Error>>(tid: string,
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdMembersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidSpacesSidMembersQueryKey(tid,sid,params);
+  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidSpacesSpaceIdMembersQueryKey(tid,spaceId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>> = ({ signal }) => getApiV1TenantsTidSpacesSidMembers(tid,sid,params, requestOptions, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>> = ({ signal }) => getApiV1TenantsTidSpacesSpaceIdMembers(tid,spaceId,params, requestOptions, signal);
 
 
 
 
 
-   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && sid !== null && sid !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && spaceId !== null && spaceId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type GetApiV1TenantsTidSpacesSidMembersQueryResult = NonNullable<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>>
-export type GetApiV1TenantsTidSpacesSidMembersQueryError = ErrorType<Error>
+export type GetApiV1TenantsTidSpacesSpaceIdMembersQueryResult = NonNullable<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>>
+export type GetApiV1TenantsTidSpacesSpaceIdMembersQueryError = ErrorType<Error>
 
 
-export function useGetApiV1TenantsTidSpacesSidMembers<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceIdMembers<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string,
-    params: undefined |  GetApiV1TenantsTidSpacesSidMembersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError, TData>> & Pick<
+    spaceId: string,
+    params: undefined |  GetApiV1TenantsTidSpacesSpaceIdMembersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>,
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>,
           TError,
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetApiV1TenantsTidSpacesSidMembers<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceIdMembers<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidMembersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError, TData>> & Pick<
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdMembersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>,
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>,
           TError,
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetApiV1TenantsTidSpacesSidMembers<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceIdMembers<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidMembersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdMembersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary GET /api/v1/tenants/:tid/spaces/:sid/members
+ * @summary GET /api/v1/tenants/:tid/spaces/:spaceId/members
  */
 
-export function useGetApiV1TenantsTidSpacesSidMembers<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceIdMembers<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidMembersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidMembers>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdMembersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdMembers>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetApiV1TenantsTidSpacesSidMembersQueryOptions(tid,sid,params,options)
+  const queryOptions = getGetApiV1TenantsTidSpacesSpaceIdMembersQueryOptions(tid,spaceId,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -685,22 +687,21 @@ export function useGetApiV1TenantsTidSpacesSidMembers<TData = Awaited<ReturnType
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Admin or owner manages membership; granting owner requires owner. The target user must be an active member of the same tenant. Last owner cannot be demoted or disabled. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
- * @summary PUT /api/v1/tenants/:tid/spaces/:sid/members/:uid
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Adds an already-registered user to the space as a plain member by email, resolved in the caller's identity source. Admin or owner only. The target is atomically ensured tenant membership (existing role kept) and thereby gains access to the Projects and Runtime Workspaces shared in that workspace. Unknown or inactive email is 404 user_not_registered; adding an existing member returns the current membership unchanged. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary POST /api/v1/tenants/:tid/spaces/:spaceId/members
  */
-export const putApiV1TenantsTidSpacesSidMembersUid = (
+export const postApiV1TenantsTidSpacesSpaceIdMembers = (
     tid: string,
-    sid: string,
-    uid: string,
-    putApiV1TenantsTidSpacesSidMembersUidBody: PutApiV1TenantsTidSpacesSidMembersUidBody,
+    spaceId: string,
+    postApiV1TenantsTidSpacesSpaceIdMembersBody: PostApiV1TenantsTidSpacesSpaceIdMembersBody,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<SpaceMember>(
-      {url: `/api/v1/tenants/${tid}/spaces/${sid}/members/${uid}`, method: 'PUT',
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}/members`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
-      data: putApiV1TenantsTidSpacesSidMembersUidBody, signal
+      data: postApiV1TenantsTidSpacesSpaceIdMembersBody, signal
     },
       options);
     }
@@ -708,13 +709,13 @@ export const putApiV1TenantsTidSpacesSidMembersUid = (
 
 
 
-export const getPutApiV1TenantsTidSpacesSidMembersUidMutationKey = () => ['putApiV1TenantsTidSpacesSidMembersUid'] as const;
+export const getPostApiV1TenantsTidSpacesSpaceIdMembersMutationKey = () => ['postApiV1TenantsTidSpacesSpaceIdMembers'] as const;
 
-export const getPutApiV1TenantsTidSpacesSidMembersUidMutationOptions = <TError = ErrorType<Error>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSidMembersUid>>, TError,PutApiV1TenantsTidSpacesSidMembersUidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
-): UseMutationOptions<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSidMembersUid>>, TError,PutApiV1TenantsTidSpacesSidMembersUidMutationVariables, TContext> => {
+export const getPostApiV1TenantsTidSpacesSpaceIdMembersMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>, TError,PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>, TError,PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables, TContext> => {
 
-const mutationKey = getPutApiV1TenantsTidSpacesSidMembersUidMutationKey();
+const mutationKey = getPostApiV1TenantsTidSpacesSpaceIdMembersMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -724,10 +725,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSidMembersUid>>, PutApiV1TenantsTidSpacesSidMembersUidMutationVariables> = (props) => {
-          const {tid,sid,uid,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>, PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables> = (props) => {
+          const {tid,spaceId,data} = props ?? {};
 
-          return  putApiV1TenantsTidSpacesSidMembersUid(tid,sid,uid,data,requestOptions)
+          return  postApiV1TenantsTidSpacesSpaceIdMembers(tid,spaceId,data,requestOptions)
         }
 
 
@@ -737,38 +738,180 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type PutApiV1TenantsTidSpacesSidMembersUidMutationResult = NonNullable<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSidMembersUid>>>
-    export type PutApiV1TenantsTidSpacesSidMembersUidMutationBody = PutApiV1TenantsTidSpacesSidMembersUidBody
-    export type PutApiV1TenantsTidSpacesSidMembersUidMutationError = ErrorType<Error>
-    export type PutApiV1TenantsTidSpacesSidMembersUidMutationVariables = {tid: string;sid: string;uid: string;data: PutApiV1TenantsTidSpacesSidMembersUidBody}
+    export type PostApiV1TenantsTidSpacesSpaceIdMembersMutationResult = NonNullable<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>>
+    export type PostApiV1TenantsTidSpacesSpaceIdMembersMutationBody = PostApiV1TenantsTidSpacesSpaceIdMembersBody
+    export type PostApiV1TenantsTidSpacesSpaceIdMembersMutationError = ErrorType<Error>
+    export type PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables = {tid: string;spaceId: string;data: PostApiV1TenantsTidSpacesSpaceIdMembersBody}
 
     /**
- * @summary PUT /api/v1/tenants/:tid/spaces/:sid/members/:uid
+ * @summary POST /api/v1/tenants/:tid/spaces/:spaceId/members
  */
-export const usePutApiV1TenantsTidSpacesSidMembersUid = <TError = ErrorType<Error>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSidMembersUid>>, TError,PutApiV1TenantsTidSpacesSidMembersUidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+export const usePostApiV1TenantsTidSpacesSpaceIdMembers = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>, TError,PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSidMembersUid>>,
+        Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>,
         TError,
-        PutApiV1TenantsTidSpacesSidMembersUidMutationVariables,
+        PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables,
         TContext
       > => {
-      return useMutation(getPutApiV1TenantsTidSpacesSidMembersUidMutationOptions(options), queryClient);
+      return useMutation(getPostApiV1TenantsTidSpacesSpaceIdMembersMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Project collection scoped to one collaboration workspace; membership is required. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
- * @summary GET /api/v1/tenants/:tid/spaces/:sid/projects
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Removes a member's workspace membership (hard delete); owner only, admins and members cannot remove anyone. The user account, tenant membership and their resources are untouched and remain in the workspace; the removed member's access to the workspace, its projects and runtime workspaces is revoked. An owner row can never be removed, including self-removal (409 cannot_remove_workspace_owner). Requires a matching version and an idempotency key. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary DELETE /api/v1/tenants/:tid/spaces/:spaceId/members/:uid
  */
-export const getApiV1TenantsTidSpacesSidProjects = (
+export const deleteApiV1TenantsTidSpacesSpaceIdMembersUid = (
     tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidProjectsParams,
+    spaceId: string,
+    uid: string,
+    deleteApiV1TenantsTidSpacesSpaceIdMembersUidBody: DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
-      return customInstance<GetApiV1TenantsTidSpacesSidProjects200>(
-      {url: `/api/v1/tenants/${tid}/spaces/${sid}/projects`, method: 'GET',
+      return customInstance<SpaceMember>(
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}/members/${uid}`, method: 'DELETE',
+      headers: {'Content-Type': 'application/json', },
+      data: deleteApiV1TenantsTidSpacesSpaceIdMembersUidBody, signal
+    },
+      options);
+    }
+
+
+
+
+export const getDeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationKey = () => ['deleteApiV1TenantsTidSpacesSpaceIdMembersUid'] as const;
+
+export const getDeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>, TError,DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>, TError,DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables, TContext> => {
+
+const mutationKey = getDeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>, DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables> = (props) => {
+          const {tid,spaceId,uid,data} = props ?? {};
+
+          return  deleteApiV1TenantsTidSpacesSpaceIdMembersUid(tid,spaceId,uid,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationResult = NonNullable<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>>
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationBody = DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationError = ErrorType<Error>
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables = {tid: string;spaceId: string;uid: string;data: DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody}
+
+    /**
+ * @summary DELETE /api/v1/tenants/:tid/spaces/:spaceId/members/:uid
+ */
+export const useDeleteApiV1TenantsTidSpacesSpaceIdMembersUid = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>, TError,DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>,
+        TError,
+        DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationOptions(options), queryClient);
+    }
+    /**
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Updates a member's role (admin/member) or status. Role management is owner-only — admins add members through POST, they cannot change roles. The owner role is immutable: granting owner or any write touching an owner row is 409 ownership_transfer_not_supported (ownership transfer is not implemented). The target user must be an active member of the same tenant; a matching version is required. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary PUT /api/v1/tenants/:tid/spaces/:spaceId/members/:uid
+ */
+export const putApiV1TenantsTidSpacesSpaceIdMembersUid = (
+    tid: string,
+    spaceId: string,
+    uid: string,
+    putApiV1TenantsTidSpacesSpaceIdMembersUidBody: PutApiV1TenantsTidSpacesSpaceIdMembersUidBody,
+ options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
+) => {
+
+
+      return customInstance<SpaceMember>(
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}/members/${uid}`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: putApiV1TenantsTidSpacesSpaceIdMembersUidBody, signal
+    },
+      options);
+    }
+
+
+
+
+export const getPutApiV1TenantsTidSpacesSpaceIdMembersUidMutationKey = () => ['putApiV1TenantsTidSpacesSpaceIdMembersUid'] as const;
+
+export const getPutApiV1TenantsTidSpacesSpaceIdMembersUidMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSpaceIdMembersUid>>, TError,PutApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSpaceIdMembersUid>>, TError,PutApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables, TContext> => {
+
+const mutationKey = getPutApiV1TenantsTidSpacesSpaceIdMembersUidMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSpaceIdMembersUid>>, PutApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables> = (props) => {
+          const {tid,spaceId,uid,data} = props ?? {};
+
+          return  putApiV1TenantsTidSpacesSpaceIdMembersUid(tid,spaceId,uid,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutApiV1TenantsTidSpacesSpaceIdMembersUidMutationResult = NonNullable<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSpaceIdMembersUid>>>
+    export type PutApiV1TenantsTidSpacesSpaceIdMembersUidMutationBody = PutApiV1TenantsTidSpacesSpaceIdMembersUidBody
+    export type PutApiV1TenantsTidSpacesSpaceIdMembersUidMutationError = ErrorType<Error>
+    export type PutApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables = {tid: string;spaceId: string;uid: string;data: PutApiV1TenantsTidSpacesSpaceIdMembersUidBody}
+
+    /**
+ * @summary PUT /api/v1/tenants/:tid/spaces/:spaceId/members/:uid
+ */
+export const usePutApiV1TenantsTidSpacesSpaceIdMembersUid = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSpaceIdMembersUid>>, TError,PutApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof putApiV1TenantsTidSpacesSpaceIdMembersUid>>,
+        TError,
+        PutApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPutApiV1TenantsTidSpacesSpaceIdMembersUidMutationOptions(options), queryClient);
+    }
+    /**
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Project collection scoped to one collaboration space; membership is required, and project visibility follows workspace membership — any active member of the space can see every active project in it. Deleting a project requires its creator or a space owner/admin. New projects created at the tenant level default into the tenant's default space. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary GET /api/v1/tenants/:tid/spaces/:spaceId/projects
+ */
+export const getApiV1TenantsTidSpacesSpaceIdProjects = (
+    tid: string,
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdProjectsParams,
+ options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
+) => {
+
+
+      return customInstance<GetApiV1TenantsTidSpacesSpaceIdProjects200>(
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}/projects`, method: 'GET',
         params, signal
     },
       options);
@@ -777,81 +920,81 @@ export const getApiV1TenantsTidSpacesSidProjects = (
 
 
 
-export const getGetApiV1TenantsTidSpacesSidProjectsQueryKey = (tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidProjectsParams,) => {
+export const getGetApiV1TenantsTidSpacesSpaceIdProjectsQueryKey = (tid: string,
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdProjectsParams,) => {
     return [
-    `/api/v1/tenants/${tid}/spaces/${sid}/projects`, ...(params ? [params] : [])
+    `/api/v1/tenants/${tid}/spaces/${spaceId}/projects`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetApiV1TenantsTidSpacesSidProjectsQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError = ErrorType<Error>>(tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+export const getGetApiV1TenantsTidSpacesSpaceIdProjectsQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError = ErrorType<Error>>(tid: string,
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidSpacesSidProjectsQueryKey(tid,sid,params);
+  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidSpacesSpaceIdProjectsQueryKey(tid,spaceId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>> = ({ signal }) => getApiV1TenantsTidSpacesSidProjects(tid,sid,params, requestOptions, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>> = ({ signal }) => getApiV1TenantsTidSpacesSpaceIdProjects(tid,spaceId,params, requestOptions, signal);
 
 
 
 
 
-   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && sid !== null && sid !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && spaceId !== null && spaceId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type GetApiV1TenantsTidSpacesSidProjectsQueryResult = NonNullable<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>>
-export type GetApiV1TenantsTidSpacesSidProjectsQueryError = ErrorType<Error>
+export type GetApiV1TenantsTidSpacesSpaceIdProjectsQueryResult = NonNullable<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>>
+export type GetApiV1TenantsTidSpacesSpaceIdProjectsQueryError = ErrorType<Error>
 
 
-export function useGetApiV1TenantsTidSpacesSidProjects<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceIdProjects<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string,
-    params: undefined |  GetApiV1TenantsTidSpacesSidProjectsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError, TData>> & Pick<
+    spaceId: string,
+    params: undefined |  GetApiV1TenantsTidSpacesSpaceIdProjectsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>,
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>,
           TError,
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetApiV1TenantsTidSpacesSidProjects<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceIdProjects<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError, TData>> & Pick<
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>,
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>,
           TError,
-          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>
+          Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetApiV1TenantsTidSpacesSidProjects<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceIdProjects<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary GET /api/v1/tenants/:tid/spaces/:sid/projects
+ * @summary GET /api/v1/tenants/:tid/spaces/:spaceId/projects
  */
 
-export function useGetApiV1TenantsTidSpacesSidProjects<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidSpacesSpaceIdProjects<TData = Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError = ErrorType<Error>>(
  tid: string,
-    sid: string,
-    params?: GetApiV1TenantsTidSpacesSidProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSidProjects>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    spaceId: string,
+    params?: GetApiV1TenantsTidSpacesSpaceIdProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidSpacesSpaceIdProjects>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetApiV1TenantsTidSpacesSidProjectsQueryOptions(tid,sid,params,options)
+  const queryOptions = getGetApiV1TenantsTidSpacesSpaceIdProjectsQueryOptions(tid,spaceId,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -864,21 +1007,21 @@ export function useGetApiV1TenantsTidSpacesSidProjects<TData = Awaited<ReturnTyp
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Project collection scoped to one collaboration workspace; membership is required. Creates Project/storage/main Workspace/operation atomically. repositoryUrl allows HTTPS or SSH with no password/query/fragment. defaultBranch defaults to HEAD; credentialRefId must belong to tenant and owner. Storage/worktree/sandbox initialization is asynchronous. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
- * @summary POST /api/v1/tenants/:tid/spaces/:sid/projects
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Project collection scoped to one collaboration space; membership is required, and project visibility follows workspace membership — any active member of the space can see every active project in it. Deleting a project requires its creator or a space owner/admin. New projects created at the tenant level default into the tenant's default space. Creates Project/storage/main Workspace/operation atomically. repositoryUrl allows HTTPS or SSH with no password/query/fragment. defaultBranch defaults to HEAD; credentialRefId must belong to tenant and owner. Storage/worktree/sandbox initialization is asynchronous. A project created at the tenant level defaults into the tenant's default collaboration space; the schema keeps space_id nullable for pre-existing unscoped projects, which stay owner-only. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary POST /api/v1/tenants/:tid/spaces/:spaceId/projects
  */
-export const postApiV1TenantsTidSpacesSidProjects = (
+export const postApiV1TenantsTidSpacesSpaceIdProjects = (
     tid: string,
-    sid: string,
-    postApiV1TenantsTidSpacesSidProjectsBody: PostApiV1TenantsTidSpacesSidProjectsBody,
+    spaceId: string,
+    postApiV1TenantsTidSpacesSpaceIdProjectsBody: PostApiV1TenantsTidSpacesSpaceIdProjectsBody,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
-      return customInstance<PostApiV1TenantsTidSpacesSidProjects202>(
-      {url: `/api/v1/tenants/${tid}/spaces/${sid}/projects`, method: 'POST',
+      return customInstance<PostApiV1TenantsTidSpacesSpaceIdProjects202>(
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}/projects`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
-      data: postApiV1TenantsTidSpacesSidProjectsBody, signal
+      data: postApiV1TenantsTidSpacesSpaceIdProjectsBody, signal
     },
       options);
     }
@@ -886,13 +1029,13 @@ export const postApiV1TenantsTidSpacesSidProjects = (
 
 
 
-export const getPostApiV1TenantsTidSpacesSidProjectsMutationKey = () => ['postApiV1TenantsTidSpacesSidProjects'] as const;
+export const getPostApiV1TenantsTidSpacesSpaceIdProjectsMutationKey = () => ['postApiV1TenantsTidSpacesSpaceIdProjects'] as const;
 
-export const getPostApiV1TenantsTidSpacesSidProjectsMutationOptions = <TError = ErrorType<Error>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSidProjects>>, TError,PostApiV1TenantsTidSpacesSidProjectsMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
-): UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSidProjects>>, TError,PostApiV1TenantsTidSpacesSidProjectsMutationVariables, TContext> => {
+export const getPostApiV1TenantsTidSpacesSpaceIdProjectsMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdProjects>>, TError,PostApiV1TenantsTidSpacesSpaceIdProjectsMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdProjects>>, TError,PostApiV1TenantsTidSpacesSpaceIdProjectsMutationVariables, TContext> => {
 
-const mutationKey = getPostApiV1TenantsTidSpacesSidProjectsMutationKey();
+const mutationKey = getPostApiV1TenantsTidSpacesSpaceIdProjectsMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -902,10 +1045,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSidProjects>>, PostApiV1TenantsTidSpacesSidProjectsMutationVariables> = (props) => {
-          const {tid,sid,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdProjects>>, PostApiV1TenantsTidSpacesSpaceIdProjectsMutationVariables> = (props) => {
+          const {tid,spaceId,data} = props ?? {};
 
-          return  postApiV1TenantsTidSpacesSidProjects(tid,sid,data,requestOptions)
+          return  postApiV1TenantsTidSpacesSpaceIdProjects(tid,spaceId,data,requestOptions)
         }
 
 
@@ -915,21 +1058,21 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type PostApiV1TenantsTidSpacesSidProjectsMutationResult = NonNullable<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSidProjects>>>
-    export type PostApiV1TenantsTidSpacesSidProjectsMutationBody = PostApiV1TenantsTidSpacesSidProjectsBody
-    export type PostApiV1TenantsTidSpacesSidProjectsMutationError = ErrorType<Error>
-    export type PostApiV1TenantsTidSpacesSidProjectsMutationVariables = {tid: string;sid: string;data: PostApiV1TenantsTidSpacesSidProjectsBody}
+    export type PostApiV1TenantsTidSpacesSpaceIdProjectsMutationResult = NonNullable<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdProjects>>>
+    export type PostApiV1TenantsTidSpacesSpaceIdProjectsMutationBody = PostApiV1TenantsTidSpacesSpaceIdProjectsBody
+    export type PostApiV1TenantsTidSpacesSpaceIdProjectsMutationError = ErrorType<Error>
+    export type PostApiV1TenantsTidSpacesSpaceIdProjectsMutationVariables = {tid: string;spaceId: string;data: PostApiV1TenantsTidSpacesSpaceIdProjectsBody}
 
     /**
- * @summary POST /api/v1/tenants/:tid/spaces/:sid/projects
+ * @summary POST /api/v1/tenants/:tid/spaces/:spaceId/projects
  */
-export const usePostApiV1TenantsTidSpacesSidProjects = <TError = ErrorType<Error>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSidProjects>>, TError,PostApiV1TenantsTidSpacesSidProjectsMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+export const usePostApiV1TenantsTidSpacesSpaceIdProjects = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdProjects>>, TError,PostApiV1TenantsTidSpacesSpaceIdProjectsMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSidProjects>>,
+        Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdProjects>>,
         TError,
-        PostApiV1TenantsTidSpacesSidProjectsMutationVariables,
+        PostApiV1TenantsTidSpacesSpaceIdProjectsMutationVariables,
         TContext
       > => {
-      return useMutation(getPostApiV1TenantsTidSpacesSidProjectsMutationOptions(options), queryClient);
+      return useMutation(getPostApiV1TenantsTidSpacesSpaceIdProjectsMutationOptions(options), queryClient);
     }

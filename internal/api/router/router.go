@@ -31,6 +31,48 @@ func Routes() []Route {
 		{"POST", "/api/v1/tenants", "", []string{"name", "slug"}},
 		{"GET", "/api/v1/tenants/:tid/members", "", nil},
 		{"PUT", "/api/v1/tenants/:tid/members/:uid", "", []string{"role", "status", "version"}},
+		{"GET", "/api/v1/tenants/:tid/collaboration/targets", "", nil},
+		{"GET", "/api/v1/tenants/:tid/collaboration/forms/:formRef", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues", "", []string{"title", "description", "status", "priority", "assigneeUserId", "assigneeType", "assigneeId", "parentIssueId", "projectRef", "properties"}},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid", "", nil},
+		{"PUT", "/api/v1/tenants/:tid/issues/:iid", "", []string{"title", "description", "status", "priority", "assigneeUserId", "assigneeType", "assigneeId", "parentIssueId", "projectRef", "properties", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid", "", []string{"version"}},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/move", "", []string{"status", "beforeId", "afterId", "version"}},
+		{"GET", "/api/v1/tenants/:tid/issue-statuses", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issue-statuses", "", []string{"key", "name", "description", "category", "color", "icon"}},
+		{"PUT", "/api/v1/tenants/:tid/issue-statuses/:sid", "", []string{"name", "description", "category", "color", "icon", "position", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/issue-statuses/:sid", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/labels", "", nil},
+		{"POST", "/api/v1/tenants/:tid/labels", "", []string{"name", "color"}},
+		{"PUT", "/api/v1/tenants/:tid/labels/:lid", "", []string{"name", "color", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/labels/:lid", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/issue-views", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issue-views", "", []string{"name", "filter"}},
+		{"PUT", "/api/v1/tenants/:tid/issue-views/:vid", "", []string{"name", "filter", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/issue-views/:vid", "", []string{"version"}},
+		{"POST", "/api/v1/tenants/:tid/issues/batch", "", []string{"ids", "status", "priority", "assigneeUserId"}},
+		{"GET", "/api/v1/tenants/:tid/issue-groups", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/comments", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/comments", "", []string{"body", "parentId", "targets"}},
+		{"PUT", "/api/v1/tenants/:tid/issues/:iid/comments/:cid", "", []string{"body", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/comments/:cid", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/labels", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/labels", "", []string{"labelId"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/labels/:lid", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/subscribers", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/subscribers", "", []string{"userId"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/subscribers", "", []string{"userId"}},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/runs", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/runs", "", []string{"executorType", "executorId", "input"}},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/runs/:rid", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", []string{"refType", "refId"}},
+		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/context-refs/:crid", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/timeline", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/interactions", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/collaboration/assist", "", []string{"targetId", "values"}},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/interactions/:ixid/confirm", "", []string{"values", "contextRefs"}},
 		{"GET", "/api/v1/tenants/:tid/projects", "", nil},
 		{"POST", "/api/v1/tenants/:tid/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},
 		{"GET", "/api/v1/tenants/:tid/projects/:pid", "", nil},
@@ -48,13 +90,15 @@ func Routes() []Route {
 		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/administrative-stop", "", []string{"version"}},
 		{"GET", "/api/v1/tenants/:tid/spaces", "", nil},
 		{"POST", "/api/v1/tenants/:tid/spaces", "", []string{"name", "slug", "description"}},
-		{"GET", "/api/v1/tenants/:tid/spaces/:sid", "", nil},
-		{"PATCH", "/api/v1/tenants/:tid/spaces/:sid", "", []string{"name", "description", "version"}},
-		{"DELETE", "/api/v1/tenants/:tid/spaces/:sid", "", []string{"version"}},
-		{"GET", "/api/v1/tenants/:tid/spaces/:sid/members", "", nil},
-		{"PUT", "/api/v1/tenants/:tid/spaces/:sid/members/:uid", "", []string{"role", "status", "version"}},
-		{"GET", "/api/v1/tenants/:tid/spaces/:sid/projects", "", nil},
-		{"POST", "/api/v1/tenants/:tid/spaces/:sid/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},
+		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId", "", nil},
+		{"PATCH", "/api/v1/tenants/:tid/spaces/:spaceId", "", []string{"name", "description", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/spaces/:spaceId", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/members", "", nil},
+		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/members", "", []string{"email"}},
+		{"PUT", "/api/v1/tenants/:tid/spaces/:spaceId/members/:uid", "", []string{"role", "status", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/spaces/:spaceId/members/:uid", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/projects", "", nil},
+		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},
 		{"POST", "/internal/v1/access", "access", []string{"tenantId", "workspaceId", "action", "epoch"}},
 		{"POST", "/internal/v1/admissions", "admit", []string{"tenantId", "workspaceId", "action", "ticketId", "kind", "epoch"}},
 		{"POST", "/internal/v1/controller-lease/acquire", "lease_acquire", []string{}},
@@ -170,7 +214,7 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger) *gin.Engi
 						return
 					}
 				}
-				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), SpaceID: c.Param("sid"), OperationID: c.Param("oid"), UserID: c.Param("uid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Body: body, Identity: user})
+				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), SpaceID: c.Param("spaceId"), OperationID: c.Param("oid"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), InteractionID: c.Param("ixid"), FormRef: c.Param("formRef"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user})
 			} else {
 				out, e = store.Control(c.Request.Context(), &core.ControlRequest{Action: route.Action, OperationID: c.Param("oid"), EffectID: c.Param("eid"), TicketID: c.Param("ticket"), Body: body, Service: service, Identity: user})
 			}
@@ -185,22 +229,22 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger) *gin.Engi
 			c.JSON(status, out)
 		})
 	}
-	r.GET("/api/v1/tenants/:tid/spaces/:sid/events", func(c *gin.Context) { sseEvents(store, auth, c) })
+	r.GET("/api/v1/tenants/:tid/spaces/:spaceId/events", func(c *gin.Context) { sseEvents(store, auth, c) })
 	r.NoRoute(func(c *gin.Context) { failure(c, &core.Fault{Code: "not_found", Status: 404, Params: core.Object{}}) })
 	return r
 }
 
-// sseEvents streams committed workspace invalidation events to a verified
-// member. Authorization reuses the REST path: the caller must be able to read
-// the workspace. Events are lightweight invalidation notices; the authoritative
-// state is always fetched over REST afterwards.
+// sseEvents streams committed space invalidation events to a verified member.
+// Authorization reuses the REST path: the caller must be able to read the space.
+// Events are lightweight invalidation notices; the authoritative state is always
+// fetched over REST afterwards.
 func sseEvents(store *core.Store, auth *core.Authenticator, c *gin.Context) {
 	_, user, fault := verifyPublicCredentials(c, auth)
 	if fault != nil {
 		failure(c, fault)
 		return
 	}
-	tid, sid := c.Param("tid"), c.Param("sid")
+	tid, sid := c.Param("tid"), c.Param("spaceId")
 	out, status, e := store.Public(c.Request.Context(), &core.PublicRequest{Method: "GET", Path: "/api/v1/tenants/" + tid + "/spaces/" + sid, TenantID: tid, SpaceID: sid, Identity: user})
 	if e != nil {
 		failure(c, core.ErrorCode(e))
@@ -266,13 +310,74 @@ func bearerToken(header string) (string, bool) {
 
 func validField(name string, value any) bool {
 	switch name {
-	case "version", "epoch", "admissionEpoch", "protocolVersion", "retrySeconds":
+	case "version", "epoch", "admissionEpoch", "protocolVersion", "retrySeconds", "position":
 		n, ok := value.(json.Number)
 		if !ok {
 			return false
 		}
 		_, e := n.Int64()
 		return e == nil
+	case "ids":
+		arr, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, v := range arr {
+			if _, ok := v.(string); !ok {
+				return false
+			}
+		}
+		return true
+	case "targets":
+		arr, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, v := range arr {
+			m, ok := v.(map[string]any)
+			if !ok {
+				return false
+			}
+			for k, fv := range m {
+				switch k {
+				case "type", "id", "task":
+					if _, ok := fv.(string); !ok {
+						return false
+					}
+				default:
+					return false
+				}
+			}
+		}
+		return true
+	case "filter", "properties", "input", "values":
+		_, ok := value.(map[string]any)
+		return ok
+	case "targetId":
+		_, ok := value.(string)
+		return ok
+	case "contextRefs":
+		arr, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, v := range arr {
+			m, ok := v.(map[string]any)
+			if !ok {
+				return false
+			}
+			for k, fv := range m {
+				switch k {
+				case "refType", "refId":
+					if _, ok := fv.(string); !ok {
+						return false
+					}
+				default:
+					return false
+				}
+			}
+		}
+		return true
 	case "idle", "initialized":
 		_, ok := value.(bool)
 		return ok
