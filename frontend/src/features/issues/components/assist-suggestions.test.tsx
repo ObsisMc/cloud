@@ -32,12 +32,12 @@ function renderSuggestions(
     values: {} as FormValues,
     suggestion,
     appliedRefs: [] as ContextRefRef[],
-    onApply: vi.fn(),
-    onApplyAll: vi.fn(),
-    onIgnore: vi.fn(),
-    onApplyRef: vi.fn(),
-    onIgnoreRef: vi.fn(),
-    onDismiss: vi.fn(),
+    onApply: vi.fn<(key: string, value: unknown) => void>(),
+    onApplyAll: vi.fn<(patch: FormValues) => void>(),
+    onIgnore: vi.fn<(key: string) => void>(),
+    onApplyRef: vi.fn<(ref: ContextRefRef) => void>(),
+    onIgnoreRef: vi.fn<(ref: ContextRefRef) => void>(),
+    onDismiss: vi.fn<() => void>(),
     ...overrides,
   }
   return render(<AssistSuggestions {...props} />)
@@ -70,7 +70,7 @@ describe('AssistSuggestions', () => {
 
   it('renders non-string suggested values through the display coercion', () => {
     renderSuggestions({
-      suggestedValues: { notes: ['a', 'b'] as unknown as string },
+      suggestedValues: { notes: ['a', 'b'] },
       suggestedContextRefs: [],
     })
     // array -> joined display; number/boolean are covered by the shared display branch.
@@ -107,7 +107,7 @@ describe('AssistSuggestions', () => {
   })
 
   it('renders context refs and distinguishes applied from pending', async () => {
-    const onApplyRef = vi.fn()
+    const onApplyRef = vi.fn<(ref: ContextRefRef) => void>()
     const refs: ContextRefRef[] = [{ refType: 'project', refId: 'p1' }]
     renderSuggestions({ suggestedValues: {}, suggestedContextRefs: refs }, { onApplyRef })
     expect(screen.getByText('project')).toBeInTheDocument()

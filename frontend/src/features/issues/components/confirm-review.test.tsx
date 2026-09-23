@@ -85,7 +85,7 @@ describe('ConfirmReview', () => {
   })
 
   it('switches to the pending state', () => {
-    const onConfirm = vi.fn()
+    const onConfirm = vi.fn<() => void>()
     renderReview(EMPTY, {}, { pending: true, onConfirm })
 
     expect(screen.getByText('确认中…')).toBeInTheDocument()

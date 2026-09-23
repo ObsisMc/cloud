@@ -206,6 +206,7 @@ func (MockExecutionDispatcher) Dispatch(_ context.Context, req core.DispatchRequ
 // Execute drives one run to completion. Agent/team runs reply as a comment (queued -> dispatched ->
 // running -> reply -> completed); a workflow run reports coarse progress and a human-readable result,
 // which the Store projects as `system` activities rather than comments (§38.26).
+//
 //nolint:gocritic // value-typed dispatch request mirrors the ExecutionDispatcher port; the mock drives the observer synchronously
 func (MockExecutionDispatcher) Execute(ctx context.Context, req core.DispatchRequest, obs core.ExecutionObserver) {
 	_, _ = obs.ObserveStarted(ctx, req.TenantID, req.RunID)

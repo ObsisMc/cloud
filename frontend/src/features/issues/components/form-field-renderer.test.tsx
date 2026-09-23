@@ -19,7 +19,7 @@ describe('FormFieldRenderer', () => {
   })
 
   it('renders a number input and coerces its change to a number or null', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(next: unknown) => void>()
     render(<FormFieldRenderer field={field({ type: 'number' })} value={7} onChange={onChange} />)
     const input = screen.getByRole('spinbutton')
 
@@ -45,13 +45,9 @@ describe('FormFieldRenderer', () => {
   })
 
   it('renders an unknown type as a plain text input rather than guessing', () => {
-    render(
-      <FormFieldRenderer
-        field={field({ type: 'unknown' as FormField['type'] })}
-        value={{}}
-        onChange={() => {}}
-      />,
-    )
+    // @ts-expect-error — an out-of-union type exercises the defensive fallback renderer
+    const unknownField = field({ type: 'unknown' })
+    render(<FormFieldRenderer field={unknownField} value={{}} onChange={() => {}} />)
     // Non-string, non-number values are coerced to an empty string.
     expect(screen.getByRole('textbox')).toHaveValue('')
   })
@@ -74,7 +70,7 @@ describe('FormFieldRenderer', () => {
   })
 
   it('renders multi_select checkboxes and toggles membership', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(next: unknown) => void>()
     render(
       <FormFieldRenderer
         field={field({
@@ -92,7 +88,9 @@ describe('FormFieldRenderer', () => {
     expect(boxes[0]).toBeChecked()
     expect(boxes[1]).not.toBeChecked()
 
-    fireEvent.click(boxes[1])
+    const second = boxes[1]
+    if (!second) throw new Error('multi_select must render a second checkbox')
+    fireEvent.click(second)
     expect(onChange).toHaveBeenCalledWith(['a', 'b'])
   })
 
@@ -130,7 +128,7 @@ describe('FormFieldRenderer', () => {
   })
 
   it('removes an option when its checkbox is unchecked', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(next: unknown) => void>()
     render(
       <FormFieldRenderer
         field={field({
@@ -144,7 +142,9 @@ describe('FormFieldRenderer', () => {
         onChange={onChange}
       />,
     )
-    fireEvent.click(screen.getAllByRole('checkbox')[0])
+    const first = screen.getAllByRole('checkbox')[0]
+    if (!first) throw new Error('multi_select must render a checkbox')
+    fireEvent.click(first)
     expect(onChange).toHaveBeenCalledWith(['b'])
   })
 
