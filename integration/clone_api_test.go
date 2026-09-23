@@ -83,6 +83,14 @@ func TestPublicClonesAcceptOnceAndReflectExecutionFacts(t *testing.T) {
 	} {
 		f.call("POST", f.path("/clones"), bad, "bad-"+strconv.Itoa(i), 400)
 	}
+	// The branch reaches Git verbatim: whitespace that validRef would trim, and inner tabs or control
+	// characters, are refused at acceptance instead of blocking the Controller's queue head.
+	for i, branch := range []string{" main", "main ", "main\n", "ma\tin", "ma\x7fin", " main"} {
+		bad := core.Object{"requestId": uuid.NewString(), "repository": body.S("repository"), "branch": branch}
+		if fault := f.call("POST", f.path("/clones"), bad, "bad-branch-"+strconv.Itoa(i), 400); fault.S("code") != "invalid_ref" {
+			t.Fatalf("branch %q: want invalid_ref, got %v", branch, fault)
+		}
+	}
 
 	// Reads: the list and the single view agree with the accepted view; unknown ids are absent.
 	list := f.call("GET", f.path("/clones"), nil, "", 200)

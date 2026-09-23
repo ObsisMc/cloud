@@ -50,7 +50,7 @@ func enqueueClone(t *transaction, tenantID, userID, requestID, repositoryURL, br
 // not accept what no Controller can dispatch: such a request would sit queued forever with no
 // terminal fact, and the caller would read that as "awaiting reconciliation" rather than failure.
 func validCloneSource(repository, branch string) {
-	require(repository != "" && len(repository) <= 2000 && !strings.ContainsAny(repository, "\\") && strings.IndexFunc(repository, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0, 400, "invalid_repository_url")
+	require(repository != "" && len(repository) <= 2000 && !strings.ContainsAny(repository, "\\") && !hasSpaceOrControl(repository), 400, "invalid_repository_url")
 	scheme, rest, ok := strings.Cut(repository, "://")
 	require(ok && (scheme == "https" || scheme == "ssh") && !strings.HasPrefix(rest, "/"), 400, "invalid_repository_url")
 	parsed, e := url.Parse(repository)
@@ -61,11 +61,22 @@ func validCloneSource(repository, branch string) {
 		require(scheme == "ssh" && i > 0 && !strings.Contains(authority[:i], ":"), 400, "invalid_repository_url")
 	}
 	require(branch != "HEAD", 400, "invalid_ref")
+	// validRef judges the trimmed text, but the branch is stored and handed to Git verbatim. A
+	// surrounding space or an inner tab or control character would pass here and be refused by the
+	// Controller; ClaimWork keeps returning the oldest queued request, so that one refusal would
+	// stall every clone queued behind it.
+	require(!hasSpaceOrControl(branch), 400, "invalid_ref")
 	validRef(branch)
 	require(!strings.HasPrefix(branch, "refs/") && !strings.HasPrefix(branch, "/") && !strings.HasSuffix(branch, "/") && !strings.Contains(branch, "//") && !strings.HasSuffix(branch, ".") && branch != "@", 400, "invalid_ref")
 	for component := range strings.SplitSeq(branch, "/") {
 		require(!strings.HasPrefix(component, ".") && !strings.HasSuffix(component, ".lock"), 400, "invalid_ref")
 	}
+}
+
+// hasSpaceOrControl reports any Unicode space or control character, which Git never receives from
+// a clone source: the text is passed verbatim, so nothing is trimmed on its behalf.
+func hasSpaceOrControl(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0
 }
 
 // cloneQuery joins each request with its at-most-one execution; the LEFT JOIN keeps queued
