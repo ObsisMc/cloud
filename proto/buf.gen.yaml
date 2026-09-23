@@ -1,0 +1,27 @@
+# Go server/client code for the internal control contract is committed under internal/controlpb;
+# `task proto:check` regenerates and fails on drift. Plugin versions are pinned so regeneration is
+# reproducible across machines and CI. The contract carries no go_package on purpose: each consumer
+# decides its own import path in managed mode, and every file lands in one flat Go package.
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package
+      path: ora/cloud/internal/v1/errors.proto
+      value: github.com/wanglongan587/cloud/internal/controlpb;controlpb
+    - file_option: go_package
+      path: ora/cloud/internal/v1/lease.proto
+      value: github.com/wanglongan587/cloud/internal/controlpb;controlpb
+    - file_option: go_package
+      path: ora/cloud/internal/v1/executions.proto
+      value: github.com/wanglongan587/cloud/internal/controlpb;controlpb
+    - file_option: go_package
+      path: ora/cloud/internal/v1/signals.proto
+      value: github.com/wanglongan587/cloud/internal/controlpb;controlpb
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.11
+    out: ..
+    opt: module=github.com/wanglongan587/cloud
+  - remote: buf.build/grpc/go:v1.5.1
+    out: ..
+    opt: module=github.com/wanglongan587/cloud

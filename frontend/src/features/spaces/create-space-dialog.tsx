@@ -9,8 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useCreateSpace } from '@/features/spaces/api'
-
-const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
+import { isValidSlug } from '@/features/spaces/slug'
 
 /**
  * Form fields for creating a collaboration space. The slug is normalized to
@@ -28,7 +27,7 @@ function CreateSpaceFields({
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
   const [description, setDescription] = useState('')
-  const slugValid = slug === '' || SLUG_PATTERN.test(slug)
+  const slugValid = slug === '' || isValidSlug(slug)
   const submittable = name.trim() !== '' && slugValid && !pending
 
   return (
@@ -94,7 +93,7 @@ export function CreateSpaceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>新建空间</DialogTitle>
+          <DialogTitle>新建工作区</DialogTitle>
           <DialogDescription>创建后你自动成为所有者（owner）。</DialogDescription>
         </DialogHeader>
         <CreateSpaceFields

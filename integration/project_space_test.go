@@ -99,15 +99,16 @@ func TestProjectSpaceScopingAndSharing(t *testing.T) {
 	}
 }
 
-// TestProjectSpaceOptionalScope covers D2: a Space is an optional grouping. The
-// tenant-level creation path never depends on a default space and leaves
-// space_id NULL, while the space-scoped path records the space.
-func TestProjectSpaceOptionalScope(t *testing.T) {
+// TestProjectSpaceDefaultScope covers the hybrid project model (D2): a project
+// created at the tenant level defaults into the tenant's default collaboration
+// space, while the space-scoped path records the given space. The schema keeps
+// space_id nullable for pre-existing unscoped projects, which stay owner-only.
+func TestProjectSpaceDefaultScope(t *testing.T) {
 	f := setup(t)
-	// Tenant-level project has no space, even though the bootstrap default space exists.
+	// Tenant-level project defaults into the bootstrap default space.
 	unscoped := f.call("POST", f.path("/projects"), core.Object{"name": "Unscoped", "repositoryUrl": "https://example.invalid/repo.git", "defaultBranch": "main"}, "unscoped", 202)
-	if unscoped.O("resource").S("spaceId") != "" {
-		t.Fatalf("tenant-level project should have no spaceId: %v", unscoped)
+	if unscoped.O("resource").S("spaceId") == "" {
+		t.Fatalf("tenant-level project should default into the default space: %v", unscoped)
 	}
 	// A space-scoped project records its space.
 	space := f.createSpace("Scoped", "scoped", "space-scoped")

@@ -49,6 +49,14 @@ bcrypt / JWT 认证 / OAuth / SSO。
    `CloudRegisterForm`（姓名 + 邮箱 + 本地可见校验「请输入姓名。」/「请输入有效的邮箱地址。」 +
    后端 `409` →「该邮箱已经注册。」；提交成功 → `/default/projects`）。注册表单 `noValidate`
    使自定义校验接管（不被浏览器原生约束吞掉）。
+
+> **合并后差异（922GithubAuth ← main）**：此前端注册 UI 在合并 main 的 gateway-会话架构时**被移除**。
+> 合并后的 `login-page.tsx` 是 main 的 provider-button 形态（`SessionProvider`/`useSession`，无 register
+> 模式）；`POST /auth/register` 仅保留为 **ora-web 开发边界 API**（`cmd/ora-web/main.go`，浏览器通过
+> 该边界注册仍是 register-only 的 dev identity 路径）。SD4「跳 `/default/projects`」的路由也随之失效
+> （合并后为 `/onboarding` + `/w/:workspaceSlug`）。合并后的开发拓扑是**双入口**：ora-web :8080 为
+> DEV-only 本地演示边界（email login/register + 进程内 API 代理 + 托管构建后 SPA），gateway :8081 为
+> 生产规范入口（provider 协议 `/auth/providers`、GitHub/dev login）。浏览器侧合并前端走 gateway 协议。
 4. **测试**（见 §3）。
 
 ## 3. 验证

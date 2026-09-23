@@ -38,7 +38,7 @@ docs/
   execution-contract.md         ← execution/operations contract (pre-existing)
 ```
 
-**Integration stages.** **Stage A** = upstream main alignment (`origin/main` → `workspace合并`). **Stage B** = Collaboration Space integration + the D1–D7 ADR. **Stage C** = final integration review (a review phase; its record is not yet a repo document). **Stage D** = coworker Login + Workspace UX restoration (SD1–SD7), a product correction that restores the coworker's product shell on top of the merged Space backend — **COMPLETE** (commits `c4a7510`…`c570b9e`, branch `workspace合并`; `main` stays `1c5b9b4`, not merged/pushed).
+**Integration stages.** **Stage A** = upstream main alignment (`origin/main` → `workspace合并`). **Stage B** = Collaboration Space integration + the D1–D7 ADR. **Stage C** = final integration review (a review phase; its record is not yet a repo document). **Stage D** = coworker Login + Workspace UX restoration (SD1–SD7), a product correction that restores the coworker's product shell on top of the merged Space backend — **COMPLETE** (commits `c4a7510`…`c570b9e`, branch `workspace合并`; `main` stays `1c5b9b4`, not merged/pushed at the time). **922GithubAuth ← main（2026-09-23）** = feature 分支 `922GithubAuth` 合并 main 的 gateway-会话架构（`SessionProvider`/`/w/:slug`/`/onboarding`），删除 feature zustand 商店，保留 Step 3A 前端能力；开发拓扑双入口（ora-web :8080 + gateway :8081）；项目模型混合 optional-space。**未 commit，留人工评审**（HEAD 冻结于 `25aa56f`，main 为 MERGE_HEAD `96451c0`）。
 
 ## Source of truth (one doc per topic)
 
@@ -106,8 +106,9 @@ docs/
   uniqueness (`Alice@Example.com` == `alice@example.com`), stable `409 user_already_exists`,
   and register mode in the existing Login page → new user enters the current-user flow directly.
   Registration is **account creation only** — AUTHENTICATION not fully implemented,
-  PROJECT SHARING not implemented (see
-  [user-registration.md](migrations/user-registration.md)).
+  PROJECT SHARING not implemented. **922GithubAuth 合并 main 后**：前端 Login 页改为 gateway
+  provider-button 形态（`SessionProvider`），**register 模式从前端移除**；`POST /auth/register` 仅保留为
+  ora-web 开发边界 API（见 [user-registration.md](migrations/user-registration.md) 合并注记）。
 - ✅ **Workspace Add Member** — owner/admin adds an already-registered user to a Collaboration Space by
   email (`POST /spaces/:sid/members`, SD1–SD6): atomic tenant+space enrollment in one tx (no
   half-state), fixed `member` role, idempotent existing-member return, 404 `user_not_registered` for
@@ -135,8 +136,15 @@ docs/
   the member API (any ownership transfer → 409 `ownership_transfer_not_supported`), and removal is an
   **owner-only hard delete** (`DELETE /members/:uid`, 409 `cannot_remove_workspace_owner`) that removes
   workspace membership alone — the user account, tenant membership, and created resources remain.
-  Project delete UI now matches the backend (`creator OR owner/admin`). (see
-  [workspace-member-management.md](migrations/workspace-member-management.md)).
+  Project delete UI now matches the backend (`creator OR owner/admin`). **922GithubAuth 合并 main 后**
+  onboarding 为独立路由 `/onboarding`（`OnboardingPage`，`useCreateTenant`/`useCreateSpace`），当前用户
+  身份来自 `useSession()`（`useAuthStore` 已删除），Step 3A 前端能力保留（见
+  [workspace-member-management.md](migrations/workspace-member-management.md)）。
+- ✅ **922GithubAuth ← main 会话架构合入** — feature 分支合并 main 的 gateway-会话架构（未 commit，留
+  人工评审）：`SessionProvider`/`useSession`/`RequireSession` + `/onboarding` + `/w/:workspaceSlug` 路由；
+  删除 feature 的 zustand 商店；保留 Step 3A 前端能力（members owner-immutable、`canDeleteProject`、
+  issues 接真实后端）。开发拓扑 = **双入口**（ora-web :8080 DEV-only 本地演示 + gateway :8081 生产
+  规范）；项目模型 = **混合/optional space**（`space_id` 可空 + 默认空间，保留 `0012`）。
 - 🧭 Planned — **Wave 3C** (Issue Detail & Collaboration UI). Real Agent/Team/Workflow modules are
   **blocked on external design**.
 - ⏸️ Deferred: attachments, issue↔project binding, PR links, realtime, bots/squads, Autopilot.
@@ -144,11 +152,13 @@ docs/
 ## ⚠️ Repository governance follow-up (unresolved)
 
 `AGENTS.md` states that `specs/` is an independent Git repository reachable via `git -C specs`, and the
-ADR-first rule requires an approved ADR before coding. **In the current working copy that does not
-hold**: `cloud/specs` does not exist, `mor/specs` has no `.git`, and `mor/.gitignore` ignores `/specs/`
-— so the ADR deliverable has **no version-controlled home**. Recorded by Wave 3B-0; **not** fixed
-(no `git init`, no `.gitignore` change, no restructuring). It needs an owner decision before the next
-ADR is written.
+ADR-first rule requires an approved ADR before coding. **现状（2026-09-23 更新）**：`mor/specs` **已是**独立
+git 仓库 —— `ora-space/specs.git` 的 clone（origin `https://github.com/ora-space/specs.git`，HEAD `d3f55df`，
+工作树干净）。Step 3A 及此前在 mor 父仓库 HEAD 中撰写的 Cloud ADR（`decisions/cloud/collaboration-workspace/*`、
+`decisions/cloud/identity-access/0-user-registration.md`）及其 test-case mirrors 已按 blob 原样恢复进嵌套
+specs 工作树（**未 commit**），使迁移文档中的 ADR 引用可解析、ADR 交付物重新有版本控制归宿。**遗留治理决策
+仍待 owner**：是否把这些 Cloud ADR 提交进 `ora-space/specs.git` 上游；以及 mor 父仓库是否继续在自己的
+index 中跟踪 specs 文件（当前与嵌套 clone 已分叉）—— 未做任何结构调整。
 
 ## Golden rules (both audiences)
 

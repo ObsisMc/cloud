@@ -47,10 +47,10 @@ function renderIssueDetail(issueId: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const router = createMemoryRouter(
     [
-      { path: '/:workspaceSlug/issues', element: <div>Issues list screen</div> },
-      { path: '/:workspaceSlug/issues/:issueId', element: <IssueDetailPage slug="t1" /> },
+      { path: '/w/:workspaceSlug/issues', element: <div>Issues list screen</div> },
+      { path: '/w/:workspaceSlug/issues/:issueId', element: <IssueDetailPage slug="t1" /> },
     ],
-    { initialEntries: [`/t1/issues/${issueId}`] },
+    { initialEntries: [`/w/t1/issues/${issueId}`] },
   )
   return render(
     <QueryClientProvider client={queryClient}>

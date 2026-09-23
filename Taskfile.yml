@@ -1,4 +1,8 @@
 version: '3'
+# `task setup` (cmd/devsetup) renders config.toml into this file: CLOUD_*/GATEWAY_* overrides for the
+# services plus TEST_DATABASE_URL for the test tasks. Missing file: nothing is loaded; shell
+# environment always wins over it.
+dotenv: ['.local/dev.env']
 tasks:
   default:
     cmds: [task --list]
@@ -35,19 +39,34 @@ tasks:
     cmds:
       - task: format:check
       - task: lint
+      - task: proto:lint
+      - task: proto:check
       - task: test
   build:
     cmds:
-      - go build -o bin/ ./cmd/server ./cmd/gateway ./cmd/cloudctl ./cmd/simulator
+      - go build -o bin/ ./cmd/server ./cmd/gateway ./cmd/cloudctl ./cmd/simulator ./cmd/devsetup
   run:
     desc: Go API server on :8080
     cmds: [go run ./cmd/server]
   run:gateway:
     desc: Authentication gateway on :8081, proxying /api/v1 to the Go server; see docs/gateway.md
+    preconditions:
+      - sh: test -f .local/dev.env
+        msg: 'No .local/dev.env yet: copy config.toml.template to config.toml, fill it in, then run `task setup`'
     cmds: [go run ./cmd/gateway]
+  setup:
+    desc: 'Local setup from config.toml (copy config.toml.template): keys, GitHub secret file, .local/dev.env, migrations; rerunnable'
+    cmds: [go run ./cmd/devsetup]
   dev:
-    desc: Go API server and Vite dev server together; open http://localhost:5173
-    deps: [run, frontend:dev]
+    desc: Go API server, authentication gateway and Vite dev server together; open http://localhost:5173
+    preconditions:
+      - sh: test -f .local/dev.env
+        msg: 'No .local/dev.env yet: copy config.toml.template to config.toml, fill it in, then run `task setup`'
+    cmds:
+      - task: dev:services
+  dev:services:
+    internal: true
+    deps: [run, run:gateway, frontend:dev]
   migrate:
     cmds: [go run ./cmd/cloudctl -command migrate]
   simulate:
@@ -55,11 +74,37 @@ tasks:
     cmds: [go run ./cmd/simulator]
   openapi:
     cmds: [go run ./cmd/openapi]
+  proto:lint:
+    desc: Lint the Controller-facing internal control contract under proto/ (STANDARD rules)
+    dir: proto
+    cmds: [buf lint]
+  proto:breaking:
+    desc: Reject breaking changes to the contract against PROTO_BASE_REF (default main); v1 is additive only
+    dir: proto
+    vars:
+      PROTO_BASE_REF: '{{.PROTO_BASE_REF | default "main"}}'
+    cmds:
+      # The first contract commit has no base to compare with; only an existing base module counts.
+      - |
+        if git -C .. cat-file -e "{{.PROTO_BASE_REF}}:proto/buf.yaml" 2>/dev/null; then
+          buf breaking --against "../.git#ref={{.PROTO_BASE_REF}},subdir=proto"
+        else
+          echo "no contract on {{.PROTO_BASE_REF}}; nothing to compare"
+        fi
+  proto:generate:
+    desc: Regenerate internal/controlpb from proto/ (needs buf and network for the pinned remote plugins)
+    dir: proto
+    cmds: [buf generate]
+  proto:check:
+    desc: Fail when the committed internal/controlpb drifts from proto/
+    cmds:
+      - task: proto:generate
+      - git diff --exit-code -- internal/controlpb
   frontend:install:
     desc: Install frontend dependencies from package-lock.json
     cmds: [npm --prefix frontend ci]
   frontend:dev:
-    desc: Vite dev server on :5173, proxying /api, /internal and /healthz to the Go server on :8080
+    desc: Vite dev server on :5173, proxying /auth, /api and /healthz to the gateway on :8081
     deps: [frontend:install]
     cmds: [npm --prefix frontend run dev]
   frontend:generate:

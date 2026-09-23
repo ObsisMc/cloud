@@ -35,9 +35,10 @@ type Options struct {
 // Route paths of the authentication boundary. Everything under /api/v1 is proxied; /internal/v1
 // deliberately has no route and falls through to 404.
 const (
-	LoginPath  = "/auth/login"
-	LogoutPath = "/auth/logout"
-	ProxyPath  = "/api/v1/*path"
+	LoginPath     = "/auth/login"
+	LogoutPath    = "/auth/logout"
+	ProvidersPath = "/auth/providers"
+	ProxyPath     = "/api/v1/*path"
 	// maxBodyBytes matches Cloud's request body limit so the Gateway never relays more than Cloud accepts.
 	maxBodyBytes = 64 << 10
 )
@@ -69,6 +70,7 @@ func NewHandler(o *Options) (*gin.Engine, error) {
 	r := gin.New()
 	r.Use(h.recovery)
 	r.GET("/healthz", h.health)
+	r.GET(ProvidersPath, h.providers)
 	r.POST(LoginPath, h.login)
 	r.GET(o.Cookies.CallbackPath+"/:provider", h.callback)
 	r.POST(LogoutPath, h.logout)
@@ -117,6 +119,13 @@ func clientKey(r *http.Request) string {
 type loginRequest struct {
 	Provider string `json:"provider"`
 	ReturnTo string `json:"returnTo"`
+}
+
+// providers names the logins this deployment offers and which one a start request without a
+// provider uses. It reveals nothing beyond what the sign-in screen must show and takes no input,
+// so it needs no origin proof.
+func (h *handler) providers(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"providers": h.Login.Providers(), "default": h.Login.DefaultProvider()})
 }
 
 // login starts an external login. It is a same-origin JSON POST so it cannot be triggered by a
@@ -236,8 +245,12 @@ func (h *handler) relay(c *gin.Context) {
 		h.fail(c, fault{"request_too_large", http.StatusRequestEntityTooLarge})
 		return
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), h.UpstreamTimeout)
+	// The upstream timeout bounds a whole bounded exchange. It is a stoppable timer rather than a
+	// context deadline so an authorized event stream can outlive it once Cloud has answered.
+	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
+	deadline := time.AfterFunc(h.UpstreamTimeout, cancel)
+	defer deadline.Stop()
 	out := c.Request.Clone(ctx)
 	out.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
 	for _, name := range []string{"Authorization", "X-Ora-User-Token", "Cookie", "Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-Ip"} {
@@ -248,6 +261,14 @@ func (h *handler) relay(c *gin.Context) {
 	h.proxy.ServeHTTP(c.Writer, out, func(err error) {
 		h.Log.Warn("upstream failure", zap.String("requestId", c.GetString("requestId")), zap.String("sessionId", session.ID), zap.Error(err))
 		h.fail(c, fault{"upstream_unavailable", http.StatusBadGateway})
+	}, func() {
+		// An event stream outlives the upstream and write timeouts by design; they guard against
+		// slow bounded exchanges, not against subscriptions. Lifting them is per-connection and
+		// happens only after Cloud has authorized the stream.
+		deadline.Stop()
+		if e := http.NewResponseController(c.Writer).SetWriteDeadline(time.Time{}); e != nil {
+			h.Log.Warn("event stream keeps write deadline", zap.String("requestId", c.GetString("requestId")), zap.String("sessionId", session.ID), zap.Error(e))
+		}
 	})
 }
 

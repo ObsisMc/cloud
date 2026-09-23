@@ -18,8 +18,8 @@ type PublicRequest struct {
 }
 
 // Public executes one authorized public request in a short database transaction.
-// Committed collaboration-space mutations are broadcast to live subscribers after
-// the transaction succeeds, never before.
+// Committed collaboration-space mutations are broadcast to live space subscribers
+// after the transaction succeeds, never before.
 func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, error) {
 	status := 200
 	var dispatches []dispatchTarget
@@ -31,7 +31,19 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 			return u
 		}
 		if r.Path == "/api/v1/me/tenants" {
-			return page(t, "SELECT t.id,t.name,t.status,m.role FROM tenants t JOIN tenant_memberships m ON m.tenant_id=t.id WHERE m.user_id=$1 AND m.status='active' AND t.status='active' AND t.deleted_at IS NULL", []any{uid}, "t.id", r)
+			// Creation order makes `items[0]` the member's earliest tenant: the product
+			// treats that one as the implicit workspace container, and a member of several
+			// tenants must not see an arbitrary one first. pageByCreation keeps the cursor
+			// an opaque tenant UUID, so the published pagination contract is unchanged.
+			return pageByCreation(t, "SELECT t.id,t.name,t.status,m.role FROM tenants t JOIN tenant_memberships m ON m.tenant_id=t.id WHERE m.user_id=$1 AND m.status='active' AND t.status='active' AND t.deleted_at IS NULL", []any{uid}, r)
+		}
+		if r.Path == "/api/v1/tenants" {
+			// Tenant provisioning is the one mutation with no tenant scope to
+			// check membership against: the caller's verified identity is the
+			// whole authorization.
+			var out Object
+			out, status = createTenant(t, r, uid)
+			return out
 		}
 		isAdmin := r.SpaceID == "" && (strings.HasSuffix(r.Path, "/resource-status") || strings.HasSuffix(r.Path, "/administrative-stop") || (r.UserID != "" && r.Method == "PUT") || strings.HasSuffix(r.Path, "/members"))
 		membership(t, r.TenantID, uid, isAdmin)
@@ -77,6 +89,7 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 		case r.ProjectID == "" && r.WorkspaceID == "" && r.OperationID == "" && strings.HasSuffix(r.Path, "/projects") && r.Method == "POST":
 			out = createProject(t, r, uid, hash)
 			status = 202
+			events = append(events, SpaceEvent{Type: "project.created", SpaceID: out.O("resource").S("spaceId"), ProjectID: out.O("resource").S("id")})
 		case r.OperationID != "":
 			out = retryOperation(t, r, uid)
 			status = 202
@@ -124,7 +137,7 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				t.exec("UPDATE projects SET lifecycle='deleting',version=version+1 WHERE id=$1", p.S("id"))
 				req := Object{"previous": previous}
 				op := newOperation(t, r, uid, p.S("id"), "", "delete_project", "quiesce", hash, req)
-				out = Object{"resource": project(t, r.TenantID, uid, p.S("id")), "operation": op}
+				out = Object{"resource": t.one("SELECT * FROM projects WHERE id=$1", p.S("id")), "operation": op}
 				status = 202
 				if p.S("spaceId") != "" {
 					events = append(events, SpaceEvent{Type: "project.archived", SpaceID: p.S("spaceId"), ProjectID: p.S("id")})
@@ -254,18 +267,38 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 }
 
 func page(t *transaction, q string, args []any, col string, r *PublicRequest) Object {
-	limit := r.Limit
-	if limit == 0 {
-		limit = 50
-	}
-	require(limit > 0 && limit <= 100, 400, "invalid_pagination")
 	if r.After != "" {
 		require(validID(r.After), 400, "invalid_cursor")
 		args = append(args, r.After)
 		q += " AND " + col + " > $" + itoa(len(args)) + "::uuid"
 	}
+	return window(t, q+" ORDER BY "+col, args, r)
+}
+
+// pageByCreation pages a member-facing list in ascending creation order with the
+// row UUID as the tiebreaker. Unlike page the ordering column is not unique, so
+// the cursor predicate resolves the anchor row's created_at from the tenants
+// table instead of comparing the UUID alone; the public cursor therefore stays
+// an opaque tenant UUID. An anchor row that no longer exists compares as NULL,
+// which ends the walk with an empty page rather than skipping or repeating rows.
+func pageByCreation(t *transaction, q string, args []any, r *PublicRequest) Object {
+	if r.After != "" {
+		require(validID(r.After), 400, "invalid_cursor")
+		args = append(args, r.After)
+		q += " AND (t.created_at, t.id) > ((SELECT a.created_at FROM tenants a WHERE a.id=$" + itoa(len(args)) + "::uuid), $" + itoa(len(args)) + "::uuid)"
+	}
+	return window(t, q+" ORDER BY t.created_at, t.id", args, r)
+}
+
+// window applies the bounded limit, runs the query and reports the next cursor.
+func window(t *transaction, q string, args []any, r *PublicRequest) Object {
+	limit := r.Limit
+	if limit == 0 {
+		limit = 50
+	}
+	require(limit > 0 && limit <= 100, 400, "invalid_pagination")
 	args = append(args, limit+1)
-	q += " ORDER BY " + col + " LIMIT $" + itoa(len(args))
+	q += " LIMIT $" + itoa(len(args))
 	items := t.list(q, args...)
 	next := ""
 	if len(items) > limit {
@@ -349,6 +382,9 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 		}
 		return p
 	default:
+		// Tenant-level project list keeps its owner filter (project workspace-sharing
+		// migration): space membership already gates the space-scoped view, and the
+		// tenant view never crosses into shared projects the caller does not own.
 		return page(t, "SELECT * FROM projects WHERE tenant_id=$1 AND owner_user_id=$2 AND deleted_at IS NULL", []any{r.TenantID, uid}, "id", r)
 	}
 }
@@ -370,8 +406,9 @@ func putMember(t *transaction, r *PublicRequest, uid string) Object {
 		t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,$3,$4)", r.TenantID, r.UserID, role, status)
 		// Space-level convenience: a new tenant member also joins the default
 		// collaboration space — admins as owners, members as members — mirroring the
-		// mapping migration 0012 seeded for pre-existing members. This never widens
-		// Project or Runtime Workspace visibility (current owner-based authorization).
+		// mapping migration 0011 seeded for pre-existing members. Space membership is
+		// the sharing boundary only for projects scoped to that space; unscoped
+		// projects stay owner-only.
 		if dw := t.one("SELECT id FROM collab_workspaces WHERE tenant_id=$1 AND slug='default' AND archived_at IS NULL", r.TenantID); dw != nil {
 			spaceRole := "member"
 			if role == "admin" {
@@ -396,14 +433,15 @@ func validRef(s string) string {
 }
 
 func createProject(t *transaction, r *PublicRequest, uid, hash string) Object {
-	// Space is optional. The tenant-level path leaves space_id NULL; the
-	// space-scoped path (SpaceID set) requires active membership in that space and
-	// persists the space_id. Neither path grants any widened visibility (current
-	// owner-based authorization).
-	var spaceID any
-	if r.SpaceID != "" {
-		spaceMember(t, r.SpaceID, uid)
-		spaceID = r.SpaceID
+	// Space is optional at the schema level (projects.space_id is nullable, so
+	// pre-existing unscoped projects keep owner-only access). New projects default
+	// into the tenant's default collaboration space; the space-scoped path
+	// requires active membership in that space.
+	spaceID := r.SpaceID
+	if spaceID == "" {
+		spaceID = defaultSpace(t, r.TenantID).S("id")
+	} else {
+		spaceMember(t, spaceID, uid)
 	}
 	name := validText(r.Body.S("name"), 200)
 	repo := validText(r.Body.S("repositoryUrl"), 2048)
@@ -429,7 +467,7 @@ func createProject(t *transaction, r *PublicRequest, uid, hash string) Object {
 	t.exec("INSERT INTO project_storage(project_id,observed_state) VALUES($1,'pending')", pid)
 	insertWorkspace(t, r.TenantID, uid, pid, wid, "main", branch, "")
 	op := newOperation(t, r, uid, pid, wid, "create_project", "storage", hash, Object{})
-	return Object{"resource": project(t, r.TenantID, uid, pid), "workspace": workspace(t, r.TenantID, uid, wid, false), "operation": op}
+	return Object{"resource": t.one("SELECT * FROM projects WHERE id=$1", pid), "workspace": t.one("SELECT * FROM workspaces WHERE id=$1", wid), "operation": op}
 }
 
 func insertWorkspace(t *transaction, tid, uid, pid, wid, kind, ref, title string) {

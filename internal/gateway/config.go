@@ -16,9 +16,17 @@ import (
 // The database enforces the same ceiling in gateway_sessions.
 const (
 	DefaultSessionLifetime = 30 * 24 * time.Hour
-	MaxSessionLifetime     = 90 * 24 * time.Hour
+	// DefaultIDaaSSessionLifetime bounds the window in which a changed corporate account state is
+	// not rechecked by IDaaS. Cloud-side user disable and session revocation remain immediate.
+	DefaultIDaaSSessionLifetime = 12 * time.Hour
+	MaxSessionLifetime          = 90 * 24 * time.Hour
 	// CallbackPath is the fixed OAuth callback route under the public base URL.
 	CallbackPath = "/auth/callback"
+	// ProviderGitHub and ProviderHuaweiIDaaS are the supported external login providers;
+	// ProviderDevelopment is the loopback-only adapter registered by login.development_provider.
+	ProviderGitHub      = "github"
+	ProviderHuaweiIDaaS = "huawei-idaas"
+	ProviderDevelopment = "dev"
 )
 
 // Config is the complete Gateway process configuration. Secrets are referenced by file path and
@@ -33,6 +41,7 @@ type Config struct {
 	Cloud    CloudConfig           `mapstructure:"cloud"`
 	Tokens   TokenConfig           `mapstructure:"tokens"`
 	GitHub   GitHubConfig          `mapstructure:"github"`
+	IDaaS    IDaaSConfig           `mapstructure:"idaas"`
 }
 
 // PublicConfig fixes the origin browsers see. The callback URL is derived from it, never from
@@ -51,11 +60,20 @@ type SessionConfig struct {
 }
 
 // LoginConfig bounds login attempts and the unauthenticated start/callback rate.
+//
+// Provider names the external identity provider of this deployment (ProviderGitHub or
+// ProviderHuaweiIDaaS); it is the default for POST /auth/login and decides the session lifetime
+// default. Only its secret is read. DevelopmentProvider additionally registers the "dev" adapter
+// (internal/gateway/devlogin), which lets a developer type any identity; it is only accepted
+// together with public.development, and with it Provider may be left empty for a dev-only
+// Gateway.
 type LoginConfig struct {
-	AttemptTTL         time.Duration `mapstructure:"attempt_ttl"`
-	RateLimitPerMinute int           `mapstructure:"rate_limit_per_minute"`
-	RateLimitBurst     int           `mapstructure:"rate_limit_burst"`
-	PKCEKeyFile        string        `mapstructure:"pkce_key_file"`
+	Provider            string        `mapstructure:"provider"`
+	AttemptTTL          time.Duration `mapstructure:"attempt_ttl"`
+	RateLimitPerMinute  int           `mapstructure:"rate_limit_per_minute"`
+	RateLimitBurst      int           `mapstructure:"rate_limit_burst"`
+	PKCEKeyFile         string        `mapstructure:"pkce_key_file"`
+	DevelopmentProvider bool          `mapstructure:"development_provider"`
 }
 
 // CloudConfig names the single fixed upstream; requests can never select another.
@@ -76,8 +94,8 @@ type TokenConfig struct {
 	Lifetime              time.Duration `mapstructure:"lifetime"`
 }
 
-// GitHubConfig configures the first adapter. Endpoint overrides exist for GitHub Enterprise Server
-// and tests; the client secret is read from a file.
+// GitHubConfig configures the GitHub adapter; an empty client_id leaves it unregistered. Endpoint
+// overrides exist for GitHub Enterprise Server and tests; the client secret is read from a file.
 type GitHubConfig struct {
 	ClientID         string `mapstructure:"client_id"`
 	ClientSecretFile string `mapstructure:"client_secret_file"`
@@ -85,6 +103,17 @@ type GitHubConfig struct {
 	TokenURL         string `mapstructure:"token_url"`
 	UserURL          string `mapstructure:"user_url"`
 	Source           string `mapstructure:"source"`
+}
+
+// IDaaSConfig configures the Huawei corporate provider. The identity source and endpoint paths are
+// fixed in the adapter; only the environment origin, application credential, display field, and
+// total request timeout vary by deployment.
+type IDaaSConfig struct {
+	BaseURL          string        `mapstructure:"base_url"`
+	ClientID         string        `mapstructure:"client_id"`
+	ClientSecretFile string        `mapstructure:"client_secret_file"`
+	DisplayNameField string        `mapstructure:"display_name_field"`
+	Timeout          time.Duration `mapstructure:"timeout"`
 }
 
 // LoadConfig reads the Gateway configuration file and GATEWAY_* environment overrides, then applies
@@ -103,6 +132,9 @@ func LoadConfig(path string) (*Config, error) {
 	v.SetEnvPrefix("GATEWAY")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	if e := config.BindEnvKeys(v, Config{}); e != nil {
+		return nil, e
+	}
 	if e := v.ReadInConfig(); e != nil {
 		return nil, e
 	}
@@ -117,8 +149,17 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() error {
+	// A configuration written before login.provider existed is a GitHub deployment; only a
+	// development Gateway may run without any external provider.
+	if c.Login.Provider == "" && !c.Login.DevelopmentProvider {
+		c.Login.Provider = ProviderGitHub
+	}
 	if c.Session.TTL == 0 {
-		c.Session.TTL = DefaultSessionLifetime
+		if c.Login.Provider == ProviderHuaweiIDaaS {
+			c.Session.TTL = DefaultIDaaSSessionLifetime
+		} else {
+			c.Session.TTL = DefaultSessionLifetime
+		}
 	}
 	if c.Session.CleanupInterval == 0 {
 		c.Session.CleanupInterval = 10 * time.Minute
@@ -146,6 +187,9 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.GitHub.Source == "" {
 		c.GitHub.Source = "github.com"
+	}
+	if c.IDaaS.Timeout == 0 {
+		c.IDaaS.Timeout = 10 * time.Second
 	}
 	return c.Validate()
 }
@@ -183,8 +227,34 @@ func (c *Config) Validate() error {
 	if c.Tokens.Lifetime <= 0 || c.Tokens.Lifetime > MaxCredentialLifetime {
 		return fmt.Errorf("tokens.lifetime must be positive and at most %s", MaxCredentialLifetime)
 	}
-	if c.GitHub.ClientID == "" || c.GitHub.ClientSecretFile == "" {
-		return fmt.Errorf("github.client_id and github.client_secret_file are required")
+	if c.Login.DevelopmentProvider && !c.Public.Development {
+		return fmt.Errorf("login.development_provider requires public.development")
+	}
+	switch c.Login.Provider {
+	case "":
+		if !c.Login.DevelopmentProvider {
+			return fmt.Errorf("login.provider must be %q or %q unless login.development_provider is set", ProviderGitHub, ProviderHuaweiIDaaS)
+		}
+	case ProviderGitHub:
+		if c.GitHub.ClientID == "" || c.GitHub.ClientSecretFile == "" {
+			return fmt.Errorf("github.client_id and github.client_secret_file are required when login.provider is %q", ProviderGitHub)
+		}
+	case ProviderHuaweiIDaaS:
+		if c.IDaaS.ClientID == "" || c.IDaaS.ClientSecretFile == "" || c.IDaaS.BaseURL == "" {
+			return fmt.Errorf("idaas.base_url, client_id and client_secret_file are required when login.provider is %q", ProviderHuaweiIDaaS)
+		}
+		provider, e := url.Parse(c.IDaaS.BaseURL)
+		if e != nil || provider.Scheme != "https" || provider.Host == "" || provider.Path != "" || provider.RawQuery != "" || provider.Fragment != "" || provider.User != nil {
+			return fmt.Errorf("idaas.base_url must be an HTTPS origin without path, query, fragment or userinfo")
+		}
+		if c.IDaaS.Timeout <= 0 {
+			return fmt.Errorf("idaas.timeout must be positive")
+		}
+		if c.IDaaS.DisplayNameField != "" && (strings.TrimSpace(c.IDaaS.DisplayNameField) != c.IDaaS.DisplayNameField || len(c.IDaaS.DisplayNameField) > 128) {
+			return fmt.Errorf("idaas.display_name_field must be a trimmed top-level field name of at most 128 bytes")
+		}
+	default:
+		return fmt.Errorf("login.provider must be %q or %q", ProviderGitHub, ProviderHuaweiIDaaS)
 	}
 	return nil
 }

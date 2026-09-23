@@ -26,6 +26,7 @@ import type {
 
 import type {
   DeleteApiV1TenantsTidSpacesSpaceIdBody,
+  DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody,
   Error,
   GetApiV1TenantsTidSpaces200,
   GetApiV1TenantsTidSpacesParams,
@@ -35,6 +36,7 @@ import type {
   GetApiV1TenantsTidSpacesSpaceIdProjectsParams,
   PatchApiV1TenantsTidSpacesSpaceIdBody,
   PostApiV1TenantsTidSpacesBody,
+  PostApiV1TenantsTidSpacesSpaceIdMembersBody,
   PostApiV1TenantsTidSpacesSpaceIdProjects202,
   PostApiV1TenantsTidSpacesSpaceIdProjectsBody,
   PutApiV1TenantsTidSpacesSpaceIdMembersUidBody,
@@ -67,7 +69,7 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
 };
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Only joined members can read a space. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Only joined members can read a space. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/spaces
  */
 export const getApiV1TenantsTidSpaces = (
@@ -168,7 +170,7 @@ export function useGetApiV1TenantsTidSpaces<TData = Awaited<ReturnType<typeof ge
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Creates the collaboration space and its first owner atomically. slug is lowercase, immutable and unique per tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Creates the collaboration space and its first owner atomically. slug is lowercase, immutable and unique per tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/spaces
  */
 export const postApiV1TenantsTidSpaces = (
@@ -237,7 +239,7 @@ export const usePostApiV1TenantsTidSpaces = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidSpacesMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Archives the space (soft delete); requires owner and a matching version. The default space cannot be archived. Projects are unaffected. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Archives the space (soft delete); requires owner and a matching version. The default space cannot be archived. Projects are unaffected. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/spaces/:spaceId
  */
 export const deleteApiV1TenantsTidSpacesSpaceId = (
@@ -307,7 +309,7 @@ export const useDeleteApiV1TenantsTidSpacesSpaceId = <TError = ErrorType<Error>,
       return useMutation(getDeleteApiV1TenantsTidSpacesSpaceIdMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Only joined members can read a space. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Only joined members can read a space. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/spaces/:spaceId
  */
 export const getApiV1TenantsTidSpacesSpaceId = (
@@ -407,7 +409,7 @@ export function useGetApiV1TenantsTidSpacesSpaceId<TData = Awaited<ReturnType<ty
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Only name and description may change; slug is immutable. Requires admin or owner and a matching version. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Only name and description may change; slug is immutable. Requires admin or owner and a matching version. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary PATCH /api/v1/tenants/:tid/spaces/:spaceId
  */
 export const patchApiV1TenantsTidSpacesSpaceId = (
@@ -577,7 +579,7 @@ export function useGetSpaceEvents<TData = Awaited<ReturnType<typeof getSpaceEven
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Admin or owner manages membership; granting owner requires owner. The target user must be an active member of the same tenant. Last owner cannot be demoted or disabled. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Lists the space's members; any active member of the space can read the member list. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/spaces/:spaceId/members
  */
 export const getApiV1TenantsTidSpacesSpaceIdMembers = (
@@ -685,7 +687,148 @@ export function useGetApiV1TenantsTidSpacesSpaceIdMembers<TData = Awaited<Return
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Admin or owner manages membership; granting owner requires owner. The target user must be an active member of the same tenant. Last owner cannot be demoted or disabled. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Adds an already-registered user to the space as a plain member by email, resolved in the caller's identity source. Admin or owner only. The target is atomically ensured tenant membership (existing role kept) and thereby gains access to the Projects and Runtime Workspaces shared in that workspace. Unknown or inactive email is 404 user_not_registered; adding an existing member returns the current membership unchanged. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary POST /api/v1/tenants/:tid/spaces/:spaceId/members
+ */
+export const postApiV1TenantsTidSpacesSpaceIdMembers = (
+    tid: string,
+    spaceId: string,
+    postApiV1TenantsTidSpacesSpaceIdMembersBody: PostApiV1TenantsTidSpacesSpaceIdMembersBody,
+ options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
+) => {
+
+
+      return customInstance<SpaceMember>(
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}/members`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: postApiV1TenantsTidSpacesSpaceIdMembersBody, signal
+    },
+      options);
+    }
+
+
+
+
+export const getPostApiV1TenantsTidSpacesSpaceIdMembersMutationKey = () => ['postApiV1TenantsTidSpacesSpaceIdMembers'] as const;
+
+export const getPostApiV1TenantsTidSpacesSpaceIdMembersMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>, TError,PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>, TError,PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables, TContext> => {
+
+const mutationKey = getPostApiV1TenantsTidSpacesSpaceIdMembersMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>, PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables> = (props) => {
+          const {tid,spaceId,data} = props ?? {};
+
+          return  postApiV1TenantsTidSpacesSpaceIdMembers(tid,spaceId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostApiV1TenantsTidSpacesSpaceIdMembersMutationResult = NonNullable<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>>
+    export type PostApiV1TenantsTidSpacesSpaceIdMembersMutationBody = PostApiV1TenantsTidSpacesSpaceIdMembersBody
+    export type PostApiV1TenantsTidSpacesSpaceIdMembersMutationError = ErrorType<Error>
+    export type PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables = {tid: string;spaceId: string;data: PostApiV1TenantsTidSpacesSpaceIdMembersBody}
+
+    /**
+ * @summary POST /api/v1/tenants/:tid/spaces/:spaceId/members
+ */
+export const usePostApiV1TenantsTidSpacesSpaceIdMembers = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>, TError,PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdMembers>>,
+        TError,
+        PostApiV1TenantsTidSpacesSpaceIdMembersMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostApiV1TenantsTidSpacesSpaceIdMembersMutationOptions(options), queryClient);
+    }
+    /**
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Removes a member's workspace membership (hard delete); owner only, admins and members cannot remove anyone. The user account, tenant membership and their resources are untouched and remain in the workspace; the removed member's access to the workspace, its projects and runtime workspaces is revoked. An owner row can never be removed, including self-removal (409 cannot_remove_workspace_owner). Requires a matching version and an idempotency key. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary DELETE /api/v1/tenants/:tid/spaces/:spaceId/members/:uid
+ */
+export const deleteApiV1TenantsTidSpacesSpaceIdMembersUid = (
+    tid: string,
+    spaceId: string,
+    uid: string,
+    deleteApiV1TenantsTidSpacesSpaceIdMembersUidBody: DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody,
+ options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
+) => {
+
+
+      return customInstance<SpaceMember>(
+      {url: `/api/v1/tenants/${tid}/spaces/${spaceId}/members/${uid}`, method: 'DELETE',
+      headers: {'Content-Type': 'application/json', },
+      data: deleteApiV1TenantsTidSpacesSpaceIdMembersUidBody, signal
+    },
+      options);
+    }
+
+
+
+
+export const getDeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationKey = () => ['deleteApiV1TenantsTidSpacesSpaceIdMembersUid'] as const;
+
+export const getDeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>, TError,DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>, TError,DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables, TContext> => {
+
+const mutationKey = getDeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>, DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables> = (props) => {
+          const {tid,spaceId,uid,data} = props ?? {};
+
+          return  deleteApiV1TenantsTidSpacesSpaceIdMembersUid(tid,spaceId,uid,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationResult = NonNullable<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>>
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationBody = DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationError = ErrorType<Error>
+    export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables = {tid: string;spaceId: string;uid: string;data: DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody}
+
+    /**
+ * @summary DELETE /api/v1/tenants/:tid/spaces/:spaceId/members/:uid
+ */
+export const useDeleteApiV1TenantsTidSpacesSpaceIdMembersUid = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>, TError,DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteApiV1TenantsTidSpacesSpaceIdMembersUid>>,
+        TError,
+        DeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteApiV1TenantsTidSpacesSpaceIdMembersUidMutationOptions(options), queryClient);
+    }
+    /**
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Updates a member's role (admin/member) or status. Role management is owner-only — admins add members through POST, they cannot change roles. The owner role is immutable: granting owner or any write touching an owner row is 409 ownership_transfer_not_supported (ownership transfer is not implemented). The target user must be an active member of the same tenant; a matching version is required. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary PUT /api/v1/tenants/:tid/spaces/:spaceId/members/:uid
  */
 export const putApiV1TenantsTidSpacesSpaceIdMembersUid = (
@@ -756,7 +899,7 @@ export const usePutApiV1TenantsTidSpacesSpaceIdMembersUid = <TError = ErrorType<
       return useMutation(getPutApiV1TenantsTidSpacesSpaceIdMembersUidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Project collection scoped to one collaboration space; membership is required, and project visibility follows owner ownership within it. spaceId on a created project is optional, never forced. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Project collection scoped to one collaboration space; membership is required, and project visibility follows workspace membership — any active member of the space can see every active project in it. Deleting a project requires its creator or a space owner/admin. New projects created at the tenant level default into the tenant's default space. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/spaces/:spaceId/projects
  */
 export const getApiV1TenantsTidSpacesSpaceIdProjects = (
@@ -864,7 +1007,7 @@ export function useGetApiV1TenantsTidSpacesSpaceIdProjects<TData = Awaited<Retur
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Project collection scoped to one collaboration space; membership is required, and project visibility follows owner ownership within it. spaceId on a created project is optional, never forced. Creates Project/storage/main Workspace/operation atomically. repositoryUrl allows HTTPS or SSH with no password/query/fragment. defaultBranch defaults to HEAD; credentialRefId must belong to tenant and owner. Storage/worktree/sandbox initialization is asynchronous. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Project collection scoped to one collaboration space; membership is required, and project visibility follows workspace membership — any active member of the space can see every active project in it. Deleting a project requires its creator or a space owner/admin. New projects created at the tenant level default into the tenant's default space. Creates Project/storage/main Workspace/operation atomically. repositoryUrl allows HTTPS or SSH with no password/query/fragment. defaultBranch defaults to HEAD; credentialRefId must belong to tenant and owner. Storage/worktree/sandbox initialization is asynchronous. A project created at the tenant level defaults into the tenant's default collaboration space; the schema keeps space_id nullable for pre-existing unscoped projects, which stay owner-only. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/spaces/:spaceId/projects
  */
 export const postApiV1TenantsTidSpacesSpaceIdProjects = (

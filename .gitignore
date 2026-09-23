@@ -29,6 +29,10 @@ go.work.sum
 .env.*
 !.env.example
 
+# Developer configuration: config.toml.template is the committed reference, config.toml holds
+# the per-machine values (including the GitHub client secret) and is materialized by `task setup`.
+config.toml
+
 # Editor/IDE
 .idea/
 .vscode/

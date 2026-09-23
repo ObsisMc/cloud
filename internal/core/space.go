@@ -5,15 +5,14 @@ import (
 	"strings"
 )
 
-// Collaboration Spaces (product term "Space") are optional collaboration and
+// Collaboration Spaces (product term "Workspace") are optional collaboration and
 // grouping boundaries inside a tenant. They are distinct from the runtime
 // `workspaces` table, which models execution environments. A project MAY
 // reference a space (projects.space_id is nullable); when it does, the space
-// scopes Space-level membership and metadata only. Space membership does NOT
-// widen Project or Runtime Workspace visibility — those keep their existing
-// owner-based authorization (the current implementation, until the project
-// workspace-sharing migration). Tenant membership stays the precondition,
-// roles stay independent (TenantMember != SpaceMember).
+// scopes Space-level membership and metadata, and active space membership gates
+// that project's visibility to members (the resource-sharing boundary). An
+// unscoped project keeps owner-based authorization. Tenant membership stays the
+// precondition, roles stay independent (TenantMember != SpaceMember).
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
@@ -46,6 +45,14 @@ func requireSpaceRole(m Object, roles ...string) {
 		}
 	}
 	reject(403, "space_role_required")
+}
+
+// defaultSpace returns the tenant's default collaboration space, which
+// Bootstrap and migration 0011 guarantee exists.
+func defaultSpace(t *transaction, tid string) Object {
+	w := t.one("SELECT * FROM collab_workspaces WHERE tenant_id=$1 AND slug='default' AND archived_at IS NULL", tid)
+	require(w != nil, 404, "not_found")
+	return w
 }
 
 // createSpace atomically inserts a space and its first owner. slug is
@@ -95,7 +102,7 @@ func patchSpace(t *transaction, r *PublicRequest, uid string) Object {
 
 // archiveSpace soft-deletes the space; owner only. Projects are unaffected and
 // keep their own lifecycle state machine. The tenant's default space
-// (slug='default') can never be archived away (D7).
+// (slug='default') can never be archived away.
 func archiveSpace(t *transaction, r *PublicRequest, uid string) Object {
 	w := t.one("SELECT * FROM collab_workspaces WHERE id=$1 AND tenant_id=$2", r.SpaceID, r.TenantID)
 	require(w != nil, 404, "not_found")
@@ -110,10 +117,11 @@ func archiveSpace(t *transaction, r *PublicRequest, uid string) Object {
 // enrollSpaceMemberByEmail adds an already-registered user to the space as a
 // plain member, resolved by (source, normalized email) in the caller's identity
 // source. It never auto-creates a user, never invites, and never widens Project
-// or Runtime Workspace visibility (current owner-based authorization). Admin or owner may enroll; the target is
-// atomically ensured a tenant membership (keeping an existing role) if they are
-// not already a tenant member. Adding an existing member returns the current
-// membership unchanged — idempotent, no role/status/version mutation.
+// or Runtime Workspace visibility beyond the resource-sharing boundary. Admin or
+// owner may enroll; the target is atomically ensured a tenant membership
+// (keeping an existing role) if they are not already a tenant member. Adding an
+// existing member returns the current membership unchanged — idempotent, no
+// role/status/version mutation.
 func enrollSpaceMemberByEmail(t *transaction, r *PublicRequest, uid string) Object {
 	actor := spaceMember(t, r.SpaceID, uid)
 	requireSpaceRole(actor, "admin", "owner")
@@ -135,14 +143,14 @@ WHERE i.source=$1 AND i.subject=$2 AND u.status='active' AND u.deleted_at IS NUL
 }
 
 // putSpaceMember updates one membership's role/status with optimistic version
-// checks. Role management is owner-only (MM3): admins add members through
+// checks. Role management is owner-only: admins add members through
 // enrollSpaceMemberByEmail but cannot change roles. The owner role is immutable
-// through this API (MM4, ownership transfer NOT implemented): no transition
-// into or out of owner is allowed — granting owner, or any write touching an
-// owner row, is 409 ownership_transfer_not_supported. Because owner rows can
-// never be modified away, the last-owner invariant is preserved by
-// construction (no space_last_owner guard needed). The target user must be an
-// active member of the same tenant.
+// through this API, ownership transfer NOT implemented: no transition into or
+// out of owner is allowed — granting owner, or any write touching an owner row,
+// is 409 ownership_transfer_not_supported. Because owner rows can never be
+// modified away, the last-owner invariant is preserved by construction (no
+// space_last_owner guard needed). The target user must be an active member of
+// the same tenant.
 func putSpaceMember(t *transaction, r *PublicRequest, uid string) Object {
 	actor := spaceMember(t, r.SpaceID, uid)
 	requireSpaceRole(actor, "owner")
@@ -167,7 +175,7 @@ WHERE u.id=$1 AND tm.tenant_id=$2 AND tm.status='active' AND u.status='active' A
 	return t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
 }
 
-// removeSpaceMember removes a member's Workspace membership (hard delete, MM5).
+// removeSpaceMember removes a member's Workspace membership (hard delete).
 // Owner only; admins and members cannot remove anyone. The owner role is
 // immutable, so an owner row — including the actor themselves — can never be
 // removed (409 cannot_remove_workspace_owner). The user account, tenant
@@ -187,4 +195,14 @@ WHERE u.id=$1 AND tm.tenant_id=$2 AND tm.status='active' AND u.status='active' A
 	version(old, r.Body.N("version"))
 	t.exec("DELETE FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
 	return old
+}
+
+// projectInSpace loads a live project in the tenant and verifies the caller's
+// space membership, returning both rows. Entity routes derive the space from
+// the project itself; client-supplied space identifiers are never trusted.
+func projectInSpace(t *transaction, tid, uid, pid string) (project, membership Object) {
+	require(validID(pid), 404, "not_found")
+	p := t.one("SELECT * FROM projects WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", pid, tid)
+	require(p != nil, 404, "not_found")
+	return p, spaceMember(t, p.S("spaceId"), uid)
 }

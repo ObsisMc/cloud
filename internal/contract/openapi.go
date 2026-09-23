@@ -76,6 +76,7 @@ func Document() map[string]any {
 	s["Error"] = object(obj{"code": str(), "params": obj{"type": "object", "additionalProperties": true}, "requestId": uuid()}, "code", "params", "requestId")
 	s["User"] = resource("id displayName status version createdAt deletedAt", "deletedAt")
 	s["Tenant"] = resource("id name status role", "")
+	s["TenantCreated"] = object(obj{"tenant": ref("Tenant"), "space": ref("Space")}, "tenant", "space")
 	s["Member"] = resource("tenantId userId role status version createdAt", "")
 	s["MemberListItem"] = resource("id tenantId userId role status version displayName", "")
 	s["Space"] = resource("id tenantId name slug description createdBy version createdAt updatedAt archivedAt", "archivedAt")
@@ -418,6 +419,8 @@ func responseSchema(r router.Route) (schema obj, status string) {
 			return object(obj{"items": array(ref("Issue")), "nextCursor": str()}, "items", "nextCursor"), "200"
 		}
 		return ref("Issue"), "200"
+	case r.Path == "/api/v1/tenants" && r.Method == "POST":
+		return ref("TenantCreated"), "201"
 	}
 	name := "Project"
 	switch {
@@ -546,6 +549,8 @@ func inputSchema(name string, r router.Route) obj {
 		return array(ref("ContextRefRef"))
 	case "position":
 		return number()
+	case "slug":
+		return obj{"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$", "description": "Lowercase, immutable, unique per tenant."}
 	case "workspaceId":
 		if r.Action == "plan" {
 			return str()
@@ -602,7 +607,7 @@ func description(r router.Route) string {
 		case r.Method == "POST" && strings.HasSuffix(r.Path, "/spaces"):
 			base += "Creates the collaboration space and its first owner atomically. slug is lowercase, immutable and unique per tenant. "
 		case strings.Contains(r.Path, "/projects"):
-			base += "Project collection scoped to one collaboration space; membership is required, and project visibility follows workspace membership — any active member of the space can see every active project in it. Deleting a project requires its creator or a space owner/admin. spaceId on a created project is optional, never forced. "
+			base += "Project collection scoped to one collaboration space; membership is required, and project visibility follows workspace membership — any active member of the space can see every active project in it. Deleting a project requires its creator or a space owner/admin. New projects created at the tenant level default into the tenant's default space. "
 		case r.Method == "PATCH":
 			base += "Only name and description may change; slug is immutable. Requires admin or owner and a matching version. "
 		case r.Method == "DELETE":
@@ -610,6 +615,9 @@ func description(r router.Route) string {
 		default:
 			base += "Only joined members can read a space. "
 		}
+	}
+	if r.Path == "/api/v1/tenants" && r.Method == "POST" {
+		base = "Public requests require a gateway service credential plus a caller-bound user credential. No tenant membership is required: the verified identity alone authorizes provisioning. Atomically creates a tenant named after the space, makes the caller its first administrator, creates the space with the given slug and makes the caller its owner. The tenant is an implicit container the product never shows. The idempotency key is matched per user across tenants and recorded under the created tenant. "
 	}
 	if strings.Contains(r.Path, "members") && !strings.Contains(r.Path, "/spaces") {
 		base += "Administrator only. Updating an existing membership requires matching version; new membership uses version=0. Last effective administrator cannot be disabled/demoted, including concurrent changes. "
@@ -627,12 +635,18 @@ func description(r router.Route) string {
 		base += "Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. "
 	}
 	if strings.HasSuffix(r.Path, "/projects") && r.Method == "POST" {
-		base += "Creates Project/storage/main Workspace/operation atomically. repositoryUrl allows HTTPS or SSH with no password/query/fragment. defaultBranch defaults to HEAD; credentialRefId must belong to tenant and owner. Storage/worktree/sandbox initialization is asynchronous. "
+		base += "Creates Project/storage/main Workspace/operation atomically. repositoryUrl allows HTTPS or SSH with no password/query/fragment. defaultBranch defaults to HEAD; credentialRefId must belong to tenant and owner. Storage/worktree/sandbox initialization is asynchronous. A project created at the tenant level defaults into the tenant's default collaboration space; the schema keeps space_id nullable for pre-existing unscoped projects, which stay owner-only. "
 	}
 	if strings.HasSuffix(r.Path, "/workspaces") && r.Method == "POST" {
 		base += "Creates one isolated Workspace and Task display identity. title/baseRef required; branch and relative path are server-generated. "
 	}
-	return base + "Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination."
+	pagination := "Lists use ascending UUID pagination."
+	if r.Path == "/api/v1/me/tenants" {
+		// The member's tenant list orders by creation so items[0] is the earliest
+		// tenant deterministically; the cursor stays an exclusive tenant UUID.
+		pagination = "Lists page in ascending creation order; the after cursor is an exclusive tenant UUID."
+	}
+	return base + "Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. " + pagination
 }
 
 func errorDescription(code string) string {

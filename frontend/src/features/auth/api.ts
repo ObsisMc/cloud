@@ -1,79 +1,98 @@
-import { useMutation } from '@tanstack/react-query'
-import { AXIOS_INSTANCE } from '@/lib/api-client'
-import { mockApi } from '@/lib/mock-api-client'
-import { useAuthStore, type SessionUser } from '@/state/auth-store'
-import { useDemoAuthStore } from '@/state/demo-auth-store'
-import type { User } from '@/mocks/data/types'
+import type { User } from '@/api/generated.schemas'
+import { getApiV1Me } from '@/api/me/me'
+import { customInstance, isForbiddenError, isUnauthorizedError } from '@/lib/api-client'
+import { navigateExternal } from '@/lib/navigation'
 
-interface LoginResponse {
-  user: SessionUser
-  tenantId: string
-  tenantName: string
-}
+/**
+ * Gateway authentication boundary.
+ *
+ * The gateway (not the cloud) owns login: `POST /auth/login` records a login
+ * attempt and returns the provider's authorization URL, the provider sends
+ * the browser back to the gateway's callback, and the gateway answers with
+ * an HttpOnly session cookie plus a redirect to `returnTo`. These routes are
+ * outside the cloud's OpenAPI document, so they are the one hand-written
+ * HTTP surface; everything else goes through the generated client.
+ */
 
-/** Registration inputs; the edge server normalizes the email to lowercase+trimmed. */
-export interface RegisterInput {
-  name: string
-  email: string
+/**
+ * Login providers this frontend knows how to present. `huawei-idaas` and
+ * `github` are external logins (a deployment configures one of them); `dev`
+ * is the gateway's development-only form, registered solely on loopback
+ * development origins, where any typed identity signs in.
+ */
+export type LoginProvider = 'huawei-idaas' | 'github' | 'dev'
+
+const KNOWN_PROVIDERS: readonly LoginProvider[] = ['huawei-idaas', 'github', 'dev']
+
+/** True for a provider a member signs in with for real, as opposed to the development form. */
+export function isExternalProvider(provider: LoginProvider): boolean {
+  return provider !== 'dev'
 }
 
 /**
- * Signs the email in through the edge server, which provisions the identity into the
- * bootstrap tenant and sets the `ora_subject` session cookie (HttpOnly). The user JWT
- * is minted server-side per request and never reaches JavaScript.
+ * Asks the gateway which logins it offers, so the sign-in screen shows
+ * exactly the buttons that can succeed (no GitHub button on a machine without
+ * an OAuth App, no developer login in production). Providers this build has
+ * no button for are dropped.
  */
-export function useLogin() {
-  const setSession = useAuthStore((s) => s.setSession)
-  return useMutation({
-    mutationFn: async (email: string) => {
-      const { data } = await AXIOS_INSTANCE.post<LoginResponse>('/auth/login', { email })
-      return data
-    },
-    onSuccess: ({ user, tenantId, tenantName }) => setSession({ user, tenantId, tenantName }),
+export async function fetchLoginProviders(signal?: AbortSignal): Promise<LoginProvider[]> {
+  const { providers } = await customInstance<{ providers: string[] }>({
+    url: '/auth/providers',
+    method: 'GET',
+    signal,
   })
+  return KNOWN_PROVIDERS.filter((known) => providers.includes(known))
 }
 
 /**
- * Creates a new user identity (name + email) through the edge server. The edge
- * provisions the identity into the bootstrap tenant, sets the `ora_subject`
- * session cookie, and returns the same session shape as login, so the new user
- * enters the app immediately. A duplicate email surfaces as a 409 the caller can
- * read from the mutation error (`user_already_exists`).
+ * Starts an external login and leaves the page. The gateway validates
+ * `returnTo` (a same-origin path); after a successful callback the browser
+ * lands there with the session cookie set. Rejects when the login could not
+ * be started, e.g. the gateway is down or refused the origin.
  */
-export function useRegister() {
-  const setSession = useAuthStore((s) => s.setSession)
-  return useMutation({
-    mutationFn: async (input: RegisterInput) => {
-      const { data } = await AXIOS_INSTANCE.post<LoginResponse>('/auth/register', input)
-      return data
-    },
-    onSuccess: ({ user, tenantId, tenantName }) => setSession({ user, tenantId, tenantName }),
+export async function startLogin(provider: LoginProvider, returnTo: string): Promise<void> {
+  const { authorizationUrl } = await customInstance<{ authorizationUrl: string }>({
+    url: '/auth/login',
+    method: 'POST',
+    data: { provider, returnTo },
   })
-}
-
-/** Clears the server session cookie and the local session state. */
-export function useLogout() {
-  const clear = useAuthStore((s) => s.clear)
-  return useMutation({
-    mutationFn: async () => {
-      await AXIOS_INSTANCE.post('/auth/logout')
-    },
-    onSettled: () => clear(),
-  })
+  navigateExternal(authorizationUrl)
 }
 
 /**
- * Demo-plane sign-in against the MSW-mocked store (`/mock-api/auth/login`); any
- * email works. The token lives only in the demo session and never touches the
- * real backend.
+ * Revokes the gateway session. Idempotent on the gateway side, so calling it
+ * without a live session is not an error.
  */
-export function useDemoLogin() {
-  const setSession = useDemoAuthStore((s) => s.setSession)
-  return useMutation({
-    mutationFn: async (email: string) => {
-      const { data } = await mockApi.post<{ token: string; user: User }>('/auth/login', { email })
-      return data
-    },
-    onSuccess: ({ token, user }) => setSession(token, user),
-  })
+export async function logoutSession(): Promise<void> {
+  await customInstance<void>({ url: '/auth/logout', method: 'POST' })
+}
+
+/**
+ * GitHub's own sign-out page (public github.com). It asks the member to
+ * confirm and then ends the github.com session, so the next "sign in with
+ * GitHub" starts from GitHub's login form instead of silently reusing the
+ * account the browser was holding. Ora cannot end that session itself: the
+ * gateway discards the GitHub token right after reading the profile and never
+ * holds one.
+ */
+export const GITHUB_SIGN_OUT_URL = 'https://github.com/logout'
+
+/** What the session probe learned: a member, no session, or a member Cloud has disabled. */
+export type SessionProbe =
+  { kind: 'signed-in'; user: User } | { kind: 'signed-out' } | { kind: 'disabled' }
+
+/**
+ * Probes the session. A 401 is the normal "signed out" answer and a 403 means
+ * the gateway session is valid but Cloud has disabled the user, so signing in
+ * again would not help; neither is a failure. Every other error propagates so
+ * the UI can distinguish those from "backend unreachable".
+ */
+export async function fetchSessionUser(signal?: AbortSignal): Promise<SessionProbe> {
+  try {
+    return { kind: 'signed-in', user: await getApiV1Me(undefined, signal) }
+  } catch (error) {
+    if (isUnauthorizedError(error)) return { kind: 'signed-out' }
+    if (isForbiddenError(error)) return { kind: 'disabled' }
+    throw error
+  }
 }

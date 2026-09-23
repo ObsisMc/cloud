@@ -865,6 +865,11 @@ export interface Tenant {
   status: string;
 }
 
+export interface TenantCreated {
+  space: Space;
+  tenant: Tenant;
+}
+
 export interface Ticket {
   actorUserId: string;
   admissionEpoch: number;
@@ -1004,6 +1009,15 @@ after?: string;
 export type GetApiV1MeTenants200 = {
   items: Tenant[];
   nextCursor: string;
+};
+
+export type PostApiV1TenantsBody = {
+  name: string;
+  /**
+     * Lowercase, immutable, unique per tenant.
+     * @pattern ^[a-z0-9][a-z0-9-]{0,63}$
+     */
+  slug: string;
 };
 
 export type GetApiV1TenantsTidCollaborationTargets200 = {
@@ -1643,6 +1657,10 @@ export type GetApiV1TenantsTidSpaces200 = {
 export type PostApiV1TenantsTidSpacesBody = {
   description?: string;
   name: string;
+  /**
+     * Lowercase, immutable, unique per tenant.
+     * @pattern ^[a-z0-9][a-z0-9-]{0,63}$
+     */
   slug: string;
 };
 
@@ -1673,6 +1691,15 @@ after?: string;
 export type GetApiV1TenantsTidSpacesSpaceIdMembers200 = {
   items: SpaceMemberListItem[];
   nextCursor: string;
+};
+
+export type PostApiV1TenantsTidSpacesSpaceIdMembersBody = {
+  email: string;
+};
+
+export type DeleteApiV1TenantsTidSpacesSpaceIdMembersUidBody = {
+  /** @minimum 0 */
+  version: number;
 };
 
 export type PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole = typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole[keyof typeof PutApiV1TenantsTidSpacesSpaceIdMembersUidBodyRole];

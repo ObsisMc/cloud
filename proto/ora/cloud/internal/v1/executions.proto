@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package ora.cloud.internal.v1;
+
+// Durable coordination of Node executions, starting with the clone closed loop. Every call that
+// changes state returns only after Cloud committed it, and each such call carries a caller-chosen
+// `submission_id`: repeating a submission with identical content returns the original response
+// without reapplying anything; the same identity with different content fails with ABORTED
+// (CONFLICT). A lost reply is therefore retried with the same submission, never a new identity.
+service ExecutionService {
+  // Claims the oldest work item Cloud has accepted but no Controller has dispatched yet. Returns
+  // no item when nothing is pending; ownership is decided here, not by a Watch signal.
+  rpc ClaimWork(ClaimWorkRequest) returns (ClaimWorkResponse);
+  // Registers execution identity, target Node and full input before any Node sees the command.
+  // Only after this succeeds may the Controller dispatch; the same execution with the same input
+  // is idempotent, a different input conflicts.
+  rpc RecordDispatch(RecordDispatchRequest) returns (RecordDispatchResponse);
+  // Commits an execution fact together with the exact receipt of the Node event that carried it.
+  // Only after this succeeds may the Controller acknowledge that event sequence to the Node.
+  rpc TakeOverNodeEvent(TakeOverNodeEventRequest) returns (TakeOverNodeEventResponse);
+  // Stores a Completed result learned by querying the Node. It records no receipt, so it never
+  // authorizes an acknowledgement.
+  rpc RecordQueriedResult(RecordQueriedResultRequest) returns (RecordQueriedResultResponse);
+  // Reads one registered execution; an unknown execution fails with NOT_FOUND, distinct from a
+  // registered execution that has no result yet.
+  rpc GetDispatch(GetDispatchRequest) returns (GetDispatchResponse);
+  // Lists registered executions without a result so a recovering or replacement worker resumes
+  // the original executions instead of creating new ones.
+  rpc ListPendingDispatches(ListPendingDispatchesRequest) returns (ListPendingDispatchesResponse);
+}
+
+// Persistent Node identity plus the incarnation that produced a fact. Historical incarnations
+// are kept as recorded; they are never rewritten to the current session.
+message NodeIdentity {
+  string node_id = 1;
+  string node_incarnation_id = 2;
+}
+
+message CloneSpec {
+  // HTTPS or SSH repository URL. Checkout paths belong to the Node, never to the caller.
+  string repository = 1;
+  string branch = 2;
+}
+
+// Full execution input as dispatched; extended with new oneof members as further execution kinds
+// join the loop.
+message ExecutionInput {
+  oneof spec {
+    CloneSpec clone = 1;
+  }
+}
+
+message CloneReady {
+  string path = 1;
+  string commit = 2;
+}
+
+message CloneFailed {
+  CloneFailureReason reason = 1;
+  // Directory the Node retained for inspection, when it kept one.
+  optional string retained_path = 2;
+}
+
+enum CloneFailureReason {
+  CLONE_FAILURE_REASON_UNSPECIFIED = 0;
+  CLONE_FAILURE_REASON_SOURCE_UNAVAILABLE = 1;
+  CLONE_FAILURE_REASON_BRANCH_NOT_FOUND = 2;
+  CLONE_FAILURE_REASON_DESTINATION_CONFLICT = 3;
+  CLONE_FAILURE_REASON_OPERATION_FAILED = 4;
+}
+
+// Terminal fact reported by a Node for one execution.
+message ExecutionResult {
+  NodeIdentity node = 1;
+  oneof outcome {
+    CloneReady clone_ready = 2;
+    CloneFailed clone_failed = 3;
+  }
+}
+
+// Work Cloud accepted in its own business transaction and handed to Controllers.
+message WorkItem {
+  string operation_id = 1;
+  ExecutionInput input = 2;
+}
+
+// One registered execution and its durable state. No result means awaiting reconciliation, never
+// failure.
+message ExecutionRecord {
+  string operation_id = 1;
+  string execution_id = 2;
+  string node_id = 3;
+  ExecutionInput input = 4;
+  optional ExecutionResult result = 5;
+}
+
+message ClaimWorkRequest {
+  string submission_id = 1;
+  int64 epoch = 2;
+}
+
+message ClaimWorkResponse {
+  optional WorkItem item = 1;
+}
+
+message RecordDispatchRequest {
+  string submission_id = 1;
+  int64 epoch = 2;
+  string operation_id = 3;
+  string execution_id = 4;
+  string node_id = 5;
+  ExecutionInput input = 6;
+}
+
+message RecordDispatchResponse {
+  ExecutionRecord record = 1;
+}
+
+message TakeOverNodeEventRequest {
+  string submission_id = 1;
+  int64 epoch = 2;
+  string operation_id = 3;
+  string execution_id = 4;
+  // Event sequence assigned by the Node; the receipt (execution_id, sequence) is the only basis
+  // for an acknowledgement.
+  uint64 sequence = 5;
+  ExecutionResult result = 6;
+  // Canonical encoding of the original Node event, kept verbatim so a replayed event with the
+  // same sequence but different content is detected as a conflict.
+  bytes event = 7;
+}
+
+message TakeOverNodeEventResponse {
+  ExecutionRecord record = 1;
+}
+
+message RecordQueriedResultRequest {
+  string submission_id = 1;
+  int64 epoch = 2;
+  string operation_id = 3;
+  string execution_id = 4;
+  ExecutionResult result = 5;
+}
+
+message RecordQueriedResultResponse {
+  ExecutionRecord record = 1;
+}
+
+message GetDispatchRequest {
+  string execution_id = 1;
+}
+
+message GetDispatchResponse {
+  ExecutionRecord record = 1;
+}
+
+message ListPendingDispatchesRequest {
+  // Restricts to executions dispatched to one Node; empty lists every pending execution.
+  string node_id = 1;
+}
+
+message ListPendingDispatchesResponse {
+  repeated ExecutionRecord records = 1;
+}

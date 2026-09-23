@@ -16,6 +16,15 @@ creator 或 owner/admin）；**Workspace foundation 已收口**（0-Workspace on
 > 前端认证/会话基座 = ora-web cookie 会话（决策 D-Auth=A）。记录见
 > [workspace-integration-stage-a.md](../../migrations/workspace-integration-stage-a.md)。
 >
+> **2026-09-23 — 922GithubAuth ← main 会话架构合入**：feature 分支 `922GithubAuth` 合并 main 的
+> **gateway-会话架构**（未 commit，留人工评审）。前端会话/路由采用 main：`SessionProvider`/`useSession`/
+> `RequireSession`、`/onboarding` + `/w/:workspaceSlug` 路由、onboarding 独立页（`useCreateTenant` /
+> `useCreateSpace`）；删除 feature 的 zustand 商店（`auth-store`/`demo-auth-store`）；保留 Step 3A 能力
+> （members owner-immutable UI、`canDeleteProject = creator OR owner/admin`、issues 接真实后端）。
+> 开发拓扑 = **双入口**（ora-web :8080 DEV-only + gateway :8081 生产规范）；项目模型 = **混合/optional
+> space**（`space_id` 可空，默认空间；保留 `0012_project_space_scope`）。注册 UI 移除（见
+> [user-registration.md](../../migrations/user-registration.md) 合并注记）。
+>
 > **2026-09-21 — User Registration**：登录页「注册」入口落地 —— `POST /auth/register` 创建 User Identity
 > （姓名 + 邮箱），邮箱 trim + lowercase 大小写不敏感唯一，重复 `409 user_already_exists`，注册成功直接进入
 > 既有 current-user 流程；**AUTHENTICATION NOT FULLY IMPLEMENTED · PROJECT SHARING NOT
@@ -86,7 +95,7 @@ ADR：`specs/decisions/cloud/identity-access/0-user-registration.md`（SD1–SD5
 | 邮箱规范化 / 大小写不敏感唯一 | ✅ | trim + lowercase；`Alice@Example.com` == `alice@example.com`；`user_identities(PK(source,subject))` 兜底 |
 | 重复邮箱 | ✅ | 稳定 `409 user_already_exists`（精确 + 大小写变体），不静默复用 |
 | 非法邮箱 / 空姓名 | ✅ | `400 invalid_email` / `400 name_required`（轻量门：非 @ 结构 / 空名） |
-| 前端注册模式 | ✅ | 既有 Login 页（Stage D 样式未动）加「注册」切换：姓名 + 邮箱；「该邮箱已经注册。」可见；成功即进 `/default/projects` |
+| 前端注册模式 | ✅/⚠️ | 原 Step 描述：既有 Login 页加「注册」切换，成功进 `/default/projects`。**合并 main 后已变**：前端 Login 页为 provider-button 形态（gateway 会话），**无 register 模式**；`POST /auth/register` 仅保留为 ora-web 开发边界 API（浏览器经 ora-web :8080 注册仍可用）；合并后注册成功经 `/onboarding` + `/w/:slug` 进入（见 [[user-registration]] 合并注记） |
 | 测试 | ✅ | 后端集成 6 用例 + 前端 5 用例全通过；HTTP smoke 通过 |
 | **AUTHENTICATION** | ❌ **NOT FULLY IMPLEMENTED** | `/auth/login` 仍是「任意 email 即登录」，无密码/凭据/OAuth/SSO |
 | **PROJECT SHARING** | ❌ **NOT IMPLEMENTED** | 无项目分享 |
@@ -325,9 +334,13 @@ AI Assist **由谁实现** · `ContextBundle` 生命周期 · `ConversationTarge
 ## Web 前端（正式）
 
 正式前端在 [`frontend/`](../../frontend/README.md)（React 19 + TS + Vite + Tailwind 4 + TanStack
-Query），从参考项目 `cloud前端/` 迁移而来，API 层由 orval 从 `api/openapi.json` 生成，鉴权复用
-双 JWT（`cmd/ora-web` 服务端签 token，浏览器只持会话 cookie + profile）。与
-`cmd/demo-issue-board-web`（单文件看板演示，仅手工验证接口）并存、互不替代。
+Query），从参考项目 `cloud前端/` 迁移而来，API 层由 orval 从 `api/openapi.json` 生成。合并 main 后
+采用 **gateway-会话架构**：`SessionProvider`/`useSession`/`RequireSession` 管会话（`GET /api/v1/me`
+探测 + 401 策略），路由为 `/onboarding` + `/w/:workspaceSlug/*`。**开发拓扑 = 双入口**：ora-web :8080
+（DEV-only 本地演示边界：email login/register + 进程内 API 代理注入双 JWT + 托管构建后 SPA）与
+gateway :8081（生产规范入口：provider 协议 `/auth/providers`、GitHub/dev login、PostgreSQL 会话，
+vite 代理 `/auth,/api,/healthz` → :8081）。与 `cmd/demo-issue-board-web`（单文件看板演示，仅手工
+验证接口）并存、互不替代。
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
@@ -369,6 +382,7 @@ Query），从参考项目 `cloud前端/` 迁移而来，API 层由 orval 从 `a
 | 最近 | **Workspace Sharing Model（Step 2B 对齐）**（Workspace=资源共享边界；统一删除规则 creator OR owner/admin；最小谓词 foundation；旧 D1 产品规则 superseded） |
 | 最近 | **Project Workspace Sharing（Step 3）**（项目访问切换为 workspace-shared：list/detail/runtime 继承；删除 = creator 或 owner/admin；unscoped 保持 owner-only；前端零改动） |
 | 最近 | **Workspace Member Management & Onboarding（Step 3A）**（0-Workspace onboarding + 可选创建；成员角色 owner-only + owner immutable；移除 owner-only 硬删、membership-only；Project delete UI 对齐） |
+| 最近 | **922GithubAuth ← main 会话架构合入**（`SessionProvider`/`useSession`/`/w/:slug` 路由 + `/onboarding`；删除 zustand 商店；保留 Step 3A 前端能力；双入口开发拓扑 ora-web + gateway；混合项目模型 optional space） |
 | 下一步 | **3C**（Issue Detail & Collaboration UI）；**Issue Workspace Scoping**（`issues.space_id`）；Agent / Team / Workflow / MCP / Skill Workspace Scoping；生产 Substrate / 看板分页与全文搜索 / 实时推送；真实 Agent/Team/Workflow/AI provider（BLOCKED ON EXTERNAL DESIGN） |
 
 > 想看每个功能对应的接口和表，去 [../agent/api-reference.md](../agent/api-reference.md) 和

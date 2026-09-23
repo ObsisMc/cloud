@@ -28,6 +28,7 @@ func Routes() []Route {
 	return []Route{
 		{"GET", "/api/v1/me", "", nil},
 		{"GET", "/api/v1/me/tenants", "", nil},
+		{"POST", "/api/v1/tenants", "", []string{"name", "slug"}},
 		{"GET", "/api/v1/tenants/:tid/members", "", nil},
 		{"PUT", "/api/v1/tenants/:tid/members/:uid", "", []string{"role", "status", "version"}},
 		{"GET", "/api/v1/tenants/:tid/collaboration/targets", "", nil},

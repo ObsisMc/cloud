@@ -1,4 +1,9 @@
-import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
+import {
+  AxiosError,
+  type AxiosAdapter,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+} from 'axios'
 import { onTestFinished } from 'vitest'
 import { AXIOS_INSTANCE } from '@/lib/api-client'
 
@@ -7,6 +12,8 @@ export type RecordedRequest = {
   url: string | undefined
   method: string | undefined
   signal: AbortSignal | undefined
+  /** Request headers as sent, so policy tests can assert on what left the client. */
+  headers: Record<string, unknown>
 }
 
 /** Handle returned by {@link installFakeHttp} for asserting on traffic. */
@@ -30,9 +37,26 @@ const toAbortSignal = (signal: InternalAxiosRequestConfig['signal']): AbortSigna
 export function installFakeHttp(body: unknown, status = 200): FakeHttp {
   const requests: RecordedRequest[] = []
   const adapter: AxiosAdapter = (config) => {
-    requests.push({ url: config.url, method: config.method, signal: toAbortSignal(config.signal) })
+    requests.push({
+      url: config.url,
+      method: config.method,
+      signal: toAbortSignal(config.signal),
+      headers: config.headers.toJSON(),
+    })
     const response: AxiosResponse = { data: body, status, statusText: '', headers: {}, config }
-    return status < 400 ? Promise.resolve(response) : Promise.reject(response)
+    // axios wraps error statuses in AxiosError; reproduce that so interceptors
+    // and `isAxiosError` see the same shape as with the real adapter.
+    return status < 400
+      ? Promise.resolve(response)
+      : Promise.reject(
+          new AxiosError(
+            `Request failed with status code ${status}`,
+            'ERR_BAD_REQUEST',
+            config,
+            undefined,
+            response,
+          ),
+        )
   }
   const { defaults } = AXIOS_INSTANCE
   const previous = defaults.adapter

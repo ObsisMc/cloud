@@ -73,7 +73,8 @@ MCP / Skill；**不引入** password/credential/JWT/OAuth；不改注册系统�
   移除；不可移除 owner → 409 `cannot_remove_workspace_owner`；version + Idempotency-Key）；`go run
   ./cmd/openapi` 重生成 `api/openapi.json`（字节比对测试通过）。不加纯授权新端点。
 
-**前端**：
+**前端**（以下描述为 Step 3A 落地形态；随后 922GithubAuth 合并 main 的会话架构后，onboarding 入口迁移为
+独立路由 —— 见本节末尾的「合并后差异」注记）：
 
 - `frontend/src/components/layout/dashboard-layout.tsx`：`EmptyWorkspaceState` 升级为 onboarding ——
   h1「你还没有加入任何工作区」+ 说明「创建一个新的工作区，或请工作区所有者通过邮箱把你添加进来。」+
@@ -90,9 +91,21 @@ MCP / Skill；**不引入** password/credential/JWT/OAuth；不改注册系统�
     成员关系不受影响。」）。
 - `frontend/src/features/projects/project-detail-page.tsx`：`canDeleteProject(role, currentUserId,
   projectOwnerId)` = `role==='owner' || role==='admin' || (currentUserId != null &&
-  currentUserId === projectOwnerId)`；currentUserId 取 `useAuthStore((s) => s.user)?.id`，
-  projectOwnerId = `project.leadId`（= ownerUserId）。为控制函数复杂度将页头 + 重命名对话框抽取为
-  `ProjectChrome` 组件。
+  currentUserId === projectOwnerId)`；currentUserId 取 `useSession()`（`session.status === 'signed-in'
+  ? session.user.id : undefined`），projectOwnerId = `project.leadId`（= ownerUserId）。为控制函数复杂度
+  将页头 + 重命名对话框抽取为 `ProjectChrome` 组件。
+
+> **合并后差异（922GithubAuth ← main）**：本节的 onboarding 实现（dashboard-layout 内嵌
+> `EmptyWorkspaceState`）在合并 main 的会话架构后**迁移为独立路由** —— 现在 onboarding 入口是
+> `frontend/src/features/onboarding/onboarding-page.tsx`（路由 `/onboarding`，`RequireSession` 包裹），
+> 它用 `useCreateTenant`（无租户时 `POST /api/v1/tenants` 建租户）或 `useCreateSpace`（有租户时在租户内
+> 建空间）二选一创建第一个工作区，成员已有工作区则 `Navigate` 到它；`dashboard-layout.tsx`（main 版）在
+> 0 空间时 `Navigate to /onboarding`，未知 slug 重定向到第一个工作区。**Step 3A 能力本身未变**：members
+> owner-immutable UI、`useRemoveSpaceMember`、`canDeleteProject = creator OR owner/admin`、0-Workspace
+> 合法状态全部保留（成员/项目 UI 文件在合并中按「能力优先」保留 HEAD 实现）。当前用户身份由
+> `useSession()`（main 的 `SessionProvider`）提供，`useAuthStore` 已删除。注册入口也随合并变化 —— 前端
+> 不再有 register 模式（见 [[user-registration]] 的合并注记），`POST /auth/register` 仅保留为 ora-web
+> 开发边界的 API。
 
 **测试**（见 §3）。
 

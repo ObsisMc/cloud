@@ -69,40 +69,90 @@ function invalidateForEvent(
   }
 }
 
+/** Reconnect backoff: doubles from the first delay up to the cap, resets after a healthy stream. */
+export const RECONNECT_DELAYS_MS = { first: 1000, max: 30000 } as const
+
+/** Backoff delay for the n-th consecutive failed connection (0-based). */
+export function reconnectDelay(attempt: number): number {
+  return Math.min(RECONNECT_DELAYS_MS.first * 2 ** attempt, RECONNECT_DELAYS_MS.max)
+}
+
+// Resolves after `ms`, or immediately when the signal aborts, so an unmount
+// never leaves a reconnect timer pending.
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    function onAbort() {
+      clearTimeout(timer)
+      resolve()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+// Pulls frames off one open stream until it ends or the signal aborts.
+async function drain(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (event: SpaceEvent) => void,
+): Promise<void> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- incremental stream, sequential awaits are the protocol
+    const { done, value } = await reader.read()
+    if (done) return
+    buffer += decoder.decode(value, { stream: true })
+    const { events, rest } = parseSSEFrames(buffer)
+    buffer = rest
+    events.forEach(onEvent)
+  }
+}
+
 /**
  * Subscribes the tab to the space event stream and invalidates the affected
  * queries on every notice. Events are lightweight: they only trigger
- * refetches against the authoritative REST state, never carry it. The
- * subscription ends with the component.
+ * refetches against the authoritative REST state, never carry it.
+ *
+ * The stream rides the gateway session cookie like every other request. A
+ * dropped connection is reconnected with exponential backoff, and each
+ * reconnect refetches the space's lists so nothing missed while offline
+ * stays stale. A 401 ends the subscription: the session is gone and the
+ * signed-out screen takes over. The subscription ends with the component.
  */
 export function useSpaceEvents(tenantId: string | undefined, spaceId: string | undefined): void {
   const queryClient = useQueryClient()
   useEffect(() => {
     if (!tenantId || !spaceId) return undefined
     const controller = new AbortController()
+    const url = `/api/v1/tenants/${tenantId}/spaces/${spaceId}/events`
+    const onEvent = (event: SpaceEvent) => invalidateForEvent(event, tenantId, spaceId, queryClient)
+    const refetchAll = () =>
+      queryClient.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0]).startsWith(`/api/v1/tenants/${tenantId}/`),
+      })
     void (async () => {
-      try {
-        const response = await fetch(`/api/v1/tenants/${tenantId}/spaces/${spaceId}/events`, {
-          signal: controller.signal,
-        })
-        if (response.ok && response.body) {
-          const reader = response.body.getReader()
-          const decoder = new TextDecoder()
-          let buffer = ''
-          for (;;) {
-            // oxlint-disable-next-line no-await-in-loop -- incremental stream, sequential awaits are the protocol
-            const { done, value } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            const { events, rest } = parseSSEFrames(buffer)
-            buffer = rest
-            for (const event of events) {
-              invalidateForEvent(event, tenantId, spaceId, queryClient)
-            }
-          }
+      let failures = 0
+      while (!controller.signal.aborted) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one connection at a time is the reconnect loop
+          const response = await fetch(url, { signal: controller.signal })
+          if (response.status === 401) return
+          if (!response.ok || !response.body) throw new Error(`event stream ${response.status}`)
+          if (failures > 0) void refetchAll()
+          failures = 0
+          // oxlint-disable-next-line no-await-in-loop -- the stream itself is long-lived
+          await drain(response.body, onEvent)
+        } catch {
+          // aborted on unmount, or the connection dropped; fall through to backoff
         }
-      } catch {
-        // aborted on unmount or the connection dropped; MVP does not reconnect
+        if (controller.signal.aborted) return
+        failures += 1
+        // oxlint-disable-next-line no-await-in-loop -- backoff between reconnects
+        await sleep(reconnectDelay(failures - 1), controller.signal)
       }
     })()
     return () => controller.abort()

@@ -101,32 +101,39 @@ func TestScopedProjectDeletePolicy(t *testing.T) {
 	}
 }
 
-// TestLegacyProjectNotSharedWithWorkspaceMembers covers §16: an unscoped
-// (space_id NULL) project keeps owner-only access — workspace membership does not
-// widen it. No auto-backfill or migration of legacy projects this phase.
-func TestLegacyProjectNotSharedWithWorkspaceMembers(t *testing.T) {
+// TestTenantLevelProjectScopedToDefaultSpace covers §16 under the hybrid project
+// model (D2): a tenant-level project defaults into the tenant's default
+// collaboration space, so the default space is its sharing boundary. Membership
+// of an unrelated workspace never widens it — bob (member of sid only) stays 404
+// and the project never appears in sid's list — while dave, a default-space
+// member via the addUser default-space sync, can read it. Pre-existing unscoped
+// (space_id NULL) rows keep the same owner-only semantics.
+func TestTenantLevelProjectScopedToDefaultSpace(t *testing.T) {
 	f, sid, bob, _, dave := projectSharingFixture(t)
 
-	// A creates a tenant-level (unscoped) project.
-	legacy := f.call("POST", f.path("/projects"), core.Object{"name": "Legacy", "repositoryUrl": "https://example.invalid/repo.git", "defaultBranch": "main"}, "legacy-create", 202)
-	pid := legacy.O("resource").S("id")
-	wid := legacy.O("workspace").S("id")
-	if legacy.O("resource").S("spaceId") != "" {
-		t.Fatalf("tenant-level project should have no spaceId: %v", legacy)
+	// A creates a tenant-level project; it defaults into the tenant's default space.
+	created := f.call("POST", f.path("/projects"), core.Object{"name": "Private", "repositoryUrl": "https://example.invalid/repo.git", "defaultBranch": "main"}, "tenant-create", 202)
+	pid := created.O("resource").S("id")
+	wid := created.O("workspace").S("id")
+	if created.O("resource").S("spaceId") == "" {
+		t.Fatalf("tenant-level project should default into the default space: %v", created)
 	}
 
-	// B (space member of W) does not gain access: the project and its runtime
-	// workspace stay 404, and the space list contains no unscoped project.
+	// B (space member of the unrelated workspace W) does not gain access: the
+	// project and its runtime workspace stay 404, and W's list contains no
+	// default-space project.
 	f.callUser(t, bob, "GET", f.path("/projects/"+pid), nil, "", 404)
 	f.callUser(t, bob, "GET", f.path("/workspaces/"+wid), nil, "", 404)
 	projects := f.callUser(t, bob, "GET", f.path("/spaces/"+sid+"/projects"), nil, "", 200)
 	if len(projects["items"].([]any)) != 0 {
-		t.Fatalf("unscoped project leaked into a space list: %v", projects)
+		t.Fatalf("default-space project leaked into an unrelated space list: %v", projects)
 	}
 
-	// The owner still sees it (owner-only legacy), and dave (non-member) is hidden.
+	// The owner still sees it, and dave — a default-space member via the addUser
+	// default-space sync — can read it too: the default space, not sid, is the
+	// sharing boundary.
 	f.call("GET", f.path("/projects/"+pid), nil, "", 200)
-	f.callUser(t, dave, "GET", f.path("/projects/"+pid), nil, "", 404)
+	f.callUser(t, dave, "GET", f.path("/projects/"+pid), nil, "", 200)
 }
 
 // TestRuntimeWorkspaceInheritsProjectAccess covers §17: a runtime workspace

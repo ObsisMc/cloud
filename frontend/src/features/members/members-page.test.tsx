@@ -1,37 +1,16 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { SpaceListItem } from '@/api/generated.schemas'
+import { describe, expect, it } from 'vitest'
 import { MembersPage } from '@/features/members/members-page'
-import { db } from '@/mocks/data/store'
-import { useAuthStore } from '@/state/auth-store'
-import { setCloudSession, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-session'
-import { server } from '@/test/msw-server'
+import { installCloudSpaceHandlers, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-handlers'
 import { renderWithProviders } from '@/test/render'
-
-const MEMBERS_KEY = `/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members`
+import { server } from '@/test/msw-server'
 
 const ALICE_ID = '33333333-3333-3333-3333-333333333333'
 const BOB_ID = '44444444-4444-4444-4444-444444444444'
 // memberRow() seeds every member with version 1.
 const BOB_VERSION = 1
-
-function spaceItem(role: string): SpaceListItem {
-  return {
-    id: TEST_SPACE_ID,
-    tenantId: TEST_TENANT_ID,
-    name: 'Team Space',
-    slug: 'team',
-    description: '',
-    role,
-    createdBy: 'u1',
-    version: 1,
-    createdAt: '2026-09-21T10:00:00+08:00',
-    updatedAt: '2026-09-21T10:00:00+08:00',
-    archivedAt: null,
-  }
-}
 
 function memberRow(id: string, displayName: string, role: string) {
   return {
@@ -46,16 +25,10 @@ function memberRow(id: string, displayName: string, role: string) {
   }
 }
 
-/** Installs the spaces list (for the current-space provider) and the space members list. */
-function installSpaceHandlers(role: string, members: unknown[]) {
-  server.use(
-    http.get(`/api/v1/tenants/${TEST_TENANT_ID}/spaces`, () =>
-      HttpResponse.json({ items: [spaceItem(role)], nextCursor: '' }),
-    ),
-    http.get(`/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members`, () =>
-      HttpResponse.json({ items: members, nextCursor: '' }),
-    ),
-  )
+const MEMBERS_KEY = `/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members`
+
+function installMembersHandler(members: unknown[]) {
+  server.use(http.get(MEMBERS_KEY, () => HttpResponse.json({ items: members, nextCursor: '' })))
 }
 
 /**
@@ -64,9 +37,10 @@ function installSpaceHandlers(role: string, members: unknown[]) {
  * so the test can drive the dialog further.
  */
 async function renderOwnerWithAddDialog() {
-  installSpaceHandlers('owner', [memberRow(ALICE_ID, 'Alice', 'owner')])
+  installCloudSpaceHandlers('owner')
+  installMembersHandler([memberRow(ALICE_ID, 'Alice', 'owner')])
   const user = userEvent.setup()
-  renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+  renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
   await screen.findByText('Alice')
   await user.click(screen.getByRole('button', { name: '添加成员' }))
   return user
@@ -82,20 +56,13 @@ async function typeAndSubmitEmail(
 }
 
 describe('MembersPage', () => {
-  beforeEach(() => {
-    setCloudSession()
-  })
-
-  afterEach(() => {
-    useAuthStore.getState().clear()
-  })
-
   it('renders real space members read-only for a plain member', async () => {
-    installSpaceHandlers('member', [
+    installCloudSpaceHandlers('member')
+    installMembersHandler([
       memberRow(ALICE_ID, 'Alice', 'owner'),
       memberRow(BOB_ID, 'Bob', 'member'),
     ])
-    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
 
     expect(await screen.findByText('Alice')).toBeInTheDocument()
     expect(await screen.findByText('Bob')).toBeInTheDocument()
@@ -175,21 +142,13 @@ describe('MembersPage', () => {
     await waitFor(() => expect(screen.queryByLabelText('成员邮箱')).not.toBeInTheDocument())
   })
 
-  it('keeps the demo store table for mock sessions', async () => {
-    useAuthStore.getState().clear()
-    renderWithProviders(<MembersPage slug={db.workspace.slug} />, { slug: db.workspace.slug })
-    const first = db.users[0]
-    if (!first) throw new Error('seed users must not be empty')
-    expect(await screen.findByText(first.name)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
-  })
-
   it('shows role select and remove for members when the actor is the owner; owner rows are read-only', async () => {
-    installSpaceHandlers('owner', [
+    installCloudSpaceHandlers('owner')
+    installMembersHandler([
       memberRow(ALICE_ID, 'Alice', 'owner'),
       memberRow(BOB_ID, 'Bob', 'member'),
     ])
-    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
     await screen.findByText('Alice')
 
     // The member row gets a role selector (owner-only) and a remove action.
@@ -204,11 +163,12 @@ describe('MembersPage', () => {
   })
 
   it('keeps admin to add-only: no role select, no remove, add trigger preserved', async () => {
-    installSpaceHandlers('admin', [
+    installCloudSpaceHandlers('admin')
+    installMembersHandler([
       memberRow(ALICE_ID, 'Alice', 'owner'),
       memberRow(BOB_ID, 'Bob', 'member'),
     ])
-    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
     await screen.findByText('Alice')
 
     expect(screen.getByRole('button', { name: '添加成员' })).toBeInTheDocument()
@@ -218,9 +178,10 @@ describe('MembersPage', () => {
   })
 
   it('does not offer the owner role in the role selector', async () => {
-    installSpaceHandlers('owner', [memberRow(BOB_ID, 'Bob', 'member')])
+    installCloudSpaceHandlers('owner')
+    installMembersHandler([memberRow(BOB_ID, 'Bob', 'member')])
     const user = userEvent.setup()
-    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
     await screen.findByText('Bob')
 
     await user.click(screen.getByLabelText('Bob 的角色'))
@@ -233,7 +194,8 @@ describe('MembersPage', () => {
   })
 
   it('confirms membership-only removal before calling the DELETE member endpoint', async () => {
-    installSpaceHandlers('owner', [
+    installCloudSpaceHandlers('owner')
+    installMembersHandler([
       memberRow(ALICE_ID, 'Alice', 'owner'),
       memberRow(BOB_ID, 'Bob', 'member'),
     ])
@@ -244,12 +206,15 @@ describe('MembersPage', () => {
       http.delete(`${MEMBERS_KEY}/${BOB_ID}`, async ({ request }) => {
         deleted = true
         idempotencyKey = request.headers.get('Idempotency-Key') ?? ''
-        bodyVersion = (await request.clone().json())['version']
+        const raw = await request.clone().json()
+        if (typeof raw === 'object' && raw !== null) {
+          bodyVersion = (raw as Record<string, unknown>)['version']
+        }
         return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
       }),
     )
     const user = userEvent.setup()
-    renderWithProviders(<MembersPage slug="team" />, { slug: 'team' })
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
     await screen.findByText('Alice')
 
     await user.click(screen.getByRole('button', { name: '移除' }))

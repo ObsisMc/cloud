@@ -1,10 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Error as ApiError, SpaceMember, SpaceMemberListItem } from '@/api/generated.schemas'
 import { getGetApiV1TenantsTidSpacesQueryKey } from '@/api/spaces/spaces'
 import { AXIOS_INSTANCE, type ErrorType } from '@/lib/api-client'
 import { useCurrentSpace } from '@/features/spaces/current-space'
 import { mutationHeaders, useIdempotencyKeys, useSpaceMembers } from '@/features/spaces/api'
-import { mockApi } from '@/lib/mock-api-client'
 import type { User, WorkspaceMember } from '@/mocks/data/types'
 
 /** Add-by-email inputs; the backend resolves and normalizes the address. */
@@ -67,32 +66,21 @@ export function cloudMemberToUI(m: SpaceMemberListItem): MemberWithUser {
 }
 
 /**
- * Members of the current space. Cloud sessions read the real membership list
- * through the generated client; mock sessions keep the demo store.
+ * Members of the space at `slug`, read through the generated client once the
+ * slug resolved to a joined space; pending until then.
  */
 export function useMembers(slug: string): {
   data: MemberWithUser[] | undefined
   isPending: boolean
   isError: boolean
 } {
-  const { cloudMode, tenantId, space } = useCurrentSpace()
+  const { tenantId, space } = useCurrentSpace()
   const cloud = useSpaceMembers(tenantId, space?.slug === slug ? space.id : undefined)
-  const mock = useQuery({
-    queryKey: ['members', slug],
-    queryFn: async () => {
-      const { data } = await mockApi.get<MemberWithUser[]>(`/workspaces/${slug}/members`)
-      return data
-    },
-    enabled: !cloudMode,
-  })
-  if (cloudMode) {
-    return {
-      data: cloud.data?.items.map(cloudMemberToUI),
-      isPending: cloud.isLoading,
-      isError: cloud.isError,
-    }
+  return {
+    data: cloud.data?.items.map(cloudMemberToUI),
+    isPending: cloud.isLoading,
+    isError: cloud.isError,
   }
-  return { data: mock.data, isPending: mock.isPending, isError: mock.isError }
 }
 
 /**

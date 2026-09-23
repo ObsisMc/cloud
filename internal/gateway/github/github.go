@@ -82,6 +82,9 @@ func New(o *Options) (*Authenticator, error) {
 func (a *Authenticator) Source() string { return a.source }
 
 // AuthorizationURL requests only the minimal scope (none) and binds state and the S256 challenge.
+// prompt=select_account makes GitHub show its account picker every time: without it GitHub silently
+// reuses whichever github.com session the browser holds, so a member could never sign in to Ora with
+// a different GitHub account than the one already authorized.
 func (a *Authenticator) AuthorizationURL(request gateway.AuthorizationRequest) (string, error) {
 	if request.State == "" || request.CodeChallenge == "" || request.CallbackURL == "" {
 		return "", errors.New("state, code challenge and callback URL are required")
@@ -93,6 +96,7 @@ func (a *Authenticator) AuthorizationURL(request gateway.AuthorizationRequest) (
 	q.Set("code_challenge", request.CodeChallenge)
 	q.Set("code_challenge_method", "S256")
 	q.Set("allow_signup", "false")
+	q.Set("prompt", "select_account")
 	return a.authorizeURL + "?" + q.Encode(), nil
 }
 

@@ -26,6 +26,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useSession } from '@/features/auth/session'
 import { ProjectIcon } from '@/features/projects/components/project-icon'
 import {
   useCloudProject,
@@ -42,7 +43,6 @@ import { useCurrentSpace } from '@/features/spaces/current-space'
 import { workspacePaths } from '@/lib/paths'
 import { actorById, db } from '@/mocks/data/store'
 import type { Project } from '@/mocks/data/types'
-import { useAuthStore } from '@/state/auth-store'
 
 export function ProjectDetailPage({ slug }: { slug: string }) {
   const { projectId } = useParams<{ projectId: string }>()
@@ -53,7 +53,8 @@ export function ProjectDetailPage({ slug }: { slug: string }) {
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameDraft, setRenameDraft] = useState('')
   const role = cloudMode ? normalizeSpaceRole(space.role) : 'member'
-  const currentUserId = useAuthStore((s) => s.user)?.id
+  const { session } = useSession()
+  const currentUserId = session.status === 'signed-in' ? session.user.id : undefined
   const version = detail.data?.version ?? 0
 
   return (

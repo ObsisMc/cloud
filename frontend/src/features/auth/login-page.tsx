@@ -1,245 +1,173 @@
-import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useDemoLogin, useLogin, useRegister } from '@/features/auth/api'
-import { db } from '@/mocks/data/store'
-import { useAuthStore } from '@/state/auth-store'
-import { useDemoAuthStore } from '@/state/demo-auth-store'
+import { isExternalProvider, startLogin, type LoginProvider } from '@/features/auth/api'
+import { useLoginProviders } from '@/features/auth/providers'
+import { useSession } from '@/features/auth/session'
+import { safeReturnTo } from '@/lib/paths'
+
+const PROVIDER_LABELS: Record<LoginProvider, { idle: string; pending: string }> = {
+  'huawei-idaas': { idle: '使用华为统一登录', pending: '正在跳转华为统一登录…' },
+  github: { idle: '使用 GitHub 登录', pending: '正在跳转到 GitHub…' },
+  dev: { idle: '开发者登录（仅本地）', pending: '正在打开开发者登录…' },
+}
 
 /**
- * Sign-in offers two flows: the demo flow keeps the mock store pages working
- * (any email), and the real-account flow signs in through the ora-web edge with
- * the user's email, which provisions the identity into the bootstrap tenant and
- * sets the `ora_subject` session cookie (HttpOnly). The real flow drives the
- * Collaboration Workspace shell; the demo flow drives the local mock store.
+ * The provider a deployment signs everyone in with, when there is nothing to
+ * choose: exactly one provider and it is external. A gateway that also offers
+ * the development form leaves the choice to the developer.
+ */
+function soleExternalProvider(providers: LoginProvider[] | undefined): LoginProvider | undefined {
+  const [only] = providers ?? []
+  return providers?.length === 1 && only && isExternalProvider(only) ? only : undefined
+}
+
+/**
+ * Sign-in screen. The only credential is the gateway session cookie, so the
+ * page has nothing to collect: it asks the gateway which providers exist and
+ * hands the browser to one of them. With a single external provider (the
+ * production shape) it starts that login by itself, once; otherwise it offers
+ * one button per provider. A signed-in tab is sent straight to `returnTo`;
+ * a disabled account is told so instead of being sent to log in again.
  */
 export function LoginPage() {
-  const tenantId = useAuthStore((s) => s.tenantId)
-  const demoToken = useDemoAuthStore((s) => s.token)
+  const { session, signOutOfGitHub } = useSession()
+  const [params] = useSearchParams()
+  const returnTo = safeReturnTo(params.get('returnTo'))
+  const providers = useLoginProviders()
+  const [pending, setPending] = useState<LoginProvider | null>(null)
+  const [failed, setFailed] = useState(false)
+  const autoStarted = useRef(false)
 
-  if (tenantId) return <Navigate to="/default/projects" replace />
-  if (demoToken) return <Navigate to={`/${db.workspace.slug}/issues`} replace />
+  const signIn = useCallback(
+    async (provider: LoginProvider) => {
+      setFailed(false)
+      setPending(provider)
+      try {
+        await startLogin(provider, returnTo)
+      } catch {
+        setFailed(true)
+        setPending(null)
+      }
+    },
+    [returnTo],
+  )
 
+  const automatic = soleExternalProvider(providers.data)
+  const canStart = session.status === 'signed-out'
+  useEffect(() => {
+    // Exactly one attempt: a failed start must show the retry button, never loop.
+    if (!automatic || !canStart || autoStarted.current) return
+    autoStarted.current = true
+    void signIn(automatic)
+  }, [automatic, canStart, signIn])
+
+  if (session.status === 'signed-in') return <Navigate to={returnTo} replace />
+
+  const disabled = session.status === 'disabled'
+  const busy = pending !== null || session.status === 'loading'
+  // While the automatic start is in flight nothing is offered; after it failed, the same
+  // provider comes back as an explicit retry.
+  const offered = disabled || (automatic && !failed) ? [] : (providers.data ?? [])
   return (
     <div className="flex min-h-svh items-center justify-center bg-muted/30 px-4">
       <div className="w-full max-w-sm space-y-6">
-        <div className="space-y-1 text-center">
-          <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground font-semibold">
-            O
-          </div>
-          <h1 className="text-lg font-semibold">登录 Ora</h1>
-          <p className="text-sm text-muted-foreground">
-            真实账号连接后端协作空间；演示账号使用本地模拟数据。
+        <Heading disabled={disabled} automatic={automatic} pending={pending} />
+        <ProviderButtons
+          providers={offered}
+          pending={pending}
+          busy={busy}
+          retry={automatic !== undefined}
+          onSignIn={(provider) => void signIn(provider)}
+        />
+        {!disabled && providers.data?.includes('github') && (
+          <p className="text-center text-xs text-muted-foreground">
+            想换一个 GitHub 账号？
+            <button
+              type="button"
+              className="ml-1 underline underline-offset-2 hover:text-foreground"
+              disabled={busy}
+              onClick={() => void signOutOfGitHub()}
+            >
+              先退出 GitHub
+            </button>
           </p>
-        </div>
-        <Tabs defaultValue="cloud">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="cloud">真实账号</TabsTrigger>
-            <TabsTrigger value="demo">演示账号</TabsTrigger>
-          </TabsList>
-          <TabsContent value="cloud">
-            <CloudSignInForm />
-          </TabsContent>
-          <TabsContent value="demo">
-            <DemoSignInForm />
-          </TabsContent>
-        </Tabs>
+        )}
+        {providers.data?.length === 0 && (
+          <p className="text-center text-xs text-muted-foreground">认证网关未配置任何登录方式</p>
+        )}
+        {(failed || providers.isError) && (
+          <p className="text-center text-xs text-destructive">
+            无法开始登录：认证网关不可用，请稍后重试
+          </p>
+        )}
       </div>
     </div>
   )
 }
 
-/**
- * Real-account sign-in through the ora-web edge: the email is provisioned into
- * the bootstrap tenant and the session cookie is set server-side; the shell then
- * lands on the default space. Fields, button flow, loading and error states
- * follow the reference login, adapted from the devgateway source/subject/display
- * triple to the cookie session's email identity.
- */
-function CloudSignInForm() {
-  const [mode, setMode] = useState<'login' | 'register'>('login')
-  if (mode === 'register') {
-    return <CloudRegisterForm onSwitchLogin={() => setMode('login')} />
+function Heading({
+  disabled,
+  automatic,
+  pending,
+}: {
+  disabled: boolean
+  automatic: LoginProvider | undefined
+  pending: LoginProvider | null
+}) {
+  let title = '登录 Ora'
+  let description = '选择一种方式继续。'
+  if (disabled) {
+    title = '账号已被停用'
+    description = 'Cloud 已拒绝当前账号，请联系管理员恢复访问。'
+  } else if (automatic) {
+    if (pending) title = PROVIDER_LABELS[automatic].pending
+    description = '登录成功后将自动返回。'
   }
-  return <CloudLoginForm onSwitchRegister={() => setMode('register')} />
-}
-
-/**
- * Reads the backend error code from a mutation error, when the edge replied.
- * Real axios rejects with an AxiosError carrying `.response.data`; the test fake
- * rejects with the raw response, so both shapes are read here.
- */
-function errorCode(error: unknown): string | null {
-  if (!error || typeof error !== 'object') return null
-  const e = error as { response?: { data?: { code?: unknown } }; data?: { code?: unknown } }
-  const code = e.response?.data?.code ?? e.data?.code
-  return typeof code === 'string' ? code : null
-}
-
-function CloudLoginForm({ onSwitchRegister }: { onSwitchRegister: () => void }) {
-  const navigate = useNavigate()
-  const login = useLogin()
-  const [email, setEmail] = useState('')
-
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        login.mutate(email, {
-          onSuccess: () => navigate('/default/projects'),
-        })
-      }}
-      className="space-y-4"
-    >
-      <div className="space-y-1.5">
-        <Label htmlFor="cloud-email">邮箱</Label>
-        <Input
-          id="cloud-email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@company.com"
-          required
-        />
+    <div className="space-y-1 text-center">
+      <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground font-semibold">
+        O
       </div>
-      {login.isError && (
-        <p className="text-xs text-destructive">登录失败：请确认后端已启动后重试。</p>
-      )}
-      <Button type="submit" className="w-full" disabled={login.isPending}>
-        {login.isPending ? '登录中…' : '连接后端登录'}
-      </Button>
-      <p className="text-center text-xs text-muted-foreground">
-        没有账号？{' '}
-        <button
-          type="button"
-          onClick={onSwitchRegister}
-          className="font-medium text-primary hover:underline"
-        >
-          注册
-        </button>
-      </p>
-    </form>
+      <h1 className="text-lg font-semibold">{title}</h1>
+      <p className="text-sm text-muted-foreground">{description}</p>
+    </div>
   )
 }
 
-/**
- * Registration creates a new user identity (name + email) through the edge
- * server, which signs the new user straight into the same session as login. The
- * server normalizes the email (lowercase+trimmed) and rejects a duplicate
- * address with 409 user_already_exists.
- */
-function CloudRegisterForm({ onSwitchLogin }: { onSwitchLogin: () => void }) {
-  const navigate = useNavigate()
-  const register = useRegister()
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [fieldError, setFieldError] = useState<string | null>(null)
-  const backendCode = errorCode(register.error)
-
-  function submit(e: React.FormEvent) {
-    e.preventDefault()
-    const trimmedName = name.trim()
-    const trimmedEmail = email.trim()
-    if (!trimmedName) {
-      setFieldError('请输入姓名。')
-      return
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setFieldError('请输入有效的邮箱地址。')
-      return
-    }
-    setFieldError(null)
-    register.mutate(
-      { name: trimmedName, email: trimmedEmail },
-      { onSuccess: () => navigate('/default/projects') },
-    )
-  }
-
+/** One button per offered provider; in retry mode the label says so instead of naming it. */
+function ProviderButtons({
+  providers,
+  pending,
+  busy,
+  retry,
+  onSignIn,
+}: {
+  providers: LoginProvider[]
+  pending: LoginProvider | null
+  busy: boolean
+  retry: boolean
+  onSignIn: (provider: LoginProvider) => void
+}) {
+  if (providers.length === 0) return null
   return (
-    // noValidate: registration shows its own field errors below the inputs, so the
-    // browser's native constraint bubbles must not swallow the submit event.
-    <form onSubmit={submit} noValidate className="space-y-4">
-      <div className="space-y-1.5">
-        <Label htmlFor="register-name">姓名</Label>
-        <Input
-          id="register-name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="你的姓名"
-          autoComplete="name"
-          required
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="register-email">邮箱</Label>
-        <Input
-          id="register-email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@company.com"
-          autoComplete="email"
-          required
-        />
-      </div>
-      {fieldError && <p className="text-xs text-destructive">{fieldError}</p>}
-      {register.isError && !fieldError && (
-        <p className="text-xs text-destructive">
-          {backendCode === 'user_already_exists'
-            ? '该邮箱已经注册。'
-            : '注册失败：请确认后端已启动后重试。'}
-        </p>
-      )}
-      <Button type="submit" className="w-full" disabled={register.isPending}>
-        {register.isPending ? '注册中…' : '注册'}
-      </Button>
-      <p className="text-center text-xs text-muted-foreground">
-        已有账号？{' '}
-        <button
-          type="button"
-          onClick={onSwitchLogin}
-          className="font-medium text-primary hover:underline"
-        >
-          登录
-        </button>
-      </p>
-    </form>
-  )
-}
-
-/** Demo sign-in against the mock store; any email works. */
-function DemoSignInForm() {
-  const navigate = useNavigate()
-  const login = useDemoLogin()
-  const [email, setEmail] = useState('ruihao053@gmail.com')
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        login.mutate(email, {
-          onSuccess: () => navigate(`/${db.workspace.slug}/issues`),
-        })
-      }}
-      className="space-y-4"
-    >
-      <div className="space-y-1.5">
-        <Label htmlFor="email">邮箱</Label>
-        <Input
-          id="email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@company.com"
-          required
-        />
-      </div>
-      <Button type="submit" className="w-full" disabled={login.isPending}>
-        {login.isPending ? '登录中…' : '继续'}
-      </Button>
-    </form>
+    <div className="space-y-2">
+      {providers.map((provider) => {
+        let label = retry ? '重新登录' : PROVIDER_LABELS[provider].idle
+        if (pending === provider) label = PROVIDER_LABELS[provider].pending
+        return (
+          <Button
+            key={provider}
+            type="button"
+            variant={isExternalProvider(provider) ? 'default' : 'outline'}
+            className="w-full"
+            disabled={busy}
+            onClick={() => onSignIn(provider)}
+          >
+            {label}
+          </Button>
+        )
+      })}
+    </div>
   )
 }

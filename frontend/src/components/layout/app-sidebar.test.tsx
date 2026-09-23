@@ -1,146 +1,160 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
-import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { describe, expect, it } from 'vitest'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
-import type { SpaceListItem } from '@/api/generated.schemas'
-import { db } from '@/mocks/data/store'
-import { setCloudSession, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-session'
+import { GITHUB_SIGN_OUT_URL } from '@/features/auth/api'
+import { RequireSession } from '@/features/auth/require-session'
+import {
+  installSignedInSession,
+  TEST_SPACE_ID,
+  TEST_TENANT_ID,
+  TEST_USER_ID,
+} from '@/test/cloud-handlers'
+import { installFakeNavigation } from '@/test/navigation'
+import { renderRoutes } from '@/test/render'
 import { server } from '@/test/msw-server'
-import { useAuthStore } from '@/state/auth-store'
-import { useDemoAuthStore } from '@/state/demo-auth-store'
 
-const CLOUD_SLUG = 'team'
-const OTHER_SLUG = 'platform'
+const SECOND_SPACE_ID = '77777777-7777-7777-7777-777777777777'
 
-function spaceItem(id: string, name: string, slug: string, role: string): SpaceListItem {
+function space(id: string, name: string, slug: string) {
   return {
     id,
     tenantId: TEST_TENANT_ID,
     name,
     slug,
     description: '',
-    role,
-    createdBy: 'u1',
+    createdBy: TEST_USER_ID,
     version: 1,
-    createdAt: '2026-09-21T10:00:00+08:00',
-    updatedAt: '2026-09-21T10:00:00+08:00',
+    createdAt: '2026-09-20T10:00:00+08:00',
+    updatedAt: '2026-09-20T10:00:00+08:00',
     archivedAt: null,
+    role: 'owner',
   }
 }
 
+function installTwoSpaces() {
+  installSignedInSession()
+  server.use(
+    http.get('/api/v1/me/tenants', () =>
+      HttpResponse.json({
+        items: [{ id: TEST_TENANT_ID, name: '研发组织', status: 'active', role: 'admin' }],
+        nextCursor: '',
+      }),
+    ),
+    http.get(`/api/v1/tenants/${TEST_TENANT_ID}/spaces`, () =>
+      HttpResponse.json({
+        items: [
+          space(TEST_SPACE_ID, 'Cloud Dev', 'cloud-dev'),
+          space(SECOND_SPACE_ID, 'Ops', 'ops'),
+        ],
+        nextCursor: '',
+      }),
+    ),
+  )
+}
+
 function renderDashboard(initialPath: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const router = createMemoryRouter(
+  return renderRoutes(
     [
       { path: '/login', element: <div>Login screen</div> },
       {
-        path: '/:workspaceSlug',
-        element: <DashboardLayout />,
-        children: [
-          { path: 'issues', element: <div>Issues screen</div> },
-          { path: 'projects', element: <div>Projects screen</div> },
-        ],
+        path: '/w/:workspaceSlug',
+        element: (
+          <RequireSession>
+            <DashboardLayout />
+          </RequireSession>
+        ),
+        children: [{ path: 'issues', element: <div>Issues screen</div> }],
       },
     ],
-    { initialEntries: [initialPath] },
-  )
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
+    initialPath,
   )
 }
 
 describe('AppSidebar workspace switcher', () => {
-  afterEach(() => {
-    useAuthStore.getState().clear()
-    useDemoAuthStore.getState().clear()
-  })
-
-  it('lists every demo workspace with the active one selected', async () => {
-    useDemoAuthStore.getState().setSession('token', {
-      id: 'u1',
-      type: 'user',
-      name: 'Demo',
-      email: 'demo@example.com',
-      avatarColor: '#3b82f6',
-      initials: 'DE',
-      role: 'owner',
-    })
+  it('shows the current space and the signed-in member, and lists every joined space', async () => {
+    installTwoSpaces()
     const user = userEvent.setup()
-    renderDashboard(`/${db.workspace.slug}/issues`)
+    renderDashboard('/w/cloud-dev/issues')
     await screen.findByText('Issues screen')
 
-    await user.click(screen.getByRole('button', { name: new RegExp(db.workspace.name) }))
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
 
-    const menu = await screen.findByRole('menu')
-    await Promise.all(
-      db.workspaces.map(async (ws) => {
-        expect(
-          await screen.findByRole('menuitem', { name: new RegExp(ws.name) }),
-        ).toBeInTheDocument()
+    expect(await screen.findByRole('menu')).toBeInTheDocument()
+    expect(screen.getByText('Alice')).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: /Cloud Dev/ })).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: /Ops/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /新建工作区/ })).toBeInTheDocument()
+  })
+
+  it('switches to a different space and lands on its issues page', async () => {
+    installTwoSpaces()
+    const user = userEvent.setup()
+    renderDashboard('/w/cloud-dev/issues')
+    await screen.findByText('Issues screen')
+
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    await user.click(await screen.findByRole('menuitem', { name: /Ops/ }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Ops/ })).toBeInTheDocument()
+    })
+  })
+
+  it('signs out through the gateway and returns to the login screen', async () => {
+    installTwoSpaces()
+    let loggedOut = false
+    server.use(
+      http.post('/auth/logout', () => {
+        loggedOut = true
+        return new HttpResponse(null, { status: 204 })
       }),
     )
-    expect(menu).toBeInTheDocument()
-  })
-
-  it('switches to another demo workspace and lands on its issues page', async () => {
-    useDemoAuthStore.getState().setSession('token', {
-      id: 'u1',
-      type: 'user',
-      name: 'Demo',
-      email: 'demo@example.com',
-      avatarColor: '#3b82f6',
-      initials: 'DE',
-      role: 'owner',
-    })
     const user = userEvent.setup()
-    const target = db.workspaces.find((w) => w.slug !== db.workspace.slug)
-    if (!target) throw new Error('workspace seed data must contain a second workspace')
-
-    renderDashboard(`/${db.workspace.slug}/issues`)
+    renderDashboard('/w/cloud-dev/issues')
     await screen.findByText('Issues screen')
 
-    await user.click(screen.getByRole('button', { name: new RegExp(db.workspace.name) }))
-    await user.click(await screen.findByRole('menuitem', { name: new RegExp(target.name) }))
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    await user.click(await screen.findByRole('menuitem', { name: /退出登录/ }))
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: new RegExp(target.name) })).toBeInTheDocument()
-    })
+    expect(await screen.findByText('Login screen')).toBeInTheDocument()
+    expect(loggedOut).toBe(true)
   })
 
-  it('lists real joined spaces in cloud mode and switches to projects', async () => {
-    setCloudSession()
+  it('offers a GitHub sign-out that revokes the Ora session first, only when GitHub login exists', async () => {
+    installTwoSpaces()
+    let loggedOut = false
     server.use(
-      http.get(`/api/v1/tenants/${TEST_TENANT_ID}/spaces`, () =>
-        HttpResponse.json({
-          items: [
-            spaceItem(TEST_SPACE_ID, 'Team Space', CLOUD_SLUG, 'admin'),
-            spaceItem('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Platform', OTHER_SLUG, 'member'),
-          ],
-          nextCursor: '',
-        }),
-      ),
+      http.post('/auth/logout', () => {
+        loggedOut = true
+        return new HttpResponse(null, { status: 204 })
+      }),
     )
+    const navigation = installFakeNavigation()
     const user = userEvent.setup()
-    renderDashboard(`/${CLOUD_SLUG}/projects`)
-    await screen.findByText('Projects screen')
+    renderDashboard('/w/cloud-dev/issues')
+    await screen.findByText('Issues screen')
 
-    await user.click(screen.getByRole('button', { name: new RegExp('Team Space') }))
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    await user.click(await screen.findByRole('menuitem', { name: /退出并注销 GitHub/ }))
 
-    expect(
-      await screen.findByRole('menuitem', { name: new RegExp('Platform') }),
-    ).toBeInTheDocument()
-    expect(screen.getByText('新建工作区')).toBeInTheDocument()
+    // Ora signs out in this tab (back to the login screen); GitHub's page opens beside it.
+    expect(await screen.findByText('Login screen')).toBeInTheDocument()
+    await waitFor(() => expect(navigation.openedTabs).toEqual([GITHUB_SIGN_OUT_URL]))
+    expect(navigation.destinations).toEqual([])
+    expect(loggedOut).toBe(true)
+  })
 
-    await user.click(screen.getByRole('menuitem', { name: new RegExp('Platform') }))
+  it('hides the GitHub sign-out when the gateway has no GitHub login', async () => {
+    installTwoSpaces()
+    server.use(http.get('/auth/providers', () => HttpResponse.json({ providers: ['dev'] })))
+    const user = userEvent.setup()
+    renderDashboard('/w/cloud-dev/issues')
+    await screen.findByText('Issues screen')
 
-    await waitFor(() => {
-      expect(screen.getByText('Projects screen')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: new RegExp('Platform') })).toBeInTheDocument()
-    })
+    await user.click(screen.getByRole('button', { name: /Cloud Dev/ }))
+    expect(await screen.findByRole('menuitem', { name: /退出登录/ })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /退出并注销 GitHub/ })).not.toBeInTheDocument()
   })
 })

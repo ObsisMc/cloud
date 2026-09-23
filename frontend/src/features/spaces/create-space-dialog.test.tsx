@@ -1,12 +1,11 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CreateSpaceDialog } from '@/features/spaces/create-space-dialog'
+import { installSignedInSession, TEST_TENANT_ID as TENANT_ID } from '@/test/cloud-handlers'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw-server'
-
-const TENANT_ID = '11111111-1111-1111-1111-111111111111'
 
 function setupDialog(onCreated = vi.fn<(slug: string) => void>()) {
   renderWithProviders(
@@ -21,11 +20,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 describe('CreateSpaceDialog', () => {
-  afterEach(() => {
-    sessionStorage.clear()
-  })
-
   it('creates a space through the cloud API and reports the normalized slug', async () => {
+    installSignedInSession()
     let postedName = ''
     let postedSlug = ''
     server.use(
@@ -62,6 +58,7 @@ describe('CreateSpaceDialog', () => {
   })
 
   it('disables submit until the name and a valid slug are present', async () => {
+    installSignedInSession()
     setupDialog()
     const user = userEvent.setup()
 

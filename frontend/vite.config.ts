@@ -14,14 +14,24 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8080',
-      '/auth': 'http://localhost:8080',
-      '/internal': 'http://localhost:8080',
-      '/healthz': 'http://localhost:8080',
+      // The browser only ever talks to the authentication gateway
+      // (cmd/gateway, `task run:gateway`): it completes the GitHub login, owns
+      // the HttpOnly session cookie and signs the internal credentials the
+      // cloud verifies. Proxying keeps everything same-origin with this dev
+      // server, which is what the gateway's cookie and Origin checks require
+      // (its `public.base_url` is this origin).
+      '/auth': 'http://localhost:8081',
+      '/api': 'http://localhost:8081',
+      '/healthz': 'http://localhost:8081',
     },
   },
   test: {
     environment: 'jsdom',
+    // Each test file builds its own jsdom environment; on many-core machines
+    // the default worker count oversubscribes CPU and timing-sensitive
+    // findBy assertions flake. GitHub runners expose 2-4 cores, so capping
+    // keeps local gates deterministic without slowing CI down.
+    maxWorkers: 4,
     setupFiles: ['src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     coverage: {

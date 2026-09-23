@@ -6,9 +6,11 @@ import { db } from '@/mocks/data/store'
 import { ChatPage } from './chat-page'
 
 function renderChat(sessionId?: string) {
-  const path = sessionId ? `/${db.workspace.slug}/chat/${sessionId}` : `/${db.workspace.slug}/chat`
+  const path = sessionId
+    ? `/w/${db.workspace.slug}/chat/${sessionId}`
+    : `/w/${db.workspace.slug}/chat`
   return renderAtRoute(
-    '/:workspaceSlug/chat/:sessionId?',
+    '/w/:workspaceSlug/chat/:sessionId?',
     <ChatPage slug={db.workspace.slug} />,
     path,
   )

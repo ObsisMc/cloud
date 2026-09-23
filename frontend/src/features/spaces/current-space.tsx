@@ -1,41 +1,34 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import type { SpaceListItem } from '@/api/generated.schemas'
-import { useSpaces } from '@/features/spaces/api'
-import { useAuthStore } from '@/state/auth-store'
+import { useJoinedSpaces } from '@/features/spaces/api'
 
 /**
- * Current-workspace context: resolves the route's `:workspaceSlug` (a
- * collaboration-space slug, e.g. `/default`) against the real spaces list when
- * a cloud session exists, and exposes the tenant id every tenant-scoped API
- * needs. Pages use {@link useCurrentSpace} to decide between cloud data and the
- * mock store without touching routing.
- *
- * Cloud mode is judged from the persisted ora-web cookie session (`tenantId`),
- * not from separately stored credentials: the cookie is the authoritative
- * session, and the browser never holds JWTs.
+ * Current-space context: resolves the route's `:workspaceSlug` against the
+ * spaces the signed-in member joined and exposes the tenant id every
+ * tenant-scoped API needs. Pages read {@link useCurrentSpace} instead of
+ * touching routing or the tenant list themselves.
  */
 export interface CurrentSpaceValue {
-  /** True while the tab holds an ora-web cookie session. */
-  cloudMode: boolean
-  /** Tenant id of the cloud session, present only in cloud mode. */
+  /** Tenant id of the session (the product shows only spaces, so the earliest-created tenant is used). */
   tenantId: string | undefined
-  /** Spaces the signed-in member joined (undefined while loading). */
+  /** Spaces the signed-in member joined; `[]` once resolved for a member with none. */
   spaces: SpaceListItem[] | undefined
   /** The space matching the active route slug, when one exists. */
   space: SpaceListItem | undefined
+  /** True until the tenant and space lists have settled. */
+  isPending: boolean
+  /** True when either list failed for a reason other than being signed out. */
+  isError: boolean
 }
 
 const CurrentSpaceContext = createContext<CurrentSpaceValue | null>(null)
 
 export function CurrentSpaceProvider({ slug, children }: { slug: string; children: ReactNode }) {
-  const tenantId = useAuthStore((s) => s.tenantId) ?? undefined
-  const cloudMode = tenantId != null
-  const spacesQuery = useSpaces(tenantId)
-  const spaces = spacesQuery.data?.items
+  const { tenantId, spaces, isPending, isError } = useJoinedSpaces()
   const space = spaces?.find((candidate) => candidate.slug === slug)
   const value = useMemo(
-    () => ({ cloudMode, tenantId, spaces, space }),
-    [cloudMode, tenantId, spaces, space],
+    () => ({ tenantId, spaces, space, isPending, isError }),
+    [tenantId, spaces, space, isPending, isError],
   )
   return <CurrentSpaceContext.Provider value={value}>{children}</CurrentSpaceContext.Provider>
 }
