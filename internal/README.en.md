@@ -20,7 +20,7 @@
 - [logger](logger/README.en.md) provides structured, non-blocking JSON logging via Zap and Lumberjack.
 - [simulator](simulator/README.en.md) implements in-process doubles for the Substrate execution engine, Controller, and Workspace Node.
 - [controlpb](controlpb/README.en.md) holds the gRPC Go code (server stubs and messages) generated from the Controller internal control contract under [`proto/`](../proto/README.en.md); read-only.
-- [controlgrpc](controlgrpc/README.en.md) serves that contract over gRPC: service-credential interceptors, `Fault` → status mapping, the lease service; translation only, no business rules.
+- [controlgrpc](controlgrpc/README.en.md) serves that contract over gRPC: the caller-identity interceptor, `Fault` → status mapping, the lease service; translation only, no business rules.
 
 ## Layering and architectural rules
 

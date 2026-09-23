@@ -20,7 +20,7 @@
 - [logger](logger/README.md)：基于 Zap 和 Lumberjack 提供结构化、非阻塞的 JSON 日志记录。
 - [simulator](simulator/README.md)：实现 Substrate 执行引擎、Controller 与 Workspace Node 的进程内替身。
 - [controlpb](controlpb/README.md)：由 [`proto/`](../proto/README.md) 生成的 Controller 内部控制契约 gRPC Go 代码（服务端桩与消息），只读。
-- [controlgrpc](controlgrpc/README.md)：该契约的 gRPC 服务端：服务凭据拦截器、`Fault` → 状态码映射、租约服务；只翻译，不含业务。
+- [controlgrpc](controlgrpc/README.md)：该契约的 gRPC 服务端：调用方身份拦截器、`Fault` → 状态码映射、租约服务；只翻译，不含业务。
 
 ## 分层与架构规则
 

@@ -68,7 +68,7 @@ func run() (runErr error) {
 	if e != nil {
 		return e
 	}
-	grpcServer := controlgrpc.New(store, auth, log)
+	grpcServer := controlgrpc.New(store)
 	failed := make(chan error, 2)
 	go func() {
 		log.Info("Cloud listening", zap.String("address", server.Addr))

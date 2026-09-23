@@ -21,7 +21,7 @@ database:
   max_open_conns: 100
   conn_max_lifetime: 1h
 control:
-  grpc_addr: "127.0.0.1:8082" # Controller-facing gRPC; loopback or private network only until TLS lands
+  grpc_addr: "127.0.0.1:8082" # Controller-facing gRPC, unauthenticated at this stage; loopback or private network only
 auth:
   audience: "ora-cloud"
   # Public keys of the local Gateway; generate them with `task setup` (config.toml). Production replaces

@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,14 +22,12 @@ import (
 	"github.com/wanglongan587/cloud/internal/controlgrpc"
 	"github.com/wanglongan587/cloud/internal/controlpb"
 	"github.com/wanglongan587/cloud/internal/core"
-	"github.com/wanglongan587/cloud/internal/simulator"
 )
 
 // controlHarness serves the gRPC control surface over bufconn against an isolated PostgreSQL schema.
 type controlHarness struct {
-	store       *core.Store
-	credentials *simulator.Credentials
-	conn        *grpc.ClientConn
+	store *core.Store
+	conn  *grpc.ClientConn
 }
 
 func newControlHarness(t *testing.T) *controlHarness {
@@ -42,26 +38,19 @@ func newControlHarness(t *testing.T) *controlHarness {
 	store, e := core.NewStore(db)
 	must(t, e)
 	must(t, store.Migrate(context.Background()))
-	credentials, e := simulator.NewCredentials()
-	must(t, e)
-	auth, e := core.NewAuthenticator("ora-cloud", credentials.Trust)
-	must(t, e)
 	listener := bufconn.Listen(1 << 20)
-	server := controlgrpc.New(store, auth, zap.NewNop())
+	server := controlgrpc.New(store)
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
 	conn, e := grpc.NewClient("passthrough:///control", grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) }), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	must(t, e)
 	t.Cleanup(func() { _ = conn.Close() })
-	return &controlHarness{store: store, credentials: credentials, conn: conn}
+	return &controlHarness{store: store, conn: conn}
 }
 
-// as returns a context carrying a fresh service credential of the given role and subject.
-func (h *controlHarness) as(t *testing.T, role, subject string) context.Context {
-	t.Helper()
-	token, err := h.credentials.Token(role, core.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: subject}})
-	must(t, err)
-	return metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+token)
+// asController returns a context naming the calling Controller; the surface authenticates nobody at this stage.
+func asController(controller string) context.Context {
+	return metadata.AppendToOutgoingContext(context.Background(), controlgrpc.HolderMetadata, controller)
 }
 
 // expectStatus asserts the status code and the ErrorDetail the contract promises together.
@@ -82,49 +71,48 @@ func expectStatus(t *testing.T, err error, code codes.Code, detail controlpb.Err
 	}
 }
 
-// The gRPC control surface admits only controller service credentials and runs the same lease
+// The gRPC control surface requires the calling Controller to name itself and runs the same lease
 // transaction as the JSON internal API: one holder, monotonic epochs, stale epochs fenced.
-func TestControlGRPCLeaseAuthenticationAndFencing(t *testing.T) {
+func TestControlGRPCLeaseHolderAndFencing(t *testing.T) {
 	h := newControlHarness(t)
 	client := controlpb.NewControllerLeaseServiceClient(h.conn)
-	as := func(role, subject string) context.Context { return h.as(t, role, subject) }
 	expect := func(err error, code codes.Code, detail controlpb.ErrorCode) {
 		t.Helper()
 		expectStatus(t, err, code, detail)
 	}
 
 	_, e := client.AcquireLease(context.Background(), &controlpb.AcquireLeaseRequest{})
-	expect(e, codes.Unauthenticated, controlpb.ErrorCode_ERROR_CODE_UNSPECIFIED)
-	_, e = client.AcquireLease(as("gateway", "gateway-a"), &controlpb.AcquireLeaseRequest{})
-	expect(e, codes.PermissionDenied, controlpb.ErrorCode_ERROR_CODE_UNSPECIFIED)
+	expect(e, codes.InvalidArgument, controlpb.ErrorCode_ERROR_CODE_UNSPECIFIED)
+	_, e = client.AcquireLease(asController(" "), &controlpb.AcquireLeaseRequest{})
+	expect(e, codes.InvalidArgument, controlpb.ErrorCode_ERROR_CODE_UNSPECIFIED)
 
-	first, e := client.AcquireLease(as("controller", "controller-a"), &controlpb.AcquireLeaseRequest{})
+	first, e := client.AcquireLease(asController("controller-a"), &controlpb.AcquireLeaseRequest{})
 	must(t, e)
 	if first.GetLease().GetHolderId() != "controller-a" || first.GetLease().GetEpoch() != 1 || first.GetLease().GetExpiresAt() == nil {
 		t.Fatalf("unexpected first lease: %v", first.GetLease())
 	}
-	_, e = client.AcquireLease(as("controller", "controller-b"), &controlpb.AcquireLeaseRequest{})
+	_, e = client.AcquireLease(asController("controller-b"), &controlpb.AcquireLeaseRequest{})
 	expect(e, codes.FailedPrecondition, controlpb.ErrorCode_ERROR_CODE_LEASE_HELD)
-	_, e = client.RenewLease(as("controller", "controller-b"), &controlpb.RenewLeaseRequest{Epoch: 1})
+	_, e = client.RenewLease(asController("controller-b"), &controlpb.RenewLeaseRequest{Epoch: 1})
 	expect(e, codes.FailedPrecondition, controlpb.ErrorCode_ERROR_CODE_STALE_CONTROLLER)
-	_, e = client.RenewLease(as("controller", "controller-a"), &controlpb.RenewLeaseRequest{Epoch: 7})
+	_, e = client.RenewLease(asController("controller-a"), &controlpb.RenewLeaseRequest{Epoch: 7})
 	expect(e, codes.FailedPrecondition, controlpb.ErrorCode_ERROR_CODE_STALE_CONTROLLER)
-	renewed, e := client.RenewLease(as("controller", "controller-a"), &controlpb.RenewLeaseRequest{Epoch: 1})
+	renewed, e := client.RenewLease(asController("controller-a"), &controlpb.RenewLeaseRequest{Epoch: 1})
 	must(t, e)
 	if renewed.GetLease().GetEpoch() != 1 || !renewed.GetLease().GetExpiresAt().AsTime().After(first.GetLease().GetExpiresAt().AsTime()) {
 		t.Fatalf("renewal must keep the epoch and extend expiry: %v -> %v", first.GetLease(), renewed.GetLease())
 	}
-	released, e := client.ReleaseLease(as("controller", "controller-a"), &controlpb.ReleaseLeaseRequest{Epoch: 1})
+	released, e := client.ReleaseLease(asController("controller-a"), &controlpb.ReleaseLeaseRequest{Epoch: 1})
 	must(t, e)
 	if released.GetLease().GetEpoch() != 1 {
 		t.Fatalf("release changed the epoch: %v", released.GetLease())
 	}
-	second, e := client.AcquireLease(as("controller", "controller-b"), &controlpb.AcquireLeaseRequest{})
+	second, e := client.AcquireLease(asController("controller-b"), &controlpb.AcquireLeaseRequest{})
 	must(t, e)
 	if second.GetLease().GetHolderId() != "controller-b" || second.GetLease().GetEpoch() != 2 {
 		t.Fatalf("hand-over must bump the epoch: %v", second.GetLease())
 	}
-	_, e = client.RenewLease(as("controller", "controller-a"), &controlpb.RenewLeaseRequest{Epoch: 1})
+	_, e = client.RenewLease(asController("controller-a"), &controlpb.RenewLeaseRequest{Epoch: 1})
 	expect(e, codes.FailedPrecondition, controlpb.ErrorCode_ERROR_CODE_STALE_CONTROLLER)
 }
 
@@ -138,7 +126,7 @@ func TestControlGRPCCloneLoopWithSubmissionReplay(t *testing.T) {
 	tid, uid := bootstrap.S("tenantId"), bootstrap.S("userId")
 	lease := controlpb.NewControllerLeaseServiceClient(h.conn)
 	client := controlpb.NewExecutionServiceClient(h.conn)
-	holder := h.as(t, "controller", "controller-a")
+	holder := asController("controller-a")
 	acquired, e := lease.AcquireLease(holder, &controlpb.AcquireLeaseRequest{})
 	must(t, e)
 	epoch := acquired.GetLease().GetEpoch()
@@ -196,8 +184,8 @@ func TestControlGRPCCloneLoopWithSubmissionReplay(t *testing.T) {
 		t.Fatalf("dispatched request was offered again: %v", drained.GetItem())
 	}
 	_, e = client.ListPendingDispatches(context.Background(), &controlpb.ListPendingDispatchesRequest{NodeId: "node-a"})
-	expectStatus(t, e, codes.Unauthenticated, controlpb.ErrorCode_ERROR_CODE_UNSPECIFIED)
-	pending, e := client.ListPendingDispatches(h.as(t, "controller", "controller-b"), &controlpb.ListPendingDispatchesRequest{NodeId: "node-a"})
+	expectStatus(t, e, codes.InvalidArgument, controlpb.ErrorCode_ERROR_CODE_UNSPECIFIED)
+	pending, e := client.ListPendingDispatches(asController("controller-b"), &controlpb.ListPendingDispatchesRequest{NodeId: "node-a"})
 	must(t, e)
 	if len(pending.GetRecords()) != 1 || pending.GetRecords()[0].GetExecutionId() != "exec-1" {
 		t.Fatalf("recovery read must see the pending execution without a lease: %v", pending.GetRecords())
@@ -230,7 +218,7 @@ func TestControlGRPCCloneLoopWithSubmissionReplay(t *testing.T) {
 	if queried.GetRecord().GetResult().GetCloneReady().GetCommit() != ready.GetCloneReady().GetCommit() {
 		t.Fatalf("identical queried result must be idempotent: %v", queried.GetRecord())
 	}
-	got, e := client.GetDispatch(h.as(t, "controller", "controller-b"), &controlpb.GetDispatchRequest{ExecutionId: "exec-1"})
+	got, e := client.GetDispatch(asController("controller-b"), &controlpb.GetDispatchRequest{ExecutionId: "exec-1"})
 	must(t, e)
 	if got.GetRecord().GetOperationId() != request.S("id") || got.GetRecord().GetResult() == nil {
 		t.Fatalf("dispatch lookup lost the result: %v", got.GetRecord())
@@ -260,7 +248,7 @@ func TestControlGRPCWatchDeliversWorkAndDrain(t *testing.T) {
 	must(t, e)
 	lease := controlpb.NewControllerLeaseServiceClient(h.conn)
 	signals := controlpb.NewControlSignalServiceClient(h.conn)
-	holder := h.as(t, "controller", "controller-a")
+	holder := asController("controller-a")
 	acquired, e := lease.AcquireLease(holder, &controlpb.AcquireLeaseRequest{})
 	must(t, e)
 	epoch := acquired.GetLease().GetEpoch()

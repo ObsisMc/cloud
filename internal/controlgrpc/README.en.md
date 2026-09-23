@@ -3,16 +3,18 @@
 [中文](README.md) | [English](README.en.md)
 
 `internal/controlgrpc` serves the [`internal/controlpb`](../controlpb/README.en.md) contract over gRPC. It
-is a translation layer only: every RPC verifies the caller's service credential, converts the request
+is a translation layer only: every RPC reads the calling Controller's identity from metadata, converts the request
 into a `core.ControlRequest`, runs it through the same `Store.Control` transaction as the JSON internal
 API, and maps the resulting `Fault` to a gRPC status. No business rule, cache or implicit retry lives here.
 
-## Authentication
+## Caller identity
 
-- `authorization: Bearer <service JWT>` metadata, verified by `core.Authenticator` as `kind=service`;
-  only `role=controller` is admitted (missing → `UNAUTHENTICATED`, other roles → `PERMISSION_DENIED`).
-- The lease holder is the verified service `sub`, never a request field.
-- Unary and stream interceptors share one verification; later server streams inherit it.
+- Controllers are not authenticated at this stage: every call names its ControllerId in the
+  `x-ora-controller-id` metadata; a missing, blank or longer than 256-byte value is `INVALID_ARGUMENT`.
+- The value only becomes the lease and submission holder in `Store.Control` (as a `role=controller`
+  principal), never a request field.
+- Unary and stream interceptors share one reading; later server streams inherit it. Without
+  authentication, `control.grpc_addr` should listen on loopback or a private network only.
 
 ## Error mapping
 

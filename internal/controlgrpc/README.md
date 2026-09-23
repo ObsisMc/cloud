@@ -3,15 +3,15 @@
 [中文](README.md) | [English](README.en.md)
 
 `internal/controlgrpc` 把 [`internal/controlpb`](../controlpb/README.md) 的契约暴露为 gRPC 服务。它只是翻译层：
-每个 RPC 校验调用方的服务凭据，把请求转换为 `core.ControlRequest`，经与 JSON 内部接口相同的
+每个 RPC 从 metadata 读出调用方 Controller 的身份，把请求转换为 `core.ControlRequest`，经与 JSON 内部接口相同的
 `Store.Control` 事务执行，再把 `Fault` 映射为 gRPC 状态。没有业务规则、缓存或隐式重试。
 
-## 认证
+## 调用方身份
 
-- `authorization: Bearer <service JWT>` metadata，由 `core.Authenticator` 按 `kind=service` 验证；
-  只有 `role=controller` 被允许（缺失 → `UNAUTHENTICATED`，其他角色 → `PERMISSION_DENIED`）。
-- 租约持有者是已验证的 service `sub`，不能由请求字段指定。
-- unary 与 stream 拦截器共用同一校验，后续的服务端流沿用。
+- 当前阶段不认证 Controller：每次调用以 `x-ora-controller-id` metadata 声明 ControllerId，缺失、为空或超过
+  256 字节时返回 `INVALID_ARGUMENT`。
+- 该值只作为租约与提交记录的持有者进入 `Store.Control`（以 `role=controller` 的 principal 表示），不能由请求字段指定。
+- unary 与 stream 拦截器共用同一读取；后续的服务端流沿用。因为没有认证，`control.grpc_addr` 只应监听回环或私网。
 
 ## 错误映射
 
