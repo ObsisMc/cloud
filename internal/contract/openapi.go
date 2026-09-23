@@ -30,7 +30,7 @@ func array(item obj) obj               { return obj{"type": "array", "items": it
 func contextRefTypeEnum() obj {
 	return enumeration("parent_issue", "run", "timeline_message", "pull_request", "project", "workspace", "acceptance_criteria")
 }
-func optional(s obj) obj               { s["nullable"] = true; return s }
+func optional(s obj) obj { s["nullable"] = true; return s }
 
 // object omits "required" when empty: OpenAPI 3.0 demands at least one item when the key is
 // present, and strict downstream generators (the frontend's orval) reject null or [] there.

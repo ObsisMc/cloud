@@ -13,11 +13,9 @@ describe('mock API handlers', () => {
     expect(body.some((w: { slug: string }) => w.slug === SLUG)).toBe(true)
   })
 
-  it('falls back to the default workspace for an unknown slug', async () => {
+  it('returns 404 for an unknown workspace slug', async () => {
     const res = await fetch(`${BASE}/workspaces/does-not-exist`)
-    expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.slug).toBe(SLUG)
+    expect(res.status).toBe(404)
   })
 
   it('creates and then reads back an issue', async () => {

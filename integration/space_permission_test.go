@@ -11,7 +11,7 @@ import (
 // every permission test: alice (fixture user) = owner, bob = plain member,
 // carol = admin (promoted via the role PUT), dave = registered but NOT a member.
 // It returns the space id and the four user ids.
-func workspacePermissionFixture(t *testing.T) (f *fixture, sid string, aliceID, bobID, carolID, daveID string) {
+func workspacePermissionFixture(t *testing.T) (f *fixture, sid, aliceID, bobID, carolID, daveID string) {
 	t.Helper()
 	f = setup(t)
 	space := f.createSpace("Team", "team", "space-create")
