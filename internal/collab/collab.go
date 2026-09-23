@@ -260,3 +260,18 @@ func renderValue(value any) string {
 		return fmt.Sprint(typed)
 	}
 }
+
+// WireDevelopmentFixtures installs the in-memory dev/demo collaboration ports on the Store. It is
+// the single composition point for the fixture set; callers must gate it behind an explicit,
+// development-only configuration (cmd/server via `collaboration.development_fixtures` /
+// CLOUD_COLLABORATION_DEVELOPMENT_FIXTURES; cmd/ora-web and the integration suite are dev edges and
+// opt in unconditionally). Production default is OFF — with the ports left nil, only human targets
+// are served and no fake Agent/Team/Workflow is exposed. It must never be enabled as a side effect
+// of any external login provider being configured.
+func WireDevelopmentFixtures(store *core.Store) {
+	store.Directory = FixtureCollaborationDirectory{}
+	store.Context = DeterministicContextBuilder{}
+	store.Dispatcher = MockExecutionDispatcher{}
+	store.Forms = FixtureFormDescriptorProvider{}
+	store.Assist = MockInputAssistProvider{}
+}

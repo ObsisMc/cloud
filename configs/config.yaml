@@ -20,6 +20,12 @@ database:
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 1h
+collaboration:
+  # Development-only: installs the in-memory Agent/Team/Workflow fixtures (internal/collab) onto the
+  # Store's collaboration ports, so the @ target discovery API serves agent/team/workflow targets in
+  # addition to humans. Explicitly enabled; production default OFF. Independent of authentication —
+  # enabling GitHub Auth never enables these fixtures. Override: CLOUD_COLLABORATION_DEVELOPMENT_FIXTURES=true.
+  development_fixtures: false
 auth:
   audience: "ora-cloud"
   # Public keys of the local Gateway; generate them with `task setup` (config.toml). Production replaces

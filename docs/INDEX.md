@@ -95,6 +95,10 @@ docs/
   New ports `FormDescriptorProvider` / `InputAssistProvider`; workflow output lands as a `system`
   activity. Real Workflow / AI providers remain **blocked on external design**
   ([§38.37](migrations/multica-issue-board/12-collaboration-architecture.md#3837-implementation-record-2026-09-20--implemented--verified)).
+  Dev fixture targets are served by `cmd/server` only when `collaboration.development_fixtures` is
+  explicitly on (env `CLOUD_COLLABORATION_DEVELOPMENT_FIXTURES=true`), **production default OFF**,
+  independent of auth; see
+  [architecture.md](development/agent/architecture.md#collaboration--implemented-vs-planned).
 - ✅ **Workspace integration Stage D** — coworker Login + Workspace UX restoration (SD1–SD7): ora-web
   cookie-session 双 tab 登录（真实 + 演示）、Current Workspace shell、左上工作区选择器/创建/切换、
   space 级 Projects/成员/设置 + tenant 级 Issues 挂回外壳；记录 **WORKSPACE SCOPING GAP**（后端

@@ -88,3 +88,32 @@
 - devemail 适配器 DEV ONLY：任何把 `/auth/dev/*` 暴露到生产网关的行为都不被支持。
 - 演示桥仍以 alice 为无会话回退身份（post-clone 预览保留）；注销后回落 alice。
 - 前端测试 baseline `handlers.test.ts` 404-vs-200 保持未动（任务约束）。
+
+---
+
+## 追加：cmd/server 协作端口接线回归修复（2026-09-23，工作区未 commit）
+
+**问题**：上表第 2 项只恢复了 `cmd/demo-issue-board-web` 的接线；真实 API 入口 `cmd/server`
+（:8080，生产形态）从未接线 `CollaborationDirectory`，导致经 gateway 的 `@` 选择器只剩 humans，
+Workflow 表单/Assist 503。core/integration 测试因自建 store 手动接线而「假绿」。
+
+**修复（最小、加法、无第二套 provider、无 fake 生产表）**：
+
+| 文件 | 状态 | 内容 |
+|---|---|---|
+| `internal/collab/collab.go` | 修改 | 新增单一组合点 `WireDevelopmentFixtures(store)`，一次装好 5 个协作端口 |
+| `cmd/server/main.go` | 修改 | `configureCollaboration`：`collaboration.development_fixtures` 为 true 才接线；启动 WARN 提示 development-only |
+| `internal/config/config.go` | 修改 | `CollaborationConfig.DevelopmentFixtures`（`CLOUD_COLLABORATION_DEVELOPMENT_FIXTURES`） |
+| `configs/config.yaml` | 修改 | `collaboration.development_fixtures: false`（默认 OFF，注释说明） |
+| `cmd/ora-web/main.go` | 修改 | 5 个内联端口赋值收敛为 `collab.WireDevelopmentFixtures(store)` |
+| `cmd/server/main_test.go` | 新增 | 默认 OFF → 5 端口 nil；显式 ON → 全装 + 稳定 ID + 不产 user |
+| `internal/collab/wire_test.go` | 新增 | 单一组合点 + 目录只产非人类目标 |
+
+**语义**：与 GitHub Auth 完全解耦（启用 auth 绝不自动启用 fixtures；auth 失败绝不回退 fixture
+身份）；fixtures OFF 时 `@` 只出 humans；ON 时 user/agent/team/workflow 走同一
+`GET /collaboration/targets` 发现 API，稳定 ID（`internal/collab` 常量），无个人路径。
+
+**实测（cmd/server + gateway 真实入口，fixtures ON）**：HUMAN mention → 无 run；AGENT/Team task →
+IssueRun → dispatch → completed；Workflow form interaction（无 run）→ assist（无副作用）→ confirm →
+run → completed；timeline 出现 comment + activity。fixtures 默认 OFF 由
+`TestConfigureCollaborationDefaultOff` + config 默认覆盖。

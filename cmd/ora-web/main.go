@@ -80,12 +80,9 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	// Dev/demo collaboration fixtures (production leaves these nil -> Unavailable).
-	store.Directory = collab.FixtureCollaborationDirectory{}
-	store.Context = collab.DeterministicContextBuilder{}
-	store.Dispatcher = collab.MockExecutionDispatcher{}
-	store.Forms = collab.FixtureFormDescriptorProvider{}
-	store.Assist = collab.MockInputAssistProvider{}
+	// Dev/demo collaboration fixtures (production leaves these nil -> Unavailable). Single wiring
+	// point shared with cmd/server's development gate: collab.WireDevelopmentFixtures.
+	collab.WireDevelopmentFixtures(store)
 	if e = store.Migrate(ctx); e != nil {
 		return fmt.Errorf("migrate: %w", e)
 	}

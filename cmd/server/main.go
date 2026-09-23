@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wanglongan587/cloud/internal/api/router"
+	"github.com/wanglongan587/cloud/internal/collab"
 	"github.com/wanglongan587/cloud/internal/config"
 	"github.com/wanglongan587/cloud/internal/core"
 	"github.com/wanglongan587/cloud/internal/logger"
@@ -26,6 +27,20 @@ func main() {
 		fmt.Fprintln(os.Stderr, e)
 		os.Exit(1)
 	}
+}
+
+// configureCollaboration installs the optional development Agent/Team/Workflow fixtures on the store
+// when the deployment explicitly enables them (`collaboration.development_fixtures`). It is the
+// cmd/server composition gate: production default is OFF, leaving the collaboration ports nil so the
+// target discovery API serves only human targets. It is intentionally independent of authentication —
+// enabling GitHub Auth must never enable these fixtures, and an auth failure must never fall back to
+// a fixture identity.
+func configureCollaboration(store *core.Store, developmentFixtures bool, log *zap.Logger) {
+	if !developmentFixtures {
+		return
+	}
+	collab.WireDevelopmentFixtures(store)
+	log.Warn("development collaboration fixtures enabled: Agent/Team/Workflow targets served from in-memory fixtures (development-only; production must leave collaboration.development_fixtures false)")
 }
 
 func run() (runErr error) {
@@ -51,6 +66,7 @@ func run() (runErr error) {
 		return e
 	}
 	defer func() { runErr = errors.Join(runErr, store.Pool.Close()) }()
+	configureCollaboration(store, cfg.Collaboration.DevelopmentFixtures, log)
 	if e := store.CheckSchema(ctx); e != nil {
 		return e
 	}

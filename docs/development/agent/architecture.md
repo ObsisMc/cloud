@@ -151,6 +151,20 @@ execution have not.
   Run lifecycle `queued→dispatched→running→completed(/failed)`; provenance via
   `trigger_evidence_kind`/`ref_id`; agent/team replies land as `author_type='agent'/'team'` comments.
 
+**Dev fixture provider — how to enable.** The fixture adapters are installed by the single composition
+point `collab.WireDevelopmentFixtures(store)` (in `internal/collab/collab.go`), which sets all five
+collaboration ports at once (Directory / Context / Dispatcher / Forms / Assist). `cmd/server` gates
+them behind the config key `collaboration.development_fixtures` (env override
+`CLOUD_COLLABORATION_DEVELOPMENT_FIXTURES=true`), **explicitly enabled, production default OFF** — the
+default `configs/config.yaml` ships `false`, and the config comment + the server startup log both warn
+that production must leave it off. `cmd/ora-web` wires the same helper unconditionally (it is a
+development/demo edge only). The gate is **independent of authentication**: enabling GitHub Auth never
+enables these fixtures, and an auth failure never falls back to a fixture identity. With the flag off,
+the `@` target discovery API serves only real tenant members (no dev Agent/Team/Workflow); with it on,
+the same API also serves the fixture targets with stable IDs
+(`internal/collab`: `BackendAgentID`/`ReviewAgentID`/`PlatformTeamID`/`SecurityReviewWorkflowID`/
+`ReleaseWorkflowID`).
+
 **Still schema-ready / not API-implemented:**
 
 - `issue_comments.author_type = system` is CHECK-allowed but nothing writes a `system` comment yet.
