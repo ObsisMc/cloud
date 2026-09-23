@@ -12,7 +12,13 @@ import { AssistSuggestions } from './assist-suggestions'
 const descriptor: FormDescriptor = {
   formRef: 'f',
   fields: [
-    { key: 'scope', label: 'Scope', type: 'select', required: false, options: [{ value: 'full', label: 'Full' }] },
+    {
+      key: 'scope',
+      label: 'Scope',
+      type: 'select',
+      required: false,
+      options: [{ value: 'full', label: 'Full' }],
+    },
     { key: 'notes', label: 'Notes', type: 'textarea', required: false },
   ],
 }
@@ -103,19 +109,13 @@ describe('AssistSuggestions', () => {
   it('renders context refs and distinguishes applied from pending', async () => {
     const onApplyRef = vi.fn()
     const refs: ContextRefRef[] = [{ refType: 'project', refId: 'p1' }]
-    renderSuggestions(
-      { suggestedValues: {}, suggestedContextRefs: refs },
-      { onApplyRef },
-    )
+    renderSuggestions({ suggestedValues: {}, suggestedContextRefs: refs }, { onApplyRef })
     expect(screen.getByText('project')).toBeInTheDocument()
 
     await userEvent.setup().click(screen.getByRole('button', { name: '应用' }))
     expect(onApplyRef).toHaveBeenCalledWith(refs[0])
 
-    renderSuggestions(
-      { suggestedValues: {}, suggestedContextRefs: refs },
-      { appliedRefs: refs },
-    )
+    renderSuggestions({ suggestedValues: {}, suggestedContextRefs: refs }, { appliedRefs: refs })
     expect(screen.getByText('已应用')).toBeInTheDocument()
   })
 })

@@ -31,12 +31,16 @@ describe('FormFieldRenderer', () => {
   })
 
   it('renders a boolean checkbox', () => {
-    render(<FormFieldRenderer field={field({ type: 'boolean' })} value={true} onChange={() => {}} />)
+    render(
+      <FormFieldRenderer field={field({ type: 'boolean' })} value={true} onChange={() => {}} />,
+    )
     expect(screen.getByRole('checkbox')).toBeChecked()
   })
 
   it('renders an unchecked boolean checkbox for a falsy value', () => {
-    render(<FormFieldRenderer field={field({ type: 'boolean' })} value={false} onChange={() => {}} />)
+    render(
+      <FormFieldRenderer field={field({ type: 'boolean' })} value={false} onChange={() => {}} />,
+    )
     expect(screen.getByRole('checkbox')).not.toBeChecked()
   })
 

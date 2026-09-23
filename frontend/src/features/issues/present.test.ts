@@ -41,13 +41,17 @@ describe('assigneeType', () => {
 
   it('resolves an opaque agent assignee', () => {
     expect(
-      assigneeType(makeIssue('i1', 'x', { assigneeUserId: null, assigneeType: 'agent', assigneeId: 'a1' })),
+      assigneeType(
+        makeIssue('i1', 'x', { assigneeUserId: null, assigneeType: 'agent', assigneeId: 'a1' }),
+      ),
     ).toBe('agent')
   })
 
   it('resolves an opaque team assignee', () => {
     expect(
-      assigneeType(makeIssue('i1', 'x', { assigneeUserId: null, assigneeType: 'team', assigneeId: 't1' })),
+      assigneeType(
+        makeIssue('i1', 'x', { assigneeUserId: null, assigneeType: 'team', assigneeId: 't1' }),
+      ),
     ).toBe('team')
   })
 
@@ -69,13 +73,19 @@ describe('assigneeName', () => {
 
   it('labels an agent assignee', () => {
     expect(
-      assigneeName(makeIssue('i1', 'x', { assigneeUserId: null, assigneeType: 'agent', assigneeId: 'a1' }), byId),
+      assigneeName(
+        makeIssue('i1', 'x', { assigneeUserId: null, assigneeType: 'agent', assigneeId: 'a1' }),
+        byId,
+      ),
     ).toBe('Agent')
   })
 
   it('labels a team assignee', () => {
     expect(
-      assigneeName(makeIssue('i1', 'x', { assigneeUserId: null, assigneeType: 'team', assigneeId: 't1' }), byId),
+      assigneeName(
+        makeIssue('i1', 'x', { assigneeUserId: null, assigneeType: 'team', assigneeId: 't1' }),
+        byId,
+      ),
     ).toBe('Team')
   })
 

@@ -14,7 +14,9 @@ function serveIssues(
   members: TenantMember[] = [],
 ) {
   server.use(
-    http.get('/api/v1/tenants/t1/issues', () => HttpResponse.json({ items: issues, nextCursor: '' })),
+    http.get('/api/v1/tenants/t1/issues', () =>
+      HttpResponse.json({ items: issues, nextCursor: '' }),
+    ),
     http.get('/api/v1/tenants/t1/issue-statuses', () =>
       HttpResponse.json({ items: statuses, nextCursor: '' }),
     ),
@@ -32,13 +34,21 @@ describe('IssuesList', () => {
   })
 
   it('renders the board view by default', async () => {
-    serveIssues([makeIssue('i1', 'Fix the login', { status: 'backlog' })], [makeStatus('backlog')], [])
+    serveIssues(
+      [makeIssue('i1', 'Fix the login', { status: 'backlog' })],
+      [makeStatus('backlog')],
+      [],
+    )
     renderWithProviders(<IssuesList slug="t1" title="Issues" />)
     expect(await screen.findByText('Fix the login')).toBeInTheDocument()
   })
 
   it('switches to the list view', async () => {
-    serveIssues([makeIssue('i1', 'Fix the login', { status: 'backlog' })], [makeStatus('backlog')], [])
+    serveIssues(
+      [makeIssue('i1', 'Fix the login', { status: 'backlog' })],
+      [makeStatus('backlog')],
+      [],
+    )
     const user = userEvent.setup()
     renderWithProviders(<IssuesList slug="t1" title="Issues" />)
     await screen.findByText('Fix the login')
