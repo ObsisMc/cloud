@@ -168,30 +168,30 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				require(r.Method == "POST" && strings.HasSuffix(r.Path, "/confirm"), 404, "not_found")
 				out = confirmInteraction(t, r, uid, &dispatches)
 			case strings.Contains(r.Path, "/comments"):
-				switch {
-				case r.Method == "POST":
+				switch r.Method {
+				case "POST":
 					out = Object{"resource": createComment(t, r, uid, &dispatches)}
-				case r.Method == "PUT":
+				case "PUT":
 					out = updateComment(t, r)
-				case r.Method == "DELETE":
+				case "DELETE":
 					out = deleteComment(t, r)
 				default:
 					reject(404, "not_found")
 				}
 			case strings.Contains(r.Path, "/subscribers"):
-				switch {
-				case r.Method == "POST":
+				switch r.Method {
+				case "POST":
 					out = Object{"resource": subscribe(t, r)}
-				case r.Method == "DELETE":
+				case "DELETE":
 					out = Object{"resource": unsubscribe(t, r)}
 				default:
 					reject(404, "not_found")
 				}
 			case strings.Contains(r.Path, "/labels"):
-				switch {
-				case r.Method == "POST":
+				switch r.Method {
+				case "POST":
 					out = Object{"resource": attachLabel(t, r)}
-				case r.Method == "DELETE":
+				case "DELETE":
 					out = detachLabel(t, r)
 				default:
 					reject(404, "not_found")
@@ -208,23 +208,23 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				reject(404, "not_found")
 			}
 		case strings.Contains(r.Path, "/issue-statuses"):
-			switch {
-			case r.Method == "POST":
+			switch r.Method {
+			case "POST":
 				out = Object{"resource": createIssueStatus(t, r)}
-			case r.Method == "PUT":
+			case "PUT":
 				out = updateIssueStatus(t, r)
-			case r.Method == "DELETE":
+			case "DELETE":
 				out = deleteIssueStatus(t, r)
 			default:
 				reject(404, "not_found")
 			}
 		case strings.Contains(r.Path, "/issue-views"):
-			switch {
-			case r.Method == "POST":
+			switch r.Method {
+			case "POST":
 				out = Object{"resource": createView(t, r, uid)}
-			case r.Method == "PUT":
+			case "PUT":
 				out = updateView(t, r, uid)
-			case r.Method == "DELETE":
+			case "DELETE":
 				out = deleteView(t, r, uid)
 			default:
 				reject(404, "not_found")
@@ -232,12 +232,12 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 		case r.Method == "POST" && strings.HasSuffix(r.Path, "/issues/batch"):
 			out = batchUpdate(t, r)
 		case strings.Contains(r.Path, "/labels"):
-			switch {
-			case r.Method == "POST":
+			switch r.Method {
+			case "POST":
 				out = Object{"resource": createLabel(t, r)}
-			case r.Method == "PUT":
+			case "PUT":
 				out = updateLabel(t, r)
-			case r.Method == "DELETE":
+			case "DELETE":
 				out = deleteLabel(t, r)
 			default:
 				reject(404, "not_found")

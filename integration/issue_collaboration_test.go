@@ -105,7 +105,7 @@ func TestIssueCollaborationMigrationBackfills(t *testing.T) {
 		}{seq, at, aid}
 	}
 	must(t, rows.Err())
-	rows.Close()
+	defer rows.Close()
 	if got[older].seq != 1 || got[newer].seq != 2 {
 		t.Fatalf("comment seq backfill wrong (want older=1 newer=2): %v", got)
 	}
@@ -204,7 +204,7 @@ func TestIssueCommentThreadingAndSharedTimeline(t *testing.T) {
 		seqs = append(seqs, s)
 	}
 	must(t, rows.Err())
-	rows.Close()
+	defer rows.Close()
 	if len(seqs) != 2 || seqs[0] != 2 || seqs[1] != 4 {
 		t.Fatalf("activity seqs should be [2 4] (shared namespace): %v", seqs)
 	}

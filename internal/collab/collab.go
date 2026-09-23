@@ -112,6 +112,7 @@ func releaseDescriptor() core.FormDescriptor {
 // randomness, and only ever *suggests* — applying and confirming stay user actions (§38.12).
 type MockInputAssistProvider struct{}
 
+//nolint:gocritic // value-typed assist input mirrors the provider interface signature this mock satisfies
 func (MockInputAssistProvider) Suggest(_ context.Context, in core.AssistInput) (core.AssistSuggestion, error) {
 	values := core.Object{}
 	explanations := core.Object{}

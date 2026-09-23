@@ -63,7 +63,7 @@ func run() error {
 	if _, e = admin.Exec("CREATE SCHEMA " + schema); e != nil {
 		return e
 	}
-	defer admin.Exec("DROP SCHEMA " + schema + " CASCADE")
+	defer func() { _, _ = admin.Exec("DROP SCHEMA " + schema + " CASCADE") }()
 	config.RuntimeParams["search_path"] = schema
 	pool := stdlib.OpenDB(*config)
 	defer pool.Close()
@@ -89,7 +89,7 @@ func run() error {
 	}
 	gin.SetMode(gin.ReleaseMode)
 	log, _ := zap.NewProduction()
-	real := router.New(store, auth, log)
+	rt := router.New(store, auth, log)
 
 	bootstrap, e := store.Bootstrap(ctx, "Demo Board", "demo", "alice", "Alice")
 	if e != nil {
@@ -129,7 +129,7 @@ func run() error {
 				http.Error(w, e.Error(), http.StatusInternalServerError)
 				return
 			}
-			real.ServeHTTP(w, r)
+			rt.ServeHTTP(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -173,7 +173,7 @@ func run() error {
 }
 
 func openBrowser(url string) error {
-	return exec.Command("cmd", "/c", "start", "", url).Start()
+	return exec.Command("cmd", "/c", "start", "", url).Start() //nolint:gosec // dev-only: opens the local demo board in the browser
 }
 
 // demoConfig assembles the live status catalog and label list straight from the store so the UI

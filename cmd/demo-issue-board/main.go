@@ -54,7 +54,7 @@ func run() error {
 	if _, e = admin.Exec("CREATE SCHEMA " + schema); e != nil {
 		return e
 	}
-	defer admin.Exec("DROP SCHEMA " + schema + " CASCADE")
+	defer func() { _, _ = admin.Exec("DROP SCHEMA " + schema + " CASCADE") }()
 	config.RuntimeParams["search_path"] = schema
 	pool := stdlib.OpenDB(*config)
 	defer pool.Close()
@@ -107,16 +107,18 @@ func run() error {
 	}
 	show := func(label string) {
 		list := call("GET", "/issues", "", nil)
-		items := list["items"].([]any)
+		items, _ := list["items"].([]any)
 		fmt.Printf("\n%s\n", label)
 		column := ""
 		for _, raw := range items {
-			o := core.Object(raw.(map[string]any))
+			m, _ := raw.(map[string]any)
+			o := core.Object(m)
 			if o.S("status") != column {
 				column = o.S("status")
 				fmt.Printf("  [%s]\n", column)
 			}
-			fmt.Printf("    pos=%6.2f  (%s)  %s\n", o["position"].(float64), o.S("priority"), o.S("title"))
+			pos, _ := o["position"].(float64)
+			fmt.Printf("    pos=%6.2f  (%s)  %s\n", pos, o.S("priority"), o.S("title"))
 		}
 	}
 
@@ -128,15 +130,15 @@ func run() error {
 	show("[3/5] Board after create (each new issue lands at the column top):")
 
 	fmt.Println("[4/5] Moving cards…")
-	// Status change with no neighbours → re-rank to the top of the destination column.
+	// Status change with no neighbors → re-rank to the top of the destination column.
 	call("POST", "/issues/"+login.S("id")+"/move", "m1", core.Object{"status": "in_progress", "version": login.N("version")})
-	// Cross-column move between two neighbours → fractional midpoint (-0.5).
+	// Cross-column move between two neighbors → fractional midpoint (-0.5).
 	call("POST", "/issues/"+docs.S("id")+"/move", "m2", core.Object{"status": "in_progress", "beforeId": login.S("id"), "afterId": api.S("id"), "version": docs.N("version")})
 	show("[5/5] Board after move:")
 
 	// Persistence: the very same rows are visible through a fresh SQL connection.
 	var count int
-	if e = store.Pool.QueryRowContext(ctx, "SELECT count(*) FROM issues WHERE tenant_id=$1 AND deleted_at IS NULL", tid).Scan(&count); e != nil {
+	if e := store.Pool.QueryRowContext(ctx, "SELECT count(*) FROM issues WHERE tenant_id=$1 AND deleted_at IS NULL", tid).Scan(&count); e != nil {
 		return e
 	}
 	fmt.Printf("\nPersistence check: %d live issue rows in PostgreSQL schema %q (dropped on exit).\n", count, schema)

@@ -156,7 +156,7 @@ func createIssue(t *transaction, r *PublicRequest, uid string) Object {
 	parent, _ := resolveParent(t, r.TenantID, "", r.Body)
 	projectRef, _ := resolveProjectRef(t, r.Body)
 	id := newID()
-	number := int64(t.one("SELECT COALESCE(max(number),0)+1 AS n FROM issues WHERE tenant_id=$1", r.TenantID)["n"].(float64))
+	number := t.one("SELECT COALESCE(max(number),0)+1 AS n FROM issues WHERE tenant_id=$1", r.TenantID).N("n")
 	t.exec("INSERT INTO issues(id,tenant_id,creator_user_id,assignee_type,assignee_id,assignee_user_id,parent_issue_id,project_ref,title,description,status,priority,position,number,properties) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)", id, r.TenantID, uid, assignee.typeVal, assignee.id, assignee.userID, parent, projectRef, title, description, status, priority, topPosition(t, r.TenantID, status), number, jsonText(r.Body.O("properties")))
 	return issue(t, r.TenantID, id)
 }
@@ -170,21 +170,21 @@ func updateIssue(t *transaction, r *PublicRequest) Object {
 		cols = append(cols, col+"=$"+itoa(len(vals)+1))
 		vals = append(vals, val)
 	}
-	if v, ok := r.Body["title"]; ok {
-		add("title", validText(v.(string), 200))
+	if _, ok := r.Body["title"]; ok {
+		add("title", validText(r.Body.S("title"), 200))
 	}
-	if v, ok := r.Body["description"]; ok {
-		d := strings.TrimSpace(v.(string))
+	if _, ok := r.Body["description"]; ok {
+		d := strings.TrimSpace(r.Body.S("description"))
 		require(len(d) <= 20000, 400, "invalid_input")
 		add("description", d)
 	}
-	if v, ok := r.Body["priority"]; ok {
-		p := v.(string)
+	if _, ok := r.Body["priority"]; ok {
+		p := r.Body.S("priority")
 		require(issuePriorities[p], 400, "invalid_priority")
 		add("priority", p)
 	}
-	if v, ok := r.Body["status"]; ok {
-		s := resolveStatus(t, r.TenantID, v.(string))
+	if _, ok := r.Body["status"]; ok {
+		s := resolveStatus(t, r.TenantID, r.Body.S("status"))
 		add("status", s)
 		if s != i.S("status") {
 			add("position", topPosition(t, r.TenantID, s))
@@ -233,8 +233,8 @@ func moveIssue(t *transaction, r *PublicRequest) Object {
 	i := issue(t, r.TenantID, r.IssueID)
 	version(i, r.Body.N("version"))
 	status := i.S("status")
-	if v, ok := r.Body["status"]; ok {
-		status = resolveStatus(t, r.TenantID, v.(string))
+	if _, ok := r.Body["status"]; ok {
+		status = resolveStatus(t, r.TenantID, r.Body.S("status"))
 	}
 	position := positionOf(i)
 	if before, ok := moveAnchor(t, r.TenantID, r.Body, "beforeId"); ok {
@@ -275,13 +275,13 @@ func batchUpdate(t *transaction, r *PublicRequest) Object {
 	}
 	var patchStatus, patchPriority string
 	hasStatus, hasPriority := false, false
-	if v, ok := r.Body["status"]; ok {
+	if _, ok := r.Body["status"]; ok {
 		hasStatus = true
-		patchStatus = resolveStatus(t, r.TenantID, v.(string))
+		patchStatus = resolveStatus(t, r.TenantID, r.Body.S("status"))
 	}
-	if v, ok := r.Body["priority"]; ok {
+	if _, ok := r.Body["priority"]; ok {
 		hasPriority = true
-		patchPriority = v.(string)
+		patchPriority = r.Body.S("priority")
 		require(issuePriorities[patchPriority], 400, "invalid_priority")
 	}
 	assignee, hasAssignee := resolveAssignee(t, r.Body)

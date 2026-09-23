@@ -32,13 +32,13 @@ func updateLabel(t *transaction, r *PublicRequest) Object {
 		cols = append(cols, col+"=$"+itoa(len(vals)+1))
 		vals = append(vals, val)
 	}
-	if v, ok := r.Body["name"]; ok {
-		name := validText(v.(string), 200)
+	if _, ok := r.Body["name"]; ok {
+		name := validText(r.Body.S("name"), 200)
 		require(t.one("SELECT id FROM labels WHERE tenant_id=$1 AND name=$2 AND deleted_at IS NULL AND id<>$3", r.TenantID, name, l.S("id")) == nil, 409, "label_conflict")
 		add("name", name)
 	}
-	if v, ok := r.Body["color"]; ok {
-		add("color", v.(string))
+	if _, ok := r.Body["color"]; ok {
+		add("color", r.Body.S("color"))
 	}
 	require(len(cols) > 0, 400, "invalid_input")
 	vals = append(vals, l.S("id"), r.TenantID)

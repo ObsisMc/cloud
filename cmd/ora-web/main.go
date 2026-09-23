@@ -97,7 +97,7 @@ func run() error {
 	}
 	gin.SetMode(gin.ReleaseMode)
 	log, _ := zap.NewProduction()
-	real := router.New(store, auth, log)
+	rt := router.New(store, auth, log)
 
 	tenant, e := ensureDevTenant(ctx, store)
 	if e != nil {
@@ -139,7 +139,7 @@ func run() error {
 			http.Error(w, core.ErrorCode(e).Code, http.StatusInternalServerError)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: subject, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int((24 * time.Hour).Seconds())})
+		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: subject, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int((24 * time.Hour).Seconds())}) //nolint:gosec // dev-only local auth over plain HTTP; loopback has no TLS
 		writeJSON(w, 200, map[string]any{
 			"user":       map[string]any{"id": u.S("id"), "displayName": u.S("displayName"), "subject": subject},
 			"tenantId":   tid,
@@ -148,7 +148,7 @@ func run() error {
 	})
 
 	mux.HandleFunc("POST /auth/logout", func(w http.ResponseWriter, r *http.Request) {
-		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true, MaxAge: -1})
+		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true, MaxAge: -1}) //nolint:gosec // dev-only local auth over plain HTTP; loopback has no TLS
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 
@@ -173,7 +173,7 @@ func run() error {
 			writeJSON(w, fault.Status, map[string]any{"code": fault.Code, "params": fault.Params, "requestId": ""})
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: subject, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int((24 * time.Hour).Seconds())})
+		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: subject, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int((24 * time.Hour).Seconds())}) //nolint:gosec // dev-only local auth over plain HTTP; loopback has no TLS
 		writeJSON(w, 200, map[string]any{
 			"user":       map[string]any{"id": u.S("id"), "displayName": u.S("displayName"), "subject": subject},
 			"tenantId":   tid,
@@ -197,7 +197,7 @@ func run() error {
 			}
 			r.Header.Set("X-Ora-User-Token", user)
 		}
-		real.ServeHTTP(w, r)
+		rt.ServeHTTP(w, r)
 	})
 	mux.Handle("/api/", proxy)
 	mux.Handle("/internal/", proxy)
@@ -300,7 +300,7 @@ func spaHandler(dev bool) http.Handler {
 	if dev {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Vite dev server; relative path is preserved so its own HMR keeps working.
-			http.Redirect(w, r, "http://localhost:5173"+r.URL.Path, http.StatusFound)
+			http.Redirect(w, r, "http://localhost:5173"+r.URL.Path, http.StatusFound) //nolint:gosec // dev-only: fixed localhost:5173 origin, not user-controlled
 		})
 	}
 	dist := http.Dir(filepath.Join("frontend", "dist"))

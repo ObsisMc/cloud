@@ -196,13 +196,3 @@ WHERE u.id=$1 AND tm.tenant_id=$2 AND tm.status='active' AND u.status='active' A
 	t.exec("DELETE FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
 	return old
 }
-
-// projectInSpace loads a live project in the tenant and verifies the caller's
-// space membership, returning both rows. Entity routes derive the space from
-// the project itself; client-supplied space identifiers are never trusted.
-func projectInSpace(t *transaction, tid, uid, pid string) (project, membership Object) {
-	require(validID(pid), 404, "not_found")
-	p := t.one("SELECT * FROM projects WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", pid, tid)
-	require(p != nil, 404, "not_found")
-	return p, spaceMember(t, p.S("spaceId"), uid)
-}

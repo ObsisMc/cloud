@@ -32,8 +32,8 @@ func updateView(t *transaction, r *PublicRequest, uid string) Object {
 		cols = append(cols, col+"=$"+itoa(len(vals)+1))
 		vals = append(vals, val)
 	}
-	if val, ok := r.Body["name"]; ok {
-		add("name", validText(val.(string), 200))
+	if _, ok := r.Body["name"]; ok {
+		add("name", validText(r.Body.S("name"), 200))
 	}
 	if _, ok := r.Body["filter"]; ok {
 		add("filter", jsonText(r.Body.O("filter")))

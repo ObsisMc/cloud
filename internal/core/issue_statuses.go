@@ -89,24 +89,24 @@ func updateIssueStatus(t *transaction, r *PublicRequest) Object {
 		cols = append(cols, col+"=$"+itoa(len(vals)+1))
 		vals = append(vals, val)
 	}
-	if v, ok := r.Body["name"]; ok {
-		add("name", validText(v.(string), 200))
+	if _, ok := r.Body["name"]; ok {
+		add("name", validText(r.Body.S("name"), 200))
 	}
-	if v, ok := r.Body["description"]; ok {
-		d := strings.TrimSpace(v.(string))
+	if _, ok := r.Body["description"]; ok {
+		d := strings.TrimSpace(r.Body.S("description"))
 		require(len(d) <= 2000, 400, "invalid_input")
 		add("description", d)
 	}
-	if v, ok := r.Body["category"]; ok {
-		c := v.(string)
+	if _, ok := r.Body["category"]; ok {
+		c := r.Body.S("category")
 		require(c == "unstarted" || c == "started" || c == "done" || c == "closed", 400, "invalid_category")
 		add("category", c)
 	}
-	if v, ok := r.Body["color"]; ok {
-		add("color", v.(string))
+	if _, ok := r.Body["color"]; ok {
+		add("color", r.Body.S("color"))
 	}
-	if v, ok := r.Body["icon"]; ok {
-		add("icon", v.(string))
+	if _, ok := r.Body["icon"]; ok {
+		add("icon", r.Body.S("icon"))
 	}
 	if _, ok := r.Body["position"]; ok {
 		add("position", float64(r.Body.N("position")))
