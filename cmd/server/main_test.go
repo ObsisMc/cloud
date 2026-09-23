@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/wanglongan587/cloud/internal/collab"
 	"github.com/wanglongan587/cloud/internal/core"
-	"go.uber.org/zap"
 )
 
 // TestConfigureCollaborationDefaultOff guards the cmd/server composition gate: with the development

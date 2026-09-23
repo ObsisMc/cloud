@@ -5,7 +5,7 @@ import "strings"
 // targetSummaryObject converts a typed CollaborationTargetSummary into the wire Object shape. The
 // interface returns plain strings, so the fields survive Object.S(); the descriptor is collapsed to
 // {mode, requiresTask} as the frozen wire contract (§4).
-func targetSummaryObject(s CollaborationTargetSummary) Object {
+func targetSummaryObject(s *CollaborationTargetSummary) Object {
 	return Object{
 		"type":        s.Type,
 		"id":          s.ID,
@@ -44,7 +44,7 @@ func collaborationTargetList(t *transaction, r *PublicRequest) Object {
 	}
 	q += " ORDER BY u.display_name, m.user_id"
 	for _, u := range t.list(q, args...) {
-		items = append(items, targetSummaryObject(CollaborationTargetSummary{
+		items = append(items, targetSummaryObject(&CollaborationTargetSummary{
 			Type:                  "user",
 			ID:                    u.S("id"),
 			DisplayName:           u.S("displayName"),
@@ -56,8 +56,8 @@ func collaborationTargetList(t *transaction, r *PublicRequest) Object {
 		if err != nil {
 			panic(databaseFailure{err})
 		}
-		for _, s := range list {
-			items = append(items, targetSummaryObject(s))
+		for i := range list {
+			items = append(items, targetSummaryObject(&list[i]))
 		}
 	}
 	return Object{"items": items, "nextCursor": ""}

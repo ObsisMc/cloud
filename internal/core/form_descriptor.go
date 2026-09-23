@@ -88,7 +88,8 @@ func validateFormDescriptor(d FormDescriptor) {
 	require(len(d.Title) <= 200 && len(d.Description) <= 2000, 500, "invalid_form_descriptor")
 	require(len(d.Fields) <= 100, 500, "invalid_form_descriptor")
 	seen := map[string]bool{}
-	for _, f := range d.Fields {
+	for i := range d.Fields {
+		f := &d.Fields[i]
 		require(validOpaqueToken(f.Key) && !seen[f.Key], 500, "invalid_form_descriptor")
 		seen[f.Key] = true
 		require(supportedFieldType(f.Type), 500, "invalid_form_descriptor")
@@ -115,7 +116,7 @@ func validateFormDescriptor(d FormDescriptor) {
 // within `options` for select, or a subset of `options` for multi_select. It is shared by descriptor
 // validation (defaults), assist filtering (provider output) and confirm validation (client input), so
 // all three agree on what a legal value is.
-func validFieldValue(f FormField, v any) bool {
+func validFieldValue(f *FormField, v any) bool {
 	switch f.Type {
 	case fieldText, fieldTextarea:
 		s, ok := v.(string)
@@ -153,7 +154,7 @@ func validFieldValue(f FormField, v any) bool {
 	return false
 }
 
-func optionValue(f FormField, value string) bool {
+func optionValue(f *FormField, value string) bool {
 	for _, o := range f.Options {
 		if o.Value == value {
 			return true
@@ -167,14 +168,16 @@ func optionValue(f FormField, value string) bool {
 // `options` and (when requireComplete) missing required fields are all rejected here.
 func validateFormValues(d FormDescriptor, values Object, requireComplete bool) {
 	known := map[string]FormField{}
-	for _, f := range d.Fields {
+	for i := range d.Fields {
+		f := d.Fields[i]
 		known[f.Key] = f
 	}
 	for k := range values {
 		_, ok := known[k]
 		require(ok, 400, "invalid_field_value")
 	}
-	for _, f := range d.Fields {
+	for i := range d.Fields {
+		f := &d.Fields[i]
 		v, present := values[f.Key]
 		if !present || v == nil {
 			require(!requireComplete || !f.Required, 400, "required_field_missing")
@@ -189,7 +192,8 @@ func validateFormValues(d FormDescriptor, values Object, requireComplete bool) {
 // schema (required = key/label/type/required) accepts.
 func formDescriptorObject(d FormDescriptor) Object {
 	fields := []Object{}
-	for _, f := range d.Fields {
+	for i := range d.Fields {
+		f := d.Fields[i]
 		o := Object{"key": f.Key, "label": f.Label, "type": f.Type, "required": f.Required}
 		if f.Description != "" {
 			o["description"] = f.Description
@@ -226,7 +230,8 @@ func formDescriptorObject(d FormDescriptor) Object {
 func assistSuggestionObject(d FormDescriptor, s AssistSuggestion) Object {
 	values := Object{}
 	explanations := Object{}
-	for _, f := range d.Fields {
+	for i := range d.Fields {
+		f := &d.Fields[i]
 		v, ok := s.Values[f.Key]
 		if !ok || !validFieldValue(f, v) {
 			continue

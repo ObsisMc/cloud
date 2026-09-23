@@ -122,8 +122,8 @@ func (MockInputAssistProvider) Suggest(_ context.Context, in core.AssistInput) (
 	// descriptor actually declares, so one mock serves every fixture workflow. A key the user has
 	// already filled in is never suggested over — assist must not clobber a typed value.
 	declared := map[string]bool{}
-	for _, field := range in.Descriptor.Fields {
-		declared[field.Key] = true
+	for i := range in.Descriptor.Fields {
+		declared[in.Descriptor.Fields[i].Key] = true
 	}
 	suggest := func(key string, value any, reason string) {
 		if !declared[key] || in.CurrentValues.S(key) != "" {
@@ -177,6 +177,7 @@ func (FixtureCollaborationDirectory) ResolveTarget(_ context.Context, _, targetT
 // builder only lays them out — it performs no AI.
 type DeterministicContextBuilder struct{}
 
+//nolint:gocritic // value-typed context input mirrors the ContextBuilder port; the fixture only lays the snapshot out
 func (DeterministicContextBuilder) Build(_ context.Context, in core.ContextInput) (core.Object, error) {
 	values := in.InteractionValues
 	if values == nil {
@@ -197,6 +198,7 @@ func (DeterministicContextBuilder) Build(_ context.Context, in core.ContextInput
 // lives here, not in the Issue core — and nothing here performs a real scan, review or LLM call.
 type MockExecutionDispatcher struct{}
 
+//nolint:gocritic // value-typed dispatch request mirrors the ExecutionDispatcher port; the mock only records the handoff
 func (MockExecutionDispatcher) Dispatch(_ context.Context, req core.DispatchRequest) (core.DispatchResult, error) {
 	return core.DispatchResult{Accepted: true, ExternalExecutionID: "mock-" + req.RunID}, nil
 }
@@ -204,6 +206,7 @@ func (MockExecutionDispatcher) Dispatch(_ context.Context, req core.DispatchRequ
 // Execute drives one run to completion. Agent/team runs reply as a comment (queued -> dispatched ->
 // running -> reply -> completed); a workflow run reports coarse progress and a human-readable result,
 // which the Store projects as `system` activities rather than comments (§38.26).
+//nolint:gocritic // value-typed dispatch request mirrors the ExecutionDispatcher port; the mock drives the observer synchronously
 func (MockExecutionDispatcher) Execute(ctx context.Context, req core.DispatchRequest, obs core.ExecutionObserver) {
 	_, _ = obs.ObserveStarted(ctx, req.TenantID, req.RunID)
 	if req.ExecutorType == "workflow" {
