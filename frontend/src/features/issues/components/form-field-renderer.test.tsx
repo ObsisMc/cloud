@@ -7,6 +7,22 @@ function field(overrides: Partial<FormField> = {}): FormField {
   return { key: 'k', label: 'Field', type: 'text', required: false, ...overrides }
 }
 
+function renderMultiSelect(value: unknown, onChange: (next: unknown) => void) {
+  return render(
+    <FormFieldRenderer
+      field={field({
+        type: 'multi_select',
+        options: [
+          { value: 'a', label: 'A' },
+          { value: 'b', label: 'B' },
+        ],
+      })}
+      value={value}
+      onChange={onChange}
+    />,
+  )
+}
+
 describe('FormFieldRenderer', () => {
   it('renders a text input as the default control', () => {
     render(<FormFieldRenderer field={field({ type: 'text' })} value="hello" onChange={() => {}} />)
@@ -71,19 +87,7 @@ describe('FormFieldRenderer', () => {
 
   it('renders multi_select checkboxes and toggles membership', () => {
     const onChange = vi.fn<(next: unknown) => void>()
-    render(
-      <FormFieldRenderer
-        field={field({
-          type: 'multi_select',
-          options: [
-            { value: 'a', label: 'A' },
-            { value: 'b', label: 'B' },
-          ],
-        })}
-        value={['a']}
-        onChange={onChange}
-      />,
-    )
+    renderMultiSelect(['a'], onChange)
     const boxes = screen.getAllByRole('checkbox')
     expect(boxes[0]).toBeChecked()
     expect(boxes[1]).not.toBeChecked()
@@ -109,19 +113,7 @@ describe('FormFieldRenderer', () => {
   })
 
   it('ignores non-string entries in a multi_select value', () => {
-    render(
-      <FormFieldRenderer
-        field={field({
-          type: 'multi_select',
-          options: [
-            { value: 'a', label: 'A' },
-            { value: 'b', label: 'B' },
-          ],
-        })}
-        value={['a', 42, null]}
-        onChange={() => {}}
-      />,
-    )
+    renderMultiSelect(['a', 42, null], () => {})
     const boxes = screen.getAllByRole('checkbox')
     expect(boxes[0]).toBeChecked()
     expect(boxes[1]).not.toBeChecked()
@@ -129,19 +121,7 @@ describe('FormFieldRenderer', () => {
 
   it('removes an option when its checkbox is unchecked', () => {
     const onChange = vi.fn<(next: unknown) => void>()
-    render(
-      <FormFieldRenderer
-        field={field({
-          type: 'multi_select',
-          options: [
-            { value: 'a', label: 'A' },
-            { value: 'b', label: 'B' },
-          ],
-        })}
-        value={['a', 'b']}
-        onChange={onChange}
-      />,
-    )
+    renderMultiSelect(['a', 'b'], onChange)
     const first = screen.getAllByRole('checkbox')[0]
     if (!first) throw new Error('multi_select must render a checkbox')
     fireEvent.click(first)
