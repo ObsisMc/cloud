@@ -1,7 +1,7 @@
 import { CanceledError } from 'axios'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { installFakeHttp } from '@/test/http'
-import { customInstance, isUnauthorizedError, onUnauthorized } from './api-client'
+import { customInstance, faultCode, isUnauthorizedError, onUnauthorized } from './api-client'
 
 describe('customInstance', () => {
   it('unwraps the response body', async () => {
@@ -97,5 +97,23 @@ describe('HTTP policy', () => {
       isUnauthorizedError,
     )
     expect(seen).toEqual([])
+  })
+})
+
+describe('faultCode', () => {
+  it('extracts the backend Fault.code from a rejected axios request', () => {
+    const error = { isAxiosError: true, response: { data: { code: 'not_found' } } }
+    expect(faultCode(error)).toBe('not_found')
+  })
+
+  it('returns undefined when the response carries no string code', () => {
+    expect(faultCode({ isAxiosError: true })).toBeUndefined()
+    expect(faultCode({ isAxiosError: true, response: {} })).toBeUndefined()
+    expect(faultCode({ isAxiosError: true, response: { data: { code: 404 } } })).toBeUndefined()
+  })
+
+  it('returns undefined for failures that are not axios errors', () => {
+    expect(faultCode(new Error('network down'))).toBeUndefined()
+    expect(faultCode(undefined)).toBeUndefined()
   })
 })
