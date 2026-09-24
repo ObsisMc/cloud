@@ -12,7 +12,8 @@ import {
   type GetApiV1TenantsTidClones200,
 } from '@/api/generated.schemas'
 import type { CloneSubmission } from '@/features/clones/pending'
-import type { ErrorType } from '@/lib/api-client'
+import { mutationHeaders } from '@/features/spaces/api'
+import { faultCode, type ErrorType } from '@/lib/api-client'
 
 /** The single page the list reads; the backend caps a page at 100. */
 export const CLONE_LIST_LIMIT = 100
@@ -83,7 +84,7 @@ export function useSubmitClone(tenantId: string) {
   return useMutation<CloneOperation, ErrorType<ApiError>, CloneSubmission>({
     mutationFn: (submission) =>
       postApiV1TenantsTidClones(tenantId, submission, {
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': submission.requestId },
+        headers: mutationHeaders(submission.requestId),
       }),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: [`/api/v1/tenants/${tenantId}/clones`] }),
@@ -103,7 +104,7 @@ const REFUSAL_STATUSES = new Set([400, 403, 404, 409, 422])
 
 /** Classifies a failed submission; see {@link SubmitFailure}. */
 export function classifySubmitFailure(error: unknown): SubmitFailure {
-  if (!isAxiosError<ApiError>(error) || error.response === undefined) return { kind: 'unconfirmed' }
-  if (!REFUSAL_STATUSES.has(error.response.status)) return { kind: 'unconfirmed' }
-  return { kind: 'rejected', code: error.response.data?.code }
+  const status = isAxiosError(error) ? error.response?.status : undefined
+  if (status === undefined || !REFUSAL_STATUSES.has(status)) return { kind: 'unconfirmed' }
+  return { kind: 'rejected', code: faultCode(error) }
 }

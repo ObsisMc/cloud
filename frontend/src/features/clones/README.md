@@ -16,7 +16,7 @@
 
 | 文件 | 说明 |
 |---|---|
-| `api.ts` | `useCloneList`（带轮询的列表查询）、`useSubmitClone`（提交，`Idempotency-Key` 取 `requestId`），以及纯函数 `newestFirst`、`awaitsResult`、`classifySubmitFailure` |
+| `api.ts` | `useCloneList`（带轮询的列表查询）、`useSubmitClone`（提交，经 `features/spaces` 的 `mutationHeaders` 以 `requestId` 作 `Idempotency-Key`；故障码经 `lib/api-client` 的 `faultCode` 读取），以及纯函数 `newestFirst`、`awaitsResult`、`classifySubmitFailure` |
 | `pending.ts` | sessionStorage 边界：`pendingSubmissionKey`（按租户和用户分槽）、`readPendingSubmission`、`writePendingSubmission` |
 | `use-clone-submission.ts` | 提交状态机：先存身份再发送，按失败类型保留或清除，列表里出现该 `requestId` 即视为已接受 |
 | `status.ts` | 由事实推导的阶段（排队中／已派发／已完成／失败）、徽章样式与失败原因文案 |
@@ -28,7 +28,7 @@
 
 ## 依赖与使用
 
-依赖：`src/api`（生成的 clones 客户端）、`features/auth/session`（用户 id）、`features/spaces/current-space`（租户 id）、`components/ui`、`components/layout/page-header`、`components/common/dialog-form-field`、TanStack Query。
+依赖：`src/api`（生成的 clones 客户端）、`lib/api-client`（`faultCode`）、`features/auth/session`（用户 id）、`features/spaces/current-space`（租户 id）、`features/spaces/api`（`mutationHeaders`）、`components/ui`、`components/layout/page-header`、`components/common/dialog-form-field`、TanStack Query。
 
 可被依赖：`routes.tsx`（`/w/:workspaceSlug/repositories`）。
 

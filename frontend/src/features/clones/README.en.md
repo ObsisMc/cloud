@@ -16,7 +16,7 @@ Not owned: projects (`features/projects`, a separate operation model), session a
 
 | File | Purpose |
 |---|---|
-| `api.ts` | `useCloneList` (the polling list query), `useSubmitClone` (submission, with `Idempotency-Key` set to the `requestId`), and the pure `newestFirst`, `awaitsResult`, `classifySubmitFailure` |
+| `api.ts` | `useCloneList` (the polling list query), `useSubmitClone` (submission; `mutationHeaders` from `features/spaces` sets `Idempotency-Key` to the `requestId`, and fault codes are read with `faultCode` from `lib/api-client`), and the pure `newestFirst`, `awaitsResult`, `classifySubmitFailure` |
 | `pending.ts` | The sessionStorage boundary: `pendingSubmissionKey` (one slot per tenant and user), `readPendingSubmission`, `writePendingSubmission` |
 | `use-clone-submission.ts` | The submission state machine: store the identity before sending, keep or clear it by failure kind, treat a listed `requestId` as accepted |
 | `status.ts` | The stage derived from Cloud's facts (queued / dispatched / succeeded / failed), badge variants, and failure-reason labels |
@@ -28,7 +28,7 @@ Not owned: projects (`features/projects`, a separate operation model), session a
 
 ## Dependencies
 
-Depends on: `src/api` (the generated clones client), `features/auth/session` (user id), `features/spaces/current-space` (tenant id), `components/ui`, `components/layout/page-header`, `components/common/dialog-form-field`, TanStack Query.
+Depends on: `src/api` (the generated clones client), `lib/api-client` (`faultCode`), `features/auth/session` (user id), `features/spaces/current-space` (tenant id), `features/spaces/api` (`mutationHeaders`), `components/ui`, `components/layout/page-header`, `components/common/dialog-form-field`, TanStack Query.
 
 May be used by: `routes.tsx` (`/w/:workspaceSlug/repositories`).
 
