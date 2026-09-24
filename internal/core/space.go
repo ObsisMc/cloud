@@ -5,16 +5,18 @@ import (
 	"strings"
 )
 
-// Collab workspaces (product term "Workspace") are collaboration and visibility
-// boundaries inside a tenant. They are distinct from the runtime `workspaces`
-// table, which models execution environments. Every project belongs to exactly
-// one space; access to projects and spaces always passes the membership check
-// in spaceMember. Tenant membership stays the precondition, roles stay
-// independent (TenantMember != SpaceMember).
+// Collaboration Spaces (product term "Workspace") are optional collaboration and
+// grouping boundaries inside a tenant. They are distinct from the runtime
+// `workspaces` table, which models execution environments. A project MAY
+// reference a space (projects.space_id is nullable); when it does, the space
+// scopes Space-level membership and metadata, and active space membership gates
+// that project's visibility to members (the resource-sharing boundary). An
+// unscoped project keeps owner-based authorization. Tenant membership stays the
+// precondition, roles stay independent (TenantMember != SpaceMember).
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
-// validSlug rejects uppercase, empty, and malformed workspace slugs.
+// validSlug rejects uppercase, empty, and malformed space slugs.
 func validSlug(s string) bool { return slugPattern.MatchString(s) }
 
 // spaceMember verifies the user is an active member of a live, unarchived space
@@ -46,14 +48,20 @@ func requireSpaceRole(m Object, roles ...string) {
 }
 
 // defaultSpace returns the tenant's default collaboration space, which
-// Bootstrap and migration 0006 guarantee exists.
+// Bootstrap and migration 0011 guarantee exists.
 func defaultSpace(t *transaction, tid string) Object {
 	w := t.one("SELECT * FROM collab_workspaces WHERE tenant_id=$1 AND slug='default' AND archived_at IS NULL", tid)
 	require(w != nil, 404, "not_found")
 	return w
 }
 
-// createSpace atomically inserts a workspace and its first owner.
+// createSpace atomically inserts a space and its first owner. slug is
+// lowercase, immutable and unique per tenant.
+//
+// An archived space does NOT release its slug: the tenant-scoped uniqueness of
+// 0011's UNIQUE(tenant_id,slug) covers live and archived rows alike, so the
+// pre-check deliberately omits an archived_at filter. Archiving is a soft delete
+// and the slug stays reserved for the space that owns it.
 func createSpace(t *transaction, r *PublicRequest, uid string) Object {
 	name := validText(r.Body.S("name"), 128)
 	slug := strings.ToLower(strings.TrimSpace(r.Body.S("slug")))
@@ -62,7 +70,13 @@ func createSpace(t *transaction, r *PublicRequest, uid string) Object {
 	require(len(description) <= 2000, 400, "invalid_input")
 	require(t.one("SELECT id FROM collab_workspaces WHERE tenant_id=$1 AND slug=$2", r.TenantID, slug) == nil, 409, "space_slug_conflict")
 	id := newID()
-	t.exec("INSERT INTO collab_workspaces(id,tenant_id,name,slug,description,created_by) VALUES($1,$2,$3,$4,$5,$6)", id, r.TenantID, name, slug, description, uid)
+	// The pre-check above is exact, but the unique index remains the final integrity
+	// guard: a concurrent duplicate create loses the insert instead of failing the
+	// request with an internal error, and is reported as the same 409 the contract
+	// promises. Space and first owner are written together or not at all.
+	if t.execRows("INSERT INTO collab_workspaces(id,tenant_id,name,slug,description,created_by) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id,slug) DO NOTHING", id, r.TenantID, name, slug, description, uid) == 0 {
+		reject(409, "space_slug_conflict")
+	}
 	t.exec("INSERT INTO collab_workspace_members(workspace_id,user_id,role,status,created_by) VALUES($1,$2,'owner','active',$2)", id, uid)
 	return t.one("SELECT * FROM collab_workspaces WHERE id=$1", id)
 }
@@ -86,11 +100,13 @@ func patchSpace(t *transaction, r *PublicRequest, uid string) Object {
 	return t.one("SELECT * FROM collab_workspaces WHERE id=$1", r.SpaceID)
 }
 
-// archiveSpace soft-deletes the workspace; owner only. Projects are unaffected
-// and keep their own lifecycle state machine.
+// archiveSpace soft-deletes the space; owner only. Projects are unaffected and
+// keep their own lifecycle state machine. The tenant's default space
+// (slug='default') can never be archived away.
 func archiveSpace(t *transaction, r *PublicRequest, uid string) Object {
 	w := t.one("SELECT * FROM collab_workspaces WHERE id=$1 AND tenant_id=$2", r.SpaceID, r.TenantID)
 	require(w != nil, 404, "not_found")
+	require(w.S("slug") != "default", 409, "default_space_protected")
 	m := spaceMember(t, r.SpaceID, uid)
 	requireSpaceRole(m, "owner")
 	version(w, r.Body.N("version"))
@@ -98,17 +114,49 @@ func archiveSpace(t *transaction, r *PublicRequest, uid string) Object {
 	return t.one("SELECT * FROM collab_workspaces WHERE id=$1", r.SpaceID)
 }
 
-// putSpaceMember upserts one membership with optimistic version checks and the
-// last-owner invariant. Adding members needs admin or owner; granting owner
-// needs owner. The target user must be an active member of the same tenant.
-func putSpaceMember(t *transaction, r *PublicRequest, uid string) Object {
+// enrollSpaceMemberByEmail adds an already-registered user to the space as a
+// plain member, resolved by (source, normalized email) in the caller's identity
+// source. It never auto-creates a user, never invites, and never widens Project
+// or Runtime Workspace visibility beyond the resource-sharing boundary. Admin or
+// owner may enroll; the target is atomically ensured a tenant membership
+// (keeping an existing role) if they are not already a tenant member. Adding an
+// existing member returns the current membership unchanged — idempotent, no
+// role/status/version mutation.
+func enrollSpaceMemberByEmail(t *transaction, r *PublicRequest, uid string) Object {
 	actor := spaceMember(t, r.SpaceID, uid)
 	requireSpaceRole(actor, "admin", "owner")
+	email := normalizeEmail(r.Body.S("email"))
+	require(validEmail(email), 400, "invalid_email")
+	u := t.one(`SELECT u.id FROM users u
+JOIN user_identities i ON i.user_id=u.id
+WHERE i.source=$1 AND i.subject=$2 AND u.status='active' AND u.deleted_at IS NULL`, r.Identity.Source, email)
+	require(u != nil, 404, "user_not_registered")
+	target := u.S("id")
+	// Atomic with the workspace membership below: a registered user who is not yet
+	// a tenant member is enrolled into the tenant first, then into the space. The
+	// ON CONFLICT keeps an existing tenant role (admin stays admin) untouched.
+	t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'member','active') ON CONFLICT (tenant_id,user_id) DO NOTHING", r.TenantID, target)
+	if t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, target) == nil {
+		t.exec("INSERT INTO collab_workspace_members(workspace_id,user_id,role,status,created_by) VALUES($1,$2,'member','active',$3)", r.SpaceID, target, uid)
+	}
+	return t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, target)
+}
+
+// putSpaceMember updates one membership's role/status with optimistic version
+// checks. Role management is owner-only: admins add members through
+// enrollSpaceMemberByEmail but cannot change roles. The owner role is immutable
+// through this API, ownership transfer NOT implemented: no transition into or
+// out of owner is allowed — granting owner, or any write touching an owner row,
+// is 409 ownership_transfer_not_supported. Because owner rows can never be
+// modified away, the last-owner invariant is preserved by construction (no
+// space_last_owner guard needed). The target user must be an active member of
+// the same tenant.
+func putSpaceMember(t *transaction, r *PublicRequest, uid string) Object {
+	actor := spaceMember(t, r.SpaceID, uid)
+	requireSpaceRole(actor, "owner")
 	role, status := r.Body.S("role"), r.Body.S("status")
 	require((role == "owner" || role == "admin" || role == "member") && (status == "active" || status == "disabled"), 400, "invalid_member")
-	if role == "owner" {
-		requireSpaceRole(actor, "owner")
-	}
+	require(role != "owner", 409, "ownership_transfer_not_supported")
 	require(validID(r.UserID), 400, "invalid_user")
 	require(t.one(`SELECT u.id FROM users u
 JOIN tenant_memberships tm ON tm.user_id=u.id
@@ -117,10 +165,8 @@ WHERE u.id=$1 AND tm.tenant_id=$2 AND tm.status='active' AND u.status='active' A
 	require(w != nil, 404, "not_found")
 	old := t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
 	if old != nil {
+		require(old.S("role") != "owner", 409, "ownership_transfer_not_supported")
 		version(old, r.Body.N("version"))
-		if old.S("role") == "owner" && old.S("status") == "active" && (role != "owner" || status != "active") {
-			require(t.one("SELECT user_id FROM collab_workspace_members WHERE workspace_id=$1 AND user_id<>$2 AND role='owner' AND status='active'", r.SpaceID, r.UserID) != nil, 409, "space_last_owner")
-		}
 		t.exec("UPDATE collab_workspace_members SET role=$3,status=$4,version=version+1 WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID, role, status)
 	} else {
 		require(r.Body.N("version") == 0, 409, "version_conflict")
@@ -129,12 +175,24 @@ WHERE u.id=$1 AND tm.tenant_id=$2 AND tm.status='active' AND u.status='active' A
 	return t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
 }
 
-// projectInSpace loads a live project in the tenant and verifies the caller's
-// space membership, returning both rows. Entity routes derive the space from
-// the project itself; client-supplied space identifiers are never trusted.
-func projectInSpace(t *transaction, tid, uid, pid string) (project, membership Object) {
-	require(validID(pid), 404, "not_found")
-	p := t.one("SELECT * FROM projects WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", pid, tid)
-	require(p != nil, 404, "not_found")
-	return p, spaceMember(t, p.S("spaceId"), uid)
+// removeSpaceMember removes a member's Workspace membership (hard delete).
+// Owner only; admins and members cannot remove anyone. The owner role is
+// immutable, so an owner row — including the actor themselves — can never be
+// removed (409 cannot_remove_workspace_owner). The user account, tenant
+// membership and any resources they created are untouched: the workspace and
+// its projects remain, and the removed member's access to the workspace, its
+// projects and their runtime workspaces is revoked by the membership gate.
+func removeSpaceMember(t *transaction, r *PublicRequest, uid string) Object {
+	actor := spaceMember(t, r.SpaceID, uid)
+	requireSpaceRole(actor, "owner")
+	require(validID(r.UserID), 400, "invalid_user")
+	require(t.one(`SELECT u.id FROM users u
+JOIN tenant_memberships tm ON tm.user_id=u.id
+WHERE u.id=$1 AND tm.tenant_id=$2 AND tm.status='active' AND u.status='active' AND u.deleted_at IS NULL`, r.UserID, r.TenantID) != nil, 404, "not_found")
+	old := t.one("SELECT * FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
+	require(old != nil, 404, "not_found")
+	require(old.S("role") != "owner", 409, "cannot_remove_workspace_owner")
+	version(old, r.Body.N("version"))
+	t.exec("DELETE FROM collab_workspace_members WHERE workspace_id=$1 AND user_id=$2", r.SpaceID, r.UserID)
+	return old
 }

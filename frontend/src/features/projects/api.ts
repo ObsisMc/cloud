@@ -9,9 +9,9 @@ import {
   getApiV1TenantsTidProjectsPid,
   patchApiV1TenantsTidProjectsPid,
 } from '@/api/projects/projects'
-import { postApiV1TenantsTidSpacesSidProjects } from '@/api/spaces/spaces'
+import { postApiV1TenantsTidSpacesSpaceIdProjects } from '@/api/spaces/spaces'
 import { useCurrentSpace } from '@/features/spaces/current-space'
-import { useSpaceProjects } from '@/features/spaces/api'
+import { mutationHeaders, useIdempotencyKeys, useSpaceProjects } from '@/features/spaces/api'
 import type { ErrorType } from '@/lib/api-client'
 import type { Project } from '@/mocks/data/types'
 
@@ -33,7 +33,9 @@ function statusFor(lifecycle: string): Project['status'] {
 export function cloudProjectToUI(p: CloudProject): Project {
   return {
     id: p.id,
-    workspaceId: p.spaceId,
+    // `projects.space_id` stays nullable in this tree (D2); the UI renders
+    // space-scoped projects, so the mapping falls back to the empty id.
+    workspaceId: p.spaceId ?? '',
     title: p.name,
     description: p.repositoryUrl,
     icon: 'folder-kanban',
@@ -89,18 +91,24 @@ export interface CreateProjectInput {
 export function useCreateProject() {
   const queryClient = useQueryClient()
   const { tenantId, space } = useCurrentSpace()
+  const keyFor = useIdempotencyKeys()
   return useMutation<
-    Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSidProjects>>,
+    Awaited<ReturnType<typeof postApiV1TenantsTidSpacesSpaceIdProjects>>,
     ErrorType<ApiError>,
     CreateProjectInput
   >({
     mutationFn: async (input: CreateProjectInput) => {
       if (!tenantId || !space) throw new Error('cloud space not resolved')
-      return postApiV1TenantsTidSpacesSidProjects(tenantId, space.id, {
-        name: input.title,
-        repositoryUrl: input.repositoryUrl,
-        defaultBranch: input.defaultBranch,
-      })
+      return postApiV1TenantsTidSpacesSpaceIdProjects(
+        tenantId,
+        space.id,
+        {
+          name: input.title,
+          repositoryUrl: input.repositoryUrl,
+          defaultBranch: input.defaultBranch,
+        },
+        { headers: mutationHeaders(keyFor(input)) },
+      )
     },
     onSuccess: () => {
       if (!tenantId || !space) return
@@ -162,6 +170,7 @@ export function useCloudProject(tenantId: string | undefined, projectId: string 
 export function useDeleteProject() {
   const queryClient = useQueryClient()
   const { tenantId, space } = useCurrentSpace()
+  const keyFor = useIdempotencyKeys()
   return useMutation<
     DeleteApiV1TenantsTidProjectsPid202,
     ErrorType<ApiError>,
@@ -169,7 +178,12 @@ export function useDeleteProject() {
   >({
     mutationFn: async (input: { id: string; version: number }) => {
       if (!tenantId) throw new Error('cloud tenant not resolved')
-      return deleteApiV1TenantsTidProjectsPid(tenantId, input.id, { version: input.version })
+      return deleteApiV1TenantsTidProjectsPid(
+        tenantId,
+        input.id,
+        { version: input.version },
+        { headers: mutationHeaders(keyFor(input)) },
+      )
     },
     onSuccess: () => {
       if (!tenantId || !space) return

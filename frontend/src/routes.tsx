@@ -22,6 +22,8 @@ import { SettingsLayout } from '@/features/settings/settings-layout'
 import { SkillsPage } from '@/features/skills/skills-page'
 import { SquadDetailPage } from '@/features/squads/squad-detail-page'
 import { SquadsPage } from '@/features/squads/squads-page'
+import { useCurrentSpace } from '@/features/spaces/current-space'
+import { db } from '@/mocks/data/store'
 import { WORKSPACE_ROUTE_PATTERN } from '@/lib/paths'
 
 /**
@@ -34,6 +36,18 @@ function WithSlug({ component: Component }: { component: ComponentType<{ slug: s
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
   if (!workspaceSlug) throw new Error('workspace route must provide a slug')
   return <Component slug={workspaceSlug} />
+}
+
+/**
+ * Resolves the current collaboration space to its tenant id and forwards it as
+ * the `slug` prop, so tenant-scoped real-backend pages (Issues, members, …) can
+ * keep their `{ slug }` contract. In the dev-only demo edge there is no tenant;
+ * the demo plane has no real Issues, so redirect to its own issue board.
+ */
+function CloudScope({ component: Component }: { component: ComponentType<{ slug: string }> }) {
+  const { tenantId } = useCurrentSpace()
+  if (!tenantId) return <Navigate to={`/w/${db.workspace.slug}/issues`} replace />
+  return <Component slug={tenantId} />
 }
 
 /**
@@ -63,9 +77,9 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <Navigate to="issues" replace /> },
-      { path: 'issues', element: <WithSlug component={IssuesPage} /> },
-      { path: 'issues/:issueId', element: <WithSlug component={IssueDetailPage} /> },
-      { path: 'my-issues', element: <WithSlug component={MyIssuesPage} /> },
+      { path: 'issues', element: <CloudScope component={IssuesPage} /> },
+      { path: 'issues/:issueId', element: <CloudScope component={IssueDetailPage} /> },
+      { path: 'my-issues', element: <CloudScope component={MyIssuesPage} /> },
       { path: 'projects', element: <WithSlug component={ProjectsPage} /> },
       { path: 'projects/:projectId', element: <WithSlug component={ProjectDetailPage} /> },
       { path: 'repositories', element: <WithSlug component={RepositoriesPage} /> },

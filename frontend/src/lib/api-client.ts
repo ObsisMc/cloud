@@ -103,3 +103,25 @@ export const customInstance = <T>(
 
 /** Error type generated hooks expose; the body is the server's `Fault` contract. */
 export type ErrorType<Error> = AxiosError<Error>
+
+/**
+ * Extracts the backend `Fault.code` from a rejected request, so callers can map
+ * `400/401/403/404/409/428/503` and `capability_unavailable` to UX without
+ * reaching into the axios internals of every feature module.
+ *
+ * @param error - The value a query/mutation surface reports on failure.
+ * @returns The server `code` string, or `undefined` for network/parse failures.
+ */
+export function faultCode(error: unknown): string | undefined {
+  if (!isAxiosErrorLike(error)) return undefined
+  const data = error.response?.data
+  if (typeof data === 'object' && data !== null && 'code' in data) {
+    const code = (data as { code?: unknown }).code
+    return typeof code === 'string' ? code : undefined
+  }
+  return undefined
+}
+
+function isAxiosErrorLike(error: unknown): error is AxiosError {
+  return typeof error === 'object' && error !== null && 'isAxiosError' in error
+}

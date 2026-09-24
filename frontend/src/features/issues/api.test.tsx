@@ -1,11 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
-import { delay, http, HttpResponse } from 'msw'
+import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
-import { db } from '@/mocks/data/store'
-import type { Issue } from '@/mocks/data/types'
 import { server } from '@/test/msw-server'
-import { useUpdateIssue } from './api'
+import type { Issue } from './types'
+import { useCreateIssue, useIssues, useMoveIssue, useUpdateIssue } from './api'
 
 function wrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
@@ -13,63 +12,123 @@ function wrapper(queryClient: QueryClient) {
   }
 }
 
-describe('useUpdateIssue', () => {
-  it('updates every cached issues list optimistically, ahead of the request settling', async () => {
-    const issue = { ...db.issues[0], status: 'backlog' } as Issue
-    // Hold the response back so the assertion below can only pass if the
-    // cache was written before the request settled, not after.
+const issueFixture: Issue = {
+  id: 'i1',
+  tenantId: 't1',
+  creatorUserId: 'u1',
+  assigneeType: 'user',
+  assigneeId: null,
+  assigneeUserId: null,
+  parentIssueId: null,
+  projectRef: null,
+  title: 'Fix the login',
+  description: '',
+  status: 'backlog',
+  priority: 'none',
+  position: 0,
+  number: 1,
+  properties: {},
+  version: 3,
+  createdAt: '',
+  updatedAt: '',
+  labels: [],
+}
+
+describe('useIssues', () => {
+  it('unwraps the items envelope into the issue list', async () => {
     server.use(
-      http.patch(`/mock-api/workspaces/${db.workspace.slug}/issues/${issue.id}`, async () => {
-        await delay(50)
-        return HttpResponse.json({ ...issue, status: 'in_progress' })
+      http.get('/api/v1/tenants/t1/issues', () =>
+        HttpResponse.json({ items: [issueFixture], nextCursor: '' }),
+      ),
+    )
+    const { result } = renderHook(() => useIssues('t1'), { wrapper: wrapper(new QueryClient()) })
+
+    await waitFor(() => expect(result.current.data).toEqual([issueFixture]))
+  })
+})
+
+describe('useUpdateIssue', () => {
+  it('sends the version alongside the patch and caches the returned issue', async () => {
+    let body: unknown
+    const updated = { ...issueFixture, status: 'done', version: 4 }
+    server.use(
+      http.put('/api/v1/tenants/t1/issues/i1', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json(updated)
       }),
     )
     const queryClient = new QueryClient()
-    // Seed two differently-filtered list caches, mirroring how the board and
-    // "My Issues" can both hold the same issue at once.
-    queryClient.setQueryData(['issues', db.workspace.slug, {}], [issue])
-    queryClient.setQueryData(
-      ['issues', db.workspace.slug, { assigneeId: issue.assigneeId }],
-      [issue],
-    )
-
-    const { result } = renderHook(() => useUpdateIssue(db.workspace.slug), {
+    const { result } = renderHook(() => useUpdateIssue('t1'), {
       wrapper: wrapper(queryClient),
     })
-    result.current.mutate({ id: issue.id, patch: { status: 'in_progress' } })
 
-    await waitFor(() => {
-      const list = queryClient.getQueryData<Issue[]>(['issues', db.workspace.slug, {}])
-      expect(list?.[0]?.status).toBe('in_progress')
-    })
-    expect(result.current.isSuccess).toBe(false)
-    const filtered = queryClient.getQueryData<Issue[]>([
-      'issues',
-      db.workspace.slug,
-      { assigneeId: issue.assigneeId },
-    ])
-    expect(filtered?.[0]?.status).toBe('in_progress')
+    result.current.mutate({ id: 'i1', version: 3, patch: { status: 'done' } })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(body).toEqual({ status: 'done', version: 3 })
+    expect(queryClient.getQueryData(['issue', 't1', 'i1'])).toEqual(updated)
+  })
+})
+
+describe('useCreateIssue', () => {
+  it('sends an idempotency key and unwraps the created resource', async () => {
+    let idempotencyKey: string | null = null
+    server.use(
+      http.post('/api/v1/tenants/t1/issues', async ({ request }) => {
+        idempotencyKey = request.headers.get('Idempotency-Key')
+        return HttpResponse.json({ resource: issueFixture })
+      }),
+    )
+    const { result } = renderHook(() => useCreateIssue('t1'), {
+      wrapper: wrapper(new QueryClient()),
+    })
+
+    result.current.mutate({ title: 'Fix the login' })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(idempotencyKey).toBeTruthy()
+    expect(result.current.data).toEqual(issueFixture)
   })
 
-  it('rolls back the cached lists if the request fails', async () => {
-    const issue = { ...db.issues[0], status: 'backlog' } as Issue
+  it('sends the parentIssueId when creating a sub-issue', async () => {
+    let body: unknown
     server.use(
-      http.patch(`/mock-api/workspaces/${db.workspace.slug}/issues/${issue.id}`, () =>
-        HttpResponse.json({ message: 'nope' }, { status: 500 }),
-      ),
+      http.post('/api/v1/tenants/t1/issues', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ resource: issueFixture })
+      }),
+    )
+    const { result } = renderHook(() => useCreateIssue('t1'), {
+      wrapper: wrapper(new QueryClient()),
+    })
+
+    result.current.mutate({ title: 'Child task', parentIssueId: 'p1' })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(body).toEqual({ title: 'Child task', parentIssueId: 'p1' })
+  })
+})
+
+describe('useMoveIssue', () => {
+  it('POSTs status, anchors and version to the move endpoint and caches the result', async () => {
+    let body: unknown
+    let idempotencyKey: string | null = null
+    const moved = { ...issueFixture, status: 'done', version: 4 }
+    server.use(
+      http.post('/api/v1/tenants/t1/issues/i1/move', async ({ request }) => {
+        idempotencyKey = request.headers.get('Idempotency-Key')
+        body = await request.json()
+        return HttpResponse.json(moved)
+      }),
     )
     const queryClient = new QueryClient()
-    queryClient.setQueryData(['issues', db.workspace.slug, {}], [issue])
+    const { result } = renderHook(() => useMoveIssue('t1'), { wrapper: wrapper(queryClient) })
 
-    const { result } = renderHook(() => useUpdateIssue(db.workspace.slug), {
-      wrapper: wrapper(queryClient),
-    })
-    result.current.mutate({ id: issue.id, patch: { status: 'done' } })
+    result.current.mutate({ id: 'i1', version: 3, move: { status: 'done', beforeId: 'b1' } })
 
-    await waitFor(() => expect(result.current.isError).toBe(true))
-    const list = queryClient.getQueryData<Issue[]>(['issues', db.workspace.slug, {}])
-    expect(list?.[0]?.status).toBe('backlog')
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(body).toEqual({ status: 'done', beforeId: 'b1', version: 3 })
+    expect(idempotencyKey).toBeTruthy()
+    expect(queryClient.getQueryData(['issue', 't1', 'i1'])).toEqual(moved)
   })
 })

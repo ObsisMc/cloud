@@ -3,17 +3,23 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { ProjectDetailPage } from '@/features/projects/project-detail-page'
-import { installCloudSpaceHandlers, TEST_SPACE_ID, TEST_TENANT_ID } from '@/test/cloud-handlers'
+import {
+  installCloudSpaceHandlers,
+  TEST_SPACE_ID,
+  TEST_TENANT_ID,
+  TEST_USER_ID,
+} from '@/test/cloud-handlers'
 import { renderAtRoute } from '@/test/render'
 import { server } from '@/test/msw-server'
 
 const PROJECT_ID = '55555555-5555-5555-5555-555555555555'
+const OTHER_USER_ID = '44444444-4444-4444-4444-444444444444'
 
-function cloudProject(name: string, lifecycle = 'active', version = 1) {
+function cloudProject(name: string, lifecycle = 'active', version = 1, ownerUserId = 'u1') {
   return {
     id: PROJECT_ID,
     tenantId: TEST_TENANT_ID,
-    ownerUserId: 'u1',
+    ownerUserId,
     spaceId: TEST_SPACE_ID,
     name,
     repositoryUrl: 'https://example.com/repo.git',
@@ -34,6 +40,13 @@ function installProjectHandlers(role: string, project = cloudProject('Demo')) {
     ),
     http.get(`/api/v1/tenants/${TEST_TENANT_ID}/projects/${PROJECT_ID}`, () =>
       HttpResponse.json(project),
+    ),
+    // The detail body also loads the tenant issues and members lists.
+    http.get(`/api/v1/tenants/${TEST_TENANT_ID}/issues`, () =>
+      HttpResponse.json({ items: [], nextCursor: '' }),
+    ),
+    http.get(`/api/v1/tenants/${TEST_TENANT_ID}/members`, () =>
+      HttpResponse.json({ items: [], nextCursor: '' }),
     ),
   )
 }
@@ -96,11 +109,32 @@ describe('ProjectDetailPage', () => {
     await waitFor(() => expect(deleted).toBe(true))
   })
 
-  it('hides the delete action from members', async () => {
-    installProjectHandlers('member')
+  it('shows delete for the member who created the project (creator rule)', async () => {
+    installProjectHandlers('member', cloudProject('Demo', 'active', 1, TEST_USER_ID))
+    renderDetail()
+    await screen.findAllByText('Demo')
+    expect(screen.getByRole('button', { name: '删除项目' })).toBeInTheDocument()
+  })
+
+  it('hides delete from a member who is not the creator', async () => {
+    installProjectHandlers('member', cloudProject('Demo', 'active', 1, OTHER_USER_ID))
     renderDetail()
     await screen.findAllByText('Demo')
     expect(screen.getByRole('button', { name: '重命名' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '删除项目' })).not.toBeInTheDocument()
+  })
+
+  it('shows delete for a workspace admin who is not the creator', async () => {
+    installProjectHandlers('admin', cloudProject('Demo', 'active', 1, OTHER_USER_ID))
+    renderDetail()
+    await screen.findAllByText('Demo')
+    expect(screen.getByRole('button', { name: '删除项目' })).toBeInTheDocument()
+  })
+
+  it('shows delete for a workspace owner who is not the creator', async () => {
+    installProjectHandlers('owner', cloudProject('Demo', 'active', 1, OTHER_USER_ID))
+    renderDetail()
+    await screen.findAllByText('Demo')
+    expect(screen.getByRole('button', { name: '删除项目' })).toBeInTheDocument()
   })
 })

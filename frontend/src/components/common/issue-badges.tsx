@@ -5,38 +5,50 @@ import {
   CircleCheck,
   CircleDashed,
   CircleDot,
+  CircleSlash,
   Minus,
   SignalHigh,
   SignalLow,
   SignalMedium,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { IssuePriority, IssueStatus } from '@/mocks/data/types'
+import type { IssuePriority } from '@/features/issues/types'
 
-const STATUS_META: Record<
-  IssueStatus,
-  { label: string; className: string; icon: React.ComponentType<{ className?: string }> }
-> = {
+type StatusMeta = {
+  label: string
+  className: string
+  icon: React.ComponentType<{ className?: string }>
+}
+
+/**
+ * Labels/icons for the 7 canonical system status keys. Custom tenant statuses have no
+ * fixed presentation here, so they fall back to the raw key; the live catalog
+ * (`/issue-statuses`) is what the board actually renders, this only prettifies known keys.
+ */
+const STATUS_META: Record<string, StatusMeta> = {
   backlog: { label: '待规划', className: 'text-muted-foreground', icon: CircleDashed },
   todo: { label: '待办', className: 'text-muted-foreground', icon: Circle },
   in_progress: { label: '进行中', className: 'text-amber-500', icon: CircleDot },
   in_review: { label: '审核中', className: 'text-violet-500', icon: CircleDot },
   blocked: { label: '已阻塞', className: 'text-red-500', icon: Ban },
   done: { label: '已完成', className: 'text-emerald-500', icon: CircleCheck },
+  cancelled: { label: '已取消', className: 'text-muted-foreground', icon: CircleSlash },
 }
 
-export function StatusIcon({ status, className }: { status: IssueStatus; className?: string }) {
-  const meta = STATUS_META[status]
+const UNKNOWN_STATUS: StatusMeta = { label: '', className: 'text-muted-foreground', icon: Circle }
+
+function statusMeta(status: string): StatusMeta {
+  return STATUS_META[status] ?? { ...UNKNOWN_STATUS, label: status }
+}
+
+export function StatusIcon({ status, className }: { status: string; className?: string }) {
+  const meta = statusMeta(status)
   const Icon = meta.icon
   return <Icon className={cn('size-4', meta.className, className)} />
 }
 
-export function StatusLabel({ status }: { status: IssueStatus }) {
-  return <span className="text-sm">{STATUS_META[status].label}</span>
-}
-
-export function statusLabelText(status: IssueStatus): string {
-  return STATUS_META[status].label
+export function statusLabelText(status: string): string {
+  return statusMeta(status).label
 }
 
 const PRIORITY_META: Record<
@@ -62,28 +74,11 @@ export function PriorityIcon({
   return <Icon className={cn('size-4', meta.className, className)} />
 }
 
-export function PriorityLabel({ priority }: { priority: IssuePriority }) {
-  return <span className="text-sm">{PRIORITY_META[priority].label}</span>
-}
-
 export function priorityLabelText(priority: IssuePriority): string {
   return PRIORITY_META[priority].label
 }
 
-export const STATUS_ORDER: IssueStatus[] = [
-  'backlog',
-  'todo',
-  'in_progress',
-  'in_review',
-  'blocked',
-  'done',
-]
 export const PRIORITY_ORDER: IssuePriority[] = ['none', 'low', 'medium', 'high', 'urgent']
-
-/** Converts untrusted select input into a known issue status. */
-export function parseIssueStatus(value: unknown): IssueStatus | undefined {
-  return STATUS_ORDER.find((status) => status === value)
-}
 
 /** Converts untrusted select input into a known issue priority. */
 export function parseIssuePriority(value: unknown): IssuePriority | undefined {

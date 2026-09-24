@@ -14,11 +14,21 @@ import (
 
 // Config holds all configuration of the application.
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Logger   logger.Config  `mapstructure:"logger"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Auth     AuthConfig     `mapstructure:"auth"`
-	Control  ControlConfig  `mapstructure:"control"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Logger        logger.Config       `mapstructure:"logger"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	Auth          AuthConfig          `mapstructure:"auth"`
+	Collaboration CollaborationConfig `mapstructure:"collaboration"`
+	Control       ControlConfig       `mapstructure:"control"`
+}
+
+// CollaborationConfig gates optional collaboration-capability wiring on the Store.
+type CollaborationConfig struct {
+	// DevelopmentFixtures installs the in-memory dev/demo Agent/Team/Workflow fixtures
+	// (internal/collab) onto the Store's collaboration ports. Development-only and explicitly
+	// enabled: production must leave it false (default), in which case only human targets are
+	// served. It must never be coupled to whether an external login provider is enabled.
+	DevelopmentFixtures bool `mapstructure:"development_fixtures"`
 }
 
 // ControlConfig binds the Controller-facing gRPC listener. Until the authentication ADR adds TLS,

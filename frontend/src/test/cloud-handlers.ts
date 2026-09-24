@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import { server } from '@/test/msw-server'
+import type { Issue, IssueStatusColumn, TenantMember } from '@/features/issues/types'
 
 /**
  * Shared fixtures for tests that exercise the cloud-backed flow: a signed-in
@@ -62,6 +63,30 @@ export function installCloudSpaceHandlers(role: string): void {
         ],
         nextCursor: '',
       }),
+    ),
+  )
+}
+
+/**
+ * Installs the three tenant queries an issue board/list mounts — issues,
+ * statuses and members — for tests that exercise the `t1` tenant the fixtures
+ * assume. Sharing one helper (instead of a per-file `serve*` trio) keeps the
+ * clone detector quiet and makes the shape of the trio visible in one place.
+ */
+export function installTenantIssueHandlers(
+  issues: Issue[] = [],
+  statuses: IssueStatusColumn[] = [],
+  members: TenantMember[] = [],
+): void {
+  server.use(
+    http.get('/api/v1/tenants/t1/issues', () =>
+      HttpResponse.json({ items: issues, nextCursor: '' }),
+    ),
+    http.get('/api/v1/tenants/t1/issue-statuses', () =>
+      HttpResponse.json({ items: statuses, nextCursor: '' }),
+    ),
+    http.get('/api/v1/tenants/t1/members', () =>
+      HttpResponse.json({ items: members, nextCursor: '' }),
     ),
   )
 }

@@ -1,10 +1,8 @@
 import { useState } from 'react'
 import {
   PRIORITY_ORDER,
-  STATUS_ORDER,
   priorityLabelText,
   parseIssuePriority,
-  parseIssueStatus,
   statusLabelText,
 } from '@/components/common/issue-badges'
 import { Button } from '@/components/ui/button'
@@ -26,41 +24,72 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { useCreateIssue } from '@/features/issues/api'
-import { db } from '@/mocks/data/store'
-import type { IssuePriority, IssueStatus } from '@/mocks/data/types'
+import { useCreateIssue, useIssues } from '@/features/issues/api'
+import { columnLabel, issueNumber } from '@/features/issues/present'
+import type { IssuePriority, IssueStatusColumn, TenantMember } from '@/features/issues/types'
+
+/** Canonical status keys used before the catalog loads (or when it is empty). */
+const FALLBACK_STATUS_KEYS = [
+  'backlog',
+  'todo',
+  'in_progress',
+  'in_review',
+  'blocked',
+  'done',
+  'cancelled',
+]
+
+/** Stable defaults so optional props don't allocate a fresh array per render. */
+const EMPTY_STATUSES: IssueStatusColumn[] = []
+const EMPTY_MEMBERS: TenantMember[] = []
 
 // oxlint-disable-next-line max-lines-per-function -- this dialog owns one cohesive create-issue form and its reset lifecycle.
 export function CreateIssueDialog({
   slug,
+  statuses = EMPTY_STATUSES,
+  members = EMPTY_MEMBERS,
   defaultStatus = 'backlog',
   trigger,
 }: {
   slug: string
-  defaultStatus?: IssueStatus
+  statuses?: IssueStatusColumn[]
+  members?: TenantMember[]
+  defaultStatus?: string
   trigger?: React.ReactElement
 }) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [status, setStatus] = useState<IssueStatus>(defaultStatus)
+  const [status, setStatus] = useState(defaultStatus)
   const [priority, setPriority] = useState<IssuePriority>('none')
-  const [projectId, setProjectId] = useState<string>('none')
+  const [assigneeId, setAssigneeId] = useState<string>('none')
+  const [parentIssueId, setParentIssueId] = useState<string>('none')
   const createIssue = useCreateIssue(slug)
+  const { data: issues = [] } = useIssues(slug)
+
+  const statusKeys = statuses.length > 0 ? statuses.map((s) => s.key) : FALLBACK_STATUS_KEYS
 
   function reset() {
     setTitle('')
     setDescription('')
     setStatus(defaultStatus)
     setPriority('none')
-    setProjectId('none')
+    setAssigneeId('none')
+    setParentIssueId('none')
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!title.trim()) return
     createIssue.mutate(
-      { title, description, status, priority, projectId: projectId === 'none' ? null : projectId },
+      {
+        title,
+        description,
+        status,
+        priority,
+        ...(assigneeId !== 'none' ? { assigneeType: 'user' as const, assigneeId } : {}),
+        ...(parentIssueId !== 'none' ? { parentIssueId } : {}),
+      },
       {
         onSuccess: () => {
           setOpen(false)
@@ -96,19 +125,20 @@ export function CreateIssueDialog({
               <Select
                 value={status}
                 onValueChange={(v) => {
-                  const nextStatus = parseIssueStatus(v)
-                  if (nextStatus) setStatus(nextStatus)
+                  if (v !== null) setStatus(v)
                 }}
               >
                 <SelectTrigger className="w-36">
                   <SelectValue>
-                    {(value: unknown) => statusLabelText(parseIssueStatus(value) ?? status)}
+                    {(value: unknown) =>
+                      statusLabelText(typeof value === 'string' ? value : status)
+                    }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {STATUS_ORDER.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {statusLabelText(s)}
+                  {statusKeys.map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {columnLabel(statuses, key)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -133,26 +163,45 @@ export function CreateIssueDialog({
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={projectId} onValueChange={(v) => setProjectId(v ?? 'none')}>
+              <Select value={assigneeId} onValueChange={(v) => setAssigneeId(v ?? 'none')}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="项目">
+                  <SelectValue placeholder="负责人">
                     {(value: unknown) =>
                       value === 'none'
-                        ? '无项目'
-                        : (db.projects.find((p) => p.id === value)?.title ?? '项目')
+                        ? '未分配'
+                        : (members.find((m) => m.userId === value)?.displayName ?? '负责人')
                     }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">无项目</SelectItem>
-                  {db.projects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.title}
+                  <SelectItem value="none">未分配</SelectItem>
+                  {members.map((m) => (
+                    <SelectItem key={m.userId} value={m.userId}>
+                      {m.displayName}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+            <Select value={parentIssueId} onValueChange={(v) => setParentIssueId(v ?? 'none')}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="父任务">
+                  {(value: unknown) =>
+                    value === 'none'
+                      ? '无父任务'
+                      : (issues.find((i) => i.id === value)?.title ?? '父任务')
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">无父任务</SelectItem>
+                {issues.map((i) => (
+                  <SelectItem key={i.id} value={i.id}>
+                    {issueNumber(i)} {i.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <DialogFooter>
             <DialogClose

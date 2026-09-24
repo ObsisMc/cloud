@@ -9,6 +9,8 @@ import { server } from '@/test/msw-server'
 
 const ALICE_ID = '33333333-3333-3333-3333-333333333333'
 const BOB_ID = '44444444-4444-4444-4444-444444444444'
+// memberRow() seeds every member with version 1.
+const BOB_VERSION = 1
 
 function memberRow(id: string, displayName: string, role: string) {
   return {
@@ -23,16 +25,38 @@ function memberRow(id: string, displayName: string, role: string) {
   }
 }
 
+const MEMBERS_KEY = `/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members`
+
 function installMembersHandler(members: unknown[]) {
-  server.use(
-    http.get(`/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members`, () =>
-      HttpResponse.json({ items: members, nextCursor: '' }),
-    ),
-  )
+  server.use(http.get(MEMBERS_KEY, () => HttpResponse.json({ items: members, nextCursor: '' })))
+}
+
+/**
+ * Renders the members page for an owner session (Alice as owner), waits for the
+ * list to load, and opens the add-member dialog. Returns the user-event instance
+ * so the test can drive the dialog further.
+ */
+async function renderOwnerWithAddDialog() {
+  installCloudSpaceHandlers('owner')
+  installMembersHandler([memberRow(ALICE_ID, 'Alice', 'owner')])
+  const user = userEvent.setup()
+  renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
+  await screen.findByText('Alice')
+  await user.click(screen.getByRole('button', { name: '添加成员' }))
+  return user
+}
+
+/** Types an email into the open add-member dialog and submits the add. */
+async function typeAndSubmitEmail(
+  user: ReturnType<typeof userEvent.setup>,
+  email: string,
+): Promise<void> {
+  await user.type(screen.getByLabelText('成员邮箱'), email)
+  await user.click(screen.getByRole('button', { name: '添加' }))
 }
 
 describe('MembersPage', () => {
-  it('renders real members and hides management controls from members', async () => {
+  it('renders real space members read-only for a plain member', async () => {
     installCloudSpaceHandlers('member')
     installMembersHandler([
       memberRow(ALICE_ID, 'Alice', 'owner'),
@@ -43,89 +67,168 @@ describe('MembersPage', () => {
     expect(await screen.findByText('Alice')).toBeInTheDocument()
     expect(await screen.findByText('Bob')).toBeInTheDocument()
     expect(screen.getByText('所有者')).toBeInTheDocument()
-    // Members are read-only: no add form, no role selectors, no action column.
-    expect(screen.queryByLabelText('新成员 userId')).not.toBeInTheDocument()
+    // Members are read-only: no add-member trigger, no role selectors, no action column.
+    expect(screen.queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Bob 的角色')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '禁用' })).not.toBeInTheDocument()
   })
 
-  it('lets an owner add a member through the upsert API', async () => {
-    installCloudSpaceHandlers('owner')
-    installMembersHandler([memberRow(ALICE_ID, 'Alice', 'owner')])
-    let putBody: unknown = null
+  it('shows the add-member dialog for an owner and adds by email through the API', async () => {
+    let postBody: unknown = null
+    let idempotencyKey = ''
     server.use(
-      http.put(
-        `/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members/:uid`,
-        async ({ request }) => {
-          putBody = await request.json()
-          return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
-        },
-      ),
+      http.post(MEMBERS_KEY, async ({ request }) => {
+        postBody = await request.json()
+        idempotencyKey = request.headers.get('Idempotency-Key') ?? ''
+        return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
+      }),
     )
-    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
-    const user = userEvent.setup()
+    const user = await renderOwnerWithAddDialog()
+    expect(screen.getByLabelText('成员邮箱')).toBeInTheDocument()
 
-    expect(await screen.findByText('Alice')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('新成员 userId'), BOB_ID)
-    await user.click(screen.getByRole('button', { name: '添加' }))
+    await typeAndSubmitEmail(user, 'bob@example.com')
 
-    await waitFor(() => expect(putBody).not.toBeNull())
-    expect(putBody).toEqual({ role: 'member', status: 'active', version: 0 })
+    await waitFor(() => expect(postBody).not.toBeNull())
+    expect(postBody).toEqual({ email: 'bob@example.com' })
+    // POST must carry a non-empty idempotency key so retries dedupe.
+    expect(idempotencyKey.length).toBeGreaterThan(0)
+    // The dialog closes on success.
+    await waitFor(() => expect(screen.queryByLabelText('成员邮箱')).not.toBeInTheDocument())
   })
 
-  it('lets an admin disable and re-enable a member and shows the backend fault code', async () => {
+  it('rejects an empty or malformed email with a local hint', async () => {
+    let posted = false
+    server.use(
+      http.post(MEMBERS_KEY, async () => {
+        posted = true
+        return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
+      }),
+    )
+    const user = await renderOwnerWithAddDialog()
+
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    expect(await screen.findByText('请输入邮箱地址。')).toBeInTheDocument()
+    expect(posted).toBe(false)
+
+    await typeAndSubmitEmail(user, 'not-an-email')
+    expect(await screen.findByText('请输入有效的邮箱地址。')).toBeInTheDocument()
+    expect(posted).toBe(false)
+  })
+
+  it('shows the not-registered hint when the backend rejects an unknown email', async () => {
+    server.use(
+      http.post(MEMBERS_KEY, () =>
+        HttpResponse.json(
+          { code: 'user_not_registered', params: {}, requestId: 'r' },
+          { status: 404 },
+        ),
+      ),
+    )
+    const user = await renderOwnerWithAddDialog()
+
+    await typeAndSubmitEmail(user, 'ghost@example.com')
+
+    expect(await screen.findByText('该邮箱尚未注册，请先完成注册。')).toBeInTheDocument()
+    // The dialog stays open so the actor can correct the address.
+    expect(screen.getByLabelText('成员邮箱')).toBeInTheDocument()
+  })
+
+  it('closes the dialog when re-adding an existing member succeeds (idempotent)', async () => {
+    server.use(http.post(MEMBERS_KEY, () => HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))))
+    const user = await renderOwnerWithAddDialog()
+
+    await typeAndSubmitEmail(user, 'bob@example.com')
+
+    await waitFor(() => expect(screen.queryByLabelText('成员邮箱')).not.toBeInTheDocument())
+  })
+
+  it('shows role select and remove for members when the actor is the owner; owner rows are read-only', async () => {
+    installCloudSpaceHandlers('owner')
+    installMembersHandler([
+      memberRow(ALICE_ID, 'Alice', 'owner'),
+      memberRow(BOB_ID, 'Bob', 'member'),
+    ])
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
+    await screen.findByText('Alice')
+
+    // The member row gets a role selector (owner-only) and a remove action.
+    expect(screen.getByLabelText('Bob 的角色')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '移除' })).toBeInTheDocument()
+    // The owner row (Alice) renders a plain Owner label with no management
+    // actions, so exactly one row carries remove/disable.
+    expect(screen.getByText('所有者')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Alice 的角色')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '移除' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '禁用' })).toHaveLength(1)
+  })
+
+  it('keeps admin to add-only: no role select, no remove, add trigger preserved', async () => {
     installCloudSpaceHandlers('admin')
     installMembersHandler([
       memberRow(ALICE_ID, 'Alice', 'owner'),
       memberRow(BOB_ID, 'Bob', 'member'),
-      {
-        ...memberRow('55555555-5555-5555-5555-555555555555', 'Carol', 'member'),
-        status: 'disabled',
-      },
     ])
-    const bodies: unknown[] = []
-    server.use(
-      http.put(
-        `/api/v1/tenants/${TEST_TENANT_ID}/spaces/${TEST_SPACE_ID}/members/:uid`,
-        async ({ request, params }) => {
-          const body = await request.json()
-          bodies.push({ uid: params['uid'], body })
-          if (params['uid'] === BOB_ID) {
-            return HttpResponse.json(
-              { code: 'space_last_owner', params: {}, requestId: 'r' },
-              { status: 409 },
-            )
-          }
-          return HttpResponse.json(memberRow(String(params['uid']), 'Carol', 'member'))
-        },
-      ),
-    )
     renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
+    await screen.findByText('Alice')
+
+    expect(screen.getByRole('button', { name: '添加成员' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Bob 的角色')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '移除' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '禁用' })).not.toBeInTheDocument()
+  })
+
+  it('does not offer the owner role in the role selector', async () => {
+    installCloudSpaceHandlers('owner')
+    installMembersHandler([memberRow(BOB_ID, 'Bob', 'member')])
     const user = userEvent.setup()
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
+    await screen.findByText('Bob')
 
-    expect(await screen.findByText('Bob')).toBeInTheDocument()
-    // The owner row cannot be disabled by anyone; a member row can.
-    const buttons = screen.getAllByRole('button', { name: /禁用|启用/ })
-    const [ownerButton, memberButton, disabledButton] = buttons
-    if (!ownerButton || !memberButton || !disabledButton) throw new Error('expected three rows')
-    expect(ownerButton).toBeDisabled()
-    expect(memberButton).toBeEnabled()
-    expect(disabledButton).toHaveTextContent('启用')
+    await user.click(screen.getByLabelText('Bob 的角色'))
+    expect(await screen.findByText('管理员')).toBeInTheDocument()
+    // '成员' renders in both the select trigger and the open item, so assert on
+    // the multiple match.
+    expect(screen.getAllByText('成员')).not.toHaveLength(0)
+    // Ownership is immutable through the member API: never offered.
+    expect(screen.queryAllByText('所有者')).toHaveLength(0)
+  })
 
-    await user.click(memberButton)
-    await waitFor(() => expect(bodies).toHaveLength(1))
-    expect(bodies[0]).toEqual({
-      uid: BOB_ID,
-      body: { role: 'member', status: 'disabled', version: 1 },
-    })
-    expect(await screen.findByText(/操作失败：space_last_owner/)).toBeInTheDocument()
+  it('confirms membership-only removal before calling the DELETE member endpoint', async () => {
+    installCloudSpaceHandlers('owner')
+    installMembersHandler([
+      memberRow(ALICE_ID, 'Alice', 'owner'),
+      memberRow(BOB_ID, 'Bob', 'member'),
+    ])
+    let deleted = false
+    let idempotencyKey = ''
+    let bodyVersion: unknown
+    server.use(
+      http.delete(`${MEMBERS_KEY}/${BOB_ID}`, async ({ request }) => {
+        deleted = true
+        idempotencyKey = request.headers.get('Idempotency-Key') ?? ''
+        const raw = await request.clone().json()
+        if (typeof raw === 'object' && raw !== null) {
+          bodyVersion = (raw as Record<string, unknown>)['version']
+        }
+        return HttpResponse.json(memberRow(BOB_ID, 'Bob', 'member'))
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<MembersPage slug="cloud-dev" />, { slug: 'cloud-dev' })
+    await screen.findByText('Alice')
 
-    const enable = screen.getAllByRole('button', { name: /禁用|启用/ })[2]
-    if (!enable) throw new Error('expected a third member row')
-    await user.click(enable)
-    await waitFor(() => expect(bodies).toHaveLength(2))
-    expect(bodies[1]).toMatchObject({ body: { role: 'member', status: 'active', version: 1 } })
-    // Admins see role selectors but cannot grant owner.
-    expect(screen.getByLabelText('Bob 的角色')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '移除' }))
+    expect(await screen.findByText('从工作区移除「Bob」？')).toBeInTheDocument()
+    // The confirm copy explains workspace-membership-only removal, not account
+    // or tenant-membership deletion, and that created resources remain.
+    expect(screen.getByText(/账号与租户成员关系不受影响/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '确认移除' }))
+    await waitFor(() => expect(deleted).toBe(true))
+    // DELETE must carry a non-empty idempotency key so retries dedupe.
+    expect(idempotencyKey.length).toBeGreaterThan(0)
+    // The optimistic lock reads `version` from the JSON body (the router
+    // requires a body on non-GET), so it must not be missing.
+    expect(bodyVersion).toBe(BOB_VERSION)
   })
 })

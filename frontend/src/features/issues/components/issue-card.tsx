@@ -2,33 +2,43 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { FolderClosed } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { ActorAvatar } from '@/components/common/actor-avatar'
-import { PriorityIcon } from '@/components/common/issue-badges'
+import { PriorityIcon, StatusIcon } from '@/components/common/issue-badges'
 import { cn } from '@/lib/utils'
 import { workspacePaths } from '@/lib/paths'
-import { actorById, db } from '@/mocks/data/store'
-import type { Issue } from '@/mocks/data/types'
+import { assigneeName, assigneeType, columnLabel, issueNumber } from '@/features/issues/present'
+import type { Issue, IssueStatusColumn } from '@/features/issues/types'
+
+/** Stable empty catalog so the status-label fallback doesn't allocate a fresh array each render. */
+const NO_STATUSES: readonly IssueStatusColumn[] = []
 
 export function IssueCard({
   issue,
   slug,
+  members,
   draggable = true,
+  statuses = NO_STATUSES,
+  subCount = 0,
 }: {
   issue: Issue
   slug: string
+  members: ReadonlyMap<string, string>
   /** DragOverlay renders its own static copy — disable dragging on that one. */
   draggable?: boolean
+  /** Status catalog, used to resolve a custom column's display name for the status label. */
+  statuses?: readonly IssueStatusColumn[]
+  /** Number of direct sub-issues; shown as a badge so a parent reads at a glance. */
+  subCount?: number
 }) {
-  const p = workspacePaths(slug)
-  const assignee = actorById(issue.assigneeId)
-  const project = db.projects.find((pr) => pr.id === issue.projectId)
+  // The `slug` prop is the tenant id (forwarded by CloudScope); nav links must
+  // carry the space slug from the route.
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
+  const p = workspacePaths(workspaceSlug ?? slug)
+  const type = assigneeType(issue)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: issue.id,
     disabled: !draggable,
-    // The card is a real <a href>, not a button — keep that semantic instead
-    // of dnd-kit's default role="button" override.
     attributes: { role: 'link', roleDescription: 'draggable issue card' },
   })
 
@@ -38,10 +48,6 @@ export function IssueCard({
       to={p.issueDetail(issue.id)}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
-        // The dragged card itself just dims in place (the DragOverlay is what
-        // follows the pointer); other cards in the column still get their
-        // sortable transform so they slide aside to open a gap at the drop
-        // target while a drag is in progress.
         'block rounded-md border bg-card p-2.5 text-sm shadow-xs touch-none hover:border-ring/50 hover:shadow-sm',
         isDragging && 'opacity-40',
       )}
@@ -50,24 +56,29 @@ export function IssueCard({
     >
       <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
         <PriorityIcon priority={issue.priority} className="size-3.5" />
-        <span>{issue.identifier}</span>
+        <span>{issueNumber(issue)}</span>
+        {subCount > 0 && (
+          <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            {subCount} 子任务
+          </span>
+        )}
       </div>
       <p className="mb-2 line-clamp-2 font-medium">{issue.title}</p>
-      {project && (
-        <div className="mb-2 flex items-center gap-1 text-xs text-muted-foreground">
-          <FolderClosed className="size-3" />
-          <span className="truncate">{project.title}</span>
-        </div>
-      )}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <ActorAvatar actor={assignee} size="sm" />
-          <span className="truncate text-xs text-muted-foreground">
-            {assignee?.name ?? '未分配'}
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="flex min-w-0 shrink-0 items-center gap-1">
+          <StatusIcon status={issue.status} className="size-3.5" />
+          <span className="truncate">{columnLabel(statuses, issue.status)}</span>
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          {type && (
+            <>
+              <ActorAvatar actor={{ name: assigneeName(issue, members), type }} size="sm" />
+              <span className="truncate">{assigneeName(issue, members)}</span>
+            </>
+          )}
+          <span className="shrink-0 text-[10px]">
+            {formatDistanceToNow(new Date(issue.updatedAt), { addSuffix: true, locale: zhCN })}
           </span>
-        </div>
-        <span className="shrink-0 text-[10px] text-muted-foreground">
-          {formatDistanceToNow(new Date(issue.updatedAt), { addSuffix: true, locale: zhCN })}
         </span>
       </div>
     </Link>

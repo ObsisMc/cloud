@@ -71,8 +71,25 @@ type databaseFailure struct{ err error }
 
 // Store is injected; there is no global database handle.
 type Store struct {
-	Pool    *sql.DB
-	Events  *SpaceHub
+	Pool *sql.DB
+
+	// Collaboration ports (consuming-side seams; see collaboration.go). Each is nil by default
+	// ("Unavailable"); dev/demo/integration wire the in-memory fixtures, production real adapters.
+	Directory  CollaborationDirectory
+	Context    ContextBuilder
+	Dispatcher ExecutionDispatcher
+	Forms      FormDescriptorProvider
+	Assist     InputAssistProvider
+
+	// Events broadcasts committed collaboration-space invalidation notices to live
+	// SSE subscribers. Space association is optional (projects.space_id is nullable):
+	// a space-scoped project gates visibility to active space members (the
+	// resource-sharing boundary), while an unscoped project keeps owner-based
+	// authorization.
+	Events *SpaceHub
+
+	// Signals carries at-most-once work hints to the lease-holding Controller's Watch stream;
+	// clone requests stay durable in PostgreSQL whether or not a hint is delivered.
 	Signals *ControlHub
 }
 
@@ -91,12 +108,31 @@ func NewStore(db *gorm.DB) (*Store, error) {
 type transaction struct {
 	tx  *sql.Tx
 	ctx context.Context
+	// collaboration ports shadowed from the Store so transaction-scoped helpers can use them.
+	directory      CollaborationDirectory
+	contextBuilder ContextBuilder
+	forms          FormDescriptorProvider
+	assist         InputAssistProvider
 }
 
 func (t *transaction) exec(q string, args ...any) {
 	if _, e := t.tx.ExecContext(t.ctx, q, args...); e != nil {
 		panic(databaseFailure{e})
 	}
+}
+
+// execRows runs a statement and returns the number of rows affected, for compare-and-set guards that
+// must distinguish "claimed it" from "someone else already did".
+func (t *transaction) execRows(q string, args ...any) int64 {
+	res, e := t.tx.ExecContext(t.ctx, q, args...)
+	if e != nil {
+		panic(databaseFailure{e})
+	}
+	n, e := res.RowsAffected()
+	if e != nil {
+		panic(databaseFailure{e})
+	}
+	return n
 }
 
 func (t *transaction) list(q string, args ...any) []Object {
@@ -177,7 +213,7 @@ func (s *Store) transact(ctx context.Context, fn func(*transaction) Object) (out
 			}
 		}
 	}()
-	t := &transaction{tx: tx, ctx: ctx}
+	t := &transaction{tx: tx, ctx: ctx, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist}
 	t.exec("SELECT pg_advisory_xact_lock(67420911)")
 	out = fn(t)
 	err = tx.Commit()
@@ -291,6 +327,73 @@ func (s *Store) Bootstrap(ctx context.Context, name, source, subject, display st
 	})
 }
 
+// EnsureMember resolves or provisions a user identity and guarantees an active membership in the
+// given tenant, returning the user object. It exists only for the local development edge server
+// (cmd/ora-web), which signs a user token for an arbitrary login subject and must attach that user
+// to its bootstrap tenant before they can read the board; it is never a public HTTP path.
+func (s *Store) EnsureMember(ctx context.Context, tid, source, subject, display string) (Object, error) {
+	return s.transact(ctx, func(t *transaction) Object {
+		require(validID(tid), 404, "not_found")
+		u := identity(t, source, subject, display)
+		uid := u.S("id")
+		if t.one("SELECT user_id FROM tenant_memberships WHERE tenant_id=$1 AND user_id=$2", tid, uid) == nil {
+			t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'member','active')", tid, uid)
+		} else {
+			t.exec("UPDATE tenant_memberships SET status='active' WHERE tenant_id=$1 AND user_id=$2 AND status<>'active'", tid, uid)
+		}
+		return u
+	})
+}
+
+// validEmail is a deliberately lightweight registration check: a single '@' with
+// non-empty local and domain parts and a dotted domain. It is not a full RFC 5322
+// validator — the system has no mailbox delivery to be strict about.
+func validEmail(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 512 {
+		return false
+	}
+	local, domain, ok := strings.Cut(s, "@")
+	if !ok || local == "" || domain == "" || strings.Contains(domain, "@") {
+		return false
+	}
+	dot := strings.LastIndexByte(domain, '.')
+	return dot > 0 && dot < len(domain)-1
+}
+
+// normalizeEmail folds an address to its canonical form: trimmed and lowercase,
+// so case-variant duplicates ("Alice@Example.com" vs "alice@example.com") collide
+// on the single (source,subject) identity row.
+func normalizeEmail(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+// RegisterIdentity strictly provisions a new user identity and its active
+// membership in the given tenant. Unlike EnsureMember it never reuses an existing
+// identity: a duplicate (source,subject) — after email normalization — is a
+// conflict (409 user_already_exists), not a silent login. It exists only for the
+// local development edge server's registration flow (cmd/ora-web); it is never a
+// public HTTP path. The created user holds only its own tenant membership; no
+// runtime workspace, project ownership, or collaboration-space membership is
+// granted by registration.
+func (s *Store) RegisterIdentity(ctx context.Context, tid, source, subject, name string) (Object, error) {
+	return s.transact(ctx, func(t *transaction) Object {
+		require(validID(tid), 400, "invalid_input")
+		require(source != "" && len(source) <= 128, 400, "invalid_input")
+		subject = normalizeEmail(subject)
+		require(validEmail(subject), 400, "invalid_email")
+		name = strings.TrimSpace(name)
+		require(name != "" && len(name) <= 200, 400, "name_required")
+		// The advisory lock keeps this check + insert atomic, so a concurrent
+		// duplicate cannot slip past the pre-check; the PK(source,subject) remains
+		// the final integrity guard.
+		require(t.one("SELECT user_id FROM user_identities WHERE source=$1 AND subject=$2", source, subject) == nil, 409, "user_already_exists")
+		id := newID()
+		t.exec("INSERT INTO users(id,display_name,status) VALUES($1,$2,'active')", id, name)
+		t.exec("INSERT INTO user_identities(user_id,source,subject) VALUES($1,$2,$3)", id, source, subject)
+		t.exec("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'member','active')", tid, id)
+		return t.one("SELECT * FROM users WHERE id=$1", id)
+	})
+}
+
 // ConfigureCredential is deliberately a deployment-only management path, never a public secret API.
 func (s *Store) ConfigureCredential(ctx context.Context, tid, owner, ref string) (Object, error) {
 	return s.transact(ctx, func(t *transaction) Object {
@@ -310,28 +413,43 @@ func membership(t *transaction, tid, uid string, admin bool) Object {
 	return m
 }
 
-// project loads a live project in the tenant and requires the caller's active
-// collaboration-space membership; individual ownership is no longer the
-// visibility boundary.
+// project loads a live project in the tenant and applies project access:
+// a space-scoped project (space_id set) is reachable by any active member of
+// that workspace (the resource-sharing boundary), while an unscoped (legacy)
+// project keeps owner-only access. Non-members stay hidden (404, no existence
+// leak), identically to the previous owner-filtered lookup.
 func project(t *transaction, tid, uid, pid string) Object {
-	p, _ := projectInSpace(t, tid, uid, pid)
+	require(validID(pid), 404, "not_found")
+	p := t.one("SELECT * FROM projects WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", pid, tid)
+	require(p != nil, 404, "not_found")
+	if sid := p.S("spaceId"); sid != "" {
+		require(workspaceRole(t, sid, uid) != "", 404, "not_found")
+	} else if p.S("ownerUserId") != uid {
+		reject(404, "not_found")
+	}
 	return p
 }
 
-// workspace loads a live runtime workspace in the tenant. Non-admin callers
-// must hold a membership in the collaboration space that owns its project;
-// the admin form (administrative-stop) requires tenant administration.
+// workspace loads a live runtime workspace in the tenant. Non-admin access
+// inherits the parent project's access: a runtime workspace of a space-scoped
+// project is reachable by any active member of that workspace, while a runtime
+// workspace of an unscoped (legacy) project keeps owner-only access. The admin
+// form (administrative-stop) requires tenant administration.
 func workspace(t *transaction, tid, uid, wid string, admin bool) Object {
 	require(validID(wid), 404, "not_found")
-	w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
-	require(w != nil, 404, "not_found")
 	if admin {
-		membership(t, tid, uid, true)
+		w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
+		require(w != nil, 404, "not_found")
 		return w
 	}
-	p := t.one("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", w.S("projectId"))
-	require(p != nil, 404, "not_found")
-	spaceMember(t, p.S("spaceId"), uid)
+	w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
+	require(w != nil, 404, "not_found")
+	proj := t.one("SELECT space_id FROM projects WHERE id=$1 AND tenant_id=$2", w.S("projectId"), tid)
+	if proj == nil || proj.S("spaceId") == "" {
+		require(w.S("ownerUserId") == uid, 404, "not_found")
+	} else {
+		require(workspaceRole(t, proj.S("spaceId"), uid) != "", 404, "not_found")
+	}
 	return w
 }
 

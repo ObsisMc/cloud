@@ -13,7 +13,7 @@ describe('mock API handlers', () => {
     expect(body.some((w: { slug: string }) => w.slug === SLUG)).toBe(true)
   })
 
-  it('404s for an unknown workspace slug', async () => {
+  it('returns 404 for an unknown workspace slug', async () => {
     const res = await fetch(`${BASE}/workspaces/does-not-exist`)
     expect(res.status).toBe(404)
   })

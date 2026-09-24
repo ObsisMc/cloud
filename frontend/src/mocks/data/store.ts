@@ -68,6 +68,8 @@ export function nextIssueIdentifier(): string {
 }
 
 export function workspaceBySlug(slug: string | undefined): Workspace | undefined {
+  // The route slug is a mock workspace slug in demo mode; callers fall back to
+  // the seeded workspace where a preview needs one.
   return db.workspaces.find((w) => w.slug === slug)
 }
 

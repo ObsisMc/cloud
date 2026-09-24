@@ -56,7 +56,7 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
 };
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Clone requests are independent accepted work items outside the project/workspace operation model: Cloud accepts them in its own transaction, a Controller claims and dispatches them over the internal control contract, and only the submitting user can read them. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Clone requests are independent accepted work items outside the project/workspace operation model: Cloud accepts them in its own transaction, a Controller claims and dispatches them over the internal control contract, and only the submitting user can read them. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/clones
  */
 export const getApiV1TenantsTidClones = (
@@ -157,7 +157,7 @@ export function useGetApiV1TenantsTidClones<TData = Awaited<ReturnType<typeof ge
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Clone requests are independent accepted work items outside the project/workspace operation model: Cloud accepts them in its own transaction, a Controller claims and dispatches them over the internal control contract, and only the submitting user can read them. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Clone requests are independent accepted work items outside the project/workspace operation model: Cloud accepts them in its own transaction, a Controller claims and dispatches them over the internal control contract, and only the submitting user can read them. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/clones
  */
 export const postApiV1TenantsTidClones = (
@@ -226,18 +226,18 @@ export const usePostApiV1TenantsTidClones = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidClonesMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant and owner in SQL. Clone requests are independent accepted work items outside the project/workspace operation model: Cloud accepts them in its own transaction, a Controller claims and dispatches them over the internal control contract, and only the submitting user can read them. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
- * @summary GET /api/v1/tenants/:tid/clones/:cid
+ * Public requests require a gateway service credential plus a caller-bound user credential. Tenant membership is checked before lookup; resource reads filter tenant in SQL, and space-scoped projects and their runtime workspaces additionally require active membership of that workspace, while unscoped projects stay owner-scoped. Clone requests are independent accepted work items outside the project/workspace operation model: Cloud accepts them in its own transaction, a Controller claims and dispatches them over the internal control contract, and only the submitting user can read them. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary GET /api/v1/tenants/:tid/clones/:cloneId
  */
-export const getApiV1TenantsTidClonesCid = (
+export const getApiV1TenantsTidClonesCloneId = (
     tid: string,
-    cid: string,
+    cloneId: string,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<CloneOperation>(
-      {url: `/api/v1/tenants/${tid}/clones/${cid}`, method: 'GET', signal
+      {url: `/api/v1/tenants/${tid}/clones/${cloneId}`, method: 'GET', signal
     },
       options);
     }
@@ -245,75 +245,75 @@ export const getApiV1TenantsTidClonesCid = (
 
 
 
-export const getGetApiV1TenantsTidClonesCidQueryKey = (tid: string,
-    cid: string,) => {
+export const getGetApiV1TenantsTidClonesCloneIdQueryKey = (tid: string,
+    cloneId: string,) => {
     return [
-    `/api/v1/tenants/${tid}/clones/${cid}`
+    `/api/v1/tenants/${tid}/clones/${cloneId}`
     ] as const;
     }
 
 
-export const getGetApiV1TenantsTidClonesCidQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError = ErrorType<Error>>(tid: string,
-    cid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+export const getGetApiV1TenantsTidClonesCloneIdQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError = ErrorType<Error>>(tid: string,
+    cloneId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidClonesCidQueryKey(tid,cid);
+  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidClonesCloneIdQueryKey(tid,cloneId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>> = ({ signal }) => getApiV1TenantsTidClonesCid(tid,cid, requestOptions, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>> = ({ signal }) => getApiV1TenantsTidClonesCloneId(tid,cloneId, requestOptions, signal);
 
 
 
 
 
-   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && cid !== null && cid !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && cloneId !== null && cloneId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type GetApiV1TenantsTidClonesCidQueryResult = NonNullable<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>>
-export type GetApiV1TenantsTidClonesCidQueryError = ErrorType<Error>
+export type GetApiV1TenantsTidClonesCloneIdQueryResult = NonNullable<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>>
+export type GetApiV1TenantsTidClonesCloneIdQueryError = ErrorType<Error>
 
 
-export function useGetApiV1TenantsTidClonesCid<TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidClonesCloneId<TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError = ErrorType<Error>>(
  tid: string,
-    cid: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError, TData>> & Pick<
+    cloneId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>,
+          Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>,
           TError,
-          Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>
+          Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetApiV1TenantsTidClonesCid<TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidClonesCloneId<TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError = ErrorType<Error>>(
  tid: string,
-    cid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError, TData>> & Pick<
+    cloneId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>,
+          Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>,
           TError,
-          Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>
+          Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetApiV1TenantsTidClonesCid<TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidClonesCloneId<TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError = ErrorType<Error>>(
  tid: string,
-    cid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    cloneId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary GET /api/v1/tenants/:tid/clones/:cid
+ * @summary GET /api/v1/tenants/:tid/clones/:cloneId
  */
 
-export function useGetApiV1TenantsTidClonesCid<TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError = ErrorType<Error>>(
+export function useGetApiV1TenantsTidClonesCloneId<TData = Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError = ErrorType<Error>>(
  tid: string,
-    cid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCid>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    cloneId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidClonesCloneId>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetApiV1TenantsTidClonesCidQueryOptions(tid,cid,options)
+  const queryOptions = getGetApiV1TenantsTidClonesCloneIdQueryOptions(tid,cloneId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
