@@ -43,6 +43,9 @@ func (c *Controller) plugins(ctx context.Context, snap core.Object, nodes []core
 	}
 	execution := ""
 	for _, existing := range executions {
+		if existing.O("result").S("outcome") == "plugins_result" {
+			return nil
+		}
 		if existing["result"] == nil {
 			execution = existing.S("executionId")
 		}

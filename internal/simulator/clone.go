@@ -44,6 +44,10 @@ func (c *Controller) clone(ctx context.Context, snap core.Object, workspaces, no
 	ctx = metadata.AppendToOutgoingContext(ctx, controlgrpc.HolderMetadata, c.Client.Subject)
 	execution := ""
 	for _, clone := range clones {
+		if clone.O("result").S("outcome") == "clone_ready" {
+			// Advance may have rolled back in B's hook after this result committed.
+			return nil
+		}
 		if clone["result"] == nil {
 			execution = clone.S("executionId")
 		}

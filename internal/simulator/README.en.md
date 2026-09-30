@@ -26,7 +26,7 @@
 
 ### Agent session double (`agent.go`)
 
-Every bounded Controller step services run work, Thread commands and Node evidence so quiesce cannot starve its own end-command dependency. The disk-backed `AgentNode` fixes execution input, deduplicates command IDs, echoes initial/additional turns and reports termination after an end command. A replacement Controller reopens the same journal. This proves Cloud control flow only: delivery explicitly reports upload_failed until a real object uploader and verified Revision path exist.
+Every bounded Controller step services run work, Thread commands and Node evidence so quiesce cannot starve its end command. Disk-backed `AgentNode` freezes input, deduplicates commands and echoes/ends a session. Delivery creates cumulative bundles and sealed JSONL from real Git and session data, uploads with checksum-signed PUT headers and refreshes expired grants for the same keys. Terminal protojson evidence survives Controller/Node restart; grants never enter the journal. Real PostgreSQL and S3 tests prove A's loop, not production Rust relay or a real D Agent.
 
 ### Ephemeral credential issuer
 - `NewCredentials()` generates in-memory Ed25519 cryptographic keypairs for the four distinct actor roles: `gateway`, `controller`, `node`, and `user`.

@@ -85,6 +85,9 @@ func nodeExecutionResult(t *transaction, r *ControlRequest, withReceipt bool) Ob
 		require(jsonText(e.O("result")) == jsonText(result), 409, "result_conflict")
 	} else {
 		validateNodeResult(e, result)
+		if e.S("kind") == "deliver_revision" {
+			liveDelivery(t, e)
+		}
 		if e.S("kind") == "install_plugins" || e.S("kind") == "remove_plugins" {
 			applyPluginResults(t, e, result)
 		}
@@ -103,6 +106,9 @@ func nodeExecutionResult(t *transaction, r *ControlRequest, withReceipt bool) Ob
 	if fresh && e.S("kind") == "deliver_revision" && result.S("outcome") == "revision_failed" {
 		deliverySettled(t, operation, execution, Object{"outcome": "failed", "reason": result.S("reason")})
 	}
+	if fresh && e.S("kind") == "deliver_revision" && revisionSuccess(result) {
+		settleVerifiedRevision(t, r, e)
+	}
 	return t.one("SELECT * FROM node_executions WHERE execution_id=$1", execution)
 }
 
@@ -119,10 +125,9 @@ func validateNodeResult(e, result Object) {
 	default:
 		switch result.S("outcome") {
 		case "revision_delivered", "revision_unchanged":
-			// Node evidence cannot settle a delivery before Cloud verifies and registers the objects.
-			// Keep it replayable until the proposed M3 verifier is implemented.
-			reject(409, "revision_verification_required")
+			validateDeliveryDeclaration(e, result)
 		case "revision_failed":
+			require(revisionFailureReasons[result.S("reason")], 400, "invalid_result")
 		default:
 			reject(409, "result_conflict")
 		}
@@ -131,6 +136,11 @@ func validateNodeResult(e, result Object) {
 
 var sessionEndReasons = map[string]bool{
 	"user_ended": true, "idle_timeout": true, "cancelled": true, "agent_failed": true, "interrupted": true,
+}
+
+var revisionFailureReasons = map[string]bool{
+	"session_not_settled": true, "checkout_unavailable": true, "snapshot_failed": true,
+	"bundle_failed": true, "history_unavailable": true, "upload_failed": true,
 }
 
 func recordNodeReceipt(t *transaction, execution string, sequence int64, event string) {

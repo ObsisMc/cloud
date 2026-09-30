@@ -79,7 +79,8 @@ type Store struct {
 	// are Node executions and are no longer gated on it.
 	PluginExecution    PluginExecutionCapability
 	legacyCloneFixture bool
-	// ObjectStore signs Revision upload URLs. Nil means delivery grants are refused; Cloud still starts.
+	// ObjectStore signs upload grants and verifies stored checksums outside SQL transactions.
+	// Nil means delivery is explicitly skipped through the transaction-scoped business hook.
 	ObjectStore *objectstore.Config
 	// OnThreadEvents receives only first-taken-over events and the caller's SQL transaction.
 	// Hooks must use that transaction; starting another Store transaction would deadlock.
@@ -90,7 +91,8 @@ type Store struct {
 	OnRunWorkspaceSettled func(context.Context, *sql.Tx, string, string) error
 	// OnRunWorkspaceDeleted runs after successful data cleanup in the deletion transaction.
 	OnRunWorkspaceDeleted func(context.Context, *sql.Tx, string) error
-	// OnDeliverySettled receives failed evidence, or verified Revision evidence once M3 is wired.
+	// OnDeliverySettled receives saved/unchanged with revisionId and Revision metadata, failed with
+	// a safe reason, or skipped when storage is unconfigured. It runs after receipt/Revision writes.
 	OnDeliverySettled func(context.Context, *sql.Tx, string, string, Object) error
 
 	// Collaboration ports (consuming-side seams; see collaboration.go). Each is nil by default

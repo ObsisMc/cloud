@@ -26,6 +26,7 @@ type agentJournal struct {
 	Events    []*controlpb.ThreadEvent
 	Commands  map[string]bool
 	Ended     controlpb.AgentSessionEndReason
+	Result    json.RawMessage
 }
 
 // NewAgentNode creates the isolated Node journal directory used by the echo fixture.
@@ -133,8 +134,7 @@ func (n *AgentNode) accept(record *controlpb.ExecutionRecord, command *controlpb
 }
 
 // stepAgentWork uses the same gRPC handoff as a real Controller. Idle echo sessions remain pending;
-// only a durable end command ends them. Delivery deliberately reports failure until M3 has a real
-// uploader, so the fixture cannot masquerade as verified storage.
+// only a durable end command ends them. Deliveries use real Git and S3 PUTs; grants stay in memory.
 func (c *Controller) stepAgentWork(ctx context.Context) (bool, error) {
 	if c.Executions == nil {
 		return true, nil
@@ -216,7 +216,10 @@ func (c *Controller) takeEchoEvidence(ctx context.Context, record *controlpb.Exe
 	if record.GetInput().GetAgentSession() != nil {
 		result.Outcome = &controlpb.ExecutionResult_AgentSessionEnded{AgentSessionEnded: &controlpb.AgentSessionEnded{Reason: j.Ended}}
 	} else {
-		result.Outcome = &controlpb.ExecutionResult_RevisionFailed{RevisionFailed: &controlpb.RevisionFailed{Reason: controlpb.RevisionFailureReason_REVISION_FAILURE_REASON_UPLOAD_FAILED}}
+		result, err = c.deliverRevision(ctx, record, j)
+		if err != nil {
+			return false, err
+		}
 	}
 	data, err := proto.MarshalOptions{Deterministic: true}.Marshal(result)
 	if err != nil {

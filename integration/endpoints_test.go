@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"testing"
@@ -10,7 +11,28 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/wanglongan587/cloud/internal/core"
+	"github.com/wanglongan587/cloud/internal/objectstore"
 )
+
+func TestHealthReportsOptionalObjectStoreWithoutDisclosingConfiguration(t *testing.T) {
+	f := setup(t)
+	for _, configured := range []bool{false, true} {
+		want := "unconfigured"
+		if configured {
+			f.store.ObjectStore = &objectstore.Config{Endpoint: "http://private.invalid", AccessKeyID: "private-access", SecretAccessKey: "private-secret"}
+			want = "configured"
+		}
+		response, err := f.client.HTTP.Get(f.cloud.URL + "/healthz")
+		must(t, err)
+		var actual core.Object
+		err = json.NewDecoder(response.Body).Decode(&actual)
+		response.Body.Close()
+		must(t, err)
+		if response.StatusCode != http.StatusOK || len(actual) != 2 || actual.S("status") != "ok" || len(actual.O("dependencies")) != 1 || actual.O("dependencies").S("objectStore") != want {
+			t.Fatal("health must report only readiness and optional storage configuration")
+		}
+	}
+}
 
 func TestRemainingPublicContractsAndMembershipRevocation(t *testing.T) {
 	f := setup(t)

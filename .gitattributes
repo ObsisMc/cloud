@@ -3,3 +3,4 @@ api/openapi.json text eol=lf
 *.go text eol=lf
 internal/core/migrations/0025_agent_control_integrity.sql text eol=lf
 internal/core/migrations/0026_run_runtime_control.sql text eol=lf
+internal/core/migrations/0027_verified_revisions.sql text eol=lf
