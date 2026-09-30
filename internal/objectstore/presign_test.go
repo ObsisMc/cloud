@@ -24,7 +24,7 @@ func TestPresignPUTBindsTheKeyAndStaysLocal(t *testing.T) {
 	if !strings.Contains(grant.URL, "/revisions/revisions/tenant/run/work/revision.bundle") || !strings.Contains(grant.URL, "X-Amz-Signature=") {
 		t.Fatal("grant did not bind the canonical key and signature")
 	}
-	if grant.Headers["host"] != "127.0.0.1:9000" {
+	if grant.Headers["host"] != "127.0.0.1:9000" || grant.Headers["if-none-match"] != "*" {
 		t.Fatalf("headers = %v", grant.Headers)
 	}
 	other, err := PresignPUT(&cfg, "revisions/tenant/run/work/session.jsonl", now)
@@ -54,6 +54,9 @@ func TestPresignPUTChecksumBindsHeaderAndRejectsInvalidDigest(t *testing.T) {
 	}
 	if grant.Headers["x-amz-checksum-sha256"] != base64.StdEncoding.EncodeToString(make([]byte, 32)) || !strings.Contains(u.Query().Get("X-Amz-SignedHeaders"), "x-amz-checksum-sha256") {
 		t.Fatal("checksum was not bound into the signature")
+	}
+	if grant.Headers["if-none-match"] != "*" || !strings.Contains(u.Query().Get("X-Amz-SignedHeaders"), "if-none-match") {
+		t.Fatal("create-only condition was not bound into the signature")
 	}
 	for _, digest := range []string{"", "invalid", strings.Repeat("A", 64)} {
 		if _, err := PresignPUTChecksum(&cfg, "run/history", digest, time.Now()); err == nil {

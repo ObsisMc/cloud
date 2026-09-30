@@ -33,7 +33,7 @@ tasks:
     env:
       REQUIRE_POSTGRES: '1'
       REQUIRE_S3: '1'
-    cmds: [go test -count=1 -v ./integration -run 'TestRevision|TestSimulatorDeliversRevision|TestS3|TestFailedDelivery|Test.*Hook|TestStartPlugin|TestAgentUpgrade|TestHealthReports']
+    cmds: [go test -count=1 -v ./integration -run 'TestRevision|TestSimulatorDeliversRevision|TestS3|TestFailedDelivery|Test.*Hook|TestStartPlugin|TestPlugin|TestAgentUpgrade|TestRunWorkspaceAndPluginStep|TestHealthReports']
   test:unit:
     cmds: [go test ./internal/... ./cmd/...]
   test:race:

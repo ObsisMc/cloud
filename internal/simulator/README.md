@@ -28,6 +28,10 @@
 
 Controller 每次有界 Step 都领取运行工作、投递 Thread 命令并接管 Node 证据，避免 quiesce 饿死结束命令。`AgentNode` 用磁盘日志固定输入、去重 command_id，回显并结束会话；交付从封存会话和真实 Git checkout 创建累计 bundle/JSONL，取得 checksum 签名头后真实 PUT，授权过期则刷新同键。终态按 protojson 写日志，上传授权不落盘；替换 Controller/Node 后重放原证据。真实 PostgreSQL + S3 测试证明 A 闭环，不能替代生产 Rust relay 或 D 真实 Agent 验收。
 
+上传携带签名的 `If-None-Match: *`，不能覆盖首次对象。回复丢失后的 412 保留对象并把声明交给 Cloud 核对，不能仅凭 412 推断摘要相同。Controller 取消会返回取消原因且不写交付终态，重启后仍可继续原执行；实际 Node 的终态失败继续持久化。
+
+首个 PUT 前，Node 在日志根目录内持久固定 bundle/JSONL 字节和元数据；部分上传后重启复用原内容，不重新生成带新时间戳的快照。终态证据原子写入后清理对象副本，此后重放原终态。旧 pending 日志中的 `Result: null` 按未终结处理；新日志省略空结果。授权从不写入准备计划或终态日志。
+
 ### 临时凭据签发器
 - `NewCredentials()` 在内存中为四种不同的角色（`gateway`、`controller`、`node`、`user`）生成 Ed25519 密码学密钥对。
 - 在模拟器测试运行期间按需签发短期 JWT token；其密码学 token 结构与生产环境一致，但不需要外部身份认证基础设施。

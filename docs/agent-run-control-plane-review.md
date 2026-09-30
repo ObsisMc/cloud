@@ -32,6 +32,10 @@ A 的 Cloud 控制闭环已实现，直接验收使用真实 PostgreSQL、Git �
 
 ## 验证与跨仓边界
 
+2026-09-30 复核修复：所有 PUT 签入 `If-None-Match: *`，防止未过期授权覆盖已验证对象；412 的声明仍由 Cloud 校验。Controller 取消不保存交付失败，重启继续原执行。单项插件失败释放维护绑定，旧 revision 的迟到失败恢复最新选择为 pending 并清除旧错误。恢复读取对整个固定输入做 protobuf 等值检查，覆盖 pending 与 GetDispatch。直接回归为 `TestRevisionStoredObjectsRejectLiveGrantOverwrite`、`TestPluginFailedResultReleasesMaintenanceForNewSelection`、`TestRevisionUploadReconcilesAnAmbiguousCreatedObject` 与扩展的双重启交付测试。
+
+首次 PUT 前持久固定对象字节和声明，部分上传后重启复用原快照；原子保存终态后清理对象副本。扩展测试在首对象已实际写入 RustFS 后取消并替换双替身、改变 checkout 内容，验证交付仍使用原快照。旧 pending 日志的 `Result: null` 保持可重放，授权从不落盘。
+
 2026-09-30 直接验收使用 PostgreSQL 17 和 `rustfs/rustfs:latest`，digest `sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff`。最终格式/lint、全量 PostgreSQL+S3、race、构建、proto/OpenAPI/前端漂移结果记录在 PR。前端全检查覆盖 53 文件、300 测试。
 
 B 仍负责 IssueRun phase、Thread 投影/API/SSE、Git 身份及界面；C 仍需生产 Rust Controller/Node relay、授权消费、日志/ACK 和恢复验收；D 仍需真实 Agent/插件运行和交付。desktop 配套仅固定 Cloud 来源、生成协议和兼容测试。specs 保留这些 Partial，ADR 状态不变。

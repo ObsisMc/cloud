@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +27,24 @@ type expiryFirstGrantClient struct {
 	cfg         *objectstore.Config
 	requests    int
 	key, digest string
+}
+
+// Forward the first signed PUT to real S3, then cancel before the uploader can observe its response.
+// The next Controller must reuse the exact prepared bytes rather than regenerate a snapshot.
+type cancelAfterUploadClient struct {
+	controlpb.AgentRunServiceClient
+	proxyURL string
+	targets  chan string
+}
+
+func (c *cancelAfterUploadClient) GrantRevisionUpload(ctx context.Context, req *controlpb.GrantRevisionUploadRequest, opts ...grpc.CallOption) (*controlpb.GrantRevisionUploadResponse, error) {
+	response, err := c.AgentRunServiceClient.GrantRevisionUpload(ctx, req, opts...)
+	if err == nil {
+		grant := response.GetGrants()[0]
+		c.targets <- grant.GetUrl()
+		grant.Url = c.proxyURL
+	}
+	return response, err
 }
 
 func (c *expiryFirstGrantClient) GrantRevisionUpload(ctx context.Context, req *controlpb.GrantRevisionUploadRequest, opts ...grpc.CallOption) (*controlpb.GrantRevisionUploadResponse, error) {
@@ -100,17 +120,62 @@ func TestSimulatorDeliversRevisionToS3AcrossRestart(t *testing.T) {
 				}
 				return nil
 			}
-			refresh := &expiryFirstGrantClient{AgentRunServiceClient: f.controller.AgentRuns, cfg: cfg}
+			originalClient := f.controller.AgentRuns
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			targets := make(chan string, 1)
+			uploaded := make(chan int, 1)
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, <-targets, r.Body)
+				if err != nil {
+					uploaded <- 0
+					cancel()
+					return
+				}
+				req.Header = r.Header.Clone()
+				req.ContentLength = r.ContentLength
+				response, err := http.DefaultClient.Do(req)
+				if err != nil {
+					uploaded <- 0
+					cancel()
+					return
+				}
+				response.Body.Close()
+				uploaded <- response.StatusCode
+				cancel()
+				w.WriteHeader(response.StatusCode)
+			}))
+			t.Cleanup(proxy.Close)
+			f.controller.AgentRuns = &cancelAfterUploadClient{AgentRunServiceClient: originalClient, proxyURL: proxy.URL, targets: targets}
+			_, err = f.controller.Step(ctx)
+			cancel()
+			if !errors.Is(err, context.Canceled) {
+				t.Fatal("Controller cancellation was converted to a terminal delivery failure")
+			}
+			if status := <-uploaded; status != http.StatusOK {
+				t.Fatal("fault injection did not commit the first object to real S3", status)
+			}
+			// Change the dirty checkout to make a regenerated snapshot observably different, without
+			// depending on commit timestamps. Replay must deliver the already prepared payload.
+			if changed {
+				must(t, os.WriteFile(filepath.Join(checkout, "result.txt"), []byte("later checkout edit must not replace the frozen delivery\n"), 0o600))
+			}
+			preparedRef := runGit(t, "-C", checkout, "rev-parse", work.O("input").S("revisionRef"))
+			rebootedNode, err := simulator.NewAgentNode(filepath.Join(f.root, "agent-node"))
+			must(t, err)
+			f.controller = &simulator.Controller{Client: f.client, SubstrateURL: f.external.URL, Executions: f.executions, AgentRuns: originalClient, AgentNode: rebootedNode}
+			must(t, f.controller.Acquire(t.Context()))
+			refresh := &expiryFirstGrantClient{AgentRunServiceClient: originalClient, cfg: cfg}
 			f.controller.AgentRuns = refresh
 			_, err = f.controller.Step(t.Context())
 			if err == nil || f.scalar("SELECT count(*) FROM revisions") != 0 {
 				t.Fatal("failed settlement did not remain replayable")
 			}
 			if refresh.requests < 2 {
-				t.Fatal("expired S3 capability was not refreshed")
+				t.Fatalf("expired S3 capability was not refreshed: requests=%d error=%v", refresh.requests, err)
 			}
 			// Replace both doubles after upload, then retry the same durable Node evidence.
-			rebootedNode, err := simulator.NewAgentNode(filepath.Join(f.root, "agent-node"))
+			rebootedNode, err = simulator.NewAgentNode(filepath.Join(f.root, "agent-node"))
 			must(t, err)
 			f.controller = &simulator.Controller{Client: f.client, SubstrateURL: f.external.URL, Executions: f.executions, AgentRuns: controlpb.NewAgentRunServiceClient(f.controlConn), AgentNode: rebootedNode}
 			must(t, f.controller.Acquire(t.Context()))
@@ -122,6 +187,18 @@ func TestSimulatorDeliversRevisionToS3AcrossRestart(t *testing.T) {
 			}
 			if runGit(t, "-C", checkout, "rev-parse", "HEAD") != branchBefore || runGit(t, "-C", checkout, "status", "--porcelain") != statusBefore {
 				t.Fatal("delivery mutated branch or working directory")
+			}
+			if changed {
+				contents, err := os.ReadFile(filepath.Join(checkout, "result.txt"))
+				must(t, err)
+				if string(contents) != "later checkout edit must not replace the frozen delivery\n" {
+					t.Fatal("delivery replay changed the checkout contents")
+				}
+			}
+			var finalCommit string
+			must(t, f.store.Pool.QueryRow("SELECT final_commit FROM revisions WHERE run_id=$1", run).Scan(&finalCommit))
+			if finalCommit != preparedRef {
+				t.Fatal("partial-upload restart replaced the prepared snapshot")
 			}
 			var historyKey, historyDigest string
 			var historySize int64

@@ -28,6 +28,10 @@
 
 Every bounded Controller step services run work, Thread commands and Node evidence so quiesce cannot starve its end command. Disk-backed `AgentNode` freezes input, deduplicates commands and echoes/ends a session. Delivery creates cumulative bundles and sealed JSONL from real Git and session data, uploads with checksum-signed PUT headers and refreshes expired grants for the same keys. Terminal protojson evidence survives Controller/Node restart; grants never enter the journal. Real PostgreSQL and S3 tests prove A's loop, not production Rust relay or a real D Agent.
 
+Uploads carry signed `If-None-Match: *` and cannot replace the first object. A 412 after a lost response preserves that object and submits the declaration for Cloud verification; it does not prove matching bytes. Controller cancellation returns its cause without journaling a delivery terminal fact, so restart can continue the original execution. Actual Node terminal failures remain durable.
+
+Before the first PUT, the Node durably freezes bundle/JSONL bytes and metadata under its journal root. Restart after a partial upload reuses that payload rather than creating a new timestamped snapshot. Once terminal evidence is atomically saved, artifact copies are removed and the original terminal remains replayable. Historical pending journals with `Result: null` remain pending; new journals omit absent results. Grants never enter the preparation plan or terminal journal.
+
 ### Ephemeral credential issuer
 - `NewCredentials()` generates in-memory Ed25519 cryptographic keypairs for the four distinct actor roles: `gateway`, `controller`, `node`, and `user`.
 - Signs short-lived JWT tokens on demand for simulator test runs, matching production cryptographic token structures without requiring external authentication infrastructure.

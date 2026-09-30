@@ -1,6 +1,7 @@
 package simulator
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -26,7 +27,8 @@ type agentJournal struct {
 	Events    []*controlpb.ThreadEvent
 	Commands  map[string]bool
 	Ended     controlpb.AgentSessionEndReason
-	Result    json.RawMessage
+	Result    json.RawMessage `json:",omitempty"`
+	Delivery  *revisionPlan   `json:",omitempty"`
 }
 
 // NewAgentNode creates the isolated Node journal directory used by the echo fixture.
@@ -54,6 +56,11 @@ func (n *AgentNode) load(record *controlpb.ExecutionRecord) (*agentJournal, erro
 	if err == nil {
 		if err = json.Unmarshal(data, j); err != nil {
 			return nil, fmt.Errorf("read echo journal: %w", err)
+		}
+		// Older pending journals encoded an absent terminal result as JSON null. RawMessage
+		// retains those bytes, so normalize absence before callers decide whether to replay it.
+		if bytes.Equal(bytes.TrimSpace(j.Result), []byte("null")) {
+			j.Result = nil
 		}
 		if j.InputHash != hash {
 			return nil, fmt.Errorf("echo execution input conflict")

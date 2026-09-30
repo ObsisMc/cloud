@@ -16,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/wanglongan587/cloud/internal/controlpb"
 	"github.com/wanglongan587/cloud/internal/core"
@@ -68,12 +70,17 @@ func (f *fixture) registeredDelivery(t *testing.T, cfg *objectstore.Config) (str
 	must(t, err)
 	found := false
 	for _, record := range pending.GetRecords() {
-		if record.GetExecutionId() == "revision-delivery" && record.GetInput().GetDeliverRevision().GetHistoryKey() == spec.GetHistoryKey() {
-			found = true
+		if record.GetExecutionId() == "revision-delivery" {
+			found = proto.Equal(record.GetInput(), claim.GetItem().GetInput())
 		}
 	}
 	if !found {
 		t.Fatal("registered delivery was absent from recovery reads")
+	}
+	recovered, err := f.executions.GetDispatch(ctx, &controlpb.GetDispatchRequest{ExecutionId: "revision-delivery"})
+	must(t, err)
+	if !proto.Equal(recovered.GetRecord().GetInput(), claim.GetItem().GetInput()) {
+		t.Fatal("GetDispatch changed the frozen delivery input")
 	}
 	history := []byte("{\"kind\":\"assistant\",\"text\":\"echo\"}\n")
 	sum := sha256.Sum256(history)
@@ -331,11 +338,12 @@ func TestRevisionLeaseAndStateAreRecheckedAfterExternalVerification(t *testing.T
 
 func TestS3RejectsIncorrectChecksumAndExpiredGrant(t *testing.T) {
 	cfg := revisionStorage(t)
-	if status := putRevisionObject(t, cfg, "acceptance/checksum-invalid", []byte("bytes"), base64.StdEncoding.EncodeToString(make([]byte, 32))); status >= 200 && status < 300 {
+	prefix := "acceptance/" + uuid.NewString()
+	if status := putRevisionObject(t, cfg, prefix+"/checksum-invalid", []byte("bytes"), base64.StdEncoding.EncodeToString(make([]byte, 32))); status >= 200 && status < 300 {
 		t.Fatal("S3 accepted an incorrect checksum")
 	}
 	sum := sha256.Sum256([]byte("bytes"))
-	grant, err := objectstore.PresignPUTChecksum(cfg, "acceptance/expired", hex.EncodeToString(sum[:]), time.Now().Add(-2*time.Minute))
+	grant, err := objectstore.PresignPUTChecksum(cfg, prefix+"/expired", hex.EncodeToString(sum[:]), time.Now().Add(-2*time.Minute))
 	must(t, err)
 	req, err := http.NewRequestWithContext(t.Context(), "PUT", grant.URL, bytes.NewReader([]byte("bytes")))
 	must(t, err)
@@ -350,7 +358,7 @@ func TestS3RejectsIncorrectChecksumAndExpiredGrant(t *testing.T) {
 		t.Fatal("S3 accepted expired grant", resp.StatusCode)
 	}
 	// Refresh keeps the same object key and input while receiving a usable signature.
-	if status := putRevisionObject(t, cfg, "acceptance/expired", []byte("bytes"), ""); status != 200 {
+	if status := putRevisionObject(t, cfg, prefix+"/expired", []byte("bytes"), ""); status != 200 {
 		t.Fatal("refreshed grant failed", status)
 	}
 }

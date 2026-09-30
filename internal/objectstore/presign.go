@@ -28,8 +28,8 @@ type Config struct {
 	UploadGrantTTL  time.Duration
 }
 
-// Grant is one presigned PUT. Headers must be sent unchanged, apart from the checksum header the
-// uploader adds itself.
+// Grant is one presigned PUT. Headers must be sent unchanged; legacy uploaders also add their
+// computed checksum. The signed creation condition keeps still-live grants from replacing objects.
 type Grant struct {
 	URL     string
 	Method  string
@@ -60,6 +60,11 @@ func presign(cfg *Config, key, method string, headers map[string]string, now tim
 	}
 	if !validKey(key) {
 		return Grant{}, fmt.Errorf("invalid object key")
+	}
+	// A grant can outlive settlement. Bind create-only semantics into every PUT, including legacy
+	// grants, so a second capability cannot change an object after Cloud's external verification.
+	if method == "PUT" {
+		headers["if-none-match"] = "*"
 	}
 	ttl := cfg.UploadGrantTTL
 	if ttl <= 0 {

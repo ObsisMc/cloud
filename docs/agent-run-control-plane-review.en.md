@@ -32,6 +32,10 @@ Grants stay in memory, never databases, journals, files, environment or argument
 
 ## Validation and remaining work
 
+The 2026-09-30 review adds signed `If-None-Match: *` to every PUT so an unexpired grant cannot replace a verified object. A 412 still requires Cloud verification. Controller cancellation leaves the original delivery replayable. Failed plugin items release their maintenance bindings; a late failure from an older revision returns the latest selection to pending without retaining the old error. Recovery tests compare the complete frozen protobuf input through both pending reads and GetDispatch. Direct regressions are `TestRevisionStoredObjectsRejectLiveGrantOverwrite`, `TestPluginFailedResultReleasesMaintenanceForNewSelection`, `TestRevisionUploadReconcilesAnAmbiguousCreatedObject` and the extended restart delivery test.
+
+Object bytes and declarations are frozen durably before the first PUT. Partial-upload restart reuses the original snapshot; artifact copies are removed after terminal evidence is atomically saved. The extended test cancels after a real RustFS PUT, replaces both doubles and changes checkout contents to prove replay still delivers the original snapshot. Historical pending journals with `Result: null` remain replayable, and grants never enter disk state.
+
 Direct acceptance on 2026-09-30 used PostgreSQL 17 and `rustfs/rustfs:latest`, digest `sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff`. Final format/lint, full PostgreSQL+S3, race, build and proto/OpenAPI/frontend drift results are recorded on the PR. Frontend checks cover 53 files and 300 tests.
 
 B still owns phases, Thread projection/API/SSE, Git identity and UI. C still needs production Rust Controller/Node relay, grants, logs/ACK and recovery acceptance. D still needs real Agent/plugin execution and delivery. The desktop companion only pins Cloud, generates protocol and tests compatibility. specs retains these Partial obligations and unchanged ADR status.
