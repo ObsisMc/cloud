@@ -64,6 +64,17 @@ func (s *Store) settleRunWorkspace(t *transaction, run Object, ready bool) error
 		// status=cancelled and deliveryState=skipped, and declares the delete.
 		return s.settleCancelled(t, o)
 	case ready:
+		// Plan §2A.2 + §2.6: the run's creation succeeded at the infra level, but the run is
+		// only ready when its *required pinned agent plugin* (IssueRun D1/D6 snapshot key) is
+		// installed at the pinned version on the run workspace. A failed or absent-at-version
+		// pinned-plugin instance settles agent_plugin_unavailable (plugin-marketplace D3, G-002),
+		// even though the operation terminal itself succeeded. Runs whose snapshot pins no agent
+		// plugin (legacy engine / other executors) and runs with no instance row yet are treated
+		// as ready, exactly as the pre-plugin-engine settle (§2.6 legacy compatibility).
+		if inst, req := s.agentPluginInstance(t, o); req && inst != nil &&
+			(inst.S("observedState") != "installed" || inst.S("observedVersion") != o.O("input").S("agentPluginVersion")) {
+			return s.settleFailed(t, o, "agent_plugin_unavailable")
+		}
 		// Plan §2A.2: ready settles provisioning → starting, status stays dispatched.
 		if s.settleReadyGuard(t, runID) == 0 {
 			return nil // stale under the serialized lock; see call site doc
@@ -73,6 +84,32 @@ func (s *Store) settleRunWorkspace(t *transaction, run Object, ready bool) error
 		// ready=false with no cancel: generic create_workspace terminal failure.
 		return s.settleFailed(t, o, "workspace_unavailable")
 	}
+}
+
+// agentPluginInstance resolves the run's required pinned agent plugin, taken from the
+// run-create snapshot (issue_runs.input keys agentPluginId / agentPluginVersion, never re-read
+// from the current roster — IssueRun D1/D6), to its workspace_plugin_instances row for the run
+// workspace, in the caller's transaction. required=false means the run snapshot pins no agent
+// plugin (legacy engine or a non-space-agent executor), so the caller must treat the run as
+// ready rather than downgrade. The returned instance is nil when the workspace has no row for
+// the pinned plugin yet (which the pre-plugin-engine settle treats as ready; G-002 creates the
+// row on the plugin step).
+func (s *Store) agentPluginInstance(t *transaction, run Object) (inst Object, required bool) {
+	pid := run.O("input").S("agentPluginId")
+	version := run.O("input").S("agentPluginVersion")
+	if pid == "" || version == "" {
+		return nil, false
+	}
+	namespace, identifier, ok := pluginIdentity(pid)
+	if !ok {
+		return nil, false
+	}
+	wid := run.S("workspaceId")
+	if !validID(wid) {
+		return nil, true
+	}
+	row := t.one("SELECT * FROM workspace_plugin_instances WHERE workspace_id=$1 AND source_namespace=$2 AND identifier=$3", wid, namespace, identifier)
+	return row, true
 }
 
 // settleReadyGuard is the CAS that moves provisioning → starting. It is guarded by
@@ -147,7 +184,7 @@ type businessAgentRunHooks struct {
 	UnavailableAgentRunHooks // ThreadEventsTakenOver/SessionEnded/DeliverySettled/RunWorkspaceDeleted keep failing closed.
 }
 
-// RunWorkspaceSettled fulfils the A→B hook: it runs the B settlement core in the
+// RunWorkspaceSettled fulfills the A→B hook: it runs the B settlement core in the
 // caller-owned transaction.
 func (h businessAgentRunHooks) RunWorkspaceSettled(t *transaction, run Object, ready bool) error {
 	return h.store.settleRunWorkspace(t, run, ready)

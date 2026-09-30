@@ -2,10 +2,11 @@
 
 > 状态：**持续维护的设计 / 执行记录**  
 > 范围负责人：**B — Cloud 业务 / 编排**  
-> 当前目标：**Phase 2A — DONE / ARCHITECTURALLY REVIEWED**；Phase 2B 下轮（G-003 caller wiring、G-002 plugin step）。  
+> 当前目标：**Phase 3 DONE → Phase 4 DESIGN（next）**；当前指标 `PHASE_3B_DONE / READY_FOR_PHASE_4_DESIGN`（实现轮，3A B 核心 + 3B A 侧执行工作持久化 + 生产化 EnqueueExecutionWork 均已交付）。
 > 更新规则：**每一轮实现开始前必须阅读本文件，结束前必须更新本文件。** 本文件是 `plan.md` 的中文对照；Phase 2
-> 详细设计的权威版本在 `plan.md` 的 `## Phase 2 — Workspace Settlement 详细设计`（§2.1–§2.15），以及 §12
-> 决策 D-007–D-010、§13 G-002/G-003/G-005、§16 执行标记。中文版此处做同步标记，不重复完整翻译细节。
+> 详细设计的权威版本在 `plan.md` 的 `## Phase 2 — Workspace Settlement 详细设计`（§2.1–§2.15），Phase 3
+> 详细设计的权威版本在 `plan.md` 的 `## Phase 3 — Session Start 详细设计`（§3.1–§3.17），以及 §12 决策
+> D-007–D-010 + D-012..D-015、§13 G-002/G-003/G-005 + G-007..G-011、§16 执行标记。中文版此处做同步标记，不重复完整翻译细节。
 
 ---
 
@@ -337,39 +338,53 @@ provisioning
 
 ### Phase 2 — Workspace Settlement
 
-状态：**PHASE 2A DONE / ARCHITECTURALLY REVIEWED**（B-owned 结算核心已实现并复核，证据见 `plan.md` §2.14）；**PHASE 2B NOT STARTED**（A-side caller wiring = G-003、plugin step = G-002）。
+状态：**PHASE 2 DONE / ARCHITECTURALLY REVIEWABLE**。Phase 2A（B-owned 结算核心）与 Phase 2B（A-side `create_workspace` plugin step + terminal wiring）均已实现并复核；证据见 `plan.md` §2.14。G-002、G-003 CLOSED；T2-3 已 DEFERRED→PASS。
 
 目标：
 
 在 A control-plane terminal evidence transaction 内处理 workspace terminal evidence，并调用 B business hook。
 
-预计工作：
+预计工作（Phase 2B 已交付列表，详见 `plan.md` §15 Phase 2B round record）：
 
-- terminal A → B hook wiring（G-003，Phase 2B — 本轮未 wire）
+- terminal A → B hook wiring（G-003 — 已 wire 于 A-owned `advance` terminal transaction；hook error 回滚整个 terminal write）
 - `RunWorkspaceSettled`
 - ready → starting
-- failed/unavailable → releasing/failed（含 cancel-before-settle；plugin-unavailable 由 G-002 gate 至 Phase 2B）
+- failed/unavailable → releasing/failed（含 cancel-before-settle；plugin-unavailable `agent_plugin_unavailable` 已由 G-002 打通，T2-3 由 DEFERRED→PASS）
 - delete-workspace declaration
-- rollback / replay tests（T2-1..T2-10；T2-3 DEFERRED_TO_PHASE_2B_G002，见 `plan.md` §2.14）
+- G-002：Agent run-workspace `create_workspace` 内部 `plugin` step（effect-based `plugin_ensure`，run-only instance writer，D-011）；snapshot 版本不可变（§6）；run-scoped 失败不扰动 `space_plugins` 聚合 / `space_agents` roster（D-011）
+- rollback / replay tests
 
 Phase 2A 已交付：`RunWorkspaceSettled` 结算核心（`businessAgentRunHooks`）、CAS `provisioning→starting`、`releasing/failed(workspace_unavailable)`、cancel-before-settle `releasing/cancelled(deliveryState=skipped)`、同事务 `DeleteRunWorkspace` 声明（B→A seam，原子）、replay/stale no-op，以及白盒 `TestPhase2A*` 套件。所有 gate 通过（build / vet / core + integration（含 race）/ `go test ./...` / `git diff --check`）。
 
-Production 仍受 A-side terminal wiring 与 plugin-step 正确性阻塞（`plan.md` G-002 / G-003），两者均为 Phase 2B。
+Phase 3（session `EnqueueExecutionWork`）本轮为**实现轮，已完成 Phase 3A（B-owned Session Start Core）+ Phase 3B（A-side Execution Work Persistence + 生产化 EnqueueExecutionWork）**；当前指标 `PHASE_3B_DONE / READY_FOR_PHASE_4_DESIGN / NOT_READY_FOR_PHASE_4_IMPLEMENTATION`。G-008 CLOSED（真实 `execution_work` 落库 + DB partial-unique 恰好一次）；G-001 执行 seam 部分 CLOSED（除外 `CreateRunWorkspace`/`DeleteRunWorkspace`/`EnqueueThreadCommand` 由各自 phase 拥有，G-001 整体 PARTIAL）。
 
 ### Phase 3 — Session Start
 
-状态：**PLANNED**
+状态：**Phase 3A IMPLEMENTED（B side）；Phase 3B IMPLEMENTED（A side real seam → PHASE_3_DONE）**；Phase 4（Thread）未开始
+
+设计章节权威版本在 `plan.md` 的 `## Phase 3 — Session Start 详细设计`（§3.1–§3.17），以及 §12 决策
+D-012..D-015、§13 G-007..G-011、§16 执行标记。核心结论：
+
+- **结束点**：恰好声明一条 AgentSession `execution_work`；`issue_runs.phase` **保持在 `starting`**
+  （D-014，IssueRun ADR D3 权威）。`running` 需首条 Thread/session-start 事件被接管
+  （`ThreadEventsTakenOver`，Phase 4），不以 enqueue 声明或 workspace ready 推进。
+- **first prompt**：即 Thread 首条 entry（`thread_entries(seq=1)`，`source=system,kind=user_turn`），
+  由 run-create 冻结输入快照经固定模板渲染，内联为 AgentSession `initial_turn`；不在 `starting` 触发
+  Thread API/SSE（D-013）。渲染器未生产化（G-007）。
+- **once**：`thread_entries(seq=1)` 是 B 侧持久的 once 标记（`INSERT ON CONFLICT DO NOTHING`，0 影响即 replay no-op），与 `EnqueueExecutionWork` 同事务（D-012/D-015）。重试在独立的 post-settle B-owned **starting 扫描**（D-015，取代 D-010 的 settle 同事务释放）。
+
+**Phase 3A 已交付（本轮）**：`AgentRunSessionStart` + `renderAgentInitialTurn`（G-007 关闭）+ `scanStartingAgentRuns`/`StartQueuedAgentSessionsOnce`（D-015 重试循环，10s 节奏，IMPLEMENTATION CHOICE）+ cmd/server 启动循环接线；once 用 `thread_entries seq=1`（非伪造 execution 表，G-008 仍 OPEN）；`phase=starting/status=dispatched` 保持到 Phase 4。白盒 `TestAgentSessionStart*` 套件覆盖 T3-1/2/3/4/5(序列化)/6/8/10/11/12/13/14。所有 gate 通过。
 
 目标：
 
 从 `starting` 精确释放一个 AgentSession execution work item。
 
-预计工作：
+预计工作（Phase 3A — B-owned 核心）：
 
-- 根据 run snapshot 生成固定 first prompt
-- `EnqueueExecutionWork`
-- 使用 immutable pinned plugin/version
-- exactly-once / replay behavior
+- 根据 run snapshot 生成固定 first prompt（G-007）
+- 对已批准 seam `EnqueueExecutionWork` 用确定性注入 stand-in 落声明（G-001）
+- 使用 immutable pinned plugin/version（既有快照 freeze 已证明）
+- exactly-once / replay behavior（D-012、D-015）
 
 ### Phase 4 — Thread / Running Lifecycle
 
@@ -745,6 +760,17 @@ Slice 1 使用固定 periodic scan，周期 ≤10 秒。
 
 不得为了 Slice 1 新增 `next_attempt_at` / lease field / retry migration。
 
+### D-012..D-015 — Phase 3 session-start 决策（新增，Design round；完整条款见 `plan.md`）
+
+- **D-012 — 执行身份与 exactly-once**：唯一身份是 `execution_work (run_id, kind='agent_session')` 部分唯一行；
+  B 不写控制表（D6 invariant 7）；`execution_id` 由 Controller `RecordDispatch` 生成、落在 A 行，不在 `issue_runs`。
+- **D-013 — first prompt 来源与不可变性**：即 Thread 首条 entry（seq=1, system user_turn），由 run-create 冻结
+  输入快照经固定模板渲染，内联为 `initial_turn`；不实时重读 issue/评论；渲染器未生产化（G-007）。
+- **D-014 — starting→running 权威证据**：`running` 需首条 Thread/session-start 事件被接管（`ThreadEventsTakenOver`，
+  Phase 4）；enqueue 声明与 workspace ready 都不是证据。Phase 3 结束后 `phase` 仍 `starting`（不变量 2）。
+- **D-015 — Phase 3 重试归属**：声明重试由一个独立的 post-settle B-owned **starting 扫描**承担（幂等、部分唯一
+  once）；取代 D-010 的「settle 同事务释放」建议。
+
 ---
 
 ## 13. Open Gaps / Decisions Needed
@@ -761,6 +787,12 @@ Production E2E 需要：
 - `EnqueueThreadCommand`
 
 在 contract 已批准的前提下，B 可以使用 deterministic injected stand-in 推进。
+
+Phase 3 Design 状态（2026-09-30）：**仍完全 open，且决定 3A/3B 拆分。** 控制面表
+`execution_work`、`node_executions`、`node_event_receipts`、`thread_commands` 在任何 migration 中都不存在
+（0018 只有业务表），`controlgrpc.ClaimWork` 只是 tenant-clone stub，`CreateRunWorkspace`/`EnqueueExecutionWork`
+只有 `Unavailable` stub + test fake。Phase 3 声明因此在确定性注入 stand-in 上跑（Phase 3A）；真实 A seam 属
+Phase 3B / A 侧后续。见 detail 章节 3A/3B 拆分结论、D-012、G-007/G-008/G-010。
 
 ### G-002 — create_workspace Plugin Step
 
@@ -787,6 +819,15 @@ Phase 2 处理，不属于 Phase 1。
 Slice 1 在此基础上继续使用 short transaction + explicit state guard。
 
 未来是否缩小或替换全局锁，是独立架构任务。
+
+### G-007..G-011 — Phase 3 session-start 缺口（本 Design 轮新增；Phase 3A 实现轮后更新状态）
+
+完整条款见 `plan.md` §3.17。Phase 3A 后状态：
+- **G-007** first-prompt 固定模板渲染器（`renderAgentInitialTurn` → `thread_entries` seq=1 `system/user_turn`）— **已关闭（CLOSED）**，确定性测试已过。
+- **G-008** `execution_work`/`node_executions` 表与 `execution_id` 写入 — **CLOSED（Phase 3B）**：A-owned `execution_work` 表（`0019_execution_work.sql`）+ `execution_work_unregistered_once` partial-unique 恰好一次已落地；`execution_work.id` A 生成，`execution_id` 由 Controller `RecordDispatch` 写入（Phase 3B 建行不占用 `execution_id`）。`node_executions` / `node_event_receipts` / `thread_commands` 不在 Phase 3B scope（§14 除非 pickup 需要，否则不建表）。
+- **G-009** `thread_entries` seq=1 被保留，Phase 4 需从 seq=2 续接 — **开放（OPEN）**，跨 phase 接缝约束；确认 Phase 3A 仅写 seq=1，不破坏。
+- **G-010** 从 `sandbox_instances`/`node_instances` 派生 D6 `target` — **以最小确定性 `sessionStartTarget` 关闭**（`{workspace_id, sandbox_instance_id, node_id}`，存在 live sandbox/connected Node 时）。
+- **G-011** starting 下 workspace/target 无效缺失的精确终态 — **部分（PARTIAL）**：fail-closed 路径（保持 `starting`，不写终态，重试循环再触达）已实现并测试（`runWorkspaceLive`/`TestAgentSessionStartSoftDeletedWorkspaceFailsClosed`）；choose-path 权威决策留待后续批准（本轮按 §6/§11 选 fail-closed，绝不因测试方便写 `status=failed`）。
 
 ---
 
@@ -850,43 +891,43 @@ Agent 必须更新：
 
 ### 当前 Phase
 
-`Phase 1 — Dispatcher Slice 1`
+`Phase 3 — Session Start（3A B 核心 + 3B A-side Execution Work + EnqueueExecutionWork）：DONE（PHASE_3_DONE）；Phase 4（Thread / running）NOT_STARTED`
 
 ### 当前 Slice
 
-`Claim + Busy + Retry Loop`
+`Phase 3A + 3B 实现完成（D-012..D-018、G-007..G-011、T3-1..T3-14 + T3B-1..T3B-14 + §28 concurrency + §29 payload-mismatch、3A/3B 拆分落地）`
 
 ### 当前状态
 
-`PLANNED — 尚未开始本 Slice 实现`
+`PHASE_3_DONE / READY_FOR_PHASE_4_DESIGN / NOT_READY_FOR_PHASE_4_IMPLEMENTATION`
 
-### 本 Slice 计划输出
+### 本 Slice 计划输出（Phase 3A）
 
-- `AgentRunDispatcher.Dispatch`
-- non-panicking project busy predicate
-- guarded queued → provisioning transition
-- one-shot retry scan
-- ≤10s B-owned retry loop
-- graceful shutdown wiring
-- deterministic PostgreSQL integration tests
+- `AgentRunSessionStart.StartSession`（authoritative in-tx re-read、cancel-first、seq=1 once-guard、A/B 原子）
+- `renderAgentInitialTurn`（D-013/G-007）
+- `scanStartingAgentRuns` / `StartQueuedAgentSessionsOnce`（D-015，10s，IMPLEMENTATION CHOICE）
+- cmd/server 启动循环接线
 
-### 本 Slice 明确不包含
+### 本 Slice 计划输出（Phase 3B — 本轮新增）
 
-- `RunWorkspaceSettled`
-- provisioning → starting
-- session work
-- Thread
-- workspace cleanup
-- delivery
-- schema migration
-- frontend
-- OpenAPI
+- `0019_execution_work.sql`：A-owned `execution_work` + `execution_work_unregistered_once` partial-unique + `execution_work_pickup`（D-016/G-008）
+- `StoreAgentRunControlPlane.EnqueueExecutionWork`（生产 seam，INSERT + ON CONFLICT 幂等 + payload-match 守卫 D-018）+ `agent_work_claim`（D-017）
+- cmd/server/main.go 接线 `store.AgentRunControlPlane = core.NewStoreAgentRunControlPlane()`；control.go `agent_work_` dispatch
+- 迁移测试 `TestMigration0019ExecutionWorkAppliesFreshAndUpgrades`
+
+### 本 Slice 明确不包含（仍属后续 phase）
+
+- `CreateRunWorkspace` / `DeleteRunWorkspace` / `EnqueueThreadCommand` 生产实现（G-001 PARTIAL：执行 seam CLOSED，其余 seam 由 2A/2B、Phase 5、Phase 4 拥有）
+- `phase=running` / Thread takeover（`ThreadEventsTakenOver`，Phase 4；D-014/D-017：claim 与 running 无关）
+- seq>=2、Thread API/SSE、SessionEnded / DeliverySettled / RunWorkspaceDeleted、cancel 公开 API、通用插件执行平面、完整 Node worker（§3）
+- `node_executions` / `node_event_receipts` / `thread_commands` 建表（§14 除非 pickup 需要）
 
 ### 当前 Blockers
 
-无 B-side design blocker。
-
-Production E2E 仍依赖 §13 中的 A-side gaps。
+无 B-side design blocker。G-008 CLOSED；G-001 执行 seam CLOSED、整体 PARTIAL（其余 A seam 方法由后续 phase 拥有）。
+本轮实现轮交付：Phase 3A（B 核心）+ Phase 3B（A 侧 `execution_work` 真实落库 + 生产化 EnqueueExecutionWork + Controller claim
+读取）。`agent_work_claim` 是纯读（D-017），物理启动（`phase=running`）仍属 Phase 4，需 takeover 证据（D-014）。
+G-009（roster-current/real-agent controller target）OPEN，Phase 4 拥有。
 
 ---
 

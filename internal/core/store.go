@@ -155,6 +155,12 @@ type transaction struct {
 	contextBuilder ContextBuilder
 	forms          FormDescriptorProvider
 	assist         InputAssistProvider
+	// hooks is the business-side AgentRun transition seam (controller-integration D6), shadowed
+	// from the Store so free control-plane functions can call it inside their Caller's transaction.
+	// It mirrors the collaboration ports: it is nil-safe through a default only at the call sites
+	// that need it, and nil means the caller fails closed (G-003: an unwired hook rolls back rather
+	// than advance business state silently). It never opens its own transaction.
+	hooks AgentRunHooks
 	// queued names operations this transaction made claimable; they are published only after commit.
 	queued []string
 }
@@ -257,7 +263,7 @@ func (s *Store) transact(ctx context.Context, fn func(*transaction) Object) (out
 			}
 		}
 	}()
-	t := &transaction{tx: tx, ctx: ctx, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist}
+	t := &transaction{tx: tx, ctx: ctx, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist, hooks: s.AgentRunHooks}
 	t.exec("SELECT pg_advisory_xact_lock(67420911)")
 	out = fn(t)
 	if err = tx.Commit(); err == nil {

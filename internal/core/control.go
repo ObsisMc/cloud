@@ -52,6 +52,9 @@ func (s *Store) Control(ctx context.Context, r *ControlRequest) (Object, error) 
 		if isCloneAction(r.Action) {
 			return cloneCommand(t, r)
 		}
+		if strings.HasPrefix(r.Action, "agent_work_") {
+			return agentWorkCommand(t, r)
+		}
 		if strings.HasPrefix(r.Action, "report_node_") {
 			return submitted(t, r, func() Object { return nodeReport(t, r) })
 		}
@@ -239,6 +242,13 @@ func planEffect(t *transaction, r *ControlRequest, o Object, spaceEvents *[]Spac
 // a registry index or marketplace sync of its own; field names match the
 // desktop plugin-manager DownloadRequest capabilities.
 func planPluginEffect(t *transaction, o Object, kind, wid string, spaceEvents *[]SpaceEvent) Object {
+	// An Agent run Workspace's create_workspace plugin step plans a plugin_ensure for the run's
+	// *pinned* agent plugin, admitted from the run snapshot (never the roster) and written back
+	// to a run-instance-only row (G-002).
+	if agentRunWorkspaceOp(t, o) {
+		require(kind == "plugin_ensure", 409, "invalid_step")
+		return planAgentRunPluginEffect(t, o, wid)
+	}
 	switch {
 	case o.S("kind") == "install_plugin":
 		require(kind == "plugin_ensure", 409, "invalid_step")
@@ -314,13 +324,20 @@ func effectResult(t *transaction, r *ControlRequest, o Object, spaceEvents *[]Sp
 		}
 	}
 	if state == "failed" && (e.S("kind") == "plugin_ensure" || e.S("kind") == "plugin_delete") {
-		// A failed install/remove surfaces on the space row immediately so the
-		// UI can render the failure while the operation waits for retry.
 		message := result.S("error")
 		if message == "" {
 			message = "external_failure"
 		}
-		pluginInstanceWriteback(t, o, "failed", "", &message, spaceEvents)
+		if agentRunWorkspaceOp(t, o) {
+			// A failed pinned plugin on a run Workspace writes ONLY the run instance row —
+			// the evidence the run settle classifies agent_plugin_unavailable from. It must not
+			// touch the space_plugins aggregate or roster (D-011).
+			writeRunPluginInstance(t, e, "failed", "", &message)
+		} else {
+			// A failed install/remove surfaces on the space aggregate immediately so the
+			// UI can render the failure while the operation waits for retry.
+			pluginInstanceWriteback(t, o, "failed", "", &message, spaceEvents)
+		}
 	}
 	t.exec("UPDATE external_effects SET state=$2,external_id=COALESCE($3,external_id),result=$4,reconciled_epoch=$5 WHERE id=$1", e.S("id"), state, nullable(external), jsonText(result), o.N("controllerEpoch"))
 	t.exec("UPDATE operations SET version=version+1,updated_at=now() WHERE id=$1", o.S("id"))
@@ -366,8 +383,15 @@ func advance(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEv
 		}
 	case "clone":
 		advanceClone(t, o, wid)
-		openWorkspace(t, o, wid)
-		next = "done"
+		if agentRunWorkspaceOp(t, o) {
+			// An Agent run's Workspace is not admitted at clone time: admission waits for the
+			// pinned agent plugin step, so the terminal settle can classify the run against the
+			// plugin evidence (priority G-002). openWorkspace runs once the plugin step ends.
+			next = "plugin"
+		} else {
+			openWorkspace(t, o, wid)
+			next = "done"
+		}
 	case "quiesce":
 		for _, w := range operationWorkspaces(t, o) {
 			checkActivities(t, w)
@@ -408,6 +432,19 @@ func advance(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEv
 		}
 		next = "done"
 	case "plugin":
+		// An Agent run Workspace (G-002): the pinned plugin step completes and opens admission;
+		// the terminal settle later classifies the run from the instance evidence.
+		if agentRunWorkspaceOp(t, o) {
+			// A run that pins no agent plugin (legacy engine) has nothing to install and opens
+			// immediately, keyed to plan §2.6 legacy compatibility.
+			if _, _, required := runPinnedAgentPlugin(t, wid); !required {
+				openWorkspace(t, o, wid)
+				next = "done"
+			} else {
+				next = advanceRunWorkspacePlugin(t, o, wid)
+			}
+			break
+		}
 		// The plugin step completes the install/remove for exactly the
 		// operation's bound workspace; the space-level aggregate is recomputed
 		// from the fan-out rows in the same transaction.
@@ -424,6 +461,13 @@ func advance(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEv
 	}
 	if next == "done" {
 		t.exec("UPDATE operations SET step='done',state='succeeded',result=jsonb_build_object('resourceId',COALESCE(workspace_id,project_id)),version=version+1,updated_at=now() WHERE id=$1", o.S("id"))
+		// Terminal A→B wiring (G-003): settle the run in this same transaction. A hook error
+		// rolls the 'succeeded' write back too, so the operation never commits while the run
+		// stays provisioning (plan §4/§6). Only creator run Workspaces settle; everything else
+		// is untouched here.
+		if agentRunWorkspaceOp(t, o) {
+			settleRunWorkspaceOnDone(t, o)
+		}
 	} else {
 		t.exec("UPDATE operations SET step=$2,version=version+1,updated_at=now() WHERE id=$1", o.S("id"), next)
 	}

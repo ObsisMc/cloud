@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -287,5 +288,71 @@ func TestMigration0016RetiresStorageAndWorktreeStepsKeepingHistory(t *testing.T)
 	}
 	if snapshot("SELECT requested_ref FROM workspaces WHERE id='"+bare+"'") != "trunk" {
 		t.Error("a Workspace without a worktree must take its Project's default branch")
+	}
+}
+
+// TestMigration0019ExecutionWorkAppliesFreshAndUpgrades (§30): the 0019 execution_work migration
+// applies cleanly on a database already at 0018 (upgrade path), is idempotent (re-running Migrate
+// changes nothing and passes CheckSchema), and leaves the table, partial-unique once-guard and
+// pickup index in place. The authoritative constraint behavior itself is covered by the white-box
+// core TestAgentRunExecutionWorkUniqueGuard; here we verify the schema lands as declared on a real
+// schema, both fresh and after the previous migrations.
+//
+// Evidence for the G-008 execution-identity persistence obligation: the migration is what installs the
+// DB-enforced exactly-once identity (execution_work_unregistered_once).
+func TestMigration0019ExecutionWorkAppliesFreshAndUpgrades(t *testing.T) {
+	// Upgrade path: start from all migrations through 0018, then let store.Migrate run 0019.
+	pool, _ := testSchema(t, "test_ew19_")
+	entries, e := os.ReadDir(filepath.Join("..", "internal", "core", "migrations"))
+	must(t, e)
+	var previous []string
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".sql" && entry.Name() < "0019_execution_work.sql" {
+			previous = append(previous, entry.Name())
+		}
+	}
+	applyMigrationsUpTo(t, pool, previous)
+	store := newStoreOnSchema(t, pool)
+	must(t, store.Migrate(context.Background()))
+	// Idempotent: a second Migrate + CheckSchema must be clean.
+	must(t, store.Migrate(context.Background()))
+	must(t, store.CheckSchema(context.Background()))
+
+	if !tableExists(t, pool, "execution_work") {
+		t.Fatal("execution_work table must exist after 0019")
+	}
+	// The partial unique index is the authoritative at-most-one-unregistered-work guard.
+	var onceIdx int
+	must(t, pool.QueryRow(`SELECT count(*) FROM pg_indexes WHERE schemaname=current_schema() AND tablename='execution_work' AND indexname='execution_work_unregistered_once'`).Scan(&onceIdx))
+	if onceIdx != 1 {
+		t.Fatal("execution_work_unregistered_once partial unique index must exist")
+	}
+	// The pickup ordering index must exist.
+	var pickupIdx int
+	must(t, pool.QueryRow(`SELECT count(*) FROM pg_indexes WHERE schemaname=current_schema() AND tablename='execution_work' AND indexname='execution_work_pickup'`).Scan(&pickupIdx))
+	if pickupIdx != 1 {
+		t.Fatal("execution_work_pickup index must exist")
+	}
+	// The unique index is partial over the un-registered predicate (execution_id IS NULL).
+	var pred sql.NullString
+	must(t, pool.QueryRow(`SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND tablename='execution_work' AND indexname='execution_work_unregistered_once'`).Scan(&pred))
+	if pred.String == "" || !strings.Contains(pred.String, "execution_id IS NULL") {
+		t.Fatalf("once-guard must be partial over execution_id IS NULL, got %q", pred.String)
+	}
+	// run_id and workspace_id are enforced references (preserve tenant/owner scope and run identity).
+	for _, col := range []string{"run_id", "workspace_id", "tenant_id"} {
+		var has bool
+		must(t, pool.QueryRow(`SELECT EXISTS (
+			SELECT 1 FROM information_schema.table_constraints tc
+			JOIN information_schema.key_column_usage kcu
+			  ON kcu.constraint_name = tc.constraint_name
+			  AND kcu.table_schema = tc.table_schema
+			  AND kcu.table_name = tc.table_name
+			WHERE tc.table_schema=current_schema() AND tc.table_name='execution_work'
+			  AND tc.constraint_type='FOREIGN KEY' AND kcu.column_name=$1
+		)`, col).Scan(&has))
+		if !has {
+			t.Fatalf("execution_work.%s must be a foreign key reference", col)
+		}
 	}
 }

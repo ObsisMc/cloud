@@ -80,6 +80,11 @@ func run() (runErr error) {
 	}
 	defer func() { runErr = errors.Join(runErr, store.Pool.Close()) }()
 	configureCollaboration(store, cfg.Collaboration.DevelopmentFixtures, log)
+	// Production A-side execution seam: replace the fail-closed Unavailable control plane with the
+	// real StoreAgentRunControlPlane so EnqueueExecutionWork persists execution_work in the caller's
+	// transaction (G-001 execution portion, G-008). The workspace/thread seams still fail closed at
+	// this slice, so G-001 stays PARTIAL; only the execution seam is wired real here.
+	store.AgentRunControlPlane = core.NewStoreAgentRunControlPlane()
 	if e := store.CheckSchema(ctx); e != nil {
 		return e
 	}
@@ -125,6 +130,22 @@ func run() (runErr error) {
 		go func() {
 			defer syncGroup.Done()
 			pluginmarket.RunSyncLoop(ctx, store.DispatchQueuedAgentRunsOnce, agentDispatchInterval, pluginmarket.ContextSleep, log)
+		}()
+	}
+	// Phase 3A session-start loop: B-owned recovery for runs settled into phase='starting' (their run
+	// Workspace is provisioned and admitted). A bounded rescan (limit agentSessionStartBatchSize, ordered
+	// by created_at,id, excluding already-started runs and cancelled requests) releases each run's
+	// exactly-once first produce: thread_entries seq=1 + one EnqueueExecutionWork item in one transaction
+	// (D-014/D-015). The run leaves 'starting' only in Phase 4 on takeover evidence, so this loop stays
+	// idempotent alongside the dispatch loop. Cadence is a repository-preferred 10s constant
+	// (IMPLEMENTATION CHOICE — plan §3 does not fix the seconds); ctx cancellation stops it and the
+	// WaitGroup waits for the in-flight pass.
+	{
+		const agentSessionStartInterval = 10 * time.Second
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.StartQueuedAgentSessionsOnce, agentSessionStartInterval, pluginmarket.ContextSleep, log)
 		}()
 	}
 	gin.SetMode(cfg.Server.Mode)
