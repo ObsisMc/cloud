@@ -2,9 +2,9 @@
 
 > Status: **Living design / execution record**  
 > Scope owner: **B — Cloud business / orchestration**  
-> Current target: **Phase 3 DONE → Phase 4 DESIGN (next)**
-> Current Phase: **3 — Session Start（3A B-core + 3B A-side Execution Work Persistence + EnqueueExecutionWork）**
-> Current Status: **PHASE_3B_DONE / READY_FOR_PHASE_4_DESIGN**
+> Current target: **Phase 4 — Thread / Running Lifecycle（DESIGN REVIEW only，本轮不实现）**
+> Current Phase: **4 — Thread / Running Lifecycle（设计轮：3A+3B 已完成，Phase 4 尚未实现）**
+> Current Status: **DESIGN REVIEW**
 > Update rule: **Every implementation round must read and update this file.**
 
 ---
@@ -373,15 +373,25 @@ Expected work (Phase 3B — A-side execution persistence + production seam): **I
 
 ### Phase 4 — Thread / Running Lifecycle
 
-Status: **PLANNED**
+Status: **Phase 4A IMPLEMENTED（A-side dispatch registration，architecturally reviewable）→ NOT_READY_FOR_PHASE_4B_IMPLEMENTATION**；4B（Thread takeover + running）与 4C（Thread API/SSE）未实现。详见 4.15 拆分。
+
+Phase 4A delivered (this round, D-020/D-021, G-012 PARTIAL):
+
+- new A-owned `node_executions` migration (0020): execution_id PK, work_id UNIQUE FK→execution_work, pending partial index by node
+- production `agent_work_dispatch` (`agentWorkDispatch`) — Controller supplies execution_id/node/input; A records `node_executions` + fences `execution_work.execution_id` in the same transaction, replay idempotent, different id/node/input → `dispatch_conflict`, never overwrite
+- recovery reads `agent_work_get` / `agent_work_pending` (no-lease; C2 crash reuse of the recorded execution)
+- claim & dispatch never run the run: `issue_runs.phase` stays `starting`/`dispatched`, thread seq stays 1, no running
+- NO Phase 4B machinery: `node_event_receipts`/`TakeOverThreadEvents`/starting→running/thread seq≥2/D-023 seq allocation all forbidden and absent (T4A-16)
+- tests T4A-1..T4A-16 (real PostgreSQL) + `TestMigration0020NodeExecutionsAppliesFreshAndUpgrades`
 
 Includes:
 
-- Thread entries
-- takeover hooks
-- running transitions
-- Thread command control seam
-- API/SSE work
+- thread_entries seq≥2 continuation + takeover hooks (4B, NOT implemented)
+- starting → running with a single authority = committed ThreadEventsTakenOver (D-019, 4B, NOT implemented)
+- execution_id registration via RecordDispatch (4A, D-020/D-021 — **IMPLEMENTED**)
+- node_event_receipts event identity (4B, D-022, NOT implemented)
+- Thread command control seam (4C, NOT implemented)
+- API/SSE work (4C, NOT implemented)
 
 ### Phase 5 — Delivery / Releasing / Done
 
@@ -1140,6 +1150,255 @@ enqueue 声明与 Workspace ready **都不是** running 证据（D-014）。因�
 - G-011 — **starting 下 workspace/target 无效缺失的精确终态**：不可重建一个 run Workspace；
   精确终态（settle 到 `workspace_unavailable` 或其他）ADR 未明示，本阶段记录为边界待定，不猜。
 
+## Phase 4 — Thread / Running Lifecycle 详细设计（DESIGN REVIEW）
+
+Status：**DESIGN REVIEW（本轮只设计，不实现；无 migration、无 production 代码）**。覆盖从
+`execution_work` 已持久化 → Controller claim/dispatch → `execution_id` 登记 → 权威会话开始/接管证据 →
+`ThreadEventsTakenOver(...)` → B 侧 `starting → running` → `seq` 从 2 续接。权威依据：IssueRun D3（running
+进入条件）、Thread D1/D3/D4、controller-integration D2/D6/D7、Node 协议 D2。Phase 3B 后代码事实见 §16；本
+章只定契约，不实现 `ThreadEventsTakenOver`/`starting→running`/`RecordDispatch`/`node_executions`（均本轮
+禁止）。核心原则：`execution_work created ≠ running`、`claim ≠ running`、`dispatch ≠ running`，只有权威
+接管/会话开始证据能 `starting → running`。
+
+### 4.1 entry state
+
+- 进入本阶段的运行：`issue_runs.executor_type='agent'`、`phase='starting'`、`status='dispatched'`、
+  `workspace_id` 指向 run Workspace 且 `workspace_plugin_instances` 已安装（Phase 2B）、快照已放出一个未登记
+  `execution_work`（kind='agent_session'，`execution_id IS NULL`）。`thread_entries` 当前仅有 seq=1
+  `source='system'`/`kind='user_turn'` 的 first prompt（Phase 3A，G-009 续接约束）。
+- `thread_state` 保持 NULL（Phase 3A 未写；首条记录接管的事务才由业务钩子写，见 4.6/4.21）。
+
+### 4.2 exit state
+
+- `running`：`issue_runs.phase='running'`、`status='running'`（IssueRun D3 表格对 running 的 status 列固定为
+  `running`——非推测，ADR 明示）。`thread_state` 进入 `active`（首条 Node 记录接管，Thread D4）或 `pending`
+  （若首批是带会话开始语义的非记录事件，G 见 4.6）；`thread_entries.seq` 从 2 起的 Node 事件已接管。
+- 除 `starting→running` 外的旁路退出（`releasing/cancelled`）仍按 IssueRun D6（cancel）与既有 G-011 边界，
+  本轮仅为 cancel race 定义串行化（4.11），不实现。
+
+### 4.3 authoritative running event
+
+唯一 authority：**`ThreadEventsTakenOver` 钩子在其所在接管事务成功提交**（IssueRun D3「首条 Thread 事件或
+会话开始事件被接管」；controller-integration D6 hook `threadEventsTakenOver`：分配 seq、写 `thread_entries`、
+推进 `thread_state`、把轮次标 `delivered`、置 `running`）。只有该钩子返回 nil、整个接管事务提交，才
+`starting → running`。以下**均不构成 running**：`agent_work_claim`（纯读，D-017）、`RecordDispatch`/
+`execution_id` 登记（dispatch ≠ session start）、Node 接受 work / 分配 sandbox・进程、Node 发 `StartAgentSession`
+（这些是 dispatch 与物理分配，不等同会话开始证据）。候选 A/B/C/D/E/F（见 mandate §4）：选 **E/F（首条
+Thread 事件接管 + 钩子成功提交）**，据此明确 `claim/RecordDispatch/dispatch ≠ running`。
+
+### 4.4 RecordDispatch contract
+
+- 目标：新控制面表 `node_executions`（**未迁移**，Phase 4A 需求），`execution_id` 为主键标识。
+  `RecordDispatch`（`agent_work_dispatch` 动作，leaseValid 门控，沿用 `clone_dispatch`/`WorkspaceOperationDispatch`
+  的先例）把 `execution_work` 设置为已登记：写入 `node_executions(execution_id, kind, operation_id=run_id,
+  work_id=execution_work.id, node_id, input, dispatched_epoch, last_event_sequence=0, result=null)`，并回写
+  `execution_work.execution_id`（在 `WHERE execution_id IS NULL` 的 fence 下）。
+- owner/生成：`execution_id` 由 Controller 生成并在 `RecordDispatch` 携带（clone 先例：caller 提供 execution_id，
+  A 校验唯一后登记）；A 负责记录与 fence，不生成执行身份（plan §8、D-012/D-016）。work `id`（`execution_work.id`）
+  A 生成、Phase 3B 已定。
+- 事务：`RecordDispatch` 在本次控制面请求自己的事务内完成 `node_executions` 插入 + `execution_work.execution_id`
+  回写；一次 RPC 一个事务，提交后 Controller 才向 Node 发 `StartAgentSession`（controller-session D1）。不在 B
+  事务内发生；B 只在 takeover 时经钩子重读。
+- replay/mismatch：`node_id` 必须等于 `target.node_id`；输入 `input` 与 `execution_work.input` 必须一致，
+  否则 `CONFLICT`。同一 work 重复 `RecordDispatch` 携带**相同** `execution_id`+节点+输入 ⇒ 幂等成功（返回既有行）；
+  携带**不同** `execution_id` 或输入不匹配 ⇒ `dispatch_conflict` invariant error，不覆盖旧 identity（§6）。
+- crash：claim 后、`RecordDispatch` 前崩溃 ⇒ 无 `node_executions` 行、`execution_id` 未写，work 仍可被重取。
+  `RecordDispatch` 提交后、Node 收到前崩溃 ⇒ row 已登记（durable truth），Node 未启动；Controller 恢复后按
+  `node_executions` 查询既有执行并重发原 `StartAgentSession`（controller-session D1 的既有恢复流程），不再二次
+  claim；`execution_id` 唯一性 + work `execution_id` 已写使重放幂等。
+
+### 4.5 execution identity
+
+一个 `execution_work` 至多一个权威 `execution_id`。约束三层：
+（1）`node_executions.execution_id` PRIMARY KEY / UNIQUE；
+（2）`node_executions.work_id` UNIQUE（一个 work 至多一次登记）；
+（3）`execution_work.execution_id` 只在 `WHERE execution_id IS NULL` fence 下回写（CAS），重复 `RecordDispatch`
+同 work 不同 id 时 second-writer 因 work_id 或 execution_id 占位而 `dispatch_conflict`。因此 repeated
+`RecordDispatch`：同 id 幂等成功，异 id invariant error，永不覆盖旧 identity。
+评估：现有 `execution_work.execution_id` nullable 无唯一约束，单独不足（不阻止两个不同执行登记到同一 work，
+且无 `node_executions`）。**Phase 4A migration requirement**：新增 `node_executions`；`node_executions.execution_id`
+唯一，`work_id` 唯一，回写 `execution_work.execution_id` 用 fence。sschema 提案见 4.13。
+
+### 4.6 ThreadEventsTakenOver contract
+
+真实签名（本仓 seam）：`ThreadEventsTakenOver(t *transaction, run, execution Object, events []Object) error`
+（agent_run_hooks.go）。当前无 production caller（Unavailable 默认 fail-closed；businessAgentRunHooks 只实现
+RunWorkspaceSettled，其余继承 fail-closed）。A 侧 `TakeOverThreadEvents` 尚未实现（无 `node_event_receipts`、无
+`node_executions`、无路由）。设计：
+- caller：控制面 `TakeOverThreadEvents` gRPC handler（Phase 4B 实现），在收据写入之后、Controller `EventAck`
+  之前调用（controller-integration D2/D6）。
+- 在哪个事务：在控制面 takeover **同一事务**内调用（收据已写，钩子未提交时不确认）。钩子不开启自己的事务。
+- 入参：`run`/`execution`/`events` 仅是 hint/权威证据载体——B 必须重新查询权威 `issue_runs` 行（phase/
+  status/cancel_requested_at/workspace_id/executor_type）与 `execution_work`（execution_id 已登记）与
+  `node_executions`（execution_id/kind/last_event_sequence），不接受 caller Object 的业务字段（§7、plan §3
+  re-read 原则，同 settleRunWorkspace）。
+- 何时调用：对每个成功的 event batch（≤64，见 controller-integration D2）调用一次；非逐事件。重放：控制面只把
+  **首次接管、序号连续**的事件交给钩子（D6），因此重放不再次调用钩子；若因事务不回滚但批次判定重复，钩子幂等
+  依赖 thread_entries 唯一键（4.9）。
+- hook error：返回错误 ⇒ 整个接管事务回滚（收据、`node_executions.last_event_sequence`、`thread_entries` 全部
+  撤销）；Controller 不确认、Node 重放（D6「钩子返回错误时整个事务回滚」）。mandate §7 原则成立。
+- 第一批事件：running 在首条 **Node 记录**接管事务里推进；thread_state 由 Thread D4 由同名事务判定（首条记录 ⇒
+  `active`）。「会话开始事件」这些场合若首条是无记录的开始信号，thread_state 为 `pending`——该分支的 Node 事件
+  形状在 Node 协议 ADR（D2 仅定义 `ThreadEvent{record}`）与 controller-session ADR（proposed）中**未明示**；本轮
+  记录为待决（G 见 4.16），不发明 synthetic 事件，不猜 running 时点的替代语义。
+
+### 4.7 A/B transaction model
+
+一次 takeover 的理想提交边界（对应 mandate §14）：
+
+```
+BEGIN caller(controller) transaction
+  A: 校验 execution 已登记(execution_id 匹配 work)
+  A: 写入 node_event_receipts((execution_id, sequence), 原事件)   // 收据是确认唯一依据
+  A: 更新 node_executions.last_event_sequence
+  B: ThreadEventsTakenOver(t, run, execution, events)             // 同事务
+       re-read issue_runs / execution_work / node_executions
+       CAS phase:'starting' AND status:'dispatched' AND cancel_requested_at IS NULL → running/running
+       分配 seq，写 thread_entries(seq=2..n)，推进 thread_state，标 delivered
+       hook error → panic(databaseFailure) → 整事务回滚
+COMMIT
+  Controller 对 batch 内序号发 EventAck
+```
+
+- 与 D6 一致：收据业务钩子在「收据写入之后」、同事务；业务钩子只在被事务提交后才收到后续（重放不再次调用）。
+- 若钩子失败：A 的收据/`last_event_sequence` 与 B 的 running/`thread_entries` 一起回滚（mandate §14 全部回滚）。
+- 提交后 `EventAck`（D6 不变量 4：任何 ack 晚于对应提交）。
+
+### 4.8 seq allocation
+
+- `thread_entries` PK `(run_id, seq)`，seq>0，「Cloud 在写入事务中分配、连续」（Thread D1）。seq=1 已被 first
+  prompt 保留（Phase 3A），Phase 4 从 2 续接（G-009）。
+- 分配机制：ADR D1 只定「Cloud 分配、连续」，未定实现。决策提案（**D-023，未实现**）：在接管事务内以
+  `MAX(seq)` 为底、从 2 起逐条 +1 分配；安全性由两层保证——（a）控制面按执行串行、同执行至多一个在途批次
+  （controller-session D2 序号恒按顺序到 Cloud），（b）交叉写经全局 advisory lock（`transact`，Phase 1 基线）
+  串行化，批次间 `MAX(seq)` 重读在锁内完成。Concurrent batches（不同执行、同运行）不可能同时进入锁而产生重复
+  seq。候选 MAX+1/counter/独立 sequence 状态/deterministic-from-order：ADR 未否决任一，选锁内 `MAX(seq)+1`
+  因其与既有 `transact` 串行化一致且零新表。不实现计数器表。
+- 不修改 seq=1；同 `(run_id, seq)` 冲突即并发错误（唯一键兜底）。
+
+### 4.9 event idempotency / receipt identity
+
+- 权威事件身份：`node_event_receipts(execution_id, sequence)`（D6 收据表，**未迁移**，Phase 4A 需求）——快照
+  原事件，是 `EventAck` 确认的唯一依据（root D4）。
+- business 重放身份：`thread_entries(node_execution_id, node_sequence)` UNIQUE（Thread D1）——同 Node 事件重复
+  接管幂等，不产生新条目；同键不同内容 `CONFLICT`，原条目不变。两层都在 Phase 4 落地（Node 协议 D2 的
+  `sequence` 即 `node_sequence`；`node_execution_id` 即 `execution_id`）。
+- 顺序：批次首事件必须 = 该执行已接管最大序号 + 1；缺口或内容不同 ⇒ `ABORTED`/`CONFLICT`，不通告 Controller
+  （D2）。Controller 收到冲突清队列、等 Node 重放（controller-session D2）。
+- event idempotency key 就是 `(execution_id, sequence)`（收据）+ `(node_execution_id, node_sequence)`（条目）；
+  **非**靠 `thread_entries(run_id, seq)` 猜重放身份。同名多次到达视为 no-op（同内容）或 `CONFLICT`（异内容）。
+- Phase 4 需要 `node_event_receipts`；未迁移前无法保证「收据是确认唯一依据」与 Node 未确认事件重启重放的正确
+  对齐（gap，见 4.13/4.16）。
+
+### 4.10 replay / stale matrix
+
+| 到达 | 处理 |
+|---|---|
+| takeover 于 phase='running'（同 execution） | stale no-op：CAS affected=0，无新条目（同 `(node_execution_id,node_sequence)` 幂等），不倒退 |
+| 同 run 不同 execution_id | `CONFLICT`/invariant reject（execution_work.execution_id 已写另一值；work_id 唯一拒绝第二执行） |
+| takeover 于 terminal/releasing/done | 不得回到 running：钩子重读 phase ≠ 'starting' ⇒ no-op（钩子不再推进）；不 regression |
+| unknown run / execution 未登记 | 钩子以 invariant 错误回滚（同 settleRunWorkspace：不存在即 invariant 而非 no-op），防止 A 事件在无业务接受方时被确认 |
+| 载荷不一（同 execution_id 同 sequence 异 record） | `CONFLICT`，原条目与兼容性收据不变 |
+
+### 4.11 cancel race
+
+本轮不实现 cancel API；只定串行化。cancel 写入与 `ThreadEventsTakenOver` 都可能决定 `starting→releasing/
+cancelled` vs `starting→running`。规则（沿用 Phase 1/2 基线 + settleRunWorkspace 先例）：
+- 同一全局 advisory lock（`transact`）串行化两个事务；钩子内做权威 re-read + CAS。
+- 钩子 CAS：`UPDATE issue_runs SET phase='running' ... WHERE phase='starting' AND status='dispatched' AND
+  executor_type='agent' AND cancel_requested_at IS NULL`。cancel 先提交 ⇒ `cancel_requested_at` 已置 ⇒
+  钩子 CAS affected=0 ⇒ takeover 视为 stale/no-op，运行按 D6 无会话取消进入 `releasing/cancelled`。
+- takeover 先提交 ⇒ 运行已是 `running`；后续 cancel 落入 running 语义（D6：取消是请求，会话收尾后结束，
+  进入 delivering→releasing），不破坏已接管 Thread。
+- winner = 先获得锁并提交者；后到者经权威 re-read 观察到并采取对应语义（hook CAS / settle 先读 cincel）。
+  不引入新 status。
+
+### 4.12 crash / restart
+
+对照 mandate §23 五类崩溃，写入避雷：
+
+| Crash | durable truth | 重试归属 | replay 安全? | duplicate Thread? | 错误 running? |
+|---|---|---|---|---|---|
+| C1 claim 后、RecordDispatch 前 | 仅 `execution_work` 未登记 | Controller 重取（`agent_work_claim` 仍返回该行） | 是（未登记可被不同 controller 取） | 否 | 否 |
+| C2 RecordDispatch 提交后、Node 收到前 | `node_executions` 已登记、work.execution_id 已写 | Controller 查询既有执行、重发 `StartAgentSession`（不再 claim） | 是（`node_executions` 幂等） | 否 | 否（dispatch ≠ running） |
+| C3 Node 启动后、takeover 发送前 | 事件在 Node 账本、未确认 | Node 重放（最小未确认序号）；Controller 中继 | 是 | 否（未接管即无条目） | 否 |
+| C4 takeover 事务中途 | 事务未提交 ⇒ 全部回滚 | Node 重放该批（未 ack） | 是（重放同批再次接管） | 否（回滚后不落条目） | 否 |
+| C5 takeover 提交后、ack 返回前 | `thread_entries`+running 已落库 | Cloud 幂等；Node 重放同批被视为已接管（同 node 键）⇒ no-op | 是 | 否（唯一键） | 若 CAS 已运行 running，重放 no-op 不倒退；若未到 CAS，重放正常推进一次 |
+
+重启恢复：Controller restart 经 `GetDispatch`/`ListPendingDispatches`（root D4 恢复读取，覆盖新种类）找回
+registered/unregistered work；Node retry takeover 依 `(execution_id, sequence)` 幂等；Cloud restart 从 DB 恢复
+全部状态（running/thread 都在库里）；B 不依赖任何 in-memory state。
+
+### 4.13 migration needs
+
+**Required Migration: YES（Phase 4A/4B）**
+
+1. `node_executions`（Phase 4A）：`execution_id text PK`、`kind`（agent_session|deliver_revision）、
+   `operation_id`（IssueRun id，语义引用）、`work_id uuid UNIQUE`（→ execution_work.id）、`node_id`、
+   `input jsonb`、`result jsonb`、`dispatched_epoch bigint`、`last_event_sequence bigint default 0`。
+2. `node_event_receipts`（Phase 4B）：`(execution_id, sequence)` 主键、`event jsonb`（原事件）。
+3. 可选：`issue_runs.thread_state` 值集合已含 `pending/active/idle/ending/ended`（0018）无需迁移；`thread_entries`
+   schema 已够（0018）；first-takeover 的 `pending` 语义分支依赖 Node 事件形状，若无则可能只需业务写。
+本轮不实现任何 migration；以上仅为 plan 记录。
+
+### 4.14 test matrix
+
+本轮只列 T4-1..T4-16（§26），全部 `DESIGNED / MISSING`（不标 Covered——未实现）；其中 T4-4 claim/dispatch 不
+推进运行在 Phase 3B 的 T3B-10/11/12 已由真实实现证明（可标该单项 Covered，见 specs），其余 T4 待 Phase 4A/4B 实现。
+
+| ID | 义务 | Phase | 状态 |
+|---|---|---|---|
+| T4-1 | RecordDispatch 登记同一 work → 一个 execution_id | 4A | DESIGNED / MISSING |
+| T4-2 | RecordDispatch 重放（同 id）幂等 | 4A | DESIGNED / MISSING |
+| T4-3 | RecordDispatch 异 id → invariant error | 4A | DESIGNED / MISSING |
+| T4-4 | claim/dispatch 不推进运行（仍是 starting） | 4A | **Covered**（T3B-10/11/12, Phase 3B） |
+| T4-5 | 权威 takeover：starting → running | 4B | DESIGNED / MISSING |
+| T4-6 | takeover 重放：无重复条目、无状态倒退 | 4B | DESIGNED / MISSING |
+| T4-7 | 错误 execution 被拒 | 4B | DESIGNED / MISSING |
+| T4-8 | terminal/stale run 不回到 running | 4B | DESIGNED / MISSING |
+| T4-9 | seq 从 2 续接 | 4B | DESIGNED / MISSING |
+| T4-10 | 并发 event 批次 seq 单调唯一 | 4B | DESIGNED / MISSING |
+| T4-11 | event 重放：同 Node 事件无重复条目 | 4B | DESIGNED / MISSING |
+| T4-12 | takeover 事务回滚（hook 错 → A 收据 + B running 一起回滚） | 4B | DESIGNED / MISSING |
+| T4-13 | commit 后重启重放安全 | 4B | DESIGNED / MISSING |
+| T4-14 | cancel 先提交 + takeover → 不进 running | 4B | DESIGNED / MISSING |
+| T4-15 | takeover 先提交 + 后到 cancel → running 取消语义（不破坏） | 4B | DESIGNED / MISSING |
+| T4-16 | 无 Phase 5 副作用（无 delivery/release 工作项） | 4B | DESIGNED / MISSING |
+
+### 4.15 sub-phase split
+
+基于代码事实（无 `node_executions`/`node_event_receipts`/`thread_commands`；无 `TakeOverThreadEvents` 路由；钩子无
+caller）拆三子阶段：
+
+- **Phase 4A — A-side Dispatch Registration**：`node_executions` 迁移 + `agent_work_dispatch`（RecordDispatch）+
+  `execution_work.execution_id` 回写 + `AgentRunControlPlane`（或直接控制面动作）生产化 + replay/mismatch invariant。
+  范围：dispatch 到已登记、可被 Node 开始的执行。**不做 running**（D-017：claim/dispatch ≠ running）。
+- **Phase 4B — Thread Takeover + starting→running**：`node_event_receipts` 迁移 + `TakeOverThreadEvents`
+  控制面路由（首批 ≤64 连续、首事件 = 已接管最大+1）+ `ThreadEventsTakenOver` 钩子（seq≥2、CAS running、
+  thread_state、delivered）+ replay/stale 矩阵 + cancel race + 崩溃恢复。
+- **Phase 4C — Thread API/SSE**（后续，公开面）：`thread_commands` + `POST .../thread/messages`（幂等）+
+  `GET .../thread` + SSE `issue_run.thread_appended` + `EndSession` 命令 + delivery state / idle。Thread D3/D4/D5、
+  controller-integration D3/D5。
+
+理由：4A 是纯 A 控制面（登记身份），4B 是 A/B 交接（running 唯一 authority），4C 是公开 API 与命令（与 running
+正交）。两两边界可独立验收（migration + 用户态状态推进互不复用），降低评审风险。若只求连贯最小合入，也可
+**单 Phase 4（A 登记 + 4B 接管一起）**，但 thread_commands/API 仍必须后置到 4C——两者不同时落地。
+
+### 4.16 open gaps（Phase 4 新增）
+
+- **G-012（新）** `node_executions` / `node_event_receipts` 未迁移、无 `RecordDispatch`/`TakeOverThreadEvents`
+  生产路由、`ThreadEventsTakenOver` 无 caller —— Phase 4A/4B 的实现前提，现状全闭门。
+- **G-013（新）** `starting→running` 的「会话开始事件」Node 形状未明示：Node 协议 D2 只定义 `ThreadEvent{record}`，
+  controller-session ADR 处于 proposed；thread_state 首条即 `active` 还是可 `pending`（非记录开始信号）待定。
+  本轮不发明 synthetic 事件。
+- **G-014（新）** seq 分配机制 ADR 未定（已提案 D-023：锁内 `MAX(seq)+1`），实现前需批准。
+- **G-015（新）** Thread event 量与限速上限（controller-integration「未决」：单运行 event 量上限、`node_event_receipts`
+  保留期限）—— Phase 4B 前需给初值或显式延迟。
+- G-001（执行 seam CLOSED；**ThreadEventsTakenOver caller / RecordDispatch / EnqueueThreadCommand** 仍 PARTIAL，
+  分别由 4B / 4A / 4C 关闭）。G-005（cancel 写路径，后续 slice 拥有；Phase 4 只定 race 语义 4.11）。
+  G-009（seq 续接）Phase 4B 关闭。G-011（invalid workspace）**不在 Phase 4 顺手解决**，仅 fail-closed 保真
+  （钩子重读 workspace 无效 ⇒ 不推进 running、保持 gap，是否终态仍 G-011 后续）。
+
 ## 12. Decision Log
 
 Append new decisions; do not erase historical ones without noting supersession.
@@ -1313,6 +1572,68 @@ produces. Declaration is exactly-once (§7/§21); physical execution is at-least
 serializes on the same A row. A 0-affected `ON CONFLICT DO NOTHING` with no existing un-registered row is an
 invariant error (the row was registered concurrently), also rolled back.
 
+### D-019 — `starting → running` authority is the committed `ThreadEventsTakenOver` takeover（Phase 4 design）
+
+Status: Accepted (design; implementation deferred to Phase 4B)
+
+Only the business hook `ThreadEventsTakenOver` succeeding inside its caller-owned `TakeOverThreadEvents`
+transaction moves a run `starting → running` (IssueRun D3 entry condition「首条 Thread 事件或会话开始事件被接管」；
+controller-integration D6 hook `threadEventsTakenOver`). `execution_work` creation, Controller claim
+(`agent_work_claim`, D-017), `RecordDispatch`/`execution_id` registration, Node accepting work, Node allocating a
+sandbox/process, and Controller sending `StartAgentSession` are all dispatch or physical-allocation facts and are
+**never** running evidence. The takeover transaction MUST have already written `node_event_receipts` before the hook
+runs, and the hook re-reads authoritative `issue_runs` before its CAS (4.6/4.7).
+
+### D-020 — `execution_id` is Controller-generated; A records and fences it at `RecordDispatch`（Phase 4 design）
+
+Status: Accepted and implemented (Phase 4A, 2026-09-30). Evidence: `agentWorkDispatch` in
+`internal/core/agent_run_execution_work.go`; migration `0020_node_executions.sql`; `T4A-1` (first registration),
+`T4A-2` (same replay idempotent), `T4A-3` (different execution_id conflict), `T4A-4` (same execution_id reused on a
+different work conflict), `T4A-13/14` (concurrent same/different id converge/conflict on one authoritative row);
+`TestMigration0020NodeExecutionsAppliesFreshAndUpgrades` (PK(execution_id), UNIQUE(work_id), FK, pending index).
+A generates neither `execution_work.id`-names-work nor Controller `execution_id`; A records `node_executions` and
+fences `execution_work.execution_id` in the same transaction (T4A-7/8 atomicity).
+
+`execution_id` is generated by the Controller and supplied on `RecordDispatch` (`agent_work_dispatch`), following the
+existing clone precedent (caller supplies the execution identity; A validates uniqueness and records it). A persists
+it in a new `node_executions` row and writes it back to `execution_work.execution_id` under a `WHERE execution_id IS
+NULL` fence. `execution_id` ownership therefore stays Controller/RecordDispatch-owned (plan §8, D-012/D-016); A owns
+the recording table and the fencing, never the identity value. `execution_work.id` (A-generated, Phase 3B) and
+`execution_id` (Controller-generated, Phase 4A) are distinct: the former names the queued work, the latter the
+dispatched execution.
+
+### D-021 — one `execution_work` at most one authoritative `execution_id`（Phase 4 design）
+
+Status: Accepted and implemented (Phase 4A, 2026-09-30). Evidence: as D-020, plus `T4A-5` (node mismatch conflict),
+`T4A-6` (immutable-input mismatch conflict leaves stored input unchanged), `T4A-7` (schema UNIQUE(work_id) forbids a
+second node_execution for one work), `T4A-8` (caller rollback leaves no node_execution and NULL binding).
+
+### D-022 — `TakeOverThreadEvents` event identity is `(execution_id, sequence)`; entry identity is
+`(node_execution_id, node_sequence)`（Phase 4 design）
+
+Status: Accepted (design; implementation deferred to Phase 4A/4B)
+
+The authoritative event receipt identity is `node_event_receipts(execution_id, sequence)` (root D4,
+controller-integration D6) — the confirmation basis for `EventAck`; the business entry-remap key is
+`thread_entries(node_execution_id, node_sequence)` UNIQUE (Thread D1), with `node_execution_id` = the execution's
+`execution_id` and `node_sequence` = the Node event `sequence`. Replay of the same Node event is a no-op (same
+content, same key); the same key with different content is `CONFLICT` and the original entry/receipt is unchanged.
+This is **not** derived by guessing from `thread_entries(run_id, seq)`; both receipt and entry must be migrated
+(`node_event_receipts`) before Phase 4B can guarantee Node-restart replay alignment.
+
+### D-023 — Thread `seq` allocation is `MAX(seq)+1` inside the takeover transaction（Phase 4 decision proposal, unapproved）
+
+Status: Proposed for approval; not implemented
+
+Thread D1 fixes「Cloud 在写入事务中分配、seq 连续」but does not prescribe the mechanism. Proposal: in the
+`ThreadEventsTakenOver` takeover transaction, allocate `seq` from 2 upward as `MAX(seq)+1` per inserted entry. Safety
+rests on (a) the control plane serializing per execution with at most one in-flight batch (controller-session D2, so
+sequences always arrive in order) and (b) cross-run/cross-batch serialization by the existing global advisory lock
+(`transact` baseline, Phase 1), so `MAX(seq)` re-reads inside the lock race no other Writer. Chosen over a counter
+column / separate sequence state because it adds no table and reuses the established serialization; a
+deterministic-from-Node-order allocation is rejected because (seq=1 is a Cloud system turn) it cannot stay gapless
+under replay. Approve before Phase 4B implementation.
+
 ---
 
 ## 13. Open Gaps / Decisions Needed
@@ -1348,6 +1669,13 @@ in `cmd/server/main.go` (G-008 CLOSED; see D-016). The remaining three seam meth
 — `CreateRunWorkspace` is owned by the phase that creates the run Workspace (Phase 2A/B used the injected
 stub), `DeleteRunWorkspace` by the Phase 5 releasing/delete path, and `EnqueueThreadCommand` by Phase 4 Thread
 control. G-001 as a whole therefore stays PARTIAL until those phases land their seam portions.
+
+Status after Phase 4 design (2026-09-30): **PARTIAL (unchanged)** — the Phase 4 design round adds **no**
+production caller. The execution seam stays CLOSED; the seam pieces Phase 4 owns remain outstanding: the
+`RecordDispatch`/`execution_id` registration path (Phase 4A, D-020/D-021) is not the isolated A seam method but a
+control-plane transaction on `node_executions`; `ThreadEventsTakenOver` caller (Phase 4B) is the
+`TakeOverThreadEvents` route; `EnqueueThreadCommand` (Phase 4C) stays fail-closed. None of these are closed by
+this design round (mandate §30: schema/contract existence ≠ implementation).
 
 ### G-002 — create_workspace plugin step
 
@@ -1398,18 +1726,38 @@ updated after the Phase 3A implementation round:
 
 - **G-007** (first-prompt renderer) — **CLOSED**: `renderAgentInitialTurn` (fixed Cloud template →
   `thread_entries` seq=1 `source=system`,`kind=user_turn`) is productionized and deterministically tested.
-- **G-008** (`execution_work`/`node_executions` tables + `execution_id` write) — **STILL OPEN**: A/Controller
-  responsibility (part of G-001), Phase 3B. Phase 3A deliberately does not fabricate an execution table: it
-  uses `thread_entries(seq=1)` as B's own durable once marker so the obligation is not disguised.
+- **G-008** (`execution_work`/`node_executions` tables + `execution_id` write) — **CLOSED for `execution_work`**:
+  `0019_execution_work.sql` persists the authoritative work row with a real partial-unique exactly-once index
+  (D-016); Phase 3B builds the work row and generates `execution_work.id`, and never occupies `execution_id` (which
+  stays Controller/RecordDispatch-owned). `node_executions` remains un-migrated and is a **Phase 4A** obligation
+  (D-020/D-021), no longer part of G-008 per se.
 - **G-009** (`thread_entries` seq=1 reserved by the first prompt; Phase 4 must continue gapless from seq=2) —
-  **OPEN**, a cross-phase seam constraint Phase 4 must honor (confirmed non-breaking: Phase 3A writes only seq=1).
+  **OPEN → Phase 4B**: seq=1 is preserved (Phase 3A writes only seq=1); Phase 4 allocates seq≥2 in the takeover
+  transaction (D-023 proposal, 4.8).
 - **G-010** (derive the D6 `EnqueueExecutionWork` `target` from `sandbox_instances`/`node_instances`) —
   **CLOSED with the minimal deterministic `sessionStartTarget`** (`{workspace_id, sandbox_instance_id, node_id}`
   when a live sandbox/connected Node exists).
 - **G-011** (terminal for a `starting` run with invalid/missing workspace) — **PARTIAL**: the fail-closed path
   (leave `starting`, no terminal state, retry loop resurfaces) is implemented + tested (`runWorkspaceLive` /
   `TestAgentSessionStartSoftDeletedWorkspaceFailsClosed`); the authoritative choose-path decision remains for a
-  later approval (this round chose fail-closed per §6/§11, never `status=failed` for convenience).
+  later approval (this round chose fail-closed per §6/§11, never `status=failed` for convenience). **Phase 4 does
+  not solve this** — the takeover hook re-checks the workspace and fails closed (no `running`), preserving the gap.
+
+### G-012..G-015 — Phase 4 thread/running gaps (added this design round)
+
+- **G-012 — PARTIAL（Phase 4A 已闭合 A 侧登记部分，4B 仍 Missing）** — `node_executions` migrated
+  (0020) + production `RecordDispatch` (`agent_work_dispatch`) + `execution_work.execution_id` fence implemented and
+  evidence-backed (D-020/D-021, T4A-1..T4A-14, `TestMigration0020NodeExecutionsAppliesFreshAndUpgrades`). Still
+  Missing: `node_event_receipts` un-migrated, `TakeOverThreadEvents` route absent, `ThreadEventsTakenOver` caller /
+  `EnqueueThreadCommand` fail-closed — all owned by Phase 4B (D-022). (D-020/D-021/D-022.)
+- **G-013** — the "session-start event" shape for `starting→running` is unspecified by the approved ADRs: Node
+  protocol D2 only defines `ThreadEvent{record}`; the controller-session ADR (which would pin the first-takeover
+  semantics and whether `thread_state` may be `pending` on a non-record start signal) is `proposed`. This design
+  round does **not** invent a synthetic event and does not guess the alternative semantics (4.3/4.6/4.16).
+- **G-014** — Thread `seq` allocation mechanism is not fixed by Thread D1 (only「Cloud 分配、连续」). Proposed
+  `MAX(seq)+1` in the takeover transaction (D-023); needs approval before Phase 4B implementation.
+- **G-015** — per-run Thread event-count ceilings and `node_event_receipts` retention are unresolved
+  (controller-integration「未决」). Phase 4B needs either an initial bound or an explicit defer.
 
 ---
 
@@ -1661,10 +2009,102 @@ At the end of each Agent round, append or update this section.
 
 Current phase:
 
-**Phase 3 — Session Start（A-side Execution Work Persistence + EnqueueExecutionWork）：DONE at the
-B/A-isolated boundary（Phase 3A + 3B both IMPLEMENTED）；Phase 4（Thread / `running`）NOT_STARTED.**
+**Phase 4A DONE — A-side dispatch registration（实现完成，架构可评审；未进入 4B running）**
 
-Current status: **PHASE_3_DONE / READY_FOR_PHASE_4_DESIGN / NOT_READY_FOR_PHASE_4_IMPLEMENTATION**
+Current status: **PHASE_4A_DONE / PHASE_4A_ARCHITECTURALLY_REVIEWABLE / NOT_READY_FOR_PHASE_4B_IMPLEMENTATION**
+（4A 只落地 A 侧 `RecordDispatch` 执行登记：`execution_work(agent_session) → Controller claim → Controller 分配
+execution_id → agent_work_dispatch → node_executions 行 + execution_work.execution_id 栅栏`。`IssueRun.phase` 全程保持
+`starting`/`dispatched`，**绝不进入 running**；4B（Thread takeover、starting→running、thread seq≥2、node_event_receipts、
+D-023 MAX(seq)+1）本轮**禁止实现/禁止固化**，其取值与本 marker 判断无关，`PHASE_4B = NOT READY`。）
+
+**Phase 4A implementation record (this round — A-side dispatch registration, D-020/D-021):**
+
+1. **migration** `internal/core/migrations/0020_node_executions.sql` (new): A-owned `node_executions` table
+   (execution_id text PK, kind('agent_session'|'deliver_revision'), operation_id uuid 语义引用, work_id uuid UNIQUE
+   FK→execution_work(id), node_id, input/result jsonb, dispatched_epoch bigint, last_event_sequence bigint DEFAULT 0,
+   created/updated)。`node_executions_pending_node (node_id, created_at) WHERE result IS NULL` 支撑 C2 崩溃恢复。
+   execution_id 是 Controller 生成的全局权威执行身份（PRIMARY KEY），A 只记录与栅栏、绝不生成（D-020）；work_id
+   UNIQUE 在存储层强制一个 work 至多一个执行（D-021）；`last_event_sequence` 是 4B 占位（DEFAULT 0，本轮只建不读，
+   D-023 未实现）。4A 不创建 `node_event_receipts`/`thread_commands`。
+2. **production first-registration** (`agentWorkDispatch` in `agent_run_execution_work.go`): Controller 提供
+   work_id/execution_id/node_id/input/epoch；A 校验（work 存在、kind=agent_session、node==work.target.node_id、
+   input==work.input 不可变快照 json 相等），随后**同一事务** INSERT node_executions + fenced UPDATE
+   `execution_work SET execution_id=$2 WHERE id=$1 AND execution_id IS NULL`；fence 影响 0 行→`reject(409)` 整体回滚，
+   绝不留下 orphan node_executions（§9/§10）。失败一律 panic/reject 使事务回滚，dispatch 由 `submitted` 幂等包装。
+3. **replay / invariant-conflict 语义（D-021）**：同一 work 已注册时，读回注册行，execution_id/node_id/input 均一致
+   → 幂等成功返回既有行；**不同 execution_id / node / input → `dispatch_conflict`（409），绝不 overwrite /
+   last-write-wins**。全局唯一性（同一 execution_id 复用于另一 work）→ 冲突。首次登记路径对"读到未注册期间他方已落
+   以便被戳穿的同 execution_id"也做幂等容忍（同 work+node+input→返回既有行），其余→冲突。
+4. **recovery reads（C2，无 lease 的纯读）**：`agent_work_get`（按 executionId 返回已注册 dispatch，404 if nil）、
+   `agent_work_pending`（列出 result IS NULL 的在途执行，可按 node 过滤），在 control.go 的 clone_get/clone_pending 旁
+   提前分支，替换 Controller 复用既有 execution_id 而不重复登记。
+5. **run 状态与 owner 纪律**：claim 与 dispatch 都是纯读/登记，`issue_runs.phase/status/thread_state` 与
+   `thread_entries` 均不触碰；4A 代码不 UPDATE issue_runs、不 INSERT thread_entries、不 UPDATE thread_state；A 侧
+   CreateRunWorkspace/DeleteRunWorkspace/EnqueueThreadCommand 仍 fail-closed（Phase 5/4）。T4A-9/T4A-10/T4A-16 全程
+   phase=starting/status=dispatched、thread seq 恒为 1、无 running。
+6. **tests（真实 PostgreSQL white-box，`internal/core/node_executions_db_test.go`）T4A-1..T4A-16**：
+   T4A-1 FirstRegistration；T4A-2 SameReplay（幂等）；T4A-3 DifferentExecutionIDConflict；T4A-4
+   SameExecutionDifferentWorkConflict；T4A-5 NodeMismatchConflict；T4A-6 InputMismatchConflict（既有 input 不变）；
+   T4A-7 NoOrphan（schema work_id UNIQUE 强制一 work 一执行，存储层原子性佐证 §9/§10）；T4A-8 CallerRollback（真实
+   dispatch 后调用者事务回滚→无 node_execution 残留、execution_id 复位 NULL）；T4A-9 ClaimDoesNotRun；
+   T4A-10 RecordDispatchDoesNotRun；T4A-11 CrashC1UnregisteredRecoverable；T4A-12 CrashC2RegisteredRecoverable
+   （agent_work_get / agent_work_pending 复用同一 execution）；T4A-13 ConcurrentSameID（幂等收敛）；
+   T4A-14 ConcurrentDifferentIDs（恰一冲突、恰一权威注册）；T4A-15 NonAgentRegression（clone/未知 agent_work_ 路由不被
+   劫持）；T4A-16 NoPhase4BSideEffects（无 node_event_receipts、thread seq=1、不 running）。
+7. **migration 升级测试** `integration.TestMigration0020NodeExecutionsAppliesFreshAndUpgrades`：从 0019 升级应用
+   0020 + 重复 Migrate/CheckSchema 幂等，断言 PK(execution_id)、UNIQUE(work_id)、FK(work_id→execution_work)、
+   `node_executions_pending_node` 部分索引（result IS NULL）。
+
+**Files changed this round (Phase 4A):**
+
+- `internal/core/migrations/0020_node_executions.sql` (new)。
+- `internal/core/agent_run_execution_work.go`: `agentWorkCommand` 新增 `agent_work_dispatch`（submitted 包装）、
+  `agent_work_get`、`agent_work_pending`；新增 `agentWorkDispatch`（首次登记 + 幂等重放 + invariant 冲突，D-021）。
+- `internal/core/control.go`: 提前分支 `agent_work_get`/`agent_work_pending`（无 lease 纯读，C2 恢复）。
+- `internal/core/node_executions_db_test.go` (new): T4A-1..T4A-16。
+- `internal/core/agent_run_dispatcher_db_test.go`: `seedDispatchScene` collab workspace slug 每场景唯一（支撑
+  单 schema 多 scene 的 T4A-4）。
+- `integration/migration_upgrade_path_test.go`: 新增 0020 升级测试。
+- `plan/plan.md`, `plan/plan-zh.md`: marker 与决策日志更新（§16）。
+
+**New gaps this round:** none that Phase 4A owns. **G-008 / G-001 execution seam** continue as covered by Phase 3B。
+**G-001 stays PARTIAL**（`CreateRunWorkspace`/`DeleteRunWorkspace`/`EnqueueThreadCommand` 仍 fail-closed，归各自
+Phase）；**G-012 PARTIAL**（`node_executions` 迁移 + production `RecordDispatch`/execution_id 栅栏已实现，4A 部分
+Covered；`node_event_receipts` 未迁移、`TakeOverThreadEvents` 未实现——4B 部分仍 Missing）；**G-013、G-014
+unchanged/open**（starting→running 事件形状、D-023 seq 分配均需后续批准与 4B）；G-011 unchanged（fail-closed 已做、
+choose-path 待批）。
+
+**Tests added this round (Phase 4A):** 见上列 T4A-1..T4A-16 全文。D-020/D-021 由 T4A-1/2/3/4/5/6/13/14（登记、幂等、
+冲突、并发权威）与 0020 迁移测试直接证明；§9/§10 原子性由 T4A-7/8 证明；C2 恢复由 T4A-12 证明；「claim 与登记均不
+running」由 T4A-9/10/16 证明；无 4B side-effect 由 T4A-16 证明。
+
+**Gate results (this round):** gofmt/gofumpt clean on all Phase 4A files（`go tool gofumpt -l -extra` 对本次改动文件
+无输出）；`go build ./...`；`go vet ./internal/... ./integration`；`go test ./internal/core -count=1`；
+`go test ./integration -count=1`；`go test -race -count=1 ./internal/core/... ./integration`；`go test ./... -count=1`；
+`git diff --check` clean。`task format:check`/`task lint` 仍报告**既有基线**（皆 committed、未改动文件；
+`agent_run_control.go:42/76`、`agent_target.go:47/58`、`agent_run_control_test.go:65`、`agent_run_settle_db_test.go:64`、
+`space_agents.go:37`，另 format 门还含 `agent_run_terminal_db_test.go`）；按 mandate §1/§38 不 reformat 这些无关旧文件——
+非 4A 回归。4A 新增文件与改动文件在 lint/format 门中零新增 finding。
+
+**Previous round marker (Phase 4 design only, before 4A implementation), preserved:**
+
+**Phase 4 design facts (see the "Phase 4 — Thread / Running Lifecycle 详细设计" chapter):**
+
+1. **running authority** = the committed `ThreadEventsTakenOver` takeover transaction (4.3); `claim`,
+   `RecordDispatch`, Node dispatch/StartAgentSession and physical allocation are all ≠ running.
+2. **execution_id** = Controller-generated, A records `node_executions` + fences `execution_work.execution_id`
+   (4.4/4.5, D-020).
+3. **event identity** = `node_event_receipts(execution_id, sequence)` (receipt) + `thread_entries(node_execution_id,
+   node_sequence)` UNIQUE (entry); both required migrations for 4B (4.9, D-022).
+4. **running transition** = hook CAS `phase='starting' AND status='dispatched' AND cancel_requested_at IS NULL →
+   running`, `status='running'` per IssueRun D3, `thread_state` per Thread D4 (4.6/4.7/4.8, 4.11 cancel race).
+5. **PHP split** = Phase 4A (A-side dispatch registration) / 4B (Thread takeover + running) / 4C (Thread API/SSE) —
+   4C is mandatory-apart, 4A and 4B may merge (4.15).
+
+**Files changed this round (Phase 4 design):** only `plan/plan.md` (+ this §16 echo, the "Phase 4 — Thread /
+Running Lifecycle" chapter, D-019..D-023, G-012..G-015) and `plan/plan-zh.md` (mirror). **No** `internal/core`,
+**no** migration, **no** OpenAPI/contract, **no** specs test-case evidence changed to `Covered` (all T4-* stay
+`DESIGNED / MISSING` except T4-4 which Phase 3B already covers).
 
 Previous rounds: Phase 3A (B-owned Session Start Core) DONE; then this round — **PHASE 3B IMPLEMENTATION —
 COMPLETE** (A-side `execution_work` persistence + production `EnqueueExecutionWork` seam). Phase 3B closes

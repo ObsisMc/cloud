@@ -356,3 +356,73 @@ func TestMigration0019ExecutionWorkAppliesFreshAndUpgrades(t *testing.T) {
 		}
 	}
 }
+
+// TestMigration0020NodeExecutionsAppliesFreshAndUpgrades (T4A, phase 4 design §4.13): the 0020
+// node_executions migration applies cleanly on a database already at 0019 (upgrade path), is
+// idempotent (re-running Migrate changes nothing and passes CheckSchema), and leaves the table with
+// its authoritative constraints: PRIMARY KEY on execution_id (the Controller-generated global
+// identity), UNIQUE work_id (at most one execution per work, D-021), work_id FK to execution_work,
+// and the pending partial index (result IS NULL) by node for C2 crash recovery. Fresh-DB coverage is
+// the full-sequence test, which migrates from scratch; this test pins the upgrade path.
+//
+// Evidence for the D-020/D-021 node_executions registration obligation: the migration is what
+// installs the DB-enforced one-work→one-execution and the recovery lookup.
+func TestMigration0020NodeExecutionsAppliesFreshAndUpgrades(t *testing.T) {
+	// Upgrade path: start from all migrations through 0019, then let store.Migrate run 0020.
+	pool, _ := testSchema(t, "test_nd20_")
+	entries, e := os.ReadDir(filepath.Join("..", "internal", "core", "migrations"))
+	must(t, e)
+	var previous []string
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".sql" && entry.Name() < "0020_node_executions.sql" {
+			previous = append(previous, entry.Name())
+		}
+	}
+	applyMigrationsUpTo(t, pool, previous)
+	store := newStoreOnSchema(t, pool)
+	must(t, store.Migrate(context.Background()))
+	// Idempotent: a second Migrate + CheckSchema must be clean.
+	must(t, store.Migrate(context.Background()))
+	must(t, store.CheckSchema(context.Background()))
+
+	if !tableExists(t, pool, "node_executions") {
+		t.Fatal("node_executions table must exist after 0020")
+	}
+	// execution_id is PRIMARY KEY: the Controller-generated identity is globally unique.
+	var pkCount int
+	must(t, pool.QueryRow(`SELECT count(*) FROM information_schema.table_constraints
+		WHERE table_schema=current_schema() AND table_name='node_executions' AND constraint_type='PRIMARY KEY'`).Scan(&pkCount))
+	if pkCount != 1 {
+		t.Fatalf("node_executions must have a PRIMARY KEY, got %d", pkCount)
+	}
+	// work_id is UNIQUE: one work can never host two executions (D-021, one-work→one-execution).
+	var workUnique int
+	must(t, pool.QueryRow(`SELECT count(*) FROM information_schema.table_constraints
+		WHERE table_schema=current_schema() AND table_name='node_executions' AND constraint_type='UNIQUE'`).Scan(&workUnique))
+	if workUnique != 1 {
+		t.Fatalf("node_executions.work_id must be UNIQUE, got %d", workUnique)
+	}
+	// work_id is an enforced reference to execution_work (ownership path node_executions → execution_work).
+	var hasFK bool
+	must(t, pool.QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		  ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema=current_schema() AND tc.table_name='node_executions'
+		  AND tc.constraint_type='FOREIGN KEY' AND kcu.column_name='work_id'
+	)`).Scan(&hasFK))
+	if !hasFK {
+		t.Fatal("node_executions.work_id must be a foreign key reference to execution_work")
+	}
+	// The pending partial index (result IS NULL, by node) backs C2 crash recovery.
+	var pendingIdx int
+	must(t, pool.QueryRow(`SELECT count(*) FROM pg_indexes WHERE schemaname=current_schema() AND tablename='node_executions' AND indexname='node_executions_pending_node'`).Scan(&pendingIdx))
+	if pendingIdx != 1 {
+		t.Fatalf("node_executions_pending_node index must exist, got %d", pendingIdx)
+	}
+	var pred sql.NullString
+	must(t, pool.QueryRow(`SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND tablename='node_executions' AND indexname='node_executions_pending_node'`).Scan(&pred))
+	if pred.String == "" || !strings.Contains(pred.String, "result IS NULL") {
+		t.Fatalf("pending index must be partial over result IS NULL, got %q", pred.String)
+	}
+}

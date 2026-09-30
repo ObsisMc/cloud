@@ -42,6 +42,11 @@ func (s *Store) Control(ctx context.Context, r *ControlRequest) (Object, error) 
 		if r.Action == "clone_get" || r.Action == "clone_pending" {
 			return cloneCommand(t, r)
 		}
+		// Recovery reads for a registered execution need no lease: a replacement worker locates
+		// the original dispatch (C2, Phase 4A) before it can hold one, and reading fences nothing.
+		if r.Action == "agent_work_get" || r.Action == "agent_work_pending" {
+			return agentWorkCommand(t, r)
+		}
 		leaseValid(t, r)
 		if r.Action == "claim" {
 			return claim(t, r)
