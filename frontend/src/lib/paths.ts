@@ -29,6 +29,10 @@ export function workspacePaths(slug: string) {
     projects: `${base}/projects`,
     projectDetail: (id: string) => `${base}/projects/${id}`,
     repositories: `${base}/repositories`,
+    workflows: `${base}/workflows`,
+    workflowDetail: (id: string) => `${base}/workflows/${id}`,
+    workflowRun: (workflowId: string, runId: string) =>
+      `${base}/workflows/${workflowId}/runs/${runId}`,
     spaces: `${base}/spaces`,
     agents: `${base}/agents`,
     agentDetail: (id: string) => `${base}/agents/${id}`,

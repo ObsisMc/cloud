@@ -41,6 +41,7 @@ import type {
   DeleteApiV1TenantsTidLabelsLidBody,
   Error,
   FormDescriptor,
+  GetApiV1TenantsTidCollaborationFormsFormRefParams,
   GetApiV1TenantsTidCollaborationTargets200,
   GetApiV1TenantsTidInvitations200,
   GetApiV1TenantsTidInvitationsParams,
@@ -57,6 +58,7 @@ import type {
   GetApiV1TenantsTidIssuesIidLabels200,
   GetApiV1TenantsTidIssuesIidLabelsParams,
   GetApiV1TenantsTidIssuesIidRuns200,
+  GetApiV1TenantsTidIssuesIidRunsParams,
   GetApiV1TenantsTidIssuesIidSubscribers200,
   GetApiV1TenantsTidIssuesIidSubscribersParams,
   GetApiV1TenantsTidIssuesIidTimeline200,
@@ -352,12 +354,14 @@ export const usePostApiV1Tenants = <TError = ErrorType<Error>,
 export const getApiV1TenantsTidCollaborationFormsFormRef = (
     tid: string,
     formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<FormDescriptor>(
-      {url: `/api/v1/tenants/${tid}/collaboration/forms/${formRef}`, method: 'GET', signal
+      {url: `/api/v1/tenants/${tid}/collaboration/forms/${formRef}`, method: 'GET',
+        params, signal
     },
       options);
     }
@@ -366,24 +370,26 @@ export const getApiV1TenantsTidCollaborationFormsFormRef = (
 
 
 export const getGetApiV1TenantsTidCollaborationFormsFormRefQueryKey = (tid: string,
-    formRef: string,) => {
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams,) => {
     return [
-    `/api/v1/tenants/${tid}/collaboration/forms/${formRef}`
+    `/api/v1/tenants/${tid}/collaboration/forms/${formRef}`, ...(params ? [params] : [])
     ] as const;
     }
 
 
 export const getGetApiV1TenantsTidCollaborationFormsFormRefQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(tid: string,
-    formRef: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidCollaborationFormsFormRefQueryKey(tid,formRef);
+  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidCollaborationFormsFormRefQueryKey(tid,formRef,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>> = ({ signal }) => getApiV1TenantsTidCollaborationFormsFormRef(tid,formRef, requestOptions, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>> = ({ signal }) => getApiV1TenantsTidCollaborationFormsFormRef(tid,formRef,params, requestOptions, signal);
 
 
 
@@ -398,7 +404,8 @@ export type GetApiV1TenantsTidCollaborationFormsFormRefQueryError = ErrorType<Er
 
 export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(
  tid: string,
-    formRef: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>> & Pick<
+    formRef: string,
+    params: undefined |  GetApiV1TenantsTidCollaborationFormsFormRefParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>,
           TError,
@@ -409,7 +416,8 @@ export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<R
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(
  tid: string,
-    formRef: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>> & Pick<
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>,
           TError,
@@ -420,7 +428,8 @@ export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<R
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(
  tid: string,
-    formRef: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -429,11 +438,12 @@ export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<R
 
 export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(
  tid: string,
-    formRef: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetApiV1TenantsTidCollaborationFormsFormRefQueryOptions(tid,formRef,options)
+  const queryOptions = getGetApiV1TenantsTidCollaborationFormsFormRefQueryOptions(tid,formRef,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -3090,12 +3100,14 @@ export const usePostApiV1TenantsTidIssuesIidMove = <TError = ErrorType<Error>,
 export const getApiV1TenantsTidIssuesIidRuns = (
     tid: string,
     iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<GetApiV1TenantsTidIssuesIidRuns200>(
-      {url: `/api/v1/tenants/${tid}/issues/${iid}/runs`, method: 'GET', signal
+      {url: `/api/v1/tenants/${tid}/issues/${iid}/runs`, method: 'GET',
+        params, signal
     },
       options);
     }
@@ -3104,24 +3116,26 @@ export const getApiV1TenantsTidIssuesIidRuns = (
 
 
 export const getGetApiV1TenantsTidIssuesIidRunsQueryKey = (tid: string,
-    iid: string,) => {
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams,) => {
     return [
-    `/api/v1/tenants/${tid}/issues/${iid}/runs`
+    `/api/v1/tenants/${tid}/issues/${iid}/runs`, ...(params ? [params] : [])
     ] as const;
     }
 
 
 export const getGetApiV1TenantsTidIssuesIidRunsQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(tid: string,
-    iid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidIssuesIidRunsQueryKey(tid,iid);
+  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidIssuesIidRunsQueryKey(tid,iid,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>> = ({ signal }) => getApiV1TenantsTidIssuesIidRuns(tid,iid, requestOptions, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>> = ({ signal }) => getApiV1TenantsTidIssuesIidRuns(tid,iid,params, requestOptions, signal);
 
 
 
@@ -3136,7 +3150,8 @@ export type GetApiV1TenantsTidIssuesIidRunsQueryError = ErrorType<Error>
 
 export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(
  tid: string,
-    iid: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>> & Pick<
+    iid: string,
+    params: undefined |  GetApiV1TenantsTidIssuesIidRunsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>,
           TError,
@@ -3147,7 +3162,8 @@ export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<ty
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(
  tid: string,
-    iid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>> & Pick<
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>,
           TError,
@@ -3158,7 +3174,8 @@ export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<ty
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(
  tid: string,
-    iid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -3167,11 +3184,12 @@ export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<ty
 
 export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(
  tid: string,
-    iid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetApiV1TenantsTidIssuesIidRunsQueryOptions(tid,iid,options)
+  const queryOptions = getGetApiV1TenantsTidIssuesIidRunsQueryOptions(tid,iid,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

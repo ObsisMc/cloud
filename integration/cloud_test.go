@@ -99,12 +99,12 @@ func setup(t *testing.T) *fixture {
 	must(t, e)
 	store, e := core.NewDevelopmentStore(db)
 	must(t, e)
-	// Wire the dev/demo collaboration fixtures so the mock execution path is exercised.
-	store.Directory = collab.FixtureCollaborationDirectory{}
-	store.Context = collab.DeterministicContextBuilder{}
-	store.Dispatcher = collab.MockExecutionDispatcher{}
-	store.Forms = collab.FixtureFormDescriptorProvider{}
-	store.Assist = collab.MockInputAssistProvider{}
+	// Wire the dev/demo collaboration fixtures so the mock execution path is exercised. Workflow
+	// targets and their form descriptors stay database-backed: the fixtures layer agent/team in front
+	// of the directory NewStore already installed.
+	collab.WireDevelopmentFixtures(store)
+	// Plugin execution has no real executor yet; the simulation capability is what the fixtures above
+	// stand in for, and it must be opted into explicitly (see plugin_maintenance.go).
 	store.PluginExecution = core.PluginExecutionSimulation
 	must(t, store.Migrate(context.Background()))
 	must(t, store.Migrate(context.Background()))
