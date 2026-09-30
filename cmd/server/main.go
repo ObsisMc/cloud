@@ -42,11 +42,18 @@ func main() {
 // enabling GitHub Auth must never enable these fixtures, and an auth failure must never fall back to
 // a fixture identity.
 func configureCollaboration(store *core.Store, developmentFixtures bool, log *zap.Logger) {
-	if !developmentFixtures {
+	if developmentFixtures {
+		collab.WireDevelopmentFixtures(store)
+		log.Warn("development collaboration fixtures enabled: Agent/Team/Workflow targets served from in-memory fixtures (development-only; production must leave collaboration.development_fixtures false)")
 		return
 	}
-	collab.WireDevelopmentFixtures(store)
-	log.Warn("development collaboration fixtures enabled: Agent/Team/Workflow targets served from in-memory fixtures (development-only; production must leave collaboration.development_fixtures false)")
+	// Production: Agent is the one collaboration target with real backing (space_agents). Wire a
+	// roster-backed directory so target discovery serves real Space Agents; Team/Workflow (cross-module
+	// ports, still unbuilt) stay unreported. Run-create resolution re-validates against space_agents
+	// in-transaction regardless of this directory.
+	if store.Pool != nil {
+		store.Directory = core.NewSpaceAgentDirectory(store.Pool)
+	}
 }
 
 func run() (runErr error) {
@@ -103,6 +110,21 @@ func run() (runErr error) {
 		go func() {
 			defer syncGroup.Done()
 			pluginmarket.RunSyncLoop(ctx, syncer.Sync, cfg.Plugins.SyncInterval, pluginmarket.ContextSleep, log)
+		}()
+	}
+	// The agent-run dispatch loop is B-owned recovery for queued real Space Agent runs: a bounded
+	// rescan (limit agentDispatchBatchSize, ordered by created_at,id) that moves a queued run to
+	// phase='provisioning', status='dispatched' only when the AgentRunControlPlane accepts, and leaves
+	// busy or failed runs queued to retry at the next tick. It is owned by the process lifecycle like
+	// the marketplace loop: ctx cancellation stops it and the WaitGroup below waits for the in-flight
+	// pass (each Dispatch runs in its own short transaction; no transaction spans the sleep). The
+	// <=10s cadence means a project that was busy at claim time unblocks within a tick.
+	{
+		const agentDispatchInterval = 10 * time.Second
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.DispatchQueuedAgentRunsOnce, agentDispatchInterval, pluginmarket.ContextSleep, log)
 		}()
 	}
 	gin.SetMode(cfg.Server.Mode)

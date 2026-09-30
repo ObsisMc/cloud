@@ -55,15 +55,21 @@ func TestTenantMigrationFrom0016PreservesRuntimeCloneAndPlugins(t *testing.T) {
 	for _, table := range tables {
 		before[table] = snapshot(table)
 	}
-	store := newStoreOnSchema(t, pool)
-	must(t, store.Migrate(context.Background()))
-	must(t, store.Migrate(context.Background()))
-	must(t, store.CheckSchema(context.Background()))
+	// Apply 0017 alone so the preservation assertion isolates 0017's behavior from the
+	// additive 0018 skeleton migration (which legitimately adds workspaces.issue_run_id
+	// per IssueRun D2 and must not be mistaken for an upstream rewrite).
+	applyMigrationsUpTo(t, pool, []string{"0017_tenant_membership_and_join.sql"})
 	for _, table := range tables {
 		if after := snapshot(table); after != before[table] {
 			t.Fatalf("0017 rewrote upstream %s: before %s after %s", table, before[table], after)
 		}
 	}
+	// Then the current binary applies 0018 on top; it must apply cleanly, stay
+	// idempotent, and satisfy the strict schema audit.
+	store := newStoreOnSchema(t, pool)
+	must(t, store.Migrate(context.Background()))
+	must(t, store.Migrate(context.Background()))
+	must(t, store.CheckSchema(context.Background()))
 	if columnNullable(t, pool, "projects", "space_id") || tableExists(t, pool, "collab_workspace_members") {
 		t.Fatal("0017 must require project space association and remove the second membership authority")
 	}

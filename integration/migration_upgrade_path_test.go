@@ -26,7 +26,7 @@ import (
 // This mirrors how an upstream deployment reached 0007.
 func applyMigrationsUpTo(t *testing.T, pool *sql.DB, versions []string) {
 	t.Helper()
-	_, e := pool.Exec("CREATE TABLE schema_migrations(version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())")
+	_, e := pool.Exec("CREATE TABLE IF NOT EXISTS schema_migrations(version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())")
 	must(t, e)
 	for _, version := range versions {
 		b, e := os.ReadFile(filepath.Join("..", "internal", "core", "migrations", version))

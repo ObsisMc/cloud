@@ -204,6 +204,10 @@ func installSpacePlugin(t *transaction, r *PublicRequest, uid string) Object {
 	if len(workspaces) == 0 {
 		t.exec(`UPDATE space_plugins SET observed_state='installed',observed_version=$4,install_error=NULL,version=version+1,updated_at=now() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3`,
 			r.SpaceID, namespace, identifier, desiredVersion)
+		// No runtime workspace means the aggregate is already terminal: an
+		// agent-class plugin converges to installed in this same transaction, so
+		// its roster row activates here too (plugin-marketplace D3).
+		reconcileAgentOnAggregate(t, r.SpaceID, namespace+"/"+identifier, "installed")
 	}
 	return Object{"resource": t.spacePluginRow(r.SpaceID, namespace, identifier)}
 }
@@ -225,6 +229,14 @@ func removeSpacePlugin(t *transaction, r *PublicRequest, uid string) Object {
 
 	t.exec(`UPDATE space_plugins SET desired_state='removed',observed_state='removing',observed_version=NULL,install_error=NULL,version=version+1,updated_at=now() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3`,
 		r.SpaceID, namespace, identifier)
+	// D3 (plugin-marketplace "node executes plugin installs"): removing is driven
+	// by the plugin's desired_state becoming `removed` — the intent transition,
+	// not the eventual removing/removed aggregate. An agent-class plugin retiring
+	// the roster row here keeps the agent out of @-lists immediately; non-agent
+	// kinds never touch the roster. Idempotent: a retired row is a no-op.
+	if e := t.pluginCatalogEntry(namespace + "/" + identifier); e != nil && e.S("kind") == agentKind {
+		retireSpaceAgent(t, r.SpaceID, namespace+"/"+identifier)
+	}
 	projectOps := map[string]bool{}
 	hash := requestHash(r.Method, r.Path, r.Body)
 	for _, w := range workspaces {
@@ -301,5 +313,12 @@ func pluginInstanceWriteback(t *transaction, op Object, state, version string, i
 	}
 	t.exec(`UPDATE space_plugins SET observed_state=$4,observed_version=$5,install_error=$6,version=version+1,updated_at=now() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3`,
 		row.S("spaceId"), namespace, identifier, aggregate, nullable(version), err)
+	// D3 (node-executes-plugin-installs): when the recomputed aggregate converges
+	// this agent-class plugin to installed, create/revive its Space Agent row in
+	// this same transaction — never in a separate or deferred one. Only the
+	// installed aggregate (this terminal transition) activates; any intermediate
+	// installing/failed/removing aggregate is a no-op, so the roster only ever sees
+	// a converged install.
+	reconcileAgentOnAggregate(t, row.S("spaceId"), namespace+"/"+identifier, aggregate)
 	*spaceEvents = append(*spaceEvents, SpaceEvent{Type: "space.plugins_updated", SpaceID: row.S("spaceId")})
 }

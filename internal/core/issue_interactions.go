@@ -44,7 +44,22 @@ func applyCommentTargets(t *transaction, i Object, r *PublicRequest, uid, commen
 		var runID any
 		if mode == "task" {
 			require(strings.TrimSpace(task) != "" && len(task) <= 20000, 400, "task_required")
-			input := buildRunContext(t, i, task, targetType, targetID, Object{}, nil)
+			var input Object
+			if targetType == "agent" {
+				if agent, ok := agentRunEvidence(t, r.TenantID, targetID); ok {
+					// Real Space Agent (IssueRun D1): enforce the D2 project gate, and snapshot the
+					// plugin identity/version before enqueueing. The gate panics 409 and rolls back the
+					// whole comment transaction (no comment, no activity, no run) when it fails.
+					agentRunGate(t, i, agent)
+					input = buildRunContext(t, i, task, targetType, targetID, Object{}, nil)
+					input = snapshotAgentRunInput(input, agent)
+				} else {
+					// Non-space_agents agent (dev/compat fixture): unchanged legacy behavior.
+					input = buildRunContext(t, i, task, targetType, targetID, Object{}, nil)
+				}
+			} else {
+				input = buildRunContext(t, i, task, targetType, targetID, Object{}, nil)
+			}
 			runObj := enqueueRun(t, r.TenantID, i.S("id"), targetType, targetID, input, "comment", commentID, "user", uid)
 			runID = runObj.S("id")
 			*dispatches = append(*dispatches, dispatchTarget{tenantID: r.TenantID, runID: runObj.S("id")})

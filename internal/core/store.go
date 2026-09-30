@@ -81,6 +81,29 @@ type Store struct {
 	Forms      FormDescriptorProvider
 	Assist     InputAssistProvider
 
+	// AgentRunHooks is the business-side transition seam (controller-integration D6):
+	// control-plane transactions call these hooks inside their own transaction to move
+	// IssueRun/Thread business state. nil means "Unavailable": the control plane wires
+	// the explicit UnavailableAgentRunHooks stub in that case, so no control-plane
+	// transaction silently advances business state while the AgentRunDispatcher
+	// transitions are unimplemented. The call sites are part of the controller
+	// integration (A side), not this skeleton.
+	AgentRunHooks AgentRunHooks
+
+	// AgentRunControlPlane is the control-plane A-seam the business layer calls inside its
+	// own transactions to declare run Workspaces and execution work (controller-integration
+	// D6, B→A). nil means "Unavailable": B-side call sites use the explicit
+	// UnavailableAgentRunControlPlane stub (via agentRunControlPlane) so no business
+	// transaction fabricates a run Workspace or execution_work item while the A side is
+	// unimplemented. It is distinct from Dispatcher, which continues to own team/workflow
+	// dispatch.
+	AgentRunControlPlane AgentRunControlPlane
+
+	// AgentRunDispatcher owns Claim + Busy for queued real Space Agent IssueRuns (dispatch claim
+	// loop). It is populated in NewStore; agentRunDispatcher is the nil-safe accessor for Stores
+	// built or zero-valued without the constructor.
+	AgentRunDispatcher *AgentRunDispatcher
+
 	// Events broadcasts committed collaboration-space invalidation notices to live
 	// SSE subscribers. Every project belongs to its tenant's sole collaboration
 	// space; current tenant membership gates visibility and authorization.
@@ -101,6 +124,27 @@ func NewStore(db *gorm.DB) (*Store, error) {
 		return nil, fmt.Errorf("get database pool: %w", err)
 	}
 	return &Store{Pool: pool, Events: NewSpaceHub(), Signals: NewControlHub()}, nil
+}
+
+// agentRunDispatcher returns the wired dispatcher, constructing a fresh one wrapping the Store when
+// the field is nil (zero-valued or non-constructor-built store). It only reads the field (never
+// writes it), so it is safe under the concurrent load the retry loop and per-request dispatch place
+// on it.
+func (s *Store) agentRunDispatcher() *AgentRunDispatcher {
+	if d := s.AgentRunDispatcher; d != nil {
+		return d
+	}
+	return &AgentRunDispatcher{store: s}
+}
+
+// agentRunControlPlane returns the wired control-plane seam, defaulting to the fail-closed
+// UnavailableAgentRunControlPlane when none is wired, so a Store with no A implementation
+// refuses to declare run Workspaces or execution work rather than silently succeeding.
+func (s *Store) agentRunControlPlane() AgentRunControlPlane {
+	if s.AgentRunControlPlane == nil {
+		return UnavailableAgentRunControlPlane{}
+	}
+	return s.AgentRunControlPlane
 }
 
 type transaction struct {
@@ -472,13 +516,13 @@ func workspace(t *transaction, tid, uid, wid string, admin bool) Object {
 	if admin {
 		w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
 		require(w != nil, 404, "not_found")
-		return w
+		return stripAgentRunSkeleton(w)
 	}
 	w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
 	require(w != nil, 404, "not_found")
 	proj := t.one("SELECT space_id FROM projects WHERE id=$1 AND tenant_id=$2", w.S("projectId"), tid)
 	require(proj != nil && workspaceRole(t, proj.S("spaceId"), uid) != "", 404, "not_found")
-	return w
+	return stripAgentRunSkeleton(w)
 }
 
 func version(o Object, v int64) {

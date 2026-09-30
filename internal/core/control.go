@@ -151,7 +151,11 @@ func operation(t *transaction, r *ControlRequest) Object {
 // original execution instead of registering a second one.
 func snapshot(t *transaction, o Object) Object {
 	p := t.one("SELECT p.*,c.secret_ref FROM projects p LEFT JOIN credential_refs c ON c.id=p.credential_ref_id WHERE p.id=$1", o.S("projectId"))
-	return Object{"operation": o, "project": p, "workspaces": t.list("SELECT w.* FROM workspaces w WHERE w.project_id=$1 AND w.deleted_at IS NULL ORDER BY w.id", o.S("projectId")), "sandboxes": t.list("SELECT s.* FROM sandbox_instances s JOIN workspaces w ON w.id=s.workspace_id WHERE w.project_id=$1 ORDER BY s.id", o.S("projectId")), "nodes": t.list("SELECT n.* FROM node_instances n JOIN sandbox_instances s ON s.id=n.sandbox_instance_id JOIN workspaces w ON w.id=s.workspace_id WHERE w.project_id=$1 ORDER BY n.id", o.S("projectId")), "effects": t.list("SELECT * FROM external_effects WHERE operation_id=$1 ORDER BY created_at,id", o.S("id")), "clones": t.list("SELECT * FROM clone_executions WHERE operation_id=$1 ORDER BY created_at,execution_id", o.S("id"))}
+	workspaces := t.list("SELECT w.* FROM workspaces w WHERE w.project_id=$1 AND w.deleted_at IS NULL ORDER BY w.id", o.S("projectId"))
+	for _, w := range workspaces {
+		stripAgentRunSkeleton(w)
+	}
+	return Object{"operation": o, "project": p, "workspaces": workspaces, "sandboxes": t.list("SELECT s.* FROM sandbox_instances s JOIN workspaces w ON w.id=s.workspace_id WHERE w.project_id=$1 ORDER BY s.id", o.S("projectId")), "nodes": t.list("SELECT n.* FROM node_instances n JOIN sandbox_instances s ON s.id=n.sandbox_instance_id JOIN workspaces w ON w.id=s.workspace_id WHERE w.project_id=$1 ORDER BY n.id", o.S("projectId")), "effects": t.list("SELECT * FROM external_effects WHERE operation_id=$1 ORDER BY created_at,id", o.S("id")), "clones": t.list("SELECT * FROM clone_executions WHERE operation_id=$1 ORDER BY created_at,execution_id", o.S("id"))}
 }
 
 func operationWorkspaces(t *transaction, o Object) []Object {

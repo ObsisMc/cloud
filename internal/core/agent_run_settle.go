@@ -1,0 +1,158 @@
+package core
+
+import (
+	"fmt"
+)
+
+// settleRunWorkspace is the B-owned Phase 2A settlement core behind the A→B hook
+// RunWorkspaceSettled (controller-integration D6 runWorkspaceSettled, phase 2A).
+//
+// It runs on the caller-owned *transaction — the run Workspace's create_workspace
+// operation terminal transaction — inside which its B transition and the deleting
+// declaration must commit or roll back together. It never opens its own transaction,
+// spawns a goroutine, or defers a post-commit effect.
+//
+// Contract (IssueRun D3/D6, plan §18):
+//
+//	provisioning + no cancel + ready=true   → phase=starting, status stays dispatched
+//	provisioning + no cancel + ready=false  → phase=releasing, status=failed, failure_reason=workspace_unavailable (+ DeleteRunWorkspace)
+//	provisioning + cancel_requested_at set  → phase=releasing, status=cancelled, result.deliveryState=skipped (+ DeleteRunWorkspace)
+//	phase != provisioning                   → stale / replay no-op
+//
+// A caller-provided run Object carries identity only (id, tenant); every business
+// field used for the transition (phase, status, cancel_requested_at, workspace_id)
+// is re-read from authoritative issue_runs state in this transaction, never taken
+// from the caller Object (plan §3). The Phase 2 state machine is not re-designed
+// here; only the committed matrix above is implemented.
+//
+// The plugin-specific failure (agent_plugin_unavailable) is deliberately NOT produced
+// here: the hook carries only a boolean ready and the create_workspace plugin step is
+// not wired (G-002), so there is no authoritative evidence to distinguish it. A
+// ready=false settlement always maps to the generic workspace_unavailable. Deferred
+// to Phase 2B (plan §18.2.6, §8).
+func (s *Store) settleRunWorkspace(t *transaction, run Object, ready bool) error {
+	// Identity from the caller; the rest of the row is re-read authoritatively below.
+	runID := run.S("id")
+	if !validID(runID) {
+		return fmt.Errorf("runWorkspaceSettled: invalid run id %q", run.S("id"))
+	}
+	callerTenant := run.S("tenantId")
+
+	o := t.one("SELECT * FROM issue_runs WHERE id=$1 AND deleted_at IS NULL", runID)
+	if o == nil {
+		// A create_workspace terminal firing for a run that does not exist is an invariant
+		// violation, not a replay: returning an error aborts the whole transaction.
+		return fmt.Errorf("runWorkspaceSettled: issue_run %s not found", runID)
+	}
+	if o.S("executorType") != "agent" {
+		return fmt.Errorf("runWorkspaceSettled: run %s is executor_type=%q, not agent", runID, o.S("executorType"))
+	}
+	if callerTenant != "" && callerTenant != o.S("tenantId") {
+		return fmt.Errorf("runWorkspaceSettled: run %s tenant mismatch (caller %s, authoritative %s)", runID, callerTenant, o.S("tenantId"))
+	}
+
+	// Replay/stale: a settlement arriving after the run already left provisioning is a
+	// deterministic no-op. It must not regress phase, return a user-facing 409, create a
+	// new delete intent, or enqueue execution (plan §11, matrix "not provisioning").
+	if o.S("phase") != "provisioning" {
+		return nil
+	}
+
+	switch {
+	case o.S("cancelRequestedAt") != "":
+		// IssueRun D6: cancel during provisioning (no session yet) releases with
+		// status=cancelled and deliveryState=skipped, and declares the delete.
+		return s.settleCancelled(t, o)
+	case ready:
+		// Plan §2A.2: ready settles provisioning → starting, status stays dispatched.
+		if s.settleReadyGuard(t, runID) == 0 {
+			return nil // stale under the serialized lock; see call site doc
+		}
+		return nil
+	default:
+		// ready=false with no cancel: generic create_workspace terminal failure.
+		return s.settleFailed(t, o, "workspace_unavailable")
+	}
+}
+
+// settleReadyGuard is the CAS that moves provisioning → starting. It is guarded by
+// phase='provisioning' AND status='dispatched' (plan §2A.2). Returns affected rows;
+// under the global advisory lock the SELECT and this CAS are serialized against other
+// writers, so after re-reading provisioning an affected count of 0 can only mean the
+// caller's evidence raced a legitimate concurrent settle — treated as a stale no-op.
+func (s *Store) settleReadyGuard(t *transaction, runID string) int64 {
+	return t.execRows(`
+		UPDATE issue_runs
+		SET phase='starting', version=version+1, updated_at=now()
+		WHERE id=$1 AND executor_type='agent' AND phase='provisioning' AND status='dispatched'`, runID)
+}
+
+// settleFailed moves a provisioning run to releasing/failed with the given reason and,
+// in the same transaction, declares the run Workspace delete via the B→A seam. It is
+// shared by the generic workspace failure path; the plugin-specific code is deferred to
+// Phase 2B (G-002) because the reason is a parameter supplied by the caller of this
+// helper, not guessed here.
+func (s *Store) settleFailed(t *transaction, o Object, reason string) error {
+	runID := o.S("id")
+	if t.execRows(`
+		UPDATE issue_runs
+		SET phase='releasing', status='failed', failure_reason=$2, completed_at=now(),
+		    version=version+1, updated_at=now()
+		WHERE id=$1 AND executor_type='agent' AND phase='provisioning' AND status='dispatched'`, runID, reason) == 0 {
+		return nil // stale under the serialized lock
+	}
+	appendActivity(t, o.S("tenantId"), o.S("issueId"), activityActor(o.S("executorType")), o.S("executorId"), "run.failed",
+		runActivityDetails(runID, o.S("executorType"), o.S("executorId"), Object{"failureReason": reason}))
+	return s.declareDelete(t, o)
+}
+
+// settleCancelled moves a provisioning run to releasing/cancelled with
+// result.deliveryState=skipped and declares the delete, all in the caller's transaction.
+func (s *Store) settleCancelled(t *transaction, o Object) error {
+	runID := o.S("id")
+	if t.execRows(`
+		UPDATE issue_runs
+		SET phase='releasing', status='cancelled', completed_at=now(),
+		    result = COALESCE(result, '{}'::jsonb) || '{"deliveryState":"skipped"}'::jsonb,
+		    version=version+1, updated_at=now()
+		WHERE id=$1 AND executor_type='agent' AND phase='provisioning' AND status='dispatched'`, runID) == 0 {
+		return nil // stale under the serialized lock
+	}
+	appendActivity(t, o.S("tenantId"), o.S("issueId"), activityActor(o.S("executorType")), o.S("executorId"), "run.cancelled",
+		runActivityDetails(runID, o.S("executorType"), o.S("executorId"), nil))
+	return s.declareDelete(t, o)
+}
+
+// declareDelete declares the run Workspace's delete_workspace operation through the B→A
+// seam DeleteRunWorkspace in the same transaction as the releasing transition, so a
+// failure of the delete declaration aborts the whole transaction and the run can never
+// be left releasing while the delete intent did not commit (plan §4/§6/§13). The caller
+// owns atomicity; this declares, it never executes the delete.
+func (s *Store) declareDelete(t *transaction, o Object) error {
+	// Reconstruct the run object with authoritative identity/binding for the seam.
+	return s.agentRunControlPlane().DeleteRunWorkspace(t, Object{
+		"id":          o.S("id"),
+		"tenantId":    o.S("tenantId"),
+		"workspaceId": o.S("workspaceId"),
+	})
+}
+
+// businessAgentRunHooks is the B-side AgentRunHooks implementation. RunWorkspaceSettled
+// delegates to the Phase 2A settlement core; the remaining hooks fail closed (they belong
+// to later phases). It is the concrete seam the control plane wires as its AgentRunHooks
+// value once the A caller exists (G-003 → Phase 2B); production callers stay unwired this
+// phase, so it is not yet bound on the Store.
+type businessAgentRunHooks struct {
+	store                    *Store
+	UnavailableAgentRunHooks // ThreadEventsTakenOver/SessionEnded/DeliverySettled/RunWorkspaceDeleted keep failing closed.
+}
+
+// RunWorkspaceSettled fulfils the A→B hook: it runs the B settlement core in the
+// caller-owned transaction.
+func (h businessAgentRunHooks) RunWorkspaceSettled(t *transaction, run Object, ready bool) error {
+	return h.store.settleRunWorkspace(t, run, ready)
+}
+
+// compile-time guard: businessAgentRunHooks satisfies the AgentRunHooks seam, with the
+// embedded UnavailableAgentRunHooks keeping every not-yet-phase hook fail-closed.
+var _ AgentRunHooks = businessAgentRunHooks{}

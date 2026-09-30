@@ -145,7 +145,7 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				previous := Object{}
 				for _, w := range ws {
 					checkActivities(t, w)
-					previous[w.S("id")] = w
+					previous[w.S("id")] = stripAgentRunSkeleton(w)
 				}
 				for _, w := range ws {
 					closeAdmission(t, w, "deleted")
@@ -399,7 +399,13 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 	case r.ProjectID != "":
 		p := project(t, r.TenantID, uid, r.ProjectID)
 		if strings.HasSuffix(r.Path, "/workspaces") {
-			return page(t, "SELECT w.*,wt.branch_name,task.title FROM workspaces w LEFT JOIN workspace_worktrees wt ON wt.workspace_id=w.id LEFT JOIN tasks task ON task.workspace_id=w.id WHERE w.project_id=$1 AND w.tenant_id=$2 AND w.deleted_at IS NULL", []any{p.S("id"), r.TenantID}, "w.id", r)
+			out := page(t, "SELECT w.*,wt.branch_name,task.title FROM workspaces w LEFT JOIN workspace_worktrees wt ON wt.workspace_id=w.id LEFT JOIN tasks task ON task.workspace_id=w.id WHERE w.project_id=$1 AND w.tenant_id=$2 AND w.deleted_at IS NULL", []any{p.S("id"), r.TenantID}, "w.id", r)
+			if items, ok := out["items"].([]Object); ok {
+				for _, o := range items {
+					stripAgentRunSkeleton(o)
+				}
+			}
+			return out
 		}
 		return p
 	default:
@@ -467,7 +473,7 @@ func createProject(t *transaction, r *PublicRequest, uid, hash string) Object {
 	t.exec("INSERT INTO projects(id,tenant_id,owner_user_id,space_id,name,repository_url,default_branch,credential_ref_id,lifecycle) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'provisioning')", pid, r.TenantID, uid, spaceID, name, repo, branch, cred)
 	insertWorkspace(t, r.TenantID, uid, pid, wid, "main", branch, "")
 	op := newOperation(t, r, uid, pid, wid, "create_project", "sandbox", hash, Object{})
-	return Object{"resource": t.one("SELECT * FROM projects WHERE id=$1", pid), "workspace": t.one("SELECT * FROM workspaces WHERE id=$1", wid), "operation": op}
+	return Object{"resource": t.one("SELECT * FROM projects WHERE id=$1", pid), "workspace": stripAgentRunSkeleton(t.one("SELECT * FROM workspaces WHERE id=$1", wid)), "operation": op}
 }
 
 func insertWorkspace(t *transaction, tid, uid, pid, wid, kind, ref, title string) {
