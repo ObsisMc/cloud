@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 
@@ -80,6 +81,13 @@ func threadMessagesPath(tenant, issue, run string) string {
 // send a body that no core.Object would marshal: malformed, a second JSON value, an unknown field.
 // Both credentials the gateway requires are attached exactly as the simulator client attaches them.
 func (f *fixture) threadRequest(method, path, body, key string) (int, core.Object, error) {
+	return f.threadRequestAs(f.user, method, path, body, key)
+}
+
+// threadRequestAs is threadRequest for an explicit caller. The Thread read's authorization cases need
+// it: the read must reject exactly the callers the comments read rejects, and proving that means
+// issuing both requests as the same verified non-member (Thread D3/D5, plan §4C.3).
+func (f *fixture) threadRequestAs(user core.Claims, method, path, body, key string) (int, core.Object, error) {
 	req, e := http.NewRequestWithContext(context.Background(), method, f.cloud.URL+path, strings.NewReader(body))
 	if e != nil {
 		return 0, nil, e
@@ -90,7 +98,7 @@ func (f *fixture) threadRequest(method, path, body, key string) (int, core.Objec
 		return 0, nil, e
 	}
 	req.Header.Set("Authorization", "Bearer "+service)
-	user := f.user
+	// The caller arrives by value, so binding it to this gateway is a local mutation.
 	user.Caller = "gateway-a"
 	token, e := f.client.Credentials.Token("user", user)
 	if e != nil {
@@ -566,34 +574,96 @@ func TestThreadMessageRejectsMalformedAndOversizedRequests(t *testing.T) {
 	}
 }
 
-// G-024 — the DEFERRED accept rows. D-4C-03's predicate also refuses a run whose
-// `cancel_requested_at` is set and one whose run Workspace is no longer live, and its CAS carries
-// `cancel_requested_at IS NULL`. The approved Thread D3 names only `ending | ended`, so those rows
-// are registered as G-024 and the plan's amendment A2 is still 待批准: this test pins today's
-// behavior on purpose. Landing A2 turns this test red, which is the point — the deferral cannot be
-// implemented silently.
-func TestThreadMessageCancelRowIsDeferred(t *testing.T) {
-	f := setup(t)
-	f.useRealControlPlane()
-	scene := seedThreadScene(t, f)
+// A2 (approved, G-024) / plan §4C.4 — a recorded cancellation request closes the Thread to new user
+// turns. Cancel is a *request* (IssueRun D6), not a terminal state, so the run is still live, its
+// Thread is still `pending`/`active`/`idle`, and the caller's only signal that this conversation is
+// winding down is this refusal. Accepting a turn here would persist a message nothing will ever
+// execute and report 201 for it.
+//
+// The refusal is the *same* `409 thread_closed` the closed states answer, not a fourth status: from
+// the client's side the two are one fact — this Thread no longer takes turns — and inventing a second
+// code would make clients branch on a distinction they cannot act on differently.
+//
+// The check lives in two places on purpose (plan §7). The predicate refuses before anything is
+// written; the CAS repeats `cancel_requested_at IS NULL` so the guard a client is refused by and the
+// guard the write is fenced by can never drift apart. This test proves the first half directly and
+// the second by consequence: nothing was written at all, so the row version — which only the CAS
+// bumps — is exactly where it was.
+func TestThreadMessageRejectsAfterCancellationRequested(t *testing.T) {
+	for _, state := range []string{"pending", "active", "idle"} {
+		t.Run(state, func(t *testing.T) {
+			f := setup(t)
+			f.useRealControlPlane()
+			scene := seedThreadScene(t, f)
+			must(t, f.setThreadState(scene.runID, "starting", state))
 
-	_, e := f.store.Pool.Exec(`UPDATE issue_runs SET cancel_requested_at=now() WHERE id=$1`, scene.runID)
-	must(t, e)
-	_, e = f.store.Pool.Exec(`UPDATE workspaces SET observed_state='stopped' WHERE id=$1`, scene.seed.runWorkspaceID)
-	must(t, e)
+			// The contrast that makes this test about cancellation and not about the state matrix: the
+			// very same state accepts a turn while no cancellation is recorded. A2's conjunct is the
+			// only difference, so an implementation that refused too much fails here and one that
+			// refused too little fails below.
+			f.postThread(scene, "key-plain", threadBody("still open"), 201, "")
+			_, e := f.store.Pool.Exec(`DELETE FROM thread_entries WHERE run_id=$1`, scene.runID)
+			must(t, e)
+			_, e = f.store.Pool.Exec(`DELETE FROM thread_commands WHERE run_id=$1`, scene.runID)
+			must(t, e)
+			must(t, f.setThreadState(scene.runID, "starting", state))
 
-	// A2 would answer 409 thread_closed here. Until it is approved, the approved Thread D3 matrix
-	// applies unchanged and the message is accepted.
-	f.postThread(scene, "key-cancelled", threadBody("still accepted"), 201, "")
-	if n := f.threadEntries(scene.runID); n != 1 {
-		t.Fatalf("the deferred rows must accept the turn until A2 lands, got %d entries", n)
-	}
+			_, e = f.store.Pool.Exec(`UPDATE issue_runs SET cancel_requested_at=now() WHERE id=$1`, scene.runID)
+			must(t, e)
+			var beforeState string
+			var idleBefore *time.Time
+			var versionBefore int64
+			must(t, f.store.Pool.QueryRow(`SELECT thread_state, idle_since, version FROM issue_runs WHERE id=$1`, scene.runID).Scan(&beforeState, &idleBefore, &versionBefore))
 
-	// The CAS is the second place A2 adds a conjunct, and it is deferred with the predicate: a
-	// cancelled run's Thread still moves to `active`.
-	var threadState string
-	must(t, f.store.Pool.QueryRow(`SELECT thread_state FROM issue_runs WHERE id=$1`, scene.runID).Scan(&threadState))
-	if threadState != "active" {
-		t.Fatalf("the deferred CAS must still move the Thread, got %q", threadState)
+			f.postThread(scene, "key-cancelled", threadBody("too late"), 409, "thread_closed")
+
+			// Nothing survived the refusal. The entry is the user's message, the command is the work
+			// that would never run, and the idempotency record is what would make a later retry under
+			// the same key replay this 409 as if it were an outcome.
+			if n := f.threadEntries(scene.runID); n != 0 {
+				t.Fatalf("a refused turn must leave no entry, got %d", n)
+			}
+			if n := f.threadCommands(scene.runID); n != 0 {
+				t.Fatalf("a refused turn must leave no command, got %d", n)
+			}
+			if n := f.scalar(`SELECT count(*) FROM idempotency_records WHERE tenant_id=$1 AND key='key-cancelled'`, scene.tenantID); n != 0 {
+				t.Fatalf("a refusal must not be recorded as a response, got %d records", n)
+			}
+			// The row is exactly where it was, including its version — which only the CAS bumps — so
+			// the second half of A2 (the CAS's own `cancel_requested_at IS NULL`) is proven by
+			// consequence: the write that the predicate refused never reached the CAS, and the CAS's
+			// conjunct is the same predicate repeated rather than a second, weaker guard.
+			var afterState string
+			var idleAfter *time.Time
+			var versionAfter int64
+			must(t, f.store.Pool.QueryRow(`SELECT thread_state, idle_since, version FROM issue_runs WHERE id=$1`, scene.runID).Scan(&afterState, &idleAfter, &versionAfter))
+			if afterState != beforeState || versionAfter != versionBefore {
+				t.Fatalf("a refused turn must not move the Thread: %s/version %d became %s/version %d", beforeState, versionBefore, afterState, versionAfter)
+			}
+			if (idleBefore == nil) != (idleAfter == nil) || (idleBefore != nil && !idleBefore.Equal(*idleAfter)) {
+				t.Fatalf("a refused turn must leave idle_since alone: %v became %v", idleBefore, idleAfter)
+			}
+			// A2 is a refusal, not a transition: the run is not made terminal and the Thread is not
+			// moved to `ending`. Ending this session is the cancel reaction's job (IssueRun D6), and a
+			// public POST must not be able to take it over.
+			var phase, threadState string
+			must(t, f.store.Pool.QueryRow(`SELECT phase, thread_state FROM issue_runs WHERE id=$1`, scene.runID).Scan(&phase, &threadState))
+			if phase != "starting" || threadState != beforeState {
+				t.Fatalf("a refusal must not transition anything: phase=%s thread_state=%s", phase, threadState)
+			}
+
+			// The refusal is per-request, not a lock on the key: clearing the request (this run was
+			// never actually cancelled) makes the same key a clean first request, which is the durable
+			// proof that no response was recorded above.
+			_, e = f.store.Pool.Exec(`UPDATE issue_runs SET cancel_requested_at=NULL WHERE id=$1`, scene.runID)
+			must(t, e)
+			out := f.postThread(scene, "key-cancelled", threadBody("welcome back"), 201, "")
+			if got := messageText(t, out.O("resource")); got != "welcome back" {
+				t.Fatalf("the retry must write the body it sent, got %q", got)
+			}
+			if n := f.threadEntries(scene.runID); n != 1 {
+				t.Fatalf("the retry must leave exactly one entry, got %d", n)
+			}
+		})
 	}
 }

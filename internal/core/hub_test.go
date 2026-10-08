@@ -84,6 +84,49 @@ func TestSpaceEventSerialization(t *testing.T) {
 	}
 }
 
+// TestThreadAppendedEventSerialization pins Thread D5's notification shape (plan §4C.7) and the
+// compatibility boundary that came with it: the three added payload fields are omitted when empty, so
+// every event that predates them still serializes to exactly the bytes it did before — a subscriber
+// that only knows the old four fields cannot be broken by this addition.
+func TestThreadAppendedEventSerialization(t *testing.T) {
+	// The pre-4C shapes, byte for byte. Each literal is what the field set produced before IssueID,
+	// RunID and LastSeq existed.
+	preexisting := []struct {
+		name  string
+		event SpaceEvent
+		want  string
+	}{
+		{"space updated", SpaceEvent{Type: "space.updated", SpaceID: "s", Version: 3}, `{"type":"space.updated","spaceId":"s","version":3}`},
+		{"project created", SpaceEvent{Type: "project.created", SpaceID: "s", ProjectID: "p"}, `{"type":"project.created","spaceId":"s","projectId":"p"}`},
+		{"member updated", SpaceEvent{Type: "space.member_updated", SpaceID: "s"}, `{"type":"space.member_updated","spaceId":"s"}`},
+		{"catalog updated", SpaceEvent{Type: "plugins.catalog_updated"}, `{"type":"plugins.catalog_updated","spaceId":""}`},
+	}
+	for _, tc := range preexisting {
+		b, e := json.Marshal(tc.event)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if string(b) != tc.want {
+			t.Fatalf("%s: JSON = %s, want %s", tc.name, b, tc.want)
+		}
+	}
+
+	// The Thread notice carries the run's identity and the commit-time max(seq) — and, deliberately,
+	// nothing else: no entry content, no cursor, no Thread state, so a client cannot mistake the
+	// notice for data and skip the GET that is the only authority.
+	appended, e := json.Marshal(SpaceEvent{Type: threadAppendedEvent, SpaceID: "s", IssueID: "i", RunID: "r", LastSeq: 7})
+	if e != nil {
+		t.Fatal(e)
+	}
+	want := `{"type":"issue_run.thread_appended","spaceId":"s","issueId":"i","runId":"r","lastSeq":7}`
+	if string(appended) != want {
+		t.Fatalf("thread appended JSON = %s, want %s", appended, want)
+	}
+	if threadAppendedEvent != "issue_run.thread_appended" {
+		t.Fatalf("the wire name is a compatibility boundary, got %q", threadAppendedEvent)
+	}
+}
+
 // TestPluginAggregateRuleMatrix pins the fan-out aggregation table: failure
 // wins, in-progress states keep the direction's progress state, all-terminal
 // (or no targets) means terminal.

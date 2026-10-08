@@ -39,7 +39,7 @@ type AgentRunControlPlane interface {
 
 	// EnqueueThreadCommand releases a SubmitUserTurn/EndSession command in the caller's
 	// transaction (D6 enqueueThreadCommand). Returns the command id (ThreadCommandAvailable).
-	EnqueueThreadCommand(t *transaction, run Object, command Object) (string, error)
+	EnqueueThreadCommand(t *transaction, run, command Object) (string, error)
 }
 
 // RunWorkspaceOutcome is the distinct non-error return of CreateRunWorkspace. Exactly one
@@ -73,7 +73,7 @@ func (UnavailableAgentRunControlPlane) EnqueueExecutionWork(t *transaction, run 
 	return "", fmt.Errorf("control-plane seam enqueueExecutionWork not implemented: A side")
 }
 
-func (UnavailableAgentRunControlPlane) EnqueueThreadCommand(t *transaction, run Object, command Object) (string, error) {
+func (UnavailableAgentRunControlPlane) EnqueueThreadCommand(t *transaction, run, command Object) (string, error) {
 	return "", fmt.Errorf("control-plane seam enqueueThreadCommand not implemented: A side")
 }
 

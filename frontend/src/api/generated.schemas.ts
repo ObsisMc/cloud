@@ -1812,6 +1812,68 @@ export type PostApiV1TenantsTidIssuesIidRuns200 = {
   resource: IssueRun;
 };
 
+export type GetApiV1TenantsTidIssuesIidRunsRidThreadParams = {
+/**
+ * @minimum 1
+ * @maximum 500
+ */
+limit?: number;
+/**
+ * Forward Thread seq cursor: the window starts after this seq. Mutually exclusive with before; neither cursor reads the tail.
+ * @minimum 0
+ */
+after?: number;
+/**
+ * Backward Thread seq cursor: the window ends just before this seq, taking the entries closest to it from below. Mutually exclusive with after.
+ * @minimum 0
+ */
+before?: number;
+};
+
+export type GetApiV1TenantsTidIssuesIidRunsRidThread200ThreadState = typeof GetApiV1TenantsTidIssuesIidRunsRidThread200ThreadState[keyof typeof GetApiV1TenantsTidIssuesIidRunsRidThread200ThreadState];
+
+
+export const GetApiV1TenantsTidIssuesIidRunsRidThread200ThreadState = {
+  pending: 'pending',
+  active: 'active',
+  idle: 'idle',
+  ending: 'ending',
+  ended: 'ended',
+} as const;
+
+export type GetApiV1TenantsTidIssuesIidRunsRidThread200 = {
+  /**
+     * When the Thread became idle; null in every other state.
+     * @nullable
+     */
+  idleSince: string | null;
+  items: ThreadEntry[];
+  /**
+     * The window's last seq, to be sent back as `after`. Null for an empty window.
+     * @nullable
+     */
+  nextCursor: number | null;
+  /**
+     * The window's first seq, to be sent back as `before`. Null for an empty window.
+     * @nullable
+     */
+  prevCursor: number | null;
+  threadState: GetApiV1TenantsTidIssuesIidRunsRidThread200ThreadState;
+};
+
+export type PostApiV1TenantsTidIssuesIidRunsRidThreadEndBody = { [key: string]: unknown };
+
+export type PostApiV1TenantsTidIssuesIidRunsRidThreadEnd202ThreadState = typeof PostApiV1TenantsTidIssuesIidRunsRidThreadEnd202ThreadState[keyof typeof PostApiV1TenantsTidIssuesIidRunsRidThreadEnd202ThreadState];
+
+
+export const PostApiV1TenantsTidIssuesIidRunsRidThreadEnd202ThreadState = {
+  ending: 'ending',
+} as const;
+
+export type PostApiV1TenantsTidIssuesIidRunsRidThreadEnd202 = {
+  threadState: PostApiV1TenantsTidIssuesIidRunsRidThreadEnd202ThreadState;
+};
+
 export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItemType = typeof PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItemType[keyof typeof PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItemType];
 
 

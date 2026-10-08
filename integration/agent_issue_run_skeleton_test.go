@@ -9,10 +9,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/wanglongan587/cloud/internal/core"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/wanglongan587/cloud/internal/core"
 )
 
 // skeletonStore applies every forward-only migration to a fresh isolated PostgreSQL

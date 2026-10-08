@@ -28,6 +28,18 @@ type Route struct {
 // default 64 KiB request cap cannot contain once the JSON envelope around the text is counted.
 const ThreadMessagePath = "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages"
 
+// ThreadPath is the Thread GET route (Thread D5). It is named because it is the one public read that
+// may ask for more than the shared list window: D5 caps `limit` at 500, while every other pageable
+// route keeps the 100 the core's `window` helper enforces. The two bounds stay separate on purpose —
+// raising the shared one would silently widen every existing list's contract.
+const ThreadPath = "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread"
+
+// ThreadEndPath is the user-initiated end route (Thread D4, G-018). It is named for the same reason
+// the other two Thread routes are: the contract, the coverage test and the transport all have to
+// agree on one spelling. It carries no request fields — the body is `{}` and anything else is an
+// unknown field — so it takes the default request cap.
+const ThreadEndPath = "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/end"
+
 // defaultBodyLimit is the request cap every other route keeps.
 const defaultBodyLimit = 64 << 10
 
@@ -83,7 +95,9 @@ func Routes() []Route {
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/runs", "", nil},
 		{"POST", "/api/v1/tenants/:tid/issues/:iid/runs", "", []string{"executorType", "executorId", "input"}},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/runs/:rid", "", nil},
+		{"GET", "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread", "", nil},
 		{"POST", "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages", "", []string{"content"}},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/end", "", nil},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", nil},
 		{"POST", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", []string{"refType", "refId"}},
 		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/context-refs/:crid", "", nil},
@@ -296,12 +310,19 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger, directori
 				limit := 0
 				if v := c.Query("limit"); v != "" {
 					limit, e = strconv.Atoi(v)
-					if e != nil || limit < 1 || limit > 100 {
+					// Every pageable route shares the core's 100-row window except the Thread read,
+					// which Thread D5 caps at 500. The bound is chosen per route rather than raised
+					// globally so no existing list's contract widens as a side effect.
+					maxLimit := 100
+					if route.Path == ThreadPath {
+						maxLimit = core.ThreadPageLimit
+					}
+					if e != nil || limit < 1 || limit > maxLimit {
 						failure(c, &core.Fault{Code: "invalid_pagination", Status: 400, Params: core.Object{}})
 						return
 					}
 				}
-				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), SpaceID: c.Param("spaceId"), OperationID: c.Param("oid"), CloneID: c.Param("cloneId"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), InteractionID: c.Param("ixid"), FormRef: c.Param("formRef"), InvitationID: c.Param("iid"), JoinLinkID: c.Param("lid"), JoinRequestID: c.Param("rid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user, Person: person})
+				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), SpaceID: c.Param("spaceId"), OperationID: c.Param("oid"), CloneID: c.Param("cloneId"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), InteractionID: c.Param("ixid"), FormRef: c.Param("formRef"), InvitationID: c.Param("iid"), JoinLinkID: c.Param("lid"), JoinRequestID: c.Param("rid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Before: c.Query("before"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user, Person: person})
 			} else {
 				out, e = store.Control(c.Request.Context(), &core.ControlRequest{Action: route.Action, OperationID: c.Param("oid"), EffectID: c.Param("eid"), TicketID: c.Param("ticket"), Body: body, Service: service, Identity: user})
 			}

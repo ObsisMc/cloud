@@ -23,6 +23,20 @@ type Config struct {
 	Directory     DirectoryConfig     `mapstructure:"directory"`
 	Control       ControlConfig       `mapstructure:"control"`
 	Plugins       PluginConfig        `mapstructure:"plugins"`
+	IssueRuns     IssueRunsConfig     `mapstructure:"issue_runs"`
+}
+
+// IssueRunsConfig holds the Thread lifecycle policy that belongs to Cloud's own dispatch loop
+// rather than to any individual run. Leaf keys are bound to CLOUD_ISSUE_RUNS_* environment
+// overrides like every other section.
+type IssueRunsConfig struct {
+	// ThreadIdleTimeout is Thread D4's idle window (`issue_runs.thread_idle_timeout` in the plan's
+	// spelling): how long a Thread may sit `idle` before Cloud asks the session to end. It is a
+	// duration configured per deployment, never a per-run column, and the comparison that judges it
+	// runs on database time — no Cloud, Controller or Node process clock decides that a Thread is
+	// idle. Zero or negative selects the approved default (15 minutes) rather than a zero-length
+	// window that would end every Thread the moment it went idle.
+	ThreadIdleTimeout time.Duration `mapstructure:"thread_idle_timeout"`
 }
 
 // PluginConfig is the cloud-side plugin marketplace configuration. Leaf keys
@@ -126,9 +140,19 @@ func Load(configPath string) (*Config, error) {
 	if err := validatePlugins(cfg.Plugins); err != nil {
 		return nil, err
 	}
+	// Thread D4's approved default. Applied here rather than left at the zero value so an operator
+	// who omits the key (or sets a nonsensical value) gets the approved window instead of a
+	// zero-length one that would end every idle Thread immediately.
+	if cfg.IssueRuns.ThreadIdleTimeout <= 0 {
+		cfg.IssueRuns.ThreadIdleTimeout = DefaultThreadIdleTimeout
+	}
 
 	return &cfg, nil
 }
+
+// DefaultThreadIdleTimeout is Thread D4's first-version idle window, applied when
+// issue_runs.thread_idle_timeout is absent or not positive.
+const DefaultThreadIdleTimeout = 15 * time.Minute
 
 // validatePlugins enforces the plugin marketplace configuration contract. An
 // empty section is legal while sync is disabled; once sync is enabled the

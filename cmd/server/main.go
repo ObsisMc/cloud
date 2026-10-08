@@ -154,6 +154,29 @@ func run() (runErr error) {
 			pluginmarket.RunSyncLoop(ctx, store.StartQueuedAgentSessionsOnce, agentSessionStartInterval, pluginmarket.ContextSleep, log)
 		}()
 	}
+	// Phase 4C Thread-ending loops: B-owned recovery for the two ending triggers that are reachable
+	// without a new public API. The idle scan ends a Thread whose idle window has expired
+	// (thread_state='idle' with idle_since older than cfg.IssueRuns.ThreadIdleTimeout), and the
+	// cancel pass reacts to a cancellation request recorded on a live run. Each run is handled in
+	// its own short transaction and each transition is a CAS, so a repeated tick emits no second
+	// EndSession. The cadence is the same repository-preferred 10s as the loops above and must stay
+	// far below the idle window (an implementation choice; plan §3 fixes no seconds, D-008 is the
+	// precedent). Both stop at thread_state='ending': the session terminal (`ended`) and everything
+	// after it belong to Phase 5.
+	{
+		const agentThreadEndInterval = 10 * time.Second
+		store.ThreadIdleTimeout = cfg.IssueRuns.ThreadIdleTimeout
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.EndIdleAgentThreadsOnce, agentThreadEndInterval, pluginmarket.ContextSleep, log)
+		}()
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.ReactToCancelledAgentRunsOnce, agentThreadEndInterval, pluginmarket.ContextSleep, log)
+		}()
+	}
 	gin.SetMode(cfg.Server.Mode)
 	server := &http.Server{Addr: fmt.Sprintf(":%d", cfg.Server.Port), Handler: router.New(store, auth, log, directory), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: cfg.Server.ReadTimeout, WriteTimeout: cfg.Server.WriteTimeout, IdleTimeout: 60 * time.Second}
 	// The control listener is bound before serving so a taken port fails startup, not a Controller.

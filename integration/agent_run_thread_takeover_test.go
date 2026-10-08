@@ -120,7 +120,11 @@ func seedStartingAgentRun(t *testing.T, store *core.Store) (runID, workspaceID, 
 	exec("run-workspace-bind", `UPDATE issue_runs SET workspace_id=$2, version=version+1, updated_at=now() WHERE id=$1`, runID, workspaceID)
 	exec("sandbox", `INSERT INTO sandbox_instances(id,workspace_id,generation,observed_state) VALUES($1,$2,1,'running')`, sandboxID, workspaceID)
 	exec("node", `INSERT INTO node_instances(id,workspace_id,sandbox_instance_id,service_subject,connection_state,protocol_version,initialized) VALUES($1,$2,$3,'node','connected',1,true)`, nodeID, workspaceID, sandboxID)
-	exec("lease", `INSERT INTO controller_leases(name,holder_id,epoch,expires_at) VALUES('global','ctrl-a',1,clock_timestamp()+interval '30 seconds')`)
+	// The global Controller lease. On a fresh schema this seeds it; in a fixture schema that already
+	// has one (its own simulator controller) it re-points that row to the Controller the test speaks
+	// as, so the lease-validated takeover actions below are validated against exactly this holder.
+	exec("lease", `INSERT INTO controller_leases(name,holder_id,epoch,expires_at) VALUES('global','ctrl-a',1,clock_timestamp()+interval '30 seconds')
+		ON CONFLICT (name) DO UPDATE SET holder_id='ctrl-a', epoch=1, expires_at=clock_timestamp()+interval '30 seconds'`)
 	must(t, tx.Commit())
 	return runID, workspaceID, nodeID
 }

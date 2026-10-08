@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -99,6 +100,14 @@ type Store struct {
 	// dispatch.
 	AgentRunControlPlane AgentRunControlPlane
 
+	// ThreadIdleTimeout is how long a Thread may sit `idle` before Cloud asks the session to end
+	// (Thread D4's idle window, `issue_runs.thread_idle_timeout` in the plan's spelling). It is a
+	// deployment configuration value, not a column — the ADR calls it "Cloud 配置" and nothing
+	// suggests it varies per run — and it is judged entirely on the database clock. Zero (the
+	// zero-value Store) means the idle path is not configured: the scan is a no-op rather than a
+	// zero-length window that would end every Thread the moment it went idle.
+	ThreadIdleTimeout time.Duration
+
 	// AgentRunDispatcher owns Claim + Busy for queued real Space Agent IssueRuns (dispatch claim
 	// loop). It is populated in NewStore; agentRunDispatcher is the nil-safe accessor for Stores
 	// built or zero-valued without the constructor.
@@ -167,6 +176,14 @@ type transaction struct {
 	// published only after a successful commit, so a rolled-back command can never produce a
 	// ThreadCommandAvailable signal for a command that does not exist (controller-integration D5).
 	threadRuns []string
+	// appends holds the Thread invalidation hints this transaction's entry writes queued. Like the
+	// two above it is released only after a successful commit, so the SSE hint can never describe an
+	// entry that rolled back (Thread D5, T4C-25).
+	appends []SpaceEvent
+	// threadChanges holds A4's generalized hints — one per run whose Thread REST representation this
+	// transaction changed, including state-only changes that append no entry. Released only after a
+	// successful commit, exactly like `appends` (Thread D5, A4/G-023).
+	threadChanges []SpaceEvent
 }
 
 func (t *transaction) exec(q string, args ...any) {
@@ -273,6 +290,8 @@ func (s *Store) transact(ctx context.Context, fn func(*transaction) Object) (out
 	if err = tx.Commit(); err == nil {
 		s.signalOperations(t.queued)
 		s.signalThreadCommands(t.threadRuns)
+		s.publishThreadHints(t.appends)
+		s.publishThreadHints(t.threadChanges)
 	}
 	return out, err
 }

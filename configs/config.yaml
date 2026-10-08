@@ -50,6 +50,14 @@ auth:
       issuer: ora-internal-issuer
       kind: user
       public_key_file: .local/gateway/user-identity.pem
+issue_runs:
+  # Thread D4's idle window: how long a Thread may sit `idle` (its last taken-over record was
+  # `TurnEnded` and no user turn is still queued) before Cloud releases `EndSession{idle_timeout}`
+  # and moves it to `ending`. A deployment duration, not a per-run column, and judged on database
+  # time. The approved first-version default is 15m; omitting the key (or setting it non-positive)
+  # selects that default. Override: CLOUD_ISSUE_RUNS_THREAD_IDLE_TIMEOUT.
+  thread_idle_timeout: 15m
+
 plugins:
   # Plugin marketplace the cloud server syncs into its own catalog snapshot (git fetch + scan of
   # registry/**/orax.toml). The catalog API always reads the PostgreSQL snapshot and never the

@@ -161,6 +161,14 @@ func (ss *AgentRunSessionStart) StartSession(ctx context.Context, runID string) 
 			WHERE id=$1 AND thread_state IS NULL`, runID) != 1 {
 			panic(databaseFailure{fmt.Errorf("session start: run %s Thread state was not materialized", runID)})
 		}
+		// seq=1 is a Thread entry write like any other, so the declaration queues the same
+		// invalidation hint the POST and the takeover queue (Thread D5): a subscriber watching this
+		// run learns that its Thread now has a first entry. The ON CONFLICT early return above is
+		// what keeps a replayed declaration from publishing — no entry was written, no hint. The
+		// hint is released only if this transaction commits, so a seam failure below rolls it back
+		// with the entry it describes.
+		threadAppended(t, o)
+		threadChanged(t, o)
 		// Authoritative declaration in the same transaction as seq=1 (§14). The payload fixes the
 		// frozen plugin identity/version from the snapshot — never re-reads the roster (D-013,
 		// G-007/G-009). A seam error rolls back the seq=1 write too.

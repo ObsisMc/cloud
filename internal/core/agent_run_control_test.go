@@ -62,7 +62,7 @@ func (s *stubAgentRunControlPlane) EnqueueExecutionWork(t *transaction, run Obje
 	return s.workID, s.workErr
 }
 
-func (s *stubAgentRunControlPlane) EnqueueThreadCommand(t *transaction, run Object, command Object) (string, error) {
+func (s *stubAgentRunControlPlane) EnqueueThreadCommand(t *transaction, run, command Object) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.commandTx, s.commandRun, s.commandCmd, s.commandN = t, run, command, s.commandN+1
@@ -70,8 +70,10 @@ func (s *stubAgentRunControlPlane) EnqueueThreadCommand(t *transaction, run Obje
 }
 
 // UnavailableAgentRunControlPlane must be safely assignable to the seam interface.
-var _ AgentRunControlPlane = UnavailableAgentRunControlPlane{}
-var _ AgentRunControlPlane = (*stubAgentRunControlPlane)(nil)
+var (
+	_ AgentRunControlPlane = UnavailableAgentRunControlPlane{}
+	_ AgentRunControlPlane = (*stubAgentRunControlPlane)(nil)
+)
 
 // The control-plane default must fail closed while the A side is unwired.
 func TestAgentRunControlUnavailableFailsClosed(t *testing.T) {

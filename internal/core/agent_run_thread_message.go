@@ -67,13 +67,20 @@ func threadMessageContent(body Object) []Object {
 // Answering the second kind with 409 would tell a client "the Thread is closed" about Cloud's own
 // broken invariant, which is exactly what §4C.15 forbids — so it is a 500 that aborts the request.
 //
-// G-024 — DEFERRED ROWS. D-4C-03's predicate also rejects a run whose `cancel_requested_at` is set
-// and one whose run Workspace is no longer live, and its CAS carries `cancel_requested_at IS NULL`.
-// The approved Thread D3 names only `ending | ended` as the rejection case, so those two rows are
-// NOT implemented here: the plan registers them as G-024 and its ADR amendment A2 is still 待批准.
-// This predicate is therefore deliberately narrower than D-4C-03 until A2 lands, and the deferral is
-// pinned by TestThreadMessageCancelRowIsDeferred so that implementing A2 cannot pass silently.
+// A2 (approved, G-024): a recorded cancellation request is Cloud's own statement that this session
+// is winding down (IssueRun D6 — cancel is a *request*), so a turn accepted after it would be
+// persisted and never executed. It is therefore refused with the same 409 thread_closed the closed
+// states answer, and it is checked before the state matrix so no state can outrank it. The request
+// changes nothing else: the run is not made terminal here, its Workspace is not deleted, and the
+// `discarded` transition still belongs to Phase 5.
+//
+// Deliberately still absent: D-4C-03's "run Workspace is no longer live" row. The approved A2 names
+// only `cancel_requested_at IS NULL` as the added conjunct, and inventing the workspace row here
+// would be the kind of unapproved extension the readiness round forbids — the plan keeps it open.
 func requireThreadAccepting(run Object) {
+	if run.S("cancelRequestedAt") != "" {
+		reject(409, "thread_closed")
+	}
 	state, phase := run.S("threadState"), run.S("phase")
 	if threadAcceptStates[state] {
 		// `pending` means StartSession declared the session and no Node record has been taken over
@@ -135,6 +142,14 @@ func appendThreadMessage(t *transaction, s *Store, r *PublicRequest, uid string)
 		INSERT INTO thread_entries(run_id, seq, source, kind, record, turn_id, status)
 		VALUES($1,$2,'user','user_turn',$3,$4,'queued')`,
 		runID, seq, jsonText(Object{"content": blocks}), turnID)
+	// This entry is the whole reason a live subscriber has to re-read (Thread D5): queue the hint
+	// here, at the write it describes, and let the commit decide whether it is ever published. The
+	// row `run` was re-read above, so the hint's identity is the database's and not the path's.
+	threadAppended(t, run)
+	// The same commit also moves the Thread to `active`, so it changes the read model twice over.
+	// A4's generalized hint covers both with one event, and the dedupe in threadChanged keeps the
+	// entry write and the state write from publishing two hints for one commit.
+	threadChanged(t, run)
 
 	// The CAS must move exactly the row the accept matrix just approved. The matrix read and this
 	// write share one transaction snapshot while the caller's advisory lock excludes every other
@@ -142,11 +157,13 @@ func appendThreadMessage(t *transaction, s *Store, r *PublicRequest, uid string)
 	// transaction did not observe — an invariant violation that rolls the whole message back, never
 	// a 409 dressed up as a client conflict.
 	//
-	// G-024: D-4C-03's CAS additionally carries `cancel_requested_at IS NULL`; that conjunct is the
-	// deferred A2 row and is deliberately absent here (see requireThreadAccepting).
+	// `cancel_requested_at IS NULL` repeats the A2 conjunct the predicate above applied. Repeating it
+	// is what keeps the two from drifting apart: the predicate alone could approve a row the CAS then
+	// moved under a predicate nobody checked, so the guard a client is refused by and the guard the
+	// write is fenced by are spelled the same way, in one place each.
 	if moved := t.execRows(`
 		UPDATE issue_runs SET thread_state='active', idle_since=NULL, version=version+1, updated_at=now()
-		WHERE id=$1 AND thread_state IN ('pending','active','idle')`, runID); moved != 1 {
+		WHERE id=$1 AND thread_state IN ('pending','active','idle') AND cancel_requested_at IS NULL`, runID); moved != 1 {
 		panic(databaseFailure{fmt.Errorf("thread message: run %s Thread state was not moved to active", runID)})
 	}
 

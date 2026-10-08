@@ -895,6 +895,8 @@ Phase 4C 是**纯设计轮**：下列决策均为设计结论，**没有任何 p
 
 - **D-4C-01..D-4C-12 全部复核通过**，未静默修改任何决策。其中 4 条需要 ADR 修订才能作为「已批准事实」落地
   （见 §13 的 G-022/G-023/G-024 与 `plan.md` §4R.7 的 A1–A4，**均为待批准，未写入任何 ADR 文件**）。
+  **更新（收口轮，2026-10-08）**：这 4 条（A1/A2/A3/A4）与 G-018 已**全部获人类批准并写入** Thread ADR 正文
+  （A1→D1、A2→D3、G-018→D4、A3+A4→D5）并实现；`G-017 / G-018 / G-023 / G-024` 据此关闭。
 - **G-017 重新切分**：`after`/`limit ≤ 500`/升序/`threadState`/事件 `{issueId,runId,lastSeq}` = **已有批准依据**
   （Thread D5 逐字）；无游标 tail 读、`before`、`idleSince`、`nextCursor`/`prevCursor` = **新扩展**，需 ADR 修订。
   `pending` 的写入时点属**措辞澄清**（D4 行 1 有两种读法，设计轮取「Cloud `StartSession` 时」）。
@@ -1017,7 +1019,7 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
 
 ### G-022..G-024 — Phase 4C 就绪评审发现的设计冲突（2026-10-08，按 mandate §4 先登记、不静默修改）
 
-- **G-022 — OPEN / NON-BLOCKING / 需 ADR 修订**：`thread_entries.status`（`queued|delivered|discarded`）为
+- **G-022 — CLOSED BY A1**（2026-10-08 人类批准 A1 后关闭；原分类 `OPEN / NON-BLOCKING / 需 ADR 修订`）：`thread_entries.status`（`queued|delivered|discarded`）为
   D-4C-01/04/05/09 所需，但 Thread **D1 逐项列举了 `thread_entries` 的列，其中没有 `status`**（`source`/`kind`/
   `record jsonb`/`turn_id`/`node_execution_id`/`node_sequence`/`created_at`）；D3 **提到**了这三个状态却从未把列放进
   D1 的 schema，0018 也已按 D1 建表。**WHY 需登记**：给已列举的 schema 加列属持久化 schema 变更，§14 归类为架构性变更。
@@ -1027,12 +1029,16 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   **更新（Phase 4C Slice 1 实施轮，2026-10-08）**：该条件的**迁移侧**已满足——`0022_thread_api_and_commands.sql`
   加列、**在加 CHECK 之前**对既有 `source='user'` 行回填 `status='queued'`，T4C-5 在「数据库里已存在这样一行」的
   升级路径上验证通过。缺口本身**仍 OPEN**：它说的是 D1 的枚举，修订 A1 仍为待批准；**未改任何 ADR 文件、未改任何 `status`**。
-- **G-023 — OPEN / NON-BLOCKING / 需 ADR 修订**：D-4C-07/08 在**任何**改变该运行 Thread 可见状态的提交后发布
+  **更新（ADR Approval Decision 轮，2026-10-08）**：人类**只**批准了 **A1**，修订已落入 Thread D1 的 `thread_entries`
+  列清单与对应说明，**G-022 现为 `CLOSED BY A1`**。**只改 ADR 文本** —— `production behavior changed: NO`、
+  `migration changed: NO`、`Phase 5 boundary unchanged`（`discarded` 仍只属 Phase 5）。A2 (G-024) / A3 (G-017) /
+  A4 (G-023) / G-018 **未获批准**，仍为 `OPEN / READY FOR APPROVAL`。
+- **G-023 — CLOSED BY A4（收口轮，2026-10-08；原分类 `OPEN / NON-BLOCKING / 需 ADR 修订`）**：D-4C-07/08 在**任何**改变该运行 Thread 可见状态的提交后发布
   `issue_run.thread_appended`，包括只翻转 `thread_entries.status` 或 `thread_state`、并未追加条目的提交；而 Thread
   **D5 写的是「条目写入事务提交后…发布」**，读起来只覆盖条目追加。**WHY 需登记**：事件名说的是 "appended"，客户端会
   依赖该契约。**WHY 非阻塞**：负载（`issueId`/`runId`/`lastSeq`）不变、事件只是失效提示，对客户端是加性的。
   **WHAT IS NEEDED TO CLOSE**：修订 A4；在落地前 S6 **只对追加了条目的提交**发布。
-- **G-024 — OPEN / NON-BLOCKING / 需 ADR 修订**：D-4C-03 在 `cancel_requested_at IS NOT NULL` 时拒绝
+- **G-024 — CLOSED BY A2（收口轮，2026-10-08；原分类 `OPEN / NON-BLOCKING / 需 ADR 修订`）**：D-4C-03 在 `cancel_requested_at IS NOT NULL` 时拒绝
   `POST .../thread/messages`，即使 `thread_state = 'pending'`；而 Thread **D3 写的是 `pending|active|idle` 时接受**，
   只把 `ending|ended` 列为拒绝情形。**WHY 需登记**：该冲突**可达**——`provisioning`/`starting` 阶段的取消会直接进入
   `releasing` 而**从不**写 `ending`（IssueRun D4/D6、D-4C-11），因此运行可能同时是 `thread_state='pending'` 与已取消；
@@ -1043,6 +1049,13 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   `agent_run_thread_message.go` 的 `requireThreadAccepting` 与 `thread_state` CAS **窄于** D-4C-03，且
   `TestThreadMessageCancelRowIsDeferred` 钉住该延后（今天「已取消 + Workspace 非活」的运行仍会被接受，A2 一落地该测试
   即转红）。S4 接受矩阵的**其余各行已实现**。缺口**保持 OPEN**；关闭它**不得**由本轮改任何 ADR 的 `status` 来完成。
+  **更新（Phase 4C Final Completion Batch = 收口轮，2026-10-08）**：人类批准 **A2**，D3 的接受谓词已改为
+  `cancel_requested_at IS NULL` **且** `thread_state ∈ pending|active|idle`，两种情况共用 `409 thread_closed`。
+  实现同时收窄了**权威前置条件**（`requireThreadAccepting`）与写命令的 **CAS 谓词**（`AND cancel_requested_at IS NULL`），
+  因此「取消先提交、写入后到」这一竞争也被拒；deferral 测试已删除，由
+  `TestThreadMessageRejectsAfterCancellationRequested` 取代。**G-024 = `CLOSED BY A2`**；
+  ADR 仍**未**声称取消立即终态、立即删 Workspace，`discarded` 仍只属 Phase 5。
+  G-023 的关闭说明见其条目首行（A4 采用**新增** `issue_run.thread_changed`，不加宽 `thread_appended`）。
 
 ### G-025 — migration 清单文档债（Phase 4C Slice 1 实施轮发现，2026-10-08）
 
@@ -1116,13 +1129,281 @@ Agent 必须更新：
 
 ### 当前 Phase
 
-`Phase 4C ACCELERATED IMPLEMENTATION BATCH 1 — S3（Thread Command Control Plane）+ S4（Thread POST）`
+`Phase 4C COMPLETE — Final Completion Batch（A2 / A3 / A4 / G-018 落地 + 最终验收）`
 
 ### 当前 Slice
 
-`Phase 4C Batch 1（IMPLEMENTATION，单 Agent 连续推进）：S3（thread_commands 控制面 + A 缝 + 提交后 ThreadCommandAvailable + T4C-21..T4C-24）+ S4（公开 Thread POST + 同事务条目/状态/命令/幂等 + T4C-13..T4C-18）`
+`Phase 4C Final Completion Batch：把人类已批准的 A2 / A3 / A4 / G-018 写入对应 approved ADR 正文并实现，随后做 Phase 4B + 4C 全量回归、Final Gate 与收口判定。`
 
 ### 当前状态
+
+`PHASE_4C_COMPLETE`
+（本轮为 **FINAL COMPLETION BATCH**：**判定 `PHASE_4C_COMPLETE` —— 不存在已批准的 mandatory blocker**。
+**ADR**：A2 → **D3**、G-018 → **D4**、A3 与 A4 → **D5**；frontmatter `status` 保持 `approved`（**未改**）；**未新增 migration**、
+**未改 0022**（四项都不需要 schema 变化）。**实现**：① Thread POST 接受谓词 = `cancel_requested_at IS NULL` **且**
+`thread_state ∈ pending|active|idle`，两种情况共用 `409 thread_closed`，**权威前置条件与 CAS 谓词同时收窄**，
+deferral 测试被正式的 `TestThreadMessageRejectsAfterCancellationRequested` 取代；② GET 的无游标取尾 / `before` /
+`idleSince` / `nextCursor`·`prevCursor`（`after` 与 `before` 互斥 ⇒ `400 invalid_pagination`，游标恒为 Cloud Thread `seq`）；
+③ 新增 `issue_run.thread_changed{issueId,runId,lastSeq}` 覆盖任何改变 Thread REST 表示的提交，**`thread_appended` 未加宽**；
+④ `POST .../runs/{rid}/thread/end`（`Idempotency-Key` 必需、body `{}`、`202 {"threadState":"ending"}`、同键重放、
+新键对 `ending|ended` ⇒ `409 thread_closed`、幂等预检先于生命周期校验），**只**推进到 `ending`，不写条目、不分配 `seq`、
+不改 `phase`/`status`。**缺口**：**G-017 / G-018 / G-023 / G-024 = CLOSED**；**G-019 归 Phase 5**、
+**G-020**（多实例 SSE）、**G-021**（多 worker 分区）、**G-025**（文档债）、**G-026**（`cancel_requested_at` 无生产写入者）
+仍 **OPEN / NON-BLOCKING**；**0 项 BLOCKER**。
+**门禁**：`format:check` exit 0；`lint` **仅剩 1 条 PRE-EXISTING BASELINE**（`internal/core/space_agents.go` 的
+`activeSpaceAgentRoster` unused——文件逐字节未改、全仓含 HEAD 无引用、在 `git archive HEAD` 的未改动树上同样报出；
+基线 7 条中另有 6 条随 format 修掉，**新增 0 条**，未加 `nolint`）；`build` exit 0；`test` **368 PASS / 0 FAIL**（真实 PostgreSQL，
+含 `TestPublishedOpenAPIIsValidAndCurrent`）；`test:race` **368 PASS / 0 DATA RACE**；`frontend:generate` **幂等**
+（三次 sha256 一致、无手改）；`npm run check` 全绿；`git diff --check`（cloud 与 specs）干净
+⇒ **Phase 4C introduced gate regressions = 0**。`-count=10` 并发压力（Thread POST 同键、`/thread/end` 同键与四类竞争、
+GET 并发追加、接管重放、核心生命周期）全绿且**零 `time.Sleep`**。
+`task frontend:check` 只在 `git status --porcelain -- frontend/src/api` 一步失败，原因是生成物相对 HEAD **未提交**（本轮禁止 commit），
+不是内容漂移。**未提交**：无 stage / commit / push / PR，cloud 与 specs 的既有未提交修改原样保留。**未进入 Phase 5。**）
+
+**上一轮（Final Gate，保留记录）：**
+
+`PHASE_4C_FINAL_GATE_CORE_DONE_WITH_APPROVAL_DEFERRED`
+（本轮为 **FINAL ACCEPTANCE ROUND**（mandate §0–§24）：只做验收、回归、缺口分类与判定，**不扩展产品范围、不实现未批准 ADR 扩展、
+不进入 Phase 5、不为得 PASS 弱化测试、不把 deferred 伪装成完成**。**判定：`PHASE_4C_CORE_COMPLETE_WITH_APPROVAL_DEFERRED`。**
+`S1/S2a/S3/S4/S5/S6/S7` 的**已批准子集完整且各有直接证据**；下列项**需要批准后才能落地**，故**明确 deferred**而非「已完成」：
+① **S2b**（Thread GET 的无游标取尾 / `before` / `idleSince` / `nextCursor`·`prevCursor`）→ 需 Thread ADR 修订 **A3**（**G-017**）；
+② **`POST .../runs/{rid}/thread/end`**（`user_ended` 触发）→ 需 **G-018** 的端点形状批准；
+③ **仅状态变化也发布** `issue_run.thread_appended` → 需 **A4**（**G-023**，现行为：只对「有新条目」的提交发布）；
+④ **POST 在 `cancel_requested_at` 已置时拒绝** → 需 **A2**（**G-024**，现行为：与已批准 D3 字面一致，两条更严行**故意不实现**）；
+⑤ **`thread_entries.status` 进入 D1 列清单** → 需 **A1**（**G-022**；迁移 0022 已按安全路径落地，语义已批准）。
+**当前安全边界**：上述 ①–⑤ 对应代码**一行未写**；`ending → ended`、`queued → discarded`、`SessionEnded`、`delivery`/`deliver_revision`
+**零实现**（Phase 5，G-019）；**A1–A4 全部未批准，未改任何 ADR 文件或其 `status`**。
+**验收结果**：**Phase 4C introduced gate regressions = 0**；`format:check` / `lint` 的失败**全部为 PRE-EXISTING BASELINE**
+（5 个 format 文件 + 6 个 lint 文件，`git diff --quiet HEAD` 全为真 ⇒ 与本轮无关，按 §24 不清理）；`build` / `test` / `test:race` 全绿、
+**0 DATA RACE**；`-count=10` 并发压力两腿全绿且**零 sleep**；迁移「全新链 / 0021→0022 升级 / 重复 `Migrate` 幂等」全部通过；
+`frontend:generate` 幂等、OpenAPI 纯增无删除；**G-016 CLOSED**，**G-017..G-026 逐条复核后状态不变**，
+其中 **0 项 BLOCKER**、G-019 归 **Phase 5**、G-025 归**文档债**、其余 8 项 **OPEN / NON-BLOCKING**。
+本轮**新增一个测试**（`TestOnlyTheFirstRecordAdvancesRunning`，证明 running 的唯一权威与其他路径的不推进性）并同步 specs 证据表；
+**未修改任何生产行为**。**未提交**：无 stage / commit / push / PR，cloud 与 specs 的既有未提交修改原样保留。）
+
+**ADR Approval Round（2026-10-08，规范收口轮，非实现轮）—— `ADR_APPROVAL_ROUND_READY_FOR_HUMAN_DECISION`：**
+
+五项提案全部就绪、**等待人类决定**，本轮**未自行批准任何一项**、**未修改任何 approved ADR 文件或其 `status`**、
+**未改生产代码 / migration / OpenAPI / frontend generated / proto**（记录见 `plan/plan.md` 的
+`### Round: Phase 4C ADR Approval Round …`，完整 A1 修订文本亦在其中）：
+
+| 项 | Gap | 状态 | 要点 |
+|---|---|---|---|
+| **A1** | G-022 | **APPROVED · APPLIED（2026-10-08，人类批准）** ⇒ G-022 `CLOSED BY A1` | D1 的 `thread_entries` 列清单补入 `status text`，语义与已批准 D3 逐条对齐（`source='user'` ⇒ `queued\|delivered\|discarded` 且恒非空；`source ∈ {node,system}` ⇒ `NULL`；echo 同事务 CAS `queued→delivered`；`discarded` 仍属 Phase 5）。**不新增任何行为** |
+| **A2** | G-024 | **READY FOR APPROVAL** | `cancel_requested_at IS NOT NULL` 时新 Thread POST ⇒ `409 thread_closed`；接受谓词收窄为 `cancel_requested_at IS NULL AND thread_state ∈ {pending,active,idle}`。落地时 `TestThreadMessageCancelRowIsDeferred` 应转红并被重写 |
+| **A3** | G-017 | **READY FOR APPROVAL** | GET v1：`after` 与 `before` 互斥、都不给 ⇒ tail、响应**始终**升序、`limit ≤ 500`、新增 `idleSince`/`nextCursor`/`prevCursor`；cursor 是 Cloud Thread `seq`。**不**含 snapshot token / 服务端 cursor 对象 / durable resume token；S2b 仍 `S2B_DEFERRED_PENDING_ADR` |
+| **A4** | G-023 | **READY FOR APPROVAL** | 首选新增 `issue_run.thread_changed{issueId,runId,lastSeq}` 覆盖「任何改变 Thread REST 表示的提交」；备选是把既有 `thread_appended` 明确为历史名称的 invalidation hint。保留：仅提交后发布 / 回滚零事件 / 可有损 / 重复无害 / GET 为唯一权威 / 无内容 / 无 exactly-once。**不**解决 G-020 |
+| **G-018** | G-018 | **READY FOR APPROVAL** | `POST .../runs/{rid}/thread/end` + `Idempotency-Key` + body `{}` ⇒ `202 {"threadState":"ending"}`；同事务 CAS `pending\|active\|idle → ending` 并 `enqueueThreadCommand(EndSession{user_ended})`；新 key 对已 `ending\|ended` ⇒ `409 thread_closed`；**不得** `ending→ended` |
+
+建议批准顺序：**A1 → A2 → G-018 → A3 → A4**（A1 已有 schema 偏差须先修文档；A2/G-018 直接影响 lifecycle/API；A3/A4 为增强）。
+跨提案一致性已核对：A1 不授权 `discarded`；A2（拒绝新消息）与 G-018（主动结束）不同；A3 cursor 与 A4 事件**不绑定**为同一 cursor；
+A4 不解决多实例；G-018 只推进到 `ending`。
+
+**ADR Approval Decision（2026-10-08，规范收口轮）—— 只落地 A1，退出标记 `ADR_APPROVAL_ROUND_A1_APPLIED`：**
+
+人类**只批准 A1 / G-022**。A1 已按批准范围落入
+`specs/decisions/cloud/thread/0-durable-agent-thread-with-user-turns.md` 的 **D1**：`thread_entries` 列清单补入 `status`，
+并写明 `source='user'` ⇒ 恒非空且限于 `queued|delivered|discarded`、`source ∈ {node,system}` ⇒ `NULL`、Cloud 首次持久化写
+`queued`、echo 同 `turn_id` 同事务 `queued→delivered`（不回退）、终态接管 `queued→discarded` **仍属 Phase 5**（本轮**未实现**），
+并**显式区分** `thread_entries.status`（轮次）/ `issue_runs.thread_state`（Thread，D4）/ `thread_commands.delivered_at`
+（命令投递登记）三者互不代偿。**G-022 由 `OPEN / READY FOR APPROVAL` 变为 `CLOSED BY A1`**；
+**A2 (G-024) / A3 (G-017) / A4 (G-023) / G-018 保持 `OPEN / READY FOR APPROVAL`，未被自行批准、行为未变**。
+本轮**只改 ADR 文本**：**未改** production Go 代码、migration 0022 或任何新 migration、OpenAPI、frontend generated output、
+proto、任何其他 ADR 文件，**未改** Thread ADR 的 `status` 字段，**未把**「看起来不错 / 继续 / 可以」当批准。
+**`production behavior changed: NO`**、**`migration changed: NO`**、**`Phase 5 boundary unchanged`**。
+（完整记录见 `plan/plan.md` 的 `### Round: Phase 4C ADR Approval Decision …`。）
+
+**上一轮（Batch 3，保留记录）：**
+
+`PHASE_4C_ACCEL_BATCH_3_CORE_DONE_WITH_S2B_DEFERRED`
+（本轮为 **ACCELERATED IMPLEMENTATION ROUND**：单 Coding Agent 按 mandate 顺序推进 **S2a → S6 → 条件性 S2b → 回归**，
+中途不结束本轮。**S2a 完整** —— `GET /api/v1/tenants/{tid}/issues/{iid}/runs/{rid}/thread` **只**落地 Thread D5 的已批准子集：
+`after={seq}`（严格 `seq > after`，`after=0` = 从头）、`limit={n}`（缺省 200 = `ThreadPageDefault`、上限 500 = `ThreadPageLimit`）、
+条目按 `seq` **升序**、响应 `{items, threadState}`；`items` 与 `threadState` 出自**同一个** `Store.transact` 快照；
+`threadState` 由 Thread 响应投影 `issue_runs.thread_state`，run 资源字段集**逐字节不变**（`stripAgentRunSkeleton` 语义保持）；
+授权复用 Thread D3 的 Issue read（与 comments 同）——跨 tenant / 跨 Issue / 软删 run / 非 agent run / `thread_state IS NULL`
+一律 `404`，非成员 `403`；**只读**：单次事务零写（不分配 `seq`、不写状态、不发事件）；条目投影只给
+`seq/source/kind/record/createdAt`，`node_execution_id`/`node_sequence`/`run_id` 不上线（D-022 身份内部化），
+`turnId`/`status` 只随 `source='user'`。**未实现**（属 **G-017**）：无游标取尾、`before`、`idleSince`、`nextCursor`/`prevCursor`、
+`PublicRequest.Before`；`after` 缺省按「不新增语义」读作**从头**（= `after=0`），**不是** tail。**S6 完整** —— `SpaceEvent`
+增量新增可选 `issueId`/`runId`/`lastSeq`（`omitempty`：4 个 4C 之前的事件形状**逐字节不变**），提交后发布
+`issue_run.thread_appended`；hint 在**调用方事务**上排队（`transaction.appends`），由 `Store.transact` 在 `tx.Commit()`
+返回 nil **之后**与既有两个 signal 并列释放，因此「回滚不发」是**结构性**的（不是每个调用点自觉）；**三个 entry 写入点**
+（session 声明 `seq=1`、Thread POST、接管 hook）都发布，`lastSeq` = 该提交的 `MAX(seq)`（**高水位**，只表示「有数据在
+seq ≤ lastSeq」，**不**推进客户端游标）；hint **不**携带条目内容或会话状态；space 解析不到就**丢弃** hint（不让通知失败污染
+业务事务）。**仅状态变化零通知**：echo 的 `queued → delivered` 与 S7 的 `thread_state='ending'`（不写条目）**不**发布，
+**T4C-26 不实现**（**G-023** 未批准），并用双向断言把边界钉住（状态变化是持久的、通知不被发明；将来实现 A4 必红）。
+SSE 传输层与内存单实例 hub **未改**、**未**建 broker，**G-020** 保持 OPEN。**S2b 未实现** —— `decisions/cloud/thread/` 下
+**只有**一个已批准 ADR，其 D5 不含 tail/`before`/`idleSince`/游标，**A3/A4 未批准**，故标记
+**`S2B_DEFERRED_PENDING_ADR`**（该 deferred **不**否定已完成的 S2a/S6，T4C-6/T4C-8 保持未实现）。
+**未改**：proto、migration、任何 ADR 文件或其 `status`、Phase 4B 的 running authority / `seq` 分配 / 收据 / 接管事务、
+S3 命令所有权、S4 POST 幂等、S5 echo `delivered`、S7 停止在 `ending`、D6「缝在调用方事务内」。
+Checkpoint：`S2A_IMPLEMENTATION_CHECKPOINT_REACHED`（S2a 定向测试 + run 资源形状回归 + 并发分页测试全绿后记录，**未 commit**），
+随后继续 S6；`S6_IMPLEMENTATION_CHECKPOINT_REACHED`（S6 五条集成测试 + 事件字节形状白盒 + Phase 4B/4C 回归全绿后记录，**未 commit**）；
+**S2b：`S2B_DEFERRED_PENDING_ADR`**（无代码、无 route、无 OpenAPI 变更）。
+**G-017 / G-018 / G-019 / G-020 / G-021 / G-022 / G-023 / G-024 / G-025 / G-026 全部保持 OPEN 且未被静默关闭**。
+**未提交**：无 stage / commit / push / PR，既有未提交修改原样保留。）
+（本轮为 **ACCELERATED IMPLEMENTATION ROUND**：单 Coding Agent 连续推进 **S5 → S7**，中途不结束本轮。**S5 完整**：
+用户轮次 echo 从「仅首提示」推广到所有 Cloud 生成的用户轮次——批次中某事件的 `turn_id` 命中已存在的
+`source='user'`/`kind='user_turn'` 行时，接管事务只做 `queued → delivered` 的 CAS，**不**新增条目、**不**分配 seq、
+**不**改写 `record`/`turn_id`、**不**新建命令、**不**重新入队；已 `delivered` 的行是相同内容的重放 ⇒ 逐字节不动，
+`delivered` **永不回退**；首提示 echo（seq=1，`source='system'`）行为**不变**。批次后生命周期**只在**本事务提交了真实
+Node 记录且事后权威重读为 `phase='running' AND status='running'` 时判定：`active` + 批次**末条有效记录**为 `turnEnded`
++ 无 `source='user' AND status='queued'` ⇒ `thread_state='idle'`、`idle_since = now()`（数据库时钟）；`idle` + 末条非
+`turnEnded` ⇒ `thread_state='active'`、清 `idle_since`。判定依据是**末条有效记录**，**不是**「批中出现过 `turnEnded`」；
+两条 CAS 的 0 行都按不变量损坏整批回滚。**S7 完整（除 G-018 门禁项）**：结束严格停止在 `thread_state='ending'`，且
+**只在同一事务**内经 **A 缝**放出恰好一条 `EndSession{reason}`（业务层**不**写 `thread_commands`，`command_id` 由 A 生成）；
+idle 窗口用 `issue_runs.thread_idle_timeout`（点号命名的**配置 key，不是列**，默认 **15m**，`<= 0` 时整个 pass 是 no-op），
+判定与比较**全部用数据库时间**（`idle_since < now() - make_interval(secs => $2)`），逐 run **短事务** + 精确 CAS，重复 tick
+**不产生第二条** `EndSession`；取消按 IssueRun D6 分流——**无会话**（`thread_state IS NULL`）⇒ `starting` 直进
+`releasing`/`cancelled` + `deliveryState='skipped'` + 同事务 `declareDelete`，**不**写 `ending`、**不**发 `EndSession`；
+**有会话** ⇒ `ending` + `EndSession{cancelled}`，run 自身 `phase/status` **不动**，不 release、不删 Workspace。三触发的
+`user_ended` 因 **G-018 未获批准而不实现**（无 endpoint、无 route、无 OpenAPI 变更，**T4C-35 不适用**），作为明确
+deferred item 登记。**ADR 优先于 plan 的一处偏离**：无会话取消的判别键是 `thread_state IS NULL`（IssueRun D6 的
+「（尚无会话）」限定语 + 不变量 3），**不是** plan §4C.11 的 `phase` 判别；「`starting` 且会话已声明（`pending`）」的取消走
+`ending`。**未改**：proto、migration、generated/OpenAPI、前端、任何 ADR 文件或其 `status`、Phase 4B 的 running
+authority / `seq` 分配 / receipt / takeover 事务、`ending → ended`/`SessionEnded`/`discarded`/`delivering`/`deliver_revision`。
+**G-018 / G-019 / G-022 / G-024 全部保持 OPEN 且行为未变**，新增 **G-026**。**未提交**：无 stage / commit / push / PR，
+既有未提交修改原样保留。）
+
+### 本轮关键结论（Phase 4C Final Completion Batch — A2 / A3 / A4 / G-018 — 2026-10-08）
+
+- **本轮性质**：FINAL COMPLETION BATCH（最后一批实现 + 收口）。人类审批决定：**批准 A2、A3、A4 与 G-018**（A1/G-022 已在上一轮落地）。
+  权威记录见 `plan.md` §15 的 `### Round: Phase 4C Final Completion Batch …`。**未进入 Phase 5。**
+- **ADR 修订**：`specs/decisions/cloud/thread/0-durable-agent-thread-with-user-turns.md` —— A2 进 **D3**（接受谓词加
+  `cancel_requested_at IS NULL` 合取项，并写明取消是请求、不立即终态、不立即删 Workspace、不改变 `discarded` 语义）；
+  G-018 进 **D4**（用户主动结束端点的形状、事务顺序与「只到 `ending`」边界）；A3 与 A4 进 **D5**（读取窗口词汇与
+  两类失效提示）。**frontmatter `status` 未改**（早已 `approved`），**未新增后续 ADR 文件**，**未改 migration**。
+- **A2 落地**：`requireThreadAccepting` 的**权威**前置条件与写命令的 **CAS 谓词**（`AND cancel_requested_at IS NULL`）同时收窄，
+  因此「请求先提交、写入后到」这一竞争也被拒；`cancel_requested_at` 置位后的追加与 `ending | ended` 共用 `409 thread_closed`，
+  且**零**条目、**零**命令、**零**幂等记录，`thread_state`/`version`/`idle_since`/`phase` 全不变。旧的 deferral 测试
+  `TestThreadMessageCancelRowIsDeferred` **删除**，由 `TestThreadMessageRejectsAfterCancellationRequested` 取代。
+- **A3 落地**：`after` / `before` / 无游标（取尾）三种窗口统一由 `seq` 范围查询实现（**不用 `OFFSET`**），响应恒升序并带
+  `idleSince`（与快照同刻）、`nextCursor`/`prevCursor`（取窗口内真实条目，空窗不给）；`limit` 缺省 200、上限 500；
+  `after` 与 `before` 互斥，**互斥优先于游标校验**；非十进制/负数游标 `400 invalid_cursor`。空串游标回落到取尾。
+- **A4 落地**：**新增** `issue_run.thread_changed`，而不是加宽旧事件——`issue_run.thread_appended` 的名称、负载与语义逐字不变。
+  两类提示都在**提交后**发布（hint 在调用方事务上排队，由 `Store.transact` 在 `tx.Commit()` 成功后释放），同一提交各至多一条
+  （`thread_changed` 按 `lastSeq` 取大去重）；测试按**每个提交的完整通知集**断言（hub 与 SSE 双通道）。
+- **G-018 落地**：新路由 `POST /api/v1/tenants/{tid}/issues/{iid}/runs/{rid}/thread/end`（`Idempotency-Key` 必需、body `{}`），
+  单事务内幂等预检 → 授权 → 权威重读与状态校验 → CAS `pending|active|idle → ending` + `EndSession{user_ended}` + 幂等响应，
+  提交后发命令可用信号，返回 `202 {"threadState":"ending"}`。**幂等预检先于生命周期校验**（同键重放即使 Thread 已 `ended`
+  仍回放那个 `202`），新键对 `ending|ended` 是 `409 thread_closed`，同键异地是 `409 idempotency_conflict`。
+  它**不**写条目、**不**分配 `seq`、**不**改 `phase`/`status`；`ended` 仍由会话终态决定。
+- **竞争矩阵**（`-count=10` 全绿，零 `time.Sleep`）：`/thread/end` 对空闲期满、对取消投放、对新的用户轮次、两个键互相竞争——
+  四种竞争都只产生**恰好一次** `ending` 转换与**恰好一个** `EndSession`，且结果是合法的串行结果之一（`reason` 只取
+  `user_ended` / `idle_timeout` / `cancelled`）；并发同键 POST 仍只产生一个轮次。
+- **缺口分类**：**CLOSED** —— G-017（A3）、G-018、G-023（A4）、G-024（A2）。**仍 OPEN / NON-BLOCKING** ——
+  G-019（`SessionEnded` / `ending → ended` / `queued → discarded`，**归 Phase 5**）、G-020（多实例 SSE 与重放）、
+  G-021（多 worker 分区）、G-025（migration README 文档债）、G-026（`cancel_requested_at` 的**生产写入者**仍不存在，
+  因此取消只有读侧谓词）。**0 项 BLOCKER**，因此本批次结束时 Phase 4C 判定为完成。
+- **specs 证据表同步**：`test-cases/cloud/thread/durable-thread.md` 新增核心用例
+  **A User End Request Ends The Thread Exactly Once**，并把读取节、SSE 节、接受谓词行的 `Missing`/`Partial` 如实升级为
+  `Covered`（含 `before`、取尾、`idleSince`、游标、仅状态变化通知、取消谓词）；`queued → discarded`、`ending → ended`、
+  客户端重连/轮询兜底、多实例投递**保持 `Missing`/`Partial`**，**未**把 `SessionEnded` / `discarded` / Phase 5 / G-026 的
+  cancel 写入者标成 `Covered`。
+- **本轮未做**：未进入 Phase 5（`SessionEnded`、`ending → ended`、`queued → discarded`、`running → delivering`、
+  `DeliverRevision`、交付结算、释放完成、Workspace 删除完成、`done` 一律零实现）；未新增/修改 migration；未改 proto；
+  未改任何 ADR 的 `status`；未手改任何 generated artifact；未弱化任何 lint / 测试。
+
+### 上一轮关键结论（Phase 4C 加速实施 Batch 3：S2a + S6 — 2026-10-08，保留）
+
+- **本轮性质**：IMPLEMENTATION，单 Agent 按 mandate 顺序 **S2a → S6 → 条件性 S2b → Batch 3 集成回归**。权威记录见
+  `plan.md` §15 "Round: Phase 4C Accelerated Implementation Batch 3 — S2a (Thread GET, approved subset) + S6 (SSE
+  invalidation notice) / 2026-10-08"。
+- **S2a 交付**：`internal/core/thread_read.go`（新）、`internal/core/public.go`（dispatch）、
+  `internal/api/router/router.go`（route）、`internal/contract/openapi.go` + `api/openapi.json` +
+  `frontend/src/api/*`（生成物，未手改）、`integration/agent_run_thread_read_test.go`（新）。
+- **S2a 三条不变量**：① **只实现已批准子集**——D5 只写了 `after`/`limit`/升序/`threadState`，其余（tail、`before`、
+  `idleSince`、游标）**一行未写**；② 快照一致——`items` 与 `threadState` 同事务读取，run 资源字段集不变；③ 只读且授权与
+  comments 一致（三重作用域 + membership），`node_execution_id`/`node_sequence`/`run_id` 不出网。
+- **S2a 的一处读法选择（已登记 G-017）**：`after` 缺省读作**从头**（= `after=0`，即「不新增语义」的那一种解释），
+  **不是** tail；`thread_state IS NULL` 答 `404` 而非空 `threadState`（D4 的状态集封闭）。
+- **S6 交付**：`internal/core/thread_events.go`（新）、`internal/core/hub.go`（+`issueId`/`runId`/`lastSeq`）、
+  `internal/core/store.go`（`transaction.appends` + 提交后 `publishThreadAppends`）、三个发布点
+  （`agent_run_session_start.go`、`agent_run_thread_message.go`、`agent_run_thread.go`）、
+  `internal/core/hub_test.go`（字节形状白盒）、`integration/agent_run_thread_events_test.go`（新）、
+  `integration/agent_run_thread_takeover_test.go`（lease seed 改幂等以便场景复用，语义未变）。
+- **S6 三条不变量**：① 发布**只在提交之后**——hint 排在调用方事务上、由 `Commit()` 成功后释放，panic 回滚与**提交失败**都不发
+  （两条路径各有一条测试）；② 事件只是**失效提示**——`lastSeq` 是高水位、不含内容/状态、**不**推进客户端游标，恢复永远走
+  GET + `after`；③ **兼容性逐字节**——4 个既有事件形状按字面固定，新增字段全部 `omitempty`。
+- **T4C 映射**：S2a → T4C-7/T4C-9/T4C-10/T4C-11/T4C-12（另有「无条目的空窗」「只读无写」两条补充用例）；
+  S6 → T4C-25、T4C-27。**T4C-6/T4C-8 不实现**（随 S2b），**T4C-26 不实现**（G-023），三者均未标 Covered。
+- **载荷证明（变异测试）**：把 `publishThreadAppends` 移到 `tx.Commit()` **之前**后，只有「提交失败」那条测试变红——
+  因为 panic 回滚根本走不到释放那一行，所以提交失败这半边必须有独立测试；变异后已从备份恢复并重新编译。
+- **门禁**：`task build` PASS；`task test` PASS（全包 0 FAIL，`integration` 57.9s、`internal/core` 24.4s）；
+  `task test:race` PASS（`./...` 与最终工作树的 `./integration` 各一次，**0 DATA RACE**）；`git diff --check`（cloud 与 specs）
+  干净；`task frontend:generate` **生成幂等**（`task openapi` + `npm run api:generate` 重跑后三个生成物 md5 不变）；
+  `npm --prefix frontend run check` PASS（组合 `frontend:check` 的漂移步骤只因生成物**未提交**而失败，按 mandate 以幂等证据
+  替代结论）。`task format:check`（5 文件）与 `task lint`（7 项）的失败项**全部**位于 **HEAD 未修改**文件，属既有基线；
+  本轮新增的 1 项 `bodyclose` + 2 项 `hugeParam` 已修（后者是 `SpaceEvent` 增字段后 96 字节触发，按值传参是刻意的扇出语义，
+  用紧邻最小 `//nolint:gocritic` + 理由记录，未改阈值、未改签名）。**未运行 `task format`**。
+- **Gaps**：**G-017 stays OPEN**（S2b `S2B_DEFERRED_PENDING_ADR`：A3/A4 未批准，未改任何 ADR 文件或其 `status`）；
+  **G-023 stays OPEN**（T4C-26 不实现，边界被双向断言钉住）；**G-018 / G-019 / G-020 / G-021 / G-022 / G-024 / G-025 /
+  G-026 状态未变**（`/thread/end` 未实现、无 `ending → ended`/`discarded`、SSE 仍无 broker 无回放）。
+- **specs 证据同步（`specs` 仓库）**：`test-cases/cloud/thread/durable-thread.md` 的 GET 与 SSE 两节：只翻转有**直接测试证据**
+  的义务，未实现项（tail/`before`/`idleSince`/游标、仅状态变化通知、前端重连轮询）一律保持 `Missing`；
+  并加 Batch 3 implementation status 段；`test-cases/cloud/controller-integration/agent-run-executions-and-thread.md`
+  的 SSE/授权相关行同步。Phase 5 契约保持 `Missing`。
+- **下一步**：**Final Gate 轮**收口（全套门禁 + 与 Phase 4B/4C 全基线对照 + gap 复核）。需要 ADR 修订才能开工的项：
+  S2b（**A3**）、仅状态变化通知（**A4**）、`/thread/end`（G-018）；Phase 5 需 G-019 专门轮次。
+
+### 上一轮关键结论（Phase 4C 加速实施 Batch 2：S5 + S7 — 2026-10-08，保留）
+
+- **本轮性质**：IMPLEMENTATION，单 Agent **连续**推进 **S5 → S7**。权威记录见 `plan.md` §15
+  "Round: Phase 4C Accelerated Implementation Batch 2 — S5 (user-turn echo + `active⇄idle`) + S7 (ending triggers, stopped at `ending`) / 2026-10-08"。
+- **S5 交付**：`internal/core/agent_run_thread.go`（echo 推广 + 批次后生命周期）、
+  `internal/core/agent_run_thread_lifecycle_db_test.go`（新，T4C-19/20/28/29/30 + 首提示 echo-only 回归）。
+- **S5 四条不变量**：① 用户轮次 echo **绝不**产生新条目/新 seq/内容改写/新命令/重新入队，只有 `status` 单向
+  `queued → delivered`；② 首提示 echo（seq=1）保持「仅收据」；③ 生命周期判定依据**批次末条有效记录**，被 echo 的用户轮次
+  算有效、首提示 echo 不算有效，`queued` 用户轮次**阻止** idle；④ `pending → active` 保持 Phase 4B 规则，**未**改写。
+- **S7 交付**：`internal/core/agent_run_thread_end.go`（新）、`internal/core/agent_run_thread_command.go`
+  （`EndSessionCommand`）、`internal/core/store.go`（`ThreadIdleTimeout`，零值 = 未配置 = no-op）、
+  `internal/config/config.go`（`IssueRunsConfig` + `DefaultThreadIdleTimeout = 15m`）、`configs/config.yaml`
+  （`issue_runs.thread_idle_timeout: 15m`）、`cmd/server/main.go`（两个 10s 循环 + 配置接线）、
+  `internal/core/agent_run_thread_end_db_test.go`（新，T4C-31/32/33/34 + 边界）。
+- **S7 三条不变量**：① 结束**只**到 `ending`，无第二条终态权威（G-019）；② `EndSession` 是**请求**——run 自身
+  `phase`/`status` 不动，不 release、不删 Workspace、不跳过 session 关停/revision 生命周期；③ 三条结束路径各有**唯一**
+  请求，重复 tick 与已 `ending` 的取消都**不**产生第二条。
+- **并发矩阵（T4C-33，真实 PostgreSQL + channel barrier，无 sleep）**：两个 idle tick ⇒ 恰一条 `EndSession`；idle tick ‖
+  取消（请求先落库）⇒ 恰一条且 reason 为 `cancelled`；idle tick ‖ 接管 ⇒ 允许集为「ending + 一条 `idle_timeout`」或
+  「active + 零命令」，并以**确定性顺序**另行覆盖 takeover-first 的一半；取消 ‖ 接管 ⇒ 收敛为 ending + 一条 `cancelled` +
+  条目照常追加。
+- **T4C-34**：`record` 永不改写、`seq` 永不重编号、唯一可变列是单向的 `status`；同时断言 Phase 5 边界（无 `ended`、
+  无 `discarded`）。**GET 半边仍不可测**（S2a 在**不实现**清单内）。
+- **S5 checkpoint**：S5 定向测试 + Phase 4B 接管全量回归 + Batch 1 S3/S4 套件全绿后记录
+  `S5_IMPLEMENTATION_CHECKPOINT_REACHED`，**未 commit**，随后继续 S7。
+- **门禁**：`task build` PASS；`task test` PASS（全包 0 FAIL）；`task test:race` PASS（无 DATA RACE）；
+  `git diff --check` 干净；`gofmt`/`go vet ./internal/core/` 干净。`task format:check`（5 文件）与 `task lint`（7 项）
+  的失败项**全部**位于 **HEAD 未修改**文件，属**既有**基线；本轮新增文件已修正 gofumpt，**零新增** lint 发现。
+  **未运行 `task format`**（会重写既有未提交文件）。
+- **Gaps**：**G-018 stays OPEN**（`/thread/end` 未实现，`user_ended` 不可达，T4C-35 不适用，作为明确 deferred item）；
+  **G-019 stays OPEN**（Phase 5 边界完整守住）；**G-022 stays OPEN**（migration 0022 中 `status` 的存在**不**自动关闭 ADR
+  gap）；**G-024 stays OPEN 且行为未变**（`cancel_requested_at` + `pending/active/idle` 的 POST deferred 行为**未**被
+  side effect 改变，`TestThreadMessageCancelRowIsDeferred` 仍绿）；**新登记 G-026**（`issue_runs.cancel_requested_at`
+  无生产写者，本轮只实现**反应**、**未**发明公开取消 API）。
+- **specs 证据同步（`specs` 仓库）**：`test-cases/cloud/thread/durable-thread.md`（加 Phase 4C implementation status 段；
+  `连续与幂等`/`冲突整批拒绝`/`同事务写入与幂等`/`关闭后拒绝` → `Covered`，`轮次结算` → `Partial`（`delivered` 半有证据、
+  `discarded` 半属 Phase 5），`空闲期满结束`/`追加消息重置`/`进入 idle 的判定` → `Covered`；**GET 与 SSE 两节保持
+  `Missing`**）；`test-cases/cloud/issue-run/agent-run-orchestration.md`（`取消是请求` → `Partial`，登记 IssueRun D6
+  「（尚无会话）」判别式与 plan §4C.11 措辞的差异、以及 G-026；header 拆出 Batch 1+Batch 2 已落地项）；
+  `test-cases/cloud/controller-integration/agent-run-executions-and-thread.md`（Batch 2 段：S5 echo 结算、A 侧
+  `EndSession{reason}` 投放，并显式区分 `EndSession`（Cloud→Node 请求）与 `SessionEnded`（Node→Cloud 终态，Phase 5））。
+  只翻转有**直接测试证据**的义务（Phase 4B、Batch 1 与本轮的证据，本次门禁实跑为绿）；Phase 5 契约一律保持 `Missing`。
+- **下一步**：**S2a**（Thread GET 已批准子集）可立即开工；**S2b** 需 ADR 修订 **A3**（G-017）；**S6** 需 **A4**（G-023）；
+  **S7 的 `/thread/end`（T4C-35）** 需先取得 G-018 的 ADR 修订或架构师确认；Phase 5（`SessionEnded` → `ended` +
+  `discarded`）需 G-019 专门轮次；**G-026** 需要一个已批准的取消 API 切片。
+
+### 上一轮记录（Phase 4C 加速实施 Batch 1：S3 + S4 — 2026-10-08，保留）
+
+#### 当时 Phase
+
+`Phase 4C ACCELERATED IMPLEMENTATION BATCH 1 — S3（Thread Command Control Plane）+ S4（Thread POST）`
+
+#### 当时 Slice
+
+`Phase 4C Batch 1（IMPLEMENTATION，单 Agent 连续推进）：S3（thread_commands 控制面 + A 缝 + 提交后 ThreadCommandAvailable + T4C-21..T4C-24）+ S4（公开 Thread POST + 同事务条目/状态/命令/幂等 + T4C-13..T4C-18）`
+
+#### 当时状态
 
 `PHASE_4C_ACCEL_BATCH_1_CORE_DONE_WITH_ADR_DEFERRED`
 （本轮为 **ACCELERATED IMPLEMENTATION ROUND**：单 Coding Agent 连续推进 **S3 → S4**，中途不结束本轮，两片边界互不合并、
@@ -1143,7 +1424,7 @@ T4C-13..T4C-18 与 T4C-21..T4C-24 全部落地并通过；`task build` / `task t
 receipt / takeover 事务、proto、任何 ADR 文件或其 `status`、`specs/test-cases/cloud/thread/durable-thread.md`。
 **未提交**：无 stage / commit / push / PR，既有未提交修改原样保留。）
 
-### 本轮关键结论（Phase 4C 加速实施 Batch 1：S3 + S4 — 2026-10-08）
+#### 上一轮关键结论（Phase 4C 加速实施 Batch 1：S3 + S4 — 2026-10-08）
 
 - **本轮性质**：IMPLEMENTATION，单 Agent **连续**推进 **S3 → S4**。权威记录见 `plan.md` §15
   "Round: Phase 4C Accelerated Implementation Batch 1 — S3 (Thread Command Control Plane) + S4 (Thread POST) / 2026-10-08"。
@@ -1367,29 +1648,33 @@ receipt / takeover 事务、proto、任何 ADR 文件或其 `status`、`specs/te
   `SessionEnded`/`DeliverySettled`/`RunWorkspaceDeleted`、cancel API、D-023 `MAX(seq)+1` —— 均无实现。
 - 不把「schema/契约已设计」当作已实现；T4B-1..T4B-19 全 `DESIGNED / MISSING`。
 
-**Phase 4C 已实现（截至 Batch 1）**：S1（migration 0022 + `pending` 物化）、S3（`thread_commands` 控制面 +
-`EnqueueThreadCommand` 缝 + `ThreadCommandAvailable` 提交后发布）、S4（公开 Thread POST + 同事务条目/状态/命令/幂等）
-**已实现并通过真实 PostgreSQL 测试**。
-**Phase 4C 仍未实现**：S2a（GET Thread 已批准子集）、S2b（GET 扩展，需 A3）、S5（echo→`delivered`、`active⇄idle`）、
-S6（SSE `issue_run.thread_appended`，需 A4）、S7（`/thread/end`、idle 扫描、`ending→ended`，需 A2/G-018）、
-`SessionEnded` / `DeliverySettled` / `RunWorkspaceDeleted`、`queued→discarded`、`DeliverRevision` / 上传授权
-（`GrantRevisionUpload`）、完整 cancel API、Phase 5 / workspace failure policy / 收据 GC / event 保留清理 / 任意 event 上限。
-**G-024 的两行有意未实现**（见 Blockers）。
+**Phase 4C 已实现（截至 Batch 4，即收口轮）**：S1（migration 0022 + `pending` 物化）、S3（`thread_commands` 控制面 +
+`EnqueueThreadCommand` 缝 + `ThreadCommandAvailable` 提交后发布）、S4（公开 Thread POST + 同事务条目/状态/命令/幂等 +
+**A2 的取消谓词**）、**S5（用户轮次 echo → `delivered`、批次末条有效记录判定的 `active⇄idle` 生命周期）**、
+**S7 的三个结束触发（`idle_timeout` 扫描、`cancelled` 分流、`user_ended` 的 `/thread/end` 端点，严格停止在
+`thread_state='ending'`）**、**S2a 的完整读取面（`after` / `before` / 取尾 / `limit` / `idleSince` / `nextCursor`·`prevCursor`，A3）**、
+**S6 的两类提交后失效提示（`thread_appended` + `thread_changed`，A4）** —— **均已实现并通过真实 HTTP/gRPC + PostgreSQL 测试**。
+**Phase 4C 仍未实现**（**不得**标 Covered）：**`ending → ended` / `SessionEnded` / `queued → discarded`（Phase 5，G-019）**、
+`DeliverySettled` / `RunWorkspaceDeleted`、`running → delivering → releasing → done`、`DeliverRevision` / 上传授权
+（`GrantRevisionUpload`）、**完整 cancel API（`cancel_requested_at` 无生产写者，G-026——本仓只实现反应与读侧谓词）**、
+SSE 的客户端重连/轮询兜底（无 Thread 面板）、多实例投递（G-020）、多 worker 命令分区（G-021）、
+收据 GC / event 保留清理 / 任意 event 上限（G-015 PARTIAL）、migration README 债务（G-025）。
+**无会话取消的判别键是 `thread_state IS NULL`**（IssueRun D6 的「（尚无会话）」限定语），与 plan §4C.11 按 `phase` 的措辞不同：
+ADR 优先于 plan，偏离已登记在 `plan.md` §15 与本文件。
 
 ### 当前 Blockers
 
-**无 4C blocker**（就绪评审轮 verdict 为 `READY_FOR_PHASE_4C_IMPLEMENTATION_SLICE_1`；**Slice 1 / S3 / S4 均不依赖任何未决项**）。
-**G-016 CLOSED**（Phase 4C 设计轮，D-4C-01）。**NON-BLOCKING OPEN**：G-017（GET 扩展需 ADR 修订——**S2b 前置**）、
-G-018（用户主动结束端点缺失——**S7 前置**）、G-019（`ending→ended` 依赖 Phase 5 `SessionEnded`）、G-020（SSE 客户端
-重连 + ≥30s 轮询义务）、G-021（多 worker 命令分区——S3 已按**单 worker 保证**交付，**有意未解决**）、
-**G-022**（`thread_entries.status` 不在 Thread D1 列清单——需修订 A1；S1 已按**已批准**的 D3 实现该列，**不自动关闭**该 ADR 缺口）、
-**G-023**（无新条目也发 `thread_appended`，与 D5 字面冲突——需 A4；未落地前 S6 只对追加条目的提交发布）、
-**G-024**（`cancel_requested_at` 已置时拒绝 POST，与 D3 字面冲突——需 A2）。**S4 已交付其余全部接受矩阵行**，
-仅 D-4C-03 的 `cancel_requested_at IS NOT NULL` 与「运行 Workspace 不活」两行**延后**（A2 未批准；由
-`TestThreadMessageCancelRowIsDeferred` 钉住，A2 落地即转红）。
+**无 4C blocker** ⇒ Phase 4C 判定 `PHASE_4C_COMPLETE`。
+**CLOSED**：**G-016**（设计轮 D-4C-01）、**G-022**（A1）、**G-017**（A3）、**G-018**、**G-023**（A4）、**G-024**（A2）。
+**NON-BLOCKING OPEN**：**G-019**（`ending→ended` 与 `queued→discarded` 依赖 Phase 5 `SessionEnded`——**归 Phase 5**）、
+G-020（SSE 客户端重连 + 周期轮询义务、多实例投递与重放）、G-021（多 worker 命令分区——S3 已按**单 worker 保证**交付，**有意未解决**）、
+**G-026**（`issue_runs.cancel_requested_at` **无生产写者**——A2 只收窄了读侧接受谓词，**未**发明任何公开取消 API；
+反应是 fail-closed 且幂等的，接线写者不改变已落地行为）、G-025（migration README 文档债）。
+**A2 落地后的行为变化**：`cancel_requested_at` 已置时 POST 返回 `409 thread_closed`（与 `ending | ended` 同一错误），
+旧 deferral 测试 `TestThreadMessageCancelRowIsDeferred` 已删除并由 `TestThreadMessageRejectsAfterCancellationRequested` 取代。
 历史缺口：**G-012 PARTIAL**、**G-015 PARTIAL / NON-BLOCKING**、**G-009 CLOSED**、G-001 保持 PARTIAL
 （Create/Delete RunWorkspace 与 `EnqueueThreadCommand` 归各自 Phase）、G-011 不在 Phase 4 顺手解决。
-**controller-session ADR 仍 `proposed`** —— 是 desktop 侧独立待批准决策，**不是** Cloud 4C 的 blocker，
+**controller-session ADR 仍 `proposed`** —— 是 desktop 侧独立待批准决策，**不是** Cloud 的 blocker，
 也**不是** 4C 任何决策的前提（D-4C-01..12 的论证**不依赖**它）。
 
 ---

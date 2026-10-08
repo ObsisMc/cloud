@@ -61,15 +61,16 @@ func settleRun(t *testing.T, store *Store, runID, tenantID string, ready bool, w
 }
 
 // runFields reads the durable run columns a settlement test asserts on.
-func runFields(t *testing.T, store *Store, runID string) (phase sql.NullString, status string, failureReason string, result sql.NullString, workspaceID sql.NullString, cancelAt sql.NullString) {
+func runFields(t *testing.T, store *Store, runID string) (phase sql.NullString, status, failureReason string, result, workspaceID, cancelAt sql.NullString) {
 	t.Helper()
 	err := store.Pool.QueryRow(
 		`SELECT phase, status, failure_reason, result, workspace_id, cancel_requested_at FROM issue_runs WHERE id=$1`,
-		runID).Scan(&phase, &status, &failureReason, &result, &workspaceID, &cancelAt)
+		runID,
+	).Scan(&phase, &status, &failureReason, &result, &workspaceID, &cancelAt)
 	if err != nil {
 		t.Fatalf("read run fields: %v", err)
 	}
-	return
+	return phase, status, failureReason, result, workspaceID, cancelAt
 }
 
 // countRunActivities reports how many issue_activities of the given action exist for the run's issue.
@@ -367,7 +368,8 @@ func TestPhase2ASettleInvariantErrors(t *testing.T) {
 	teamRun := newID()
 	if _, err := store.Pool.Exec(
 		`INSERT INTO issue_runs(id,tenant_id,issue_id,executor_type,executor_id,status) VALUES($1,$2,$3,'team',$4,'queued')`,
-		teamRun, seed.tenant, seed.issue, newID()); err != nil {
+		teamRun, seed.tenant, seed.issue, newID(),
+	); err != nil {
 		t.Fatalf("seed team run: %v", err)
 	}
 	if err := settleRun(t, store, teamRun, seed.tenant, true, ""); err == nil {

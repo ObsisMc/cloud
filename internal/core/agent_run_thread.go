@@ -50,11 +50,20 @@ func threadRecordKind(record Object) (string, bool) {
 //	echo dedupe:          an event whose turn_id is the Thread's first prompt turn_id is the echo of
 //	                      the prompt Cloud already wrote as seq=1: it is persisted as a receipt by
 //	                      the caller but produces no entry and consumes no seq (Thread D3 rule).
+//	user turn echo:       an event whose turn_id is an existing Cloud-written user turn takes that
+//	                      turn over: the row moves `queued → delivered` and nothing else changes —
+//	                      no entry, no seq, no rewrite of the stored content, no new command
+//	                      (Thread D3, D-4C-08).
 //	seq allocation:       one gapless run-scoped seq per real record, from MAX(seq)+1 — seq=1 stays
 //	                      the immutable Cloud-authored first prompt (D-023, G-009/§21/§23).
 //	running authority:    the first real record commits `starting → running` in this same
 //	                      transaction, and only when the run is still a valid starting run with a
 //	                      usable workspace; nothing else about the run changes (§15, §30).
+//	thread lifecycle:     after the batch commits its records, an `active` Thread whose last
+//	                      effective record is `turnEnded` with no queued user turn becomes `idle`
+//	                      (idle_since from the database clock), and an `idle` Thread that took over a
+//	                      continuation record becomes `active` again with idle_since cleared
+//	                      (Thread D4, D-4C-04/D-4C-09).
 //	stale/terminal:       a run that is no longer `starting`, a cancelled run and an unusable
 //	                      workspace are not advanced (G-011 fail-closed, §17/§20) but the taken-over
 //	                      records are still appended to the Thread, so an acked event is never
@@ -105,6 +114,13 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 
 	next := t.one("SELECT COALESCE(MAX(seq),0) AS m FROM thread_entries WHERE run_id=$1", runID).N("m") + 1
 	taken := 0
+	// lastKind is the kind of the batch's last *effective* Node record — the record the Thread
+	// lifecycle decision below is taken on (D-4C-04/D-4C-09). A user turn the Node echoes is
+	// effective even though it appends no entry: it is the Node stating it holds that turn, so a
+	// batch ending on one means the agent still has work and the Thread is not idle. The first
+	// prompt's echo is not effective at all — seq=1 already presents it and it says nothing about
+	// what the session did afterwards.
+	lastKind := ""
 	for _, ev := range events {
 		if turnID := ev.S("turnId"); turnID != "" && turnID == initialTurnID {
 			continue // echo of the first prompt: receipt only, seq=1 already presents it
@@ -112,6 +128,34 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 		kind, ok := threadRecordKind(ev.O("record"))
 		if !ok {
 			return fmt.Errorf("threadEventsTakenOver: run %s node sequence %d carries unknown record type %q", runID, ev.N("sequence"), ev.O("record").S("type"))
+		}
+		lastKind = kind
+		// A Cloud-written user turn echoed back by the Node (Thread D3, D-4C-08). The event carries
+		// the turn_id of the entry Cloud wrote when the turn was accepted, so taking it over is a
+		// lifecycle transition on that existing row: never a new entry, a new seq, a rewrite of the
+		// original content, a new command or a re-enqueue. Only `queued → delivered` moves; a turn
+		// already delivered is an identical replay and is left byte-for-byte alone, so `delivered`
+		// never regresses to `queued`. The status CHECK admits exactly queued/delivered/discarded,
+		// and only a session end that found the turn still queued writes `discarded` (Thread D3
+		// invariant 4, Phase 5) — an echo cannot undo it, which is why the test above needs no third
+		// branch and no default.
+		if turnID := ev.S("turnId"); turnID != "" {
+			if echo := t.one("SELECT seq, status FROM thread_entries WHERE run_id=$1 AND turn_id=$2 AND source='user' AND kind='user_turn'", runID, turnID); echo != nil {
+				if echo.S("status") == "queued" {
+					// Same hardening as every other Thread CAS: the row was just read under the
+					// caller's advisory lock, so zero affected rows means the lifecycle moved under
+					// a predicate this transaction did not observe — invariant corruption that rolls
+					// the batch back rather than being silently tolerated.
+					if moved := t.execRows(`UPDATE thread_entries SET status='delivered' WHERE run_id=$1 AND seq=$2 AND status='queued'`, runID, echo.N("seq")); moved != 1 {
+						return fmt.Errorf("threadEventsTakenOver: run %s user turn %s was not marked delivered (rows affected %d)", runID, turnID, moved)
+					}
+					// A4: the row moved, so the Thread's REST representation changed even though no
+					// entry was appended. A turn already `delivered` (an identical replay) moves
+					// nothing and therefore queues nothing — the hint describes a change, not an echo.
+					threadChanged(t, o)
+				}
+				continue
+			}
 		}
 		// Thread D1: the same (node_execution_id, node_sequence) yields at most one entry, even if
 		// the A-side batch classification ever let a duplicate through. Identical content is a
@@ -130,10 +174,21 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 		taken++
 	}
 	if taken == 0 {
-		// Every event was an echo (or an identical duplicate): no record was taken over, so the run
-		// stays exactly where it was — not running, thread_state still pending (plan §4B.4/§31).
+		// No Node record was taken over in this batch, so the run stays exactly where it was — not
+		// running, and its Thread state untouched (plan §4B.4/§31). A delivered user turn written
+		// above is still committed: that echo is durable Node evidence about a turn Cloud already
+		// owns, and it is not a Thread record, so it is not takeover evidence for anything else.
 		return nil
 	}
+	// At least one Node record became a Thread entry, so a live subscriber has something new to
+	// read: queue the invalidation hints here, against the authoritative run row re-read above
+	// (Thread D5, T4C-25). They are queued after this batch's entry writes, so lastSeq is the batch's
+	// max(seq), and the store releases them only if this whole batch commits. Both hints are queued:
+	// the append-specific one keeps its meaning, and A4's generalized one covers this same commit.
+	// A batch that only delivered an echoed user turn takes the early return above and publishes no
+	// append hint — but it did change the read model, so the echo path queued A4's hint for it.
+	threadAppended(t, o)
+	threadChanged(t, o)
 
 	// The running transition (§15/§30). The gate is re-read here rather than passed in: a run that
 	// a cancel, a settlement or an earlier batch already moved must not be moved again, and an
@@ -151,6 +206,53 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 			WHERE id=$1 AND executor_type='agent' AND phase='starting' AND status='dispatched' AND cancel_requested_at IS NULL`, runID); moved != 1 {
 			return fmt.Errorf("threadEventsTakenOver: run %s was not moved to running (rows affected %d)", runID, moved)
 		}
+	}
+
+	// Post-batch Thread lifecycle (Thread D4, D-4C-04/D-4C-08/D-4C-09). The decision is taken on the
+	// batch's own outcome — re-read here, after the writes above, so it sees exactly what this
+	// transaction committed to — and it only ever moves a Thread that a running run already owns.
+	// A run the running gate above did not move (cancelled, unusable workspace, already past
+	// 'starting') keeps whatever state it had, and `pending` stays Phase 4B's business alone.
+	//
+	// The idle predicate is deliberately NOT "the batch contained a TurnEnded": a TurnEnded the
+	// agent followed with another record — an agent message, a tool record, another user turn — is
+	// not the end of the conversation, which is why the decision reads the batch's last effective
+	// record rather than scanning for a marker. A user turn still `queued` is work the Node has not
+	// taken over yet, so it blocks idle for as long as it stays queued; the probe runs after the
+	// delivery writes above, so a turn this very batch delivered does not block it.
+	//
+	// Only a *running* Thread has a lifecycle to decide here. A run still `starting` (its first
+	// batch did not pass the gate above: cancelled, unusable workspace), one already `delivering`,
+	// or one settled altogether keeps whatever Thread state it had and is written by nothing here —
+	// which is also what keeps a stale or cancelled run's late records from reaching the lifecycle
+	// at all.
+	after := t.one("SELECT phase, status, thread_state FROM issue_runs WHERE id=$1", runID)
+	if after.S("phase") != "running" || after.S("status") != "running" {
+		return nil
+	}
+	threadState := after.S("threadState")
+	ended := lastKind == "turnEnded"
+	queued := t.one("SELECT seq FROM thread_entries WHERE run_id=$1 AND source='user' AND status='queued' LIMIT 1", runID) != nil
+	switch {
+	case threadState == "active" && ended && !queued:
+		// idle_since is written from the database clock: the idle window is judged against the
+		// database's own time on every reader, never against a process clock (D-4C-10, §21).
+		if moved := t.execRows(`
+			UPDATE issue_runs SET thread_state='idle', idle_since=now(), version=version+1, updated_at=now()
+			WHERE id=$1 AND thread_state='active'`, runID); moved != 1 {
+			return fmt.Errorf("threadEventsTakenOver: run %s was not moved to idle (rows affected %d)", runID, moved)
+		}
+		threadChanged(t, o)
+	case threadState == "idle" && !ended:
+		// A continuation record taken over while the Thread sat idle: the conversation is live
+		// again, and idle_since is cleared with the state so a stale instant can never be read as
+		// an expired idle window by the ending scan (D-4C-10).
+		if moved := t.execRows(`
+			UPDATE issue_runs SET thread_state='active', idle_since=NULL, version=version+1, updated_at=now()
+			WHERE id=$1 AND thread_state='idle'`, runID); moved != 1 {
+			return fmt.Errorf("threadEventsTakenOver: run %s was not moved back to active (rows affected %d)", runID, moved)
+		}
+		threadChanged(t, o)
 	}
 	return nil
 }

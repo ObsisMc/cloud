@@ -11,11 +11,11 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // PublicRequest is populated only after service and final-user credentials are verified.
 type PublicRequest struct {
-	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, CloneID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, InteractionID, FormRef, InvitationID, JoinLinkID, JoinRequestID, Key, After, Query, GroupBy string
-	Limit                                                                                                                                                                                                                                                  int
-	Body                                                                                                                                                                                                                                                   Object
-	Identity                                                                                                                                                                                                                                               *Claims
-	Person                                                                                                                                                                                                                                                 *DirectoryPerson
+	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, CloneID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, InteractionID, FormRef, InvitationID, JoinLinkID, JoinRequestID, Key, After, Before, Query, GroupBy string
+	Limit                                                                                                                                                                                                                                                          int
+	Body                                                                                                                                                                                                                                                           Object
+	Identity                                                                                                                                                                                                                                                       *Claims
+	Person                                                                                                                                                                                                                                                         *DirectoryPerson
 }
 
 // Public executes one authorized public request in a short database transaction.
@@ -167,6 +167,14 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 				require(r.Method == "POST", 404, "not_found")
 				out = Object{"resource": appendThreadMessage(t, s, r, uid)}
 				status = 201
+			case strings.HasSuffix(r.Path, "/thread/end"):
+				// Thread D4 (G-018): the user ending the conversation. Also matched before the /runs
+				// arm, and answered 202 because the request is accepted for asynchronous shutdown —
+				// the Thread is `ending`, not `ended`. The response is the Thread state itself rather
+				// than a wrapped resource: the endpoint creates no new resource to point at.
+				require(r.Method == "POST", 404, "not_found")
+				out = endThreadByUser(t, s, r)
+				status = 202
 			case strings.Contains(r.Path, "/runs"):
 				switch r.Method {
 				case "POST":
@@ -363,6 +371,11 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 		return listSpaces(t, r, uid)
 	case strings.HasSuffix(r.Path, "/members"):
 		return page(t, "SELECT m.user_id AS id,m.tenant_id,m.user_id,m.role,m.status,m.version,u.display_name FROM tenant_memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1", []any{r.TenantID}, "m.user_id", r)
+	case strings.HasSuffix(r.Path, "/thread"):
+		// Thread D5: reading a run's Thread. Matched before the /runs arm below because the path
+		// contains "/runs/" too and this is a different resource — the Thread, not the run. The POST
+		// side is dispatched in Public before readPublic; this arm is the GET.
+		return threadRead(t, r)
 	case strings.Contains(r.Path, "/runs"):
 		if r.RunID != "" {
 			return run(t, r.TenantID, r.IssueID, r.RunID)

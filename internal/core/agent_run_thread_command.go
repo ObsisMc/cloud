@@ -40,6 +40,17 @@ func SubmitUserTurnCommand(turnID string, content []Object) Object {
 	return Object{"kind": "submit_user_turn", "body": Object{"turn": Object{"turn_id": turnID, "content": blocks}}}
 }
 
+// EndSessionCommand builds the canonical command object for one Thread-ending request (Thread D4).
+//
+// reason is the approved trigger the caller observed — the user ending the conversation, the idle
+// window expiring, or the run being cancelled — and is the only thing the command carries: the
+// Node decides how to shut the session down, and Cloud never sends a shutdown plan. The reason is
+// part of the durable command body, so a Controller replaying an undelivered command cannot lose
+// why the session is ending.
+func EndSessionCommand(reason string) Object {
+	return Object{"kind": "end_session", "body": Object{"reason": reason}}
+}
+
 // EnqueueThreadCommand persists one Thread command in the caller's transaction and returns its
 // A-generated command_id (controller-integration D6 enqueueThreadCommand, Thread D3).
 //

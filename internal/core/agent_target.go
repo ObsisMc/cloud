@@ -44,7 +44,7 @@ func agentRunEvidence(t *transaction, tid, agentID string) (Object, bool) {
 // agentRunGate enforces the IssueRun D2 project gate for a real space_agents-backed agent run. Any
 // failure rejects the whole comment target by panicking (409), rolling back the enclosing comment
 // transaction so no comment, activity, or run survives.
-func agentRunGate(t *transaction, i Object, agent Object) {
+func agentRunGate(t *transaction, i, agent Object) {
 	ref, _ := i["projectRef"].(string)
 	require(ref != "", 409, "issue_project_required")
 	p := t.one("SELECT id, space_id FROM projects WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", ref, i.S("tenantId"))
@@ -55,7 +55,7 @@ func agentRunGate(t *transaction, i Object, agent Object) {
 // snapshotAgentRunInput merges the D1 plugin identity/version snapshot into a run input so a later
 // install never changes what a historical run executed. It copies the builder's bundle and adds the
 // two AgentSession keys; already-present keys win (the snapshot is written once at create).
-func snapshotAgentRunInput(input Object, agent Object) Object {
+func snapshotAgentRunInput(input, agent Object) Object {
 	out := make(Object, len(input)+2)
 	for k, v := range input {
 		out[k] = v

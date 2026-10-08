@@ -60,7 +60,7 @@ func seedRunPluginInstanceRow(t *testing.T, pool *sql.DB, workspaceID, pluginID,
 // stagePluginSettleScene binds the run to the seed main workspace, pins the run snapshot, sets
 // the run-instance evidence, and stages provisioning/dispatched — the pre-settle authoritative
 // state the plugin classification tests start from. Returns the bound workspace id.
-func stagePluginSettleScene(t *testing.T, store *Store, seed dispSeed, pluginID, pinnedVersion string, instState, instVersion string) string {
+func stagePluginSettleScene(t *testing.T, store *Store, seed dispSeed, pluginID, pinnedVersion, instState, instVersion string) string {
 	t.Helper()
 	wid := bindRunWorkspace(t, store, seed.run, seed.project)
 	seedRunPinnedPlugin(t, store.Pool, seed.run, pluginID, pinnedVersion)
