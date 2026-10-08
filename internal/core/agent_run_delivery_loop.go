@@ -2,11 +2,11 @@ package core
 
 import "context"
 
-// The two background recovery passes of the delivery/release half (IssueRun D3/D5, operation D4;
-// plan §5 Batch 2). Both follow the repository's established bounded-pass shape — a read-only scan
+// The three background recovery passes of the delivery/release half (IssueRun D3/D5/D8, operation D4;
+// plan §5 Batch 2). All follow the repository's established bounded-pass shape — a read-only scan
 // outside the advisory lock, then one short transaction per run, with the sleep between ticks owned
-// by the caller — exactly like the dispatch, session-start, idle-Thread and cancel passes. Neither
-// pass makes a business decision the durable state has not already made:
+// by the caller — exactly like the dispatch, session-start, idle-Thread and cancel passes. None of the
+// three makes a business decision the durable state has not already made:
 //
 //	GiveUpStaleDeliveriesOnce      applies D5's two give-up limits to a run the delivery path has
 //	                               already left `delivering`; it decides nothing that a fresh
@@ -14,11 +14,18 @@ import "context"
 //	RedeclareRunWorkspaceDeletesOnce  re-declares a delete intent that the `releasing` transition
 //	                               already committed. The run being `releasing` IS the decision; this
 //	                               pass only guarantees the Controller has an operation to execute.
+//	GiveUpStaleWorkspaceReleasesOnce  applies D8's single give-up limit to a run the release path has
+//	                               already left `releasing`, so a Workspace whose Node never answers
+//	                               again cannot hold the run (and its Project's operation slot)
+//	                               forever. The run ceases to be retried; it is never reported as
+//	                               deleted.
 //
-// Neither invents a limit. D5 fixes the give-up window and the unreachability window as Cloud
-// configuration ("这两个上限是第一版默认值（Cloud 配置项）"), and the delete re-declaration has no
-// limit at all: a `releasing` run must reach `done`, and D3's own durability rule ("Controller 丢信号时
-// 靠周期领取兜底") is precisely that Cloud keeps a durable intent reachable until it is executed.
+// None of them invents a limit. D5 fixes the give-up window and the unreachability window as Cloud
+// configuration ("这两个上限是第一版默认值（Cloud 配置项）"), D8 reuses the unreachability one verbatim
+// ("本决策不为删除侧引入新的时限") and the delete re-declaration has no limit at all: a `releasing` run
+// must reach `done`, and D3's own durability rule ("Controller 丢信号时靠周期领取兜底") is precisely
+// that Cloud keeps a durable intent reachable until it is executed — or, under D8, until Cloud
+// concludes it will not be.
 
 // agentDeliveryBatchSize bounds one scan pass so a single tick advances at most this many runs.
 // Ordering is deterministic (the oldest first) so every tick drains the backlog without starving.
@@ -173,6 +180,10 @@ func (s *Store) scanUndeclaredReleasingRuns(ctx context.Context, limit int) ([]s
 // quiesce fails the operation and restores the Workspace (restoreAdmission), which is operation D4's
 // documented "quiesce 失败并按原规则重试" — and for a run Workspace the retrying party is Cloud, since
 // the run Workspace has no public API and no user to retry it.
+//
+// A run D8 gave up on is out of this pass by its own phase: `done` is not `releasing`, so the scan
+// cannot re-enter the release, re-create a delete, or re-trigger anything for it (mandate §11). D8's
+// residual Workspace is intentionally left with no operation and no retry.
 func (s *Store) RedeclareRunWorkspaceDeletesOnce(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -183,6 +194,90 @@ func (s *Store) RedeclareRunWorkspaceDeletesOnce(ctx context.Context) error {
 	}
 	for _, id := range ids {
 		_ = s.redeclareRunWorkspaceDelete(ctx, id)
+	}
+	return nil
+}
+
+// giveUpStaleWorkspaceRelease applies D8 to one `releasing` run in its own short transaction. The
+// re-read repeats the scan's predicate, and the give-up condition is judged from authoritative rows
+// inside the same transaction as the write, so a run that settled its release (or whose Node came
+// back) between the scan and this transaction is a deterministic no-op rather than a wrongful
+// abandonment.
+//
+// The whole decision is `releaseGivenUp` — the run's own Workspace and its Node heartbeat — and it is
+// never taken from the delete operation's state: an operation that has failed repeatedly, or one that
+// never existed, is not evidence about reachability, and a refusal by a reachable Node is not a
+// reason to give up (mandate §5/§6).
+func (s *Store) giveUpStaleWorkspaceRelease(ctx context.Context, runID string) error {
+	_, err := s.transact(ctx, func(t *transaction) Object {
+		o := t.one(`
+			SELECT * FROM issue_runs
+			WHERE id = $1 AND executor_type = 'agent' AND deleted_at IS NULL AND phase = 'releasing'`, runID)
+		if o == nil {
+			return Object{}
+		}
+		if !s.releaseGivenUp(t, o) {
+			return Object{}
+		}
+		if err := s.giveUpRunWorkspaceRelease(t, o); err != nil {
+			panic(databaseFailure{err})
+		}
+		return Object{}
+	})
+	return err
+}
+
+// scanReleasingRuns returns the bounded, deterministically ordered ids of `releasing` runs. Like
+// scanStaleDeliveringRuns it deliberately does not evaluate D8's limit: the limit is judged on
+// database time against a configured duration, and repeating it per row in SQL would put the policy
+// in two places. Ordering by the run's own last write keeps the oldest stuck release first, so a
+// backlog drains instead of starving behind newer runs.
+func (s *Store) scanReleasingRuns(ctx context.Context, limit int) ([]string, error) {
+	rows, err := s.Pool.QueryContext(ctx, `
+		SELECT ir.id FROM issue_runs ir
+		WHERE ir.executor_type = 'agent'
+		  AND ir.deleted_at IS NULL
+		  AND ir.phase = 'releasing'
+		ORDER BY ir.updated_at, ir.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// GiveUpStaleWorkspaceReleasesOnce is one bounded pass of D8's give-up policy: find the runs still
+// `releasing` (read-only) and stop waiting for each one whose Workspace's Node state has been unknown
+// past the configured window, in its own short transaction. Per-run failures are deliberately not
+// surfaced — the transaction rolled back, the run is unchanged, and the next tick retries it — for the
+// same reason as the other passes: one transiently stuck run must not flood logs or cancel the pass.
+//
+// A deployment that configured no unreachability window is a no-op, not an immediate give-up: with the
+// window unset nothing is ever stale (`releaseGivenUp` fails closed), so the scan would only burn a
+// query. This is also what keeps D8 from becoming a second, differently-tuned limit: it reads the same
+// `DeliveryUnreachableAfter` D5's delivery give-up reads, and neither can be enabled without the other.
+func (s *Store) GiveUpStaleWorkspaceReleasesOnce(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if s.DeliveryUnreachableAfter <= 0 {
+		return nil
+	}
+	ids, err := s.scanReleasingRuns(ctx, agentDeliveryBatchSize)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		_ = s.giveUpStaleWorkspaceRelease(ctx, id)
 	}
 	return nil
 }

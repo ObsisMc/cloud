@@ -1,18 +1,27 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // The B-owned release half of an Agent IssueRun: `delivering → releasing` with D4's final status,
-// and `releasing → done` once the run Workspace's delete has been taken over
-// (IssueRun D3/D4/D5, controller-integration D6 deliverRevision/RunWorkspaceDeleted; plan §5 Batch 2).
+// and `releasing → done` once the run Workspace's delete has been taken over — or once D8's single
+// give-up condition says it never will be (IssueRun D3/D4/D5/D8, controller-integration D6
+// deliverRevision/RunWorkspaceDeleted; plan §5 Batch 2).
 //
 // Two transitions, one shape: each is a CAS on the phase the caller re-read, and each declares or
 // completes the run Workspace's delete in the same transaction that commits the phase write, so the
-// run can never be `releasing` without a durable delete intent, nor `done` without a succeeded
-// delete. Neither transition writes anything else about the run: `releasing` sets `status` exactly
+// run can never be `releasing` without a durable delete intent, nor `done` without a settled delete
+// operation. Neither transition writes anything else about the run: `releasing` sets `status` exactly
 // once from the session end reason (D4), and `done` deliberately changes no business outcome —
 // "终态不变" in D3's own words, which is why `done` carries no separate status of its own and why
 // `done` is never a synonym for `completed` (mandate §15).
+//
+// `done` therefore has two entry conditions (D3's table, as amended by D8), and they are not the same
+// statement: a `succeeded` delete means the Workspace is gone, while D8's expiry means Cloud stopped
+// waiting and the Workspace is still there. Only the first may ever be reported to a user as a
+// released Workspace.
 
 // runSessionExecution resolves the run's settled agent_session execution: the execution whose durable
 // result carries the session end reason D4 derives the final status from, and the one the delivery
@@ -139,19 +148,112 @@ func (s *Store) deliveryGivenUp(t *transaction, o Object) bool {
 		LIMIT 1`, runID, s.DeliveryGiveUpAfter.Seconds()) != nil {
 		return true
 	}
-	if s.DeliveryUnreachableAfter > 0 && validID(wid) {
-		return t.one(`
-			SELECT w.id FROM workspaces w
-			WHERE w.id=$1 AND w.issue_run_id=$2
-			  AND NOT EXISTS (
-			    SELECT 1 FROM sandbox_instances sb
-			    JOIN node_instances n ON n.sandbox_instance_id = sb.id
-			    WHERE sb.workspace_id = w.id AND sb.terminated_at IS NULL
-			      AND n.ended_at IS NULL AND n.connection_state='connected'
-			      AND n.last_seen_at > clock_timestamp() - make_interval(secs => $3))`,
-			wid, runID, s.DeliveryUnreachableAfter.Seconds()) != nil
+	return s.runWorkspaceNodeUnknown(t, runID, wid, s.DeliveryUnreachableAfter)
+}
+
+// runWorkspaceNodeUnknown is the release half's one authoritative judgement that a run Workspace's
+// Node state is unknown, and the only place the heartbeat evidence behind it is read: the run is
+// bound to this Workspace and no live sandbox of it carries a Node that is connected and was last
+// seen inside window. Both D5's delivery give-up and D8's delete give-up ask this one function, so the
+// two sides cannot drift into two definitions of "the Node is unreachable" (mandate §5).
+//
+// The polarity is deliberately "unknown" rather than "reachable": a Workspace whose row is missing, is
+// not bound to this run, or whose id is unusable is *not* unknown. Failing the other way round would
+// turn a lookup problem into an abandoned run.
+//
+// window is the caller's configured limit and is judged on the database clock, so a Cloud process with
+// a skewed clock cannot abandon a Workspace another replica would still be waiting for. A window that
+// was never configured (zero or negative) fails closed as "not unknown".
+func (s *Store) runWorkspaceNodeUnknown(t *transaction, runID, wid string, window time.Duration) bool {
+	if window <= 0 || !validID(wid) {
+		return false
 	}
-	return false
+	return t.one(`
+		SELECT w.id FROM workspaces w
+		WHERE w.id=$1 AND w.issue_run_id=$2
+		  AND NOT EXISTS (
+		    SELECT 1 FROM sandbox_instances sb
+		    JOIN node_instances n ON n.sandbox_instance_id = sb.id
+		    WHERE sb.workspace_id = w.id AND sb.terminated_at IS NULL
+		      AND n.ended_at IS NULL AND n.connection_state='connected'
+		      AND n.last_seen_at > clock_timestamp() - make_interval(secs => $3))`,
+		wid, runID, window.Seconds()) != nil
+}
+
+// releaseGivenUp reports whether D8's single give-up condition holds for a run still in `releasing`:
+// the run Workspace still holds a sandbox and that sandbox's Node state has been unknown for longer
+// than `DeliveryUnreachableAfter` (D5's window, reused verbatim — D8 introduces no second limit and no
+// "delete failed N times" count).
+//
+// The live-sandbox requirement is what makes the shared heartbeat judgement the right one here. A
+// Workspace usually has a sandbox for the whole `releasing` phase, because the delete cannot confirm
+// quiescence without a Node; a Workspace whose sandbox is already terminated has finished the step
+// that needed it and is being taken through `cleanup`, which runs against the Substrate with no Node
+// involved. That case is not an unknown Node — there is no Node left to be unknown — and abandoning it
+// would report a release as failed while a live Controller was still completing it. So a silent Node
+// only counts as D8's condition while the sandbox it belongs to is still there.
+//
+// The window is judged in the caller's transaction, on the database clock, exactly as D5 judges its
+// own, and an unconfigured window fails closed. An explicit quiesce refusal does not reach here at
+// all: refusing leaves the Node connected and freshly seen, so the heartbeat is present and the
+// condition is false — which is D8's "删除失败不是放弃条件" (mandate §6), not an extra rule.
+func (s *Store) releaseGivenUp(t *transaction, o Object) bool {
+	wid := o.S("workspaceId")
+	if !validID(wid) {
+		return false
+	}
+	if t.one(`SELECT 1 FROM sandbox_instances WHERE workspace_id=$1 AND terminated_at IS NULL`, wid) == nil {
+		return false
+	}
+	return s.runWorkspaceNodeUnknown(t, o.S("id"), wid, s.DeliveryUnreachableAfter)
+}
+
+// giveUpRunWorkspaceRelease is D8's terminal transition, run on the caller-owned *transaction: an
+// unreachable run Workspace stops being retried, and the run reaches `done` without Cloud ever
+// claiming the Workspace was released (IssueRun D8, D3's `done` row, invariant 8).
+//
+// Three writes, and nothing else, are what the decision consists of:
+//
+//   - the unfinished `delete_workspace` operation becomes terminally failed. Zero rows is a legal
+//     outcome, not an error: the run can be `releasing` with no operation in flight (a Project that
+//     was busy when the intent was declared, or a refusal the reconciliation pass has not re-declared
+//     yet), and D8's condition is about the Workspace, not about an operation existing.
+//   - `releasing → done`, as one CAS on the phase the caller re-read. A CAS that matches nothing is an
+//     invariant contradiction and an error, which rolls the operation's failure back with it: a
+//     terminal-failed operation without the run moving would be exactly the "operation failed, run
+//     stuck in releasing" state D8 exists to prevent (mandate §12).
+//   - `failure_reason = workspace_unavailable`, the code D3 already uses for the same fact — Cloud
+//     could not make the Workspace available-to-delete, so the release did not happen.
+//
+// What is deliberately NOT here:
+//
+//   - `status`. D8 keeps the delivery conclusion D4 derived; `done` is not a business outcome.
+//   - anything about `workspaces`. The Workspace is still there, and pretending otherwise — clearing
+//     `issue_run_id`, soft-deleting the row, writing a success-shaped operation result — is the
+//     lie D8 forbids. The row is the record of a residual resource, and it must stay readable.
+//   - a Timeline activity. D4 attaches `run.completed/failed/cancelled` to the `releasing` transition,
+//     which is where the business outcome is decided; D8 decides nothing about the outcome, and
+//     inventing a new `action` string for it would publish an event no approved decision defines. The
+//     reason is on the run itself, as `failure_reason`, where a client already reads it.
+//   - any cleanup. D8 explicitly adds no background task, no retention sweep and no retry API; the
+//     residual Workspace stays unreachable through the public API and is an operator's problem.
+func (s *Store) giveUpRunWorkspaceRelease(t *transaction, o Object) error {
+	runID, wid := o.S("id"), o.S("workspaceId")
+	// `node_unavailable` is the published operation failure code for this fact — OperationErrorCode's
+	// own vocabulary, already carried by the OpenAPI enum — so D8 reuses it rather than minting a new
+	// public error code (mandate §9). It is also the code the Controller itself uses to park a step on
+	// an unreachable Node, which is the same diagnosis. The operation is left with its `step` and
+	// `request` intact: they are the record of how far the delete got.
+	t.exec(`UPDATE operations SET state='failed', error_code='node_unavailable', version=version+1, updated_at=now()
+		WHERE workspace_id=$1 AND kind='delete_workspace' AND state IN ('queued','running','retry_wait','blocked')`, wid)
+	if t.execRows(`
+		UPDATE issue_runs
+		SET phase='done', failure_reason=$2, version=version+1, updated_at=now()
+		WHERE id=$1 AND executor_type='agent' AND phase='releasing'`, runID, "workspace_unavailable") != 1 {
+		now := t.one("SELECT phase, status FROM issue_runs WHERE id=$1", runID)
+		return fmt.Errorf("give up run release: run %s was not moved to done (phase=%q status=%q)", runID, now.S("phase"), now.S("status"))
+	}
+	return nil
 }
 
 // runWorkspaceDeleted is the B-owned core behind the A→B hook RunWorkspaceDeleted
@@ -167,6 +269,12 @@ func (s *Store) deliveryGivenUp(t *transaction, o Object) bool {
 // replayed, and settling it twice must not bump the version or write a second business fact
 // (mandate §19). Any other phase is an invariant contradiction — the delete is declared only from
 // `releasing`, so no other phase can have a succeeded delete to settle.
+//
+// `done` is also reachable through D8's give-up, and that is what makes the no-op branch load-bearing
+// rather than merely defensive: a run Cloud abandoned under D8 is `done` with its delete operation
+// terminally failed, so a Controller that replays a late success for that operation is refused by the
+// operation's own state check long before it gets here, and a replayed hook invocation finds the run
+// `done` and writes nothing. Neither path can turn D8's give-up back into a reported deletion.
 func (s *Store) runWorkspaceDeleted(t *transaction, run Object) error {
 	runID := run.S("id")
 	if !validID(runID) {

@@ -212,9 +212,14 @@ func run() (runErr error) {
 	// released with deliveryState=failed and its Workspace delete declared. The second reconciles the
 	// release half: a `releasing` run whose delete_workspace operation has no operation in flight gets
 	// its delete re-declared, which is the Cloud-side retry operation D4 requires after a Node refuses
-	// to quiesce (the run Workspace has no public API and no user to retry it). Both are bounded passes
-	// of one short transaction per run, so a repeated tick produces no second release, no second
-	// delete operation, and no second phase transition. Cadence is the same repository-preferred 10s
+	// to quiesce (the run Workspace has no public API and no user to retry it). The third applies
+	// IssueRun D8's single give-up limit to the delete side: a `releasing` run whose Workspace Node has
+	// been unknown for cfg.IssueRuns.DeliveryUnreachableAfter (the same window — D8 adds no new one) is
+	// settled `done` with failure_reason=workspace_unavailable, its delete operation left terminally
+	// failed and its Workspace row retained; `done` there means Cloud stopped retrying, never that the
+	// Workspace was released. All three are bounded passes of one short transaction per run, so a
+	// repeated tick produces no second release, no second delete operation, and no second phase
+	// transition. Cadence is the same repository-preferred 10s
 	// as the loops above (an implementation choice; plan §3 fixes no seconds).
 	{
 		const agentDeliveryInterval = 10 * time.Second
@@ -229,6 +234,11 @@ func run() (runErr error) {
 		go func() {
 			defer syncGroup.Done()
 			pluginmarket.RunSyncLoop(ctx, store.RedeclareRunWorkspaceDeletesOnce, agentDeliveryInterval, pluginmarket.ContextSleep, log)
+		}()
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.GiveUpStaleWorkspaceReleasesOnce, agentDeliveryInterval, pluginmarket.ContextSleep, log)
 		}()
 	}
 	gin.SetMode(cfg.Server.Mode)

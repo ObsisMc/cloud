@@ -2,12 +2,15 @@
 
 > Status: **Living design / execution record**  
 > Scope owner: **B — Cloud business / orchestration**  
-> Current target: **Revision Completion Slice — object store + verified Revision registration + Project Final Acceptance**（`object_store` 配置 / 对象存储客户端 / `0023_revisions.sql` / `GrantRevisionUpload` 与授权约束 / D4 的两步校验 / 登记与释放同事务 / 重放与冲突 / G-031・G-032・G-033 已批准文本同步 / Revision 核心用例证据 / 全项目 Final Acceptance）
-> Current Phase: **5 — Delivery / Releasing / Done（Revision 半边已实现：对象存储、上传授权、亲自校验后登记；随后跑全项目 Final Acceptance）**
-> Current Status: **`REVISION_COMPLETION_SLICE_DONE` + `PROJECT_FINAL_ACCEPTANCE_PASSED`（G-030 = `CLOSED`；两个 Revision ADR 的已批准契约在 Cloud 侧落地；`format:check` / `lint`（仅剩 G-028 的既有基线）/ `test` 420 PASS・0 FAIL・0 SKIP / `test:race` 0 DATA RACE / `build` 全部通过；新增 G-035 / G-036 / G-037 三项**已披露、未修**的缺口：公开读未投影 D5 的 Revision 元数据、健康检查不报告对象存储、真实 MinIO 上的三项验收义务仍 `Missing`；**未** stage、**未** commit、**未** push、**未**开 PR）**
-> Previous target: **Phase 5 — Revision ADR Decision & Amendment Round**（converge B-1..B-4 + P-1..P-3 into one approvable Revision contract; write the exact amendment proposals for G-031 / G-032; **no production code, no `status` change**）
-> Previous Phase: **5 — Delivery / Releasing / Done（decision & amendment round; the two `proposed` Revision ADRs were amended in place and explicitly marked 待审批）**
-> Previous Status: **`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`（B-1..B-4 与 P-1..P-3 各有唯一推荐方案且已写入 Cloud Revision ADR 正文；Node Revision ADR 补入最小回显条款；G-031 / G-032 输出精确 amendment 提案（**未**改写 approved ADR）；新增 G-033（IssueRun D5 澄清）与 G-034（放弃后仍可认领的交付工作项）；两个 ADR 的 `status` 仍为 `proposed`——**未**自行批准、**未**实现任何 Revision 生产路径）**
+> Current target: **G-032 Implementation Slice — Workspace Delete Give-Up → `done` without lying about deletion success**（已批准的 IssueRun **D8**：唯一放弃条件 = 运行 Workspace 的 Node 状态未知超过 D5 的 `delivery_unreachable_after` / 同一事务 `releasing → done` + `failure_reason = workspace_unavailable` + 业务 `status` 不变 / 残留 Workspace 行与终结失败态 `delete_workspace` operation 如实保留 / 无后台清理机制 / 核心用例四条义务 `Missing` → `Covered`）
+> Current Phase: **5 — Delivery / Releasing / Done（删除侧的上限已实现并取证；G-032 = CLOSED）**
+> Current Status: **`G032_IMPLEMENTATION_DONE`**（G-032 = `CLOSED`；`G-037` 仍 `OPEN`、`G-034` 仍 `OPEN`、`G-029` 仍 `DEFERRED / NON-BLOCKING`，G-020 / G-021 / G-025 / G-026 / G-027 / G-028 / G-035 / G-036 不变；新增 `cloud/integration/agent_run_release_giveup_test.go`（G032-1..G032-9，真实 PostgreSQL）；`format:check` / `lint`（仅剩 G-028 的既有基线）/ `build` / `test` / `test:race` 全部通过；**未** stage、**未** commit、**未** push、**未**开 PR）
+> Previous target: **Revision Completion Slice — object store + verified Revision registration + Project Final Acceptance**（`object_store` 配置 / 对象存储客户端 / `0023_revisions.sql` / `GrantRevisionUpload` 与授权约束 / D4 的两步校验 / 登记与释放同事务 / 重放与冲突 / G-031・G-032・G-033 已批准文本同步 / Revision 核心用例证据 / 全项目 Final Acceptance）
+> Previous Phase: **5 — Delivery / Releasing / Done（Revision 半边已实现：对象存储、上传授权、亲自校验后登记；随后跑全项目 Final Acceptance）**
+> Previous Status: **`REVISION_COMPLETION_SLICE_DONE` + `PROJECT_FINAL_ACCEPTANCE_PASSED`（G-030 = `CLOSED`；两个 Revision ADR 的已批准契约在 Cloud 侧落地；`format:check` / `lint`（仅剩 G-028 的既有基线）/ `test` 420 PASS・0 FAIL・0 SKIP / `test:race` 0 DATA RACE / `build` 全部通过；新增 G-035 / G-036 / G-037 三项**已披露、未修**的缺口：公开读未投影 D5 的 Revision 元数据、健康检查不报告对象存储、真实 MinIO 上的三项验收义务仍 `Missing`；**未** stage、**未** commit、**未** push、**未**开 PR）**
+> Earlier target: **Phase 5 — Revision ADR Decision & Amendment Round**（converge B-1..B-4 + P-1..P-3 into one approvable Revision contract; write the exact amendment proposals for G-031 / G-032; **no production code, no `status` change**）
+> Earlier Phase: **5 — Delivery / Releasing / Done（decision & amendment round; the two `proposed` Revision ADRs were amended in place and explicitly marked 待审批）**
+> Earlier Status: **`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`（B-1..B-4 与 P-1..P-3 各有唯一推荐方案且已写入 Cloud Revision ADR 正文；Node Revision ADR 补入最小回显条款；G-031 / G-032 输出精确 amendment 提案（**未**改写 approved ADR）；新增 G-033（IssueRun D5 澄清）与 G-034（放弃后仍可认领的交付工作项）；两个 ADR 的 `status` 仍为 `proposed`——**未**自行批准、**未**实现任何 Revision 生产路径）**
 > Earlier target: **Revision ADR Approval Round — G-030 approval-readiness audit + G-029/G-031/G-032 clarification**
 > Earlier Status: **`REVISION_ADR_APPROVAL_BLOCKED`（`REVISION_ADR_NOT_READY_FOR_APPROVAL`：B-1..B-4 + P-1..P-3；G-029 = `DEFERRED / NON-BLOCKING`）**
 > Earlier target: **Phase 5 Batch 2 — Delivery → Releasing → Done（交付/释放/终态半边 DONE；Revision 登记半边 BLOCKED by G-030）**
@@ -3463,12 +3466,23 @@ updated after the Phase 3A implementation round:
   `agent_run_workspace_release.go` 的应用级检查表达，数据库侧由既有 `one_project_operation` 传递性串行）。
   **是否再补一个数据库部分唯一索引是独立问题，不在本 amendment 内**（加索引 = migration = 另一轮）。
 
-- **G-032 — `OPEN / APPROVED TEXT LANDED / IMPLEMENTATION PENDING`（Update: Revision Completion Slice, 2026-10-08）** ——
-  人类已批准 **IssueRun D8**（含 `done` 条件、残留如实保留、绝不谎报删除成功、**不新增后台清理机制**四句），
-  批准文本已同步进 approved IssueRun 根决策、D3 阶段表的 `done` 行与
-  `test-cases/cloud/issue-run/agent-run-orchestration.md`（该文件的四条义务因此**仍然**是 `Missing`：ADR 已批准，
-  但**实现待做**，且人类**未**批准任何具体修复方式、**未**把它纳入 Revision Completion Slice）。
-  ⇒ **本轮未实现 D8**，也**未**为它发明清理机制。以下保留该缺口的历史登记：
+- **G-032 — `CLOSED`（G-032 Implementation Slice, 2026-10-08）**。关闭依据：人类批准的 **IssueRun D8** 已在 Cloud 侧
+  全部落地，四条核心用例义务均由**会失败的**集成测试直接取证：
+  ① **唯一放弃条件 = 运行 Workspace 不可达** —— `releaseGivenUp` 只读「该 Workspace 仍有活 sandbox **且**其 Node 状态
+  未知超过窗口」，完全不看 `delete_workspace` operation 的状态与重试次数，因此反复失败但 Node 可达（含 Node 明确拒绝
+  quiesce）的运行仍留在 `releasing` 并继续重试；② **上限复用 D5 既有配置** —— 判据是 D5 与 D8 共用的一个
+  `runWorkspaceNodeUnknown`（**不存在第二套 reachability 定义**），窗口取 `delivery_unreachable_after`（默认 30m），
+  **未新增任何 timeout 配置**，也**未**复用 D5 的 2h「连续失败」窗口；③ **超限终态** —— 同一事务内
+  `releasing → done` + `failure_reason = workspace_unavailable`，业务 `status` 保持 D4 交付结论不变；④ **残留如实保留**
+  —— Workspace 行未软删除、`issue_run_id` 未清除、未写成功形态的 operation result，未完成的 `delete_workspace` 以
+  **既有公开失败码** `node_unavailable` 终结（**未新增 schema**、**未发明新错误枚举**、**未新增后台清理机制**、
+  **未新增运维重试 API**）。**为什么必须有一个"活的 sandbox"前置条件**：删除走到 `cleanup` 步时 sandbox 已终止、
+  已无 Node 可判「未知」，那种情况不是 D8 的条件，否则会把一个仍在推进的释放判死。
+  证据：`cloud/integration/agent_run_release_giveup_test.go`（G032-1..G032-9，真实 PostgreSQL；
+  `TestG032_3_...` 为核心用例，G032-3/5/6/7 另以 `-count=10` 通过，G032 全组 `-race` 无 DATA RACE）；
+  核心用例四条义务已 `Missing` → `Covered`（`test-cases/cloud/issue-run/agent-run-orchestration.md`）。
+  **未借本次批准扩大** G-020 / G-021 / G-025 / G-026 / G-027 / G-028 / G-029 / G-034 / G-035 / G-036 / G-037 的范围。
+  以下保留该缺口的历史登记（含批准文本与精确 amendment proposal 的原文）：
   **（历史）OPEN / NON-BLOCKING / MISSING LIMIT（Phase 5 Batch 2, 2026-10-08）** — D5 只给**交付**侧放弃窗口
   （连续失败 >2h、Node 未知 >30m）；**Workspace 删除**侧的持续失败没有上限，删除意图由
   `RedeclareRunWorkspaceDeletesOnce` 无限重新声明，运行会一直停在 `releasing`。
@@ -5300,6 +5314,56 @@ frontend 均无改动，因此该结果仍然有效，但**不**代表本轮产�
 4. **修订既有 ADR 的落地**（与批准同步）：G-031 的两句 + 用例一句、G-032 的 D8 + D3 表 + 用例两处、G-033 的一句。
 5. 全部落地后才是 **Project Final Acceptance** 与里程碑提交。
 
+### Round: G-032 Implementation Slice — Workspace Delete Give-Up → `done` without lying about deletion success / 2026-10-08
+
+**Plan section executed:**
+
+- §5 Batch 2 的删除侧收口（已批准的 IssueRun **D8**）；§13 的 **G-032** 条目；§16 marker。
+  **范围严格限定**：不触碰 G-037 / G-034 / G-020 / G-021 / G-025 / G-026 / G-027 / G-028 / G-029 / G-035 / G-036。
+
+**Status:** Complete — 退出标记 `G032_IMPLEMENTATION_DONE`。
+
+**Files changed:**
+
+- `internal/core/agent_run_release.go`：新增共用的 `runWorkspaceNodeUnknown`（D5 与 D8 **唯一**的不可达判据，
+  窗口参数化、"unknown" 极性保持 fail-closed）、`releaseGivenUp`（D8 决策 = 活 sandbox 前置 + 共用判据）、
+  `giveUpRunWorkspaceRelease`（D8 终态事务：operation 终结失败 + `releasing → done` + `failure_reason`）；
+  `deliveryGivenUp` 的窗口 2 改为调用共用判据（语义不变）；文件头与 `runWorkspaceDeleted` 的注释补上 D8 的第二种 `done`。
+- `internal/core/agent_run_delivery_loop.go`：新增 `giveUpStaleWorkspaceRelease` / `scanReleasingRuns` /
+  `GiveUpStaleWorkspaceReleasesOnce`（与另两条补偿轮同形状：只读扫描 + 每 run 一个短事务）；`RedeclareRunWorkspaceDeletesOnce`
+  的注释记录 §11（`done` 天然不在扫描内）。
+- `cmd/server/main.go`：Phase 5 Batch 2 的循环块加入第三个 goroutine（同一 10s 节奏，同一 `syncGroup` 生命周期）。
+- `integration/agent_run_release_giveup_test.go`（新）：G032-1..G032-9。
+- `integration/agent_run_delivery_test.go`：`givingUpScene` 与 `ageRunWorkspaceNode` 改为委托新助手（行为不变）。
+- `specs/test-cases/cloud/issue-run/agent-run-orchestration.md`：四条义务 `Missing` → `Covered` + 直接证据清单。
+- `plan/plan.md`、`plan/plan-zh.md`：头部、G-032 条目、§16 marker。
+
+**Decisions added/changed:** None（**未**新增配置、**未**新增 schema、**未**新增公开错误码、**未**改任何 approved ADR 的决策语义）。
+
+**New gaps:** None。G-032 = `CLOSED`；G-037 / G-034 仍 `OPEN`，其余缺口不变。
+
+**Tests added/changed:**
+
+- `TestG032_1_SuccessfulDeleteIsUnchangedByTheGiveUpPass` → 成功删除仍是 `releasing → done`、无 `failure_reason`，之后的放弃轮对 run 与 Workspace 均零写入。
+- `TestG032_2_UnreachableBelowTheWindowStaysReleasing` → 心跳仅早于窗口的运行保持 `releasing`、版本不变、delete 仍 `queued`。
+- `TestG032_3_UnreachablePastTheWindowSettlesDoneWithoutClaimingDeletion`（**核心**）→ 超限 ⇒ `done` + `status` 不变 + `failure_reason = workspace_unavailable`；Workspace 未软删除、绑定未清除、版本未被写；operation 终结失败为 `node_unavailable`；无任何 `succeeded`；Timeline 零新增。
+- `TestG032_4_RefusedQuiesceNeverTriggersGiveUpEvenPastTheWindow` → 删除意图时间戳推早一小时而 Node 可达时两轮放弃轮零写入；随后重新声明并正常 `done`。
+- `TestG032_5_SuccessfulDeleteWinsTheRaceAndThePassIsANoOp` → 成功先落地后放弃轮零写入；以及 barrier 同起并发下只允许「已释放」或「已放弃」两种终局。
+- `TestG032_6_GiveUpWinsTheRaceAndAStaleDeleteSettlementIsRefused` → 放弃先落地后过期 `advance` 被 `stale_operation` 拒绝，终态/status/版本/Workspace 全部不变。
+- `TestG032_7_ADoneRunIsNeverRedeclaredOrRewritten` → `done` 之后三轮三条补偿轮 + 一次 Controller 领取均零写入、不新增 operation。
+- `TestG032_8_BusinessStatusMatrixSurvivesTheGiveUp` → `completed` / `cancelled` / `failed` 三行全部保持。
+- `TestG032_9_NoBackwardLifecycleAfterGiveUp` → 观测到的阶段轨迹逐步前进（`assertForwardOnly`），三条补偿轮与一条可领取 operation 检查共同证明 `done` 是终态。
+
+**Gate results:** `task format:check` exit 0；`task lint` 仅剩 1 条 PRE-EXISTING BASELINE（G-028，`git archive HEAD` 上逐字相同 ⇒ 本切片 0 回归）；`task build` exit 0；`task test` exit 0；`task test:race` exit 0（G032 全组 `-race` 无 DATA RACE）；G032-3/5/6/7 另以 `-count=10` 通过；两个仓库 `git diff --check` 干净。**禁止 arbitrary sleep**：窗口推进改由数据库时间控制（改 Node 心跳时刻），并发用 barrier + channel。
+
+**Scope deviations:** None。未新增 timeout 配置、未复用 D5 的 2h 窗口、未实现第二套 reachability 定义、未新增 schema、未发明公开错误枚举、未新增后台清理机制、未把无直接测试的义务标 `Covered`、未改 ADR 决策语义、未触碰 G-028 的 lint 基线（未删函数 / 未接线 / 未 `nolint` / 未改 lint 配置）。
+
+**Next planned step:** **Git normalization → milestone commit → push → PR**。不要开启新的功能开发批次。
+
+**Git:** staged **NO** / commit **NO** / push **NO** / PR **NO** / destructive git **NO**。
+
+---
+
 ### Round: Revision Completion Slice — 对象存储 + 亲自校验后的 Revision 登记 + 全项目 Final Acceptance / 2026-10-08
 
 **Plan section executed:**
@@ -5835,6 +5899,52 @@ G-036 健康检查不报告对象存储）与一项测试证据缺口（G-037 �
 ---
 
 ## 16. Current Execution Marker
+
+Current phase:
+
+**Phase 5 — G-032 Implementation Slice（运行 Workspace 的删除侧放弃 → `done`）**
+
+Current status: **`G032_IMPLEMENTATION_DONE`**
+
+（本轮为 **IMPLEMENTATION ROUND（G-032 / IssueRun D8）**。**权威重读**：`cloud/AGENTS.md`、本文件、`plan-zh.md`、
+`specs/AGENTS.md`、**已批准的 IssueRun 根决策**（D3 阶段表含修改后的 `done` 行、D4、D5、**D8**、不变量 8）、
+**已批准的 operation ADR**（D4）、**已批准的 controller-integration ADR**（D2/D4/D6）、既有实现
+（`agent_run_release.go`、`agent_run_delivery_loop.go`、`agent_run_workspace_release.go`、operation 的
+claim/dispatch/settle 路径、Workspace Node 可达性/心跳判据、`RedeclareRunWorkspaceDeletesOnce`、
+`RunWorkspaceDeleted`）与 Phase 5 Batch 2 的集成测试（`authoritative constraints re-read: yes`）；权威顺序
+**approved ADR > AGENTS.md > plan > implementation**。
+**放弃权限**：唯一条件 = 运行 Workspace 所在 Node 连续不可达超过 `delivery_unreachable_after`（D5 的既有配置，
+默认 30m）。**未新增 timeout 配置**，**未**复用 D5 的 2h 连续失败窗口，**未**实现第二套 reachability 定义 ——
+D5 与 D8 共用同一个 `runWorkspaceNodeUnknown`（字节等价的 SQL，仅窗口参数化），证据是 Cloud 自己观察到的
+Node 心跳，不采信 Node 自报、不据删除 operation 的失败原因或重试次数推断，也**不**把「删除失败」当作放弃条件
+（Node 明确拒绝 quiesce ⇒ 心跳新鲜 ⇒ 条件为假，运行继续 `releasing` 并按 operation D4 重新声明）。
+**终态语义**：同一事务内 `releasing → done` + `failure_reason = workspace_unavailable`，业务 `status` 保持 D4 的交付结论；
+**不**改写 `completed → failed` / `cancelled → failed` / `failed → completed`。
+**Workspace 如实性**：Workspace 行未软删除、未标已删除、未伪造 `RunWorkspaceDeleted`、未写成功形态的 operation result、
+未清除 `issue_run_id` 绑定。
+**operation 结算**：未完成的 `delete_workspace` 以**既有公开失败码** `node_unavailable` 终结，不再 `queued`/`running`/
+`retry_wait`/`blocked`，普通 worker 再也领不到；**未新增 schema**、**未发明新错误枚举**。
+**无后续自动清理**：无后台孤儿清理、无运维重试 API、无公开删除后门、无自动重新入队、无定时清理任务。
+**scanner / 协调**：`RedeclareRunWorkspaceDeletesOnce` 与新增的放弃轮都以 `phase = 'releasing'` 为谓词，因此
+D8 之后的运行天然不在扫描内，不可能被重新置回 `releasing` 或重新声明删除。
+**事务边界**：确认仍为 `releasing` + 确认不可达证据仍成立 + 终结 operation + `releasing → done` + 写 `failure_reason`
+全在一个事务内，任一步失败整体回滚（**不**产生「run `done` 但 operation 仍 `retry_wait`」或「operation 终结失败但
+run 永久 `releasing`」）。
+**竞态**：Case A（真实 `RunWorkspaceDeleted` 先赢）由同一事务把 run 写到 `done`，之后的放弃轮重读 `phase='releasing'`
+不成立 ⇒ 确定性 no-op；Case B（D8 先赢）由 operation 自身的 `state='running'` 前置检查拒绝迟到的 `advance`（`stale_operation`），
+迟到结果既不能反转状态也不能把残留 Workspace 报成已删除。
+**证据**：`integration/agent_run_release_giveup_test.go`（G032-1..G032-9，真实 PostgreSQL；G032-3 为核心用例，
+G032-3/5/6/7 另以 `-count=10` 通过，全组 `-race` 无 DATA RACE）。
+**specs 同步**：`test-cases/cloud/issue-run/agent-run-orchestration.md` 的四条义务由 `Missing` 改为 `Covered`
+（只把有直接测试的义务标 `Covered`；**未**改任何 ADR 决策语义）。
+**门禁**：`format:check` / `lint`（仅剩 G-028 的既有基线，`git archive HEAD` 上逐字相同 ⇒ 0 回归）/ `build` /
+`test` / `test:race` 全部通过；两个仓库 `git diff --check` 干净。
+**缺口**：**G-032 = `CLOSED`**；**G-037 仍 `OPEN`**、**G-034 仍 `OPEN`**、G-029 仍 `DEFERRED / NON-BLOCKING`，
+G-020/G-021/G-025/G-026/G-027/G-028/G-035/G-036 不变。
+**下一步**：**Git normalization → milestone commit → push → PR**，不开启新的功能开发批次。
+本轮**未提交**：无 `git add` / commit / push / PR / 破坏性 git 操作。）
+
+**上一实现轮（Revision Completion Slice，保留记录）**
 
 Current phase:
 

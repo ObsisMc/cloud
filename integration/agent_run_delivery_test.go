@@ -834,10 +834,7 @@ func endReasonName(r controlpb.AgentSessionEndReason) string {
 // the durable form of "the Node's state is unknown".
 func (f *fixture) ageRunWorkspaceNode(runID string) error {
 	f.t.Helper()
-	_, e := f.store.Pool.Exec(`
-		UPDATE node_instances SET last_seen_at=now()-interval '1 hour'
-		WHERE workspace_id=(SELECT workspace_id FROM issue_runs WHERE id=$1) AND ended_at IS NULL`, runID)
-	return e
+	return f.ageRunWorkspaceNodeBy(runID, time.Hour)
 }
 
 // P5-9 continued, §10 — the same give-up is reached by Cloud's own clock when no Node ever reports
@@ -898,21 +895,12 @@ func (f *fixture) runVersion(runID string) int64 {
 }
 
 // givingUpScene is P5-8's end state promoted to a starting point: the run released (`releasing`),
-// `deliveryState=failed`, with its delete intent declared.
+// `deliveryState=failed`, with its delete intent declared. It is the D5 settlement with the ordinary
+// session ending; the D8 suite's driveToReleasing builds the same state for any outcome.
 func givingUpScene(t *testing.T, f *fixture) (liveThreadScene, string) {
 	t.Helper()
-	scene := deliveringScene(t, f)
-	execution := f.deliverRevision(t, scene)
-	f.store.DeliveryGiveUpAfter = time.Nanosecond
-	if _, e := f.deliveryTerminal(scene, execution, "", 1,
-		revisionFailedResult(scene, controlpb.RevisionFailureReason_REVISION_FAILURE_REASON_UPLOAD_FAILED),
-		"revision_failed/upload_failed"); e != nil {
-		t.Fatalf("the give-up result must be taken over: %v", e)
-	}
-	if got := f.runPhase(scene.runID); got != "releasing" {
-		t.Fatalf("the scene must be releasing, got %q", got)
-	}
-	return scene, execution
+	run := driveToReleasing(t, f, controlpb.AgentSessionEndReason_AGENT_SESSION_END_REASON_USER_ENDED)
+	return run.liveThreadScene, run.execution
 }
 
 // P5-10, §12 — the releasing transition declares the run Workspace's delete through the approved
