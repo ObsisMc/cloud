@@ -2,7 +2,7 @@
 
 [English](agent-run-control-plane-review.en.md) | 中文
 
-A 的 Cloud 控制闭环已实现，直接验收使用真实 PostgreSQL、Git 和 RustFS。按用户授权实现当前 ADR 草案，保留其 proposed 状态。Cloud #41 已合并，本次继续原分支并在原 PR 记录后续提交，不另开重复 Cloud PR。A 完成不代表 cluster#5/#7 或 M1–M4 跨仓里程碑完成。
+A 的 Cloud 控制闭环已实现，直接验收使用真实 PostgreSQL、Git 和 RustFS。按用户授权实现当前 ADR 草案，保留其 proposed 状态。Cloud #41 已合并；本次通过新的上游 PR 提交其后新增的 Revision 交付与恢复修复，并同步当前 main。A 完成不代表 cluster#5/#7 或 M1–M4 跨仓里程碑完成。
 
 依据：[specs#58](https://github.com/ora-space/specs/pull/58)、[cluster#5](https://github.com/ora-space/cluster/issues/5)、[cluster#7](https://github.com/ora-space/cluster/issues/7)、[specs#66](https://github.com/ora-space/specs/pull/66)。
 

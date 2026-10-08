@@ -2,7 +2,7 @@
 
 English | [中文](agent-run-control-plane-review.md)
 
-A's Cloud control loop is implemented and directly exercised with PostgreSQL, Git and RustFS. The user authorized the current proposed ADRs; their status remains unchanged. Cloud #41 is already merged: continue its original branch and record continuation commits there without a duplicate Cloud PR. A does not complete cluster#5/#7 or M1–M4.
+A's Cloud control loop is implemented and directly exercised with PostgreSQL, Git and RustFS. The user authorized the current proposed ADRs; their status remains unchanged. Cloud #41 is already merged. A new upstream PR submits the subsequent Revision delivery and recovery changes and synchronizes current main. A does not complete cluster#5/#7 or M1–M4.
 
 Sources: [specs#58](https://github.com/ora-space/specs/pull/58), [cluster#5](https://github.com/ora-space/cluster/issues/5), [cluster#7](https://github.com/ora-space/cluster/issues/7), [specs#66](https://github.com/ora-space/specs/pull/66).
 

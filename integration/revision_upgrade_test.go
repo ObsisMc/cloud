@@ -57,3 +57,55 @@ func TestRevisionUpgradePreservesRegisteredInputAndRawNodeEvidence(t *testing.T)
 		t.Fatal("upgrade inferred verified delivery from historical Node declarations")
 	}
 }
+
+// A deployment that already applied the upstream workflow migrations must add Revision tables
+// without renaming migration identities or changing existing workflow documents and runs.
+func TestRevisionUpgradePreservesPublishedWorkflowSchema(t *testing.T) {
+	pool, _ := testSchema(t, "test_revision_workflow_upgrade_")
+	entries, err := os.ReadDir(filepath.Join("..", "internal", "core", "migrations"))
+	must(t, err)
+	var versions []string
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".sql" && entry.Name() != "0027_verified_revisions.sql" {
+			versions = append(versions, entry.Name())
+		}
+	}
+	applyMigrationsUpTo(t, pool, versions)
+	user, tenant, workflow, snapshot, run := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	tx, err := pool.BeginTx(t.Context(), nil)
+	must(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	for _, item := range []struct {
+		query string
+		args  []any
+	}{
+		{"INSERT INTO users(id,status) VALUES($1,'active')", []any{user}},
+		{"INSERT INTO tenants(id,name,status) VALUES($1,'Published workflow upgrade','active')", []any{tenant}},
+		{"INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'admin','active')", []any{tenant, user}},
+		{`INSERT INTO workflows(id,tenant_id,name,graph) VALUES($1,$2,'Live workflow','{"nodes":[{"id":"changed"}],"edges":[]}')`, []any{workflow, tenant}},
+		{`INSERT INTO workflow_snapshots(id,tenant_id,workflow_id,version,name,graph) VALUES($1,$2,$3,1,'Frozen workflow','{"nodes":[{"id":"start"}],"edges":[]}')`, []any{snapshot, tenant, workflow}},
+		{"INSERT INTO workflow_runs(id,tenant_id,workflow_id,snapshot_id,name) VALUES($1,$2,$3,$4,'Pending workflow run')", []any{run, tenant, workflow, snapshot}},
+	} {
+		_, err = tx.Exec(item.query, item.args...)
+		must(t, err)
+	}
+	must(t, tx.Commit())
+	const documents = `SELECT jsonb_build_object('workflow',to_jsonb(w),'snapshot',to_jsonb(s),'run',to_jsonb(r))::text FROM workflows w JOIN workflow_snapshots s ON s.workflow_id=w.id JOIN workflow_runs r ON r.snapshot_id=s.id WHERE r.id=$1`
+	const ledger = `SELECT jsonb_object_agg(version,checksum)::text FROM schema_migrations WHERE version <> '0027_verified_revisions.sql'`
+	var beforeDocuments, beforeLedger string
+	must(t, pool.QueryRow(documents, run).Scan(&beforeDocuments))
+	must(t, pool.QueryRow(ledger).Scan(&beforeLedger))
+	store := newStoreOnSchema(t, pool)
+	must(t, store.Migrate(t.Context()))
+	must(t, store.Migrate(t.Context()))
+	must(t, store.CheckSchema(t.Context()))
+	var afterDocuments, afterLedger string
+	must(t, pool.QueryRow(documents, run).Scan(&afterDocuments))
+	must(t, pool.QueryRow(ledger).Scan(&afterLedger))
+	if beforeDocuments != afterDocuments || beforeLedger != afterLedger {
+		t.Fatal("Revision upgrade changed published workflow data or migration identities")
+	}
+	if !tableExists(t, pool, "revisions") || !tableExists(t, pool, "revision_verifications") {
+		t.Fatal("Revision upgrade did not add authoritative delivery tables")
+	}
+}

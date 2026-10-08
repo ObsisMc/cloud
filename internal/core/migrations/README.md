@@ -79,3 +79,5 @@
 真实 PostgreSQL 新库与 0017 升级证据见 integration/runtime_upgrade_test.go、runtime_control_test.go、repository_credentials_test.go 和 plugin_pending_test.go。业务事务只有数据库操作，不跨执行程序、网络或文件调用持锁。Node 的本地恢复日志不替代此业务权威。
 
 0027 仅前向新增 Revision、验证结论与未配置存储跳过记录，保留原 Node 证据。复合外键约束租户/run/Workspace/project 范围；changed 与 unchanged 元数据互斥。revision_upgrade_test.go 验证真实 0026 升级与重复迁移；agent_plugin_upgrade_test.go 验证 0023 在途旧插件 effect 保留及新步骤重启。
+
+与当前上游合并时保留 `0027_verified_revisions.sql`、`0027_workflows.sql` 及 `0028–0029` 的完整文件名和原始 SQL；前缀相同不等于迁移身份相同，执行器按完整文件名和校验和追踪已应用迁移。`TestRevisionUpgradePreservesPublishedWorkflowSchema` 直接验证已经应用上游工作流迁移的数据库可追加 Revision 表，重复迁移后原工作流、快照、运行和迁移账本均保持完整。
