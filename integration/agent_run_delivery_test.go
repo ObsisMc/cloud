@@ -6,34 +6,40 @@ package integration
 //
 // The chain under test is the production one end to end:
 //
-//	a session ends            → the run `delivering` + one released deliver_revision work item (Batch 1)
-//	agent_work_claim/dispatch → a registered deliver_revision execution carrying D2's fixed spec
-//	GrantRevisionUpload       → one presigned PUT per object key of that attempt's frozen input
-//	TakeOverNodeEvent         → the `agent_delivery_takeover` action: D4 steps 1–2 (the local input
-//	                            comparison and the object-store HEAD for every declared object) run
-//	                            BEFORE the transaction opens; the receipt, the durable result, the
-//	                            `revisions` row and the settlement then commit in ONE transaction
-//	DeliverySettled           → a verified Revision releases the run `releasing` with
-//	                            deliveryState=saved|unchanged and the Revision's id; a failure D5 has
-//	                            not given up on releases a backoff retry and keeps the run `delivering`
-//	the releasing transition  → exactly one delete_workspace operation, declared in the same commit
-//	the delete reaching       → RunWorkspaceDeleted moves the run `releasing → done`
+//	a session ends             → the run `delivering` + one released deliver_revision work item (Batch 1)
+//	clone_claim/clone_dispatch → a registered deliver_revision execution carrying D2's fixed spec
+//	GrantRevisionUpload        → one presigned PUT per object key of that attempt's frozen input
+//	TakeOverNodeEvent          → the `clone_takeover` action: the local input comparison runs in a
+//	                             fence transaction, the object-store HEAD for every declared object
+//	                             runs outside any transaction, and the receipt, the durable result,
+//	                             the verification verdict, the `revisions` row and the settlement
+//	                             then commit in ONE transaction
+//	DeliverySettled            → a verified Revision releases the run `releasing` with
+//	                             deliveryState=saved|unchanged and the Revision's id; a failure D5 has
+//	                             not given up on releases a backoff retry and keeps the run `delivering`
+//	the releasing transition   → exactly one delete_workspace operation, declared in the same commit
+//	the delete reaching        → RunWorkspaceDeleted moves the run `releasing → done`
 //	`succeeded`
 //
-// The object store is the fixture's own double, installed as store.RevisionObjects (revisionObjects
-// below). What these tests assert about it is the interface the delivery path consumes — which object
-// keys are probed, with which declared size and digest, and what a failed probe does to the run — not
-// that a real S3 accepts Cloud's signatures. The request shapes are internal/objectstore's own
-// business, and the ADR's local-MinIO integration test is still owed: no MinIO endpoint was
-// reachable when this slice was written, and that gap is registered in the plan rather than papered
-// over here.
+// The object store is a real HTTP endpoint (revisionStore below), installed as store.ObjectStore:
+// internal/objectstore signs a HEAD and the fixture answers it, so what these tests pin is the
+// request Cloud actually sends — which object keys it spends a request on, and what a store that
+// disagrees with the declaration does to the run — rather than a call into a Go stand-in for the
+// client. What they deliberately do not prove is that a real S3 accepts Cloud's signature: the ADR's
+// local-MinIO acceptance is still owed, no MinIO endpoint was reachable when this was written, and
+// that gap is registered as G-037 rather than papered over here.
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +51,7 @@ import (
 
 	"github.com/wanglongan587/cloud/internal/controlpb"
 	"github.com/wanglongan587/cloud/internal/core"
+	"github.com/wanglongan587/cloud/internal/objectstore"
 )
 
 // controllerClaims is the lease holder the seeded Thread scenes install (`ctrl-a`), which every
@@ -62,75 +69,134 @@ func revisionFailedResult(scene liveThreadScene, reason controlpb.RevisionFailur
 	}
 }
 
-// revisionObjects is the fixture's stand-in for Cloud's object-store client (Cloud Revision D1). It
-// answers every probe the way a store holding exactly the declared objects would, except for the one
-// key a case names as missing or different, which is how the failure path is reached without a real
-// S3. Every probe is recorded, because *which* objects Cloud spends a request on is an obligation in
-// its own right: a result Cloud cannot compare against its own frozen input must never reach the
-// store at all (D4 step 1 precedes step 2).
-type revisionObjects struct {
-	mu       sync.Mutex
+// revisionStore is the S3 endpoint Cloud's object-store client talks to (Cloud Revision D1), served
+// over real HTTP so the request Cloud signs is the request that is answered. It holds exactly the
+// objects deliveredResult/unchangedResult declare, and answers a HEAD for one with that object's own
+// size and stored SHA-256 — which is what makes "Cloud verified the right objects" a claim about the
+// keys Cloud asked for, since internal/objectstore only reaches a verdict when the metadata comes
+// back matching the declaration it was given.
+//
+// Every probe is recorded for the same reason: *which* objects Cloud spends a request on is an
+// obligation in its own right, and a result Cloud can already tell contradicts its own frozen input
+// must never reach the store at all (D4 step 1 precedes step 2). A key a case marks as broken is
+// answered with metadata that disagrees with the declaration — the store's own verdict, not a
+// transport failure — which is the shape D4 step 4 turns into Cloud's `verification_failed`.
+type revisionStore struct {
+	*httptest.Server
+	mu sync.Mutex
+	// probes are the objects Cloud asked about, in order; intruders are the requests that were not a
+	// HEAD, which is the only way a real store would see Cloud hand out an upload capability.
 	probes   []core.Object
-	issued   []string
-	ttl      time.Duration
-	rejectAt string
+	intruder int
+	broken   map[string]bool
+	config   *objectstore.Config
 }
 
-func (r *revisionObjects) PresignPut(objectKey string, ttl time.Duration) (core.UploadGrant, error) {
-	r.mu.Lock()
-	r.issued = append(r.issued, objectKey)
-	r.ttl = ttl
-	r.mu.Unlock()
-	// A grant that is shaped like the real one but is not a signature: the fixture's Controller never
-	// uploads anything, so the URL is only ever asserted on, never fetched.
-	return core.UploadGrant{
-		ObjectKey: objectKey,
-		URL:       "https://store.invalid/" + objectKey + "?X-Amz-Signature=fixture",
-		Method:    http.MethodPut,
-		Headers:   map[string]string{},
-		ExpiresAt: time.Now().UTC().Add(ttl),
-	}, nil
-}
-
-func (r *revisionObjects) Verify(_ context.Context, objectKey string, size int64, sha256 string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.probes = append(r.probes, core.Object{"key": objectKey, "size": size, "sha256": sha256})
-	if objectKey == r.rejectAt {
-		return fmt.Errorf("object %s: the stored object does not match the declaration", objectKey)
+// storedMeasurements answers the size and digest a store that received the Node's upload would report
+// for one key. Cloud fixes each key's shape per D2 (`.../revision.bundle`, `.../session.jsonl`), so
+// the key itself says which object it is; the values are the ones this file's own result builders
+// declare, which is what keeps the fixture's declaration and the store's metadata one fact.
+func storedMeasurements(key string) (int64, string) {
+	if strings.HasSuffix(key, "/revision.bundle") {
+		return revisionBundleSize, revisionBundleSHA
 	}
-	return nil
+	return revisionHistorySize, revisionHistorySHA
+}
+
+func (s *revisionStore) head(w http.ResponseWriter, req *http.Request) {
+	s.mu.Lock()
+	if req.Method != http.MethodHead {
+		s.intruder++
+		s.mu.Unlock()
+		http.Error(w, "only a HEAD reaches the store on this path", http.StatusMethodNotAllowed)
+		return
+	}
+	s.mu.Unlock()
+	key := strings.TrimPrefix(req.URL.Path, "/revisions/")
+	size, digest := storedMeasurements(key)
+	s.mu.Lock()
+	s.probes = append(s.probes, core.Object{"key": key, "size": size, "sha256": digest})
+	broken := s.broken[key]
+	s.mu.Unlock()
+	if broken {
+		// One byte more than declared: an object that exists but is not the object Cloud was told to
+		// expect. A 404 would be the other definitive verdict, and is what an absent upload produces.
+		size++
+	}
+	raw, e := hex.DecodeString(digest)
+	if e != nil {
+		http.Error(w, "fixture digest is not hex", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	w.Header().Set("X-Amz-Checksum-Sha256", base64.StdEncoding.EncodeToString(raw))
+	w.WriteHeader(http.StatusOK)
 }
 
 // probed returns the objects Cloud verified, in order.
-func (r *revisionObjects) probed() []core.Object {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]core.Object(nil), r.probes...)
+func (s *revisionStore) probed() []core.Object {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]core.Object(nil), s.probes...)
 }
 
-// issuedKeys returns the object keys Cloud signed a grant for, in order.
-func (r *revisionObjects) issuedKeys() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]string(nil), r.issued...)
+// breakObject makes one object's stored metadata disagree with the declaration the Node reported.
+func (s *revisionStore) breakObject(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.broken[key] = true
 }
 
-// issuedTTL returns the lifetime of the last grant Cloud signed.
-func (r *revisionObjects) issuedTTL() time.Duration {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.ttl
+// nonHeadRequests returns how many requests reached the store that were not object probes. An upload
+// grant is minted by local signing and never fetched by the fixture, so a non-zero count is the only
+// sign that a path other than verification used Cloud's object-store capability.
+func (s *revisionStore) nonHeadRequests() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.intruder
 }
 
-// useObjectStore installs the double on the store and returns it. A Store with a nil
-// RevisionObjects is the other legal state D1 defines — a deployment without object storage — and the
+// grantsOf returns the object keys of an upload-grant reply, in the order Cloud signed them.
+func grantKeys(grants []*controlpb.UploadGrant) []string {
+	keys := make([]string, 0, len(grants))
+	for _, g := range grants {
+		keys = append(keys, g.GetObjectKey())
+	}
+	return keys
+}
+
+// useObjectStore starts the endpoint and installs its configuration on the store, once per fixture:
+// repeating the call returns the same double, so a test that names the store and a helper that also
+// needs storage configured cannot end up watching two different endpoints. A Store with a nil
+// ObjectStore is the other legal state D1 defines — a deployment without object storage — and the
 // tests that need it clear the field explicitly.
-func (f *fixture) useObjectStore() *revisionObjects {
+func (f *fixture) useObjectStore() *revisionStore {
 	f.t.Helper()
-	objects := &revisionObjects{}
-	f.store.RevisionObjects = objects
-	return objects
+	if f.objects != nil {
+		f.store.ObjectStore = f.objects.config
+		return f.objects
+	}
+	store := &revisionStore{broken: map[string]bool{}}
+	store.Server = httptest.NewServer(http.HandlerFunc(store.head))
+	f.t.Cleanup(store.Close)
+	store.config = &objectstore.Config{
+		Endpoint: store.URL, Region: "us-east-1", Bucket: "revisions", PathStyle: true,
+		AccessKeyID: "test-access", SecretAccessKey: "test-secret",
+	}
+	f.objects = store
+	f.store.ObjectStore = store.config
+	return store
+}
+
+// deliveryTarget reads the target a run's declared delivery attempt carries, which is what a
+// re-declaration of the same attempt has to repeat for its refusal to be about anything else.
+func (f *fixture) deliveryTarget(runID string) core.Object {
+	f.t.Helper()
+	var raw string
+	must(f.t, f.store.Pool.QueryRow(`SELECT target::text FROM execution_work WHERE run_id=$1 AND kind='deliver_revision'`, runID).Scan(&raw))
+	out := core.Object{}
+	must(f.t, json.Unmarshal([]byte(raw), &out))
+	return out
 }
 
 // deliveryInputOf reads the frozen DeliverRevisionSpec one registered attempt carries. Every
@@ -152,9 +218,9 @@ func deliveredResult(scene liveThreadScene, in core.Object, final string) *contr
 	return &controlpb.ExecutionResult{
 		Node: &controlpb.NodeIdentity{NodeId: scene.nodeID, NodeIncarnationId: "inc-" + scene.nodeID[:8]},
 		Outcome: &controlpb.ExecutionResult_RevisionDelivered{RevisionDelivered: &controlpb.RevisionDelivered{
-			FinalCommit: final, BaseCommit: in.S("base_commit"), RevisionRef: in.S("revision_ref"),
-			Bundle:  &controlpb.StoredObject{Key: in.S("bundle_key"), Size: revisionBundleSize, Sha256: revisionBundleSHA},
-			History: &controlpb.StoredObject{Key: in.S("history_key"), Size: revisionHistorySize, Sha256: revisionHistorySHA},
+			FinalCommit: final, BaseCommit: in.S("baseCommit"), RevisionRef: in.S("revisionRef"),
+			Bundle:  &controlpb.StoredObject{Key: in.S("bundleKey"), Size: revisionBundleSize, Sha256: revisionBundleSHA},
+			History: &controlpb.StoredObject{Key: in.S("historyKey"), Size: revisionHistorySize, Sha256: revisionHistorySHA},
 		}},
 	}
 }
@@ -165,8 +231,8 @@ func unchangedResult(scene liveThreadScene, in core.Object) *controlpb.Execution
 	return &controlpb.ExecutionResult{
 		Node: &controlpb.NodeIdentity{NodeId: scene.nodeID, NodeIncarnationId: "inc-" + scene.nodeID[:8]},
 		Outcome: &controlpb.ExecutionResult_RevisionUnchanged{RevisionUnchanged: &controlpb.RevisionUnchanged{
-			FinalCommit: in.S("base_commit"), BaseCommit: in.S("base_commit"), RevisionRef: in.S("revision_ref"),
-			History: &controlpb.StoredObject{Key: in.S("history_key"), Size: revisionHistorySize, Sha256: revisionHistorySHA},
+			FinalCommit: in.S("baseCommit"), BaseCommit: in.S("baseCommit"), RevisionRef: in.S("revisionRef"),
+			History: &controlpb.StoredObject{Key: in.S("historyKey"), Size: revisionHistorySize, Sha256: revisionHistorySHA},
 		}},
 	}
 }
@@ -239,23 +305,26 @@ func (f *fixture) revisionRow(runID string) *revisionRow {
 	return &row
 }
 
-// receiptResult reads the Node's own payload as the takeover's receipt kept it. D4 step 4 rewrites
-// the durable `node_executions.result` when Cloud's verification fails, so the receipt is the only
-// row that still holds what the Node claimed — and it is exactly the copy the replay comparison is
-// made against, which is why an exact replay after a failed verification must stay a no-op.
-func (f *fixture) receiptResult(execution string, sequence int64) core.Object {
+// receiptEvent reads the event bytes one takeover acknowledged, exactly as the Node sent them. The
+// merged control plane stores the Node's event text verbatim in `node_event_receipts.event` (it is
+// `text`, not jsonb; the gRPC boundary carries the bytes base64-encoded, so the row does too) and keeps
+// what the Node claimed about the result in `node_executions.result`. The decoded bytes are the copy
+// Cloud must never rewrite: they are the basis for the EventAck, and they are what a replay is compared
+// against — `recordNodeReceipt` refuses the same sequence carrying different bytes.
+func (f *fixture) receiptEvent(execution string, sequence int64) string {
 	f.t.Helper()
-	var raw string
+	var event string
 	must(f.t, f.store.Pool.QueryRow(`
-		SELECT COALESCE(event -> 'result', '{}')::text FROM node_event_receipts
-		WHERE execution_id=$1 AND sequence=$2`, execution, sequence).Scan(&raw))
-	out := core.Object{}
-	must(f.t, json.Unmarshal([]byte(raw), &out))
-	return out
+		SELECT event FROM node_event_receipts
+		WHERE execution_id=$1 AND sequence=$2`, execution, sequence).Scan(&event))
+	raw, e := base64.StdEncoding.DecodeString(event)
+	must(f.t, e)
+	return string(raw)
 }
 
-// nodeResult reads one execution's durable terminal result, or nil when it holds none. It is the row
-// D4 step 4 may rewrite, so a case has to be able to tell the Node's own payload from Cloud's verdict.
+// nodeResult reads one execution's durable terminal result, or nil when it holds none. It is the
+// Node's own payload as the control plane stored it, so a case can tell it apart from Cloud's verdict
+// on the declared objects, which is a `revision_verifications` row and never a rewrite of this one.
 func (f *fixture) nodeResult(execution string) core.Object {
 	f.t.Helper()
 	var raw sql.NullString
@@ -265,6 +334,26 @@ func (f *fixture) nodeResult(execution string) core.Object {
 	}
 	out := core.Object{}
 	must(f.t, json.Unmarshal([]byte(raw.String), &out))
+	return out
+}
+
+// revisionVerification reads Cloud's verdict on one delivery execution's declared objects, or nil
+// when the control plane recorded none — which is what both a refusal that settled nothing and a
+// registration that rolled back leave behind. `outcome` is delivered|unchanged|failed, and `reason`
+// is non-null exactly when the outcome is failed (D4 step 4, upstream's `revision_verifications`).
+func (f *fixture) revisionVerification(execution string) core.Object {
+	f.t.Helper()
+	rows, e := f.store.Pool.Query(`
+		SELECT to_jsonb(v)::text FROM revision_verifications v WHERE v.execution_id=$1`, execution)
+	must(f.t, e)
+	defer rows.Close()
+	if !rows.Next() {
+		return nil
+	}
+	var raw string
+	must(f.t, rows.Scan(&raw))
+	out := core.Object{}
+	must(f.t, json.Unmarshal([]byte(raw), &out))
 	return out
 }
 
@@ -290,6 +379,19 @@ func (f *fixture) runPlacement(runID string) (projectID, repositoryURL string) {
 	return projectID, repositoryURL
 }
 
+// grantRevisionUpload asks for the attempt's upload grants over the real gRPC surface as the seeded
+// lease holder, which is how a Controller obtains the presigned PUTs a Node uploads through.
+func (f *fixture) grantRevisionUpload(execution string) (*controlpb.GrantRevisionUploadResponse, error) {
+	return controlpb.NewAgentRunServiceClient(f.controlConn).GrantRevisionUpload(asController("ctrl-a"),
+		&controlpb.GrantRevisionUploadRequest{Epoch: 1, ExecutionId: execution})
+}
+
+// grantErrOnly narrows one grant request to its error, for a refusal a test asserts on.
+func grantErrOnly(f *fixture, execution string) error {
+	_, e := f.grantRevisionUpload(execution)
+	return e
+}
+
 // deliveryTerminal submits one delivery terminal event over the real gRPC surface as the seeded
 // lease holder. The canonical event bytes are the caller's label: the A layer stores them verbatim
 // and never parses them, so their only job is to make "same sequence, different bytes" detectable.
@@ -304,7 +406,7 @@ func (f *fixture) deliveryTerminal(scene liveThreadScene, execution, submission 
 // ended through the production takeover, the run `delivering`, and its delivery work item released.
 func deliveringScene(t *testing.T, f *fixture) liveThreadScene {
 	t.Helper()
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 	f.runningThread(t, scene)
@@ -316,11 +418,11 @@ func deliveringScene(t *testing.T, f *fixture) liveThreadScene {
 }
 
 // claimDelivery picks the run's released delivery work item the way a Controller does, through the
-// real agent_work_claim action, and requires it to be a delivery.
+// real clone_claim action, and requires it to be a delivery.
 func (f *fixture) claimDelivery(t *testing.T, scene liveThreadScene) core.Object {
 	t.Helper()
 	out, e := f.store.Control(context.Background(), &core.ControlRequest{
-		Action: "agent_work_claim", Body: core.Object{"epoch": 1}, Service: controllerClaims(),
+		Action: "clone_claim", Body: core.Object{"epoch": 1}, Service: controllerClaims(),
 	})
 	must(t, e)
 	work := out.O("work")
@@ -336,14 +438,17 @@ func (f *fixture) claimDelivery(t *testing.T, scene liveThreadScene) core.Object
 	return work
 }
 
-// registerDelivery registers the claimed delivery work item through the real agent_work_dispatch
-// action, which is what makes a delivery execution addressable by a terminal result.
+// registerDelivery registers the claimed delivery work item through the real clone_dispatch action,
+// which routes a non-clone input to the Node-execution path and is what makes a delivery execution
+// addressable by a terminal result. The registered input is echoed back to Cloud unchanged because
+// that is the A layer's own comparison: the work item's server-owned keys are frozen when it is
+// declared, so a Controller holds them before it dispatches.
 func (f *fixture) registerDelivery(t *testing.T, scene liveThreadScene, work core.Object, execution string) {
 	t.Helper()
 	_, e := f.store.Control(context.Background(), &core.ControlRequest{
-		Action: "agent_work_dispatch",
+		Action: "clone_dispatch",
 		Body: core.Object{
-			"workId": work.S("id"), "executionId": execution, "nodeId": scene.nodeID,
+			"operationId": scene.runID, "executionId": execution, "nodeId": scene.nodeID,
 			"input": work.O("input"), "epoch": 1,
 		},
 		Service: controllerClaims(),
@@ -523,6 +628,28 @@ func (f *fixture) bindRunWorkspaceSandbox(t *testing.T, runID string) (sandboxID
 	return sandboxID, nodeID
 }
 
+// substrateRun dispatches one effect to the Substrate's own effect API — the same PUT a Controller's
+// operation machine issues — and returns the journal entry. The request is passed verbatim because
+// the Substrate validates it before performing anything, so an entry it would not have accepted is
+// not a faithful stand-in for one it did.
+func (f *fixture) substrateRun(t *testing.T, effect core.Object, wantStatus int) core.Object {
+	t.Helper()
+	body, e := json.Marshal(effect.O("request"))
+	must(t, e)
+	req, e := http.NewRequest(http.MethodPut, f.external.URL+"/effects/"+effect.S("id"), bytes.NewReader(body))
+	must(t, e)
+	req.Header.Set("Content-Type", "application/json")
+	resp, e := f.client.HTTP.Do(req)
+	must(t, e)
+	defer resp.Body.Close()
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("substrate PUT: want %d got %d", wantStatus, resp.StatusCode)
+	}
+	var out core.Object
+	must(t, json.NewDecoder(resp.Body).Decode(&out))
+	return out
+}
+
 // recordSandbox stages one Workspace's sandbox in the Substrate's own journal through the same effect
 // API a Controller's `sandbox` step uses. The request is shaped exactly like planEffect's
 // (`kind`/`projectId`/`workspaceId`) because the Substrate validates those fields before it performs
@@ -601,35 +728,38 @@ func TestDeliveryExecutionClaimCarriesTheFixedSpecAndMovesNothing(t *testing.T) 
 
 	work := f.claimDelivery(t, scene)
 	in := work.O("input")
-	if got := in.S("session_execution_id"); got != scene.executionID {
-		t.Fatalf("session_execution_id = %q, want the ended session execution %q", got, scene.executionID)
+	if got := in.S("kind"); got != "deliver_revision" {
+		t.Fatalf("the frozen spec kind = %q, want deliver_revision", got)
 	}
-	if got := in.S("base_commit"); got != seedRunWorkspaceCommit {
-		t.Fatalf("base_commit = %q, want the run Workspace's recorded baseline %q", got, seedRunWorkspaceCommit)
+	if got := in.S("sessionExecutionId"); got != scene.executionID {
+		t.Fatalf("sessionExecutionId = %q, want the ended session execution %q", got, scene.executionID)
 	}
-	if got := in.S("revision_ref"); got != "refs/ora/revisions/"+scene.runID {
-		t.Fatalf("revision_ref = %q, want the name Cloud owns for this run", got)
+	if got := in.S("baseCommit"); got != seedRunWorkspaceCommit {
+		t.Fatalf("baseCommit = %q, want the run Workspace's recorded baseline %q", got, seedRunWorkspaceCommit)
+	}
+	if got := in.S("revisionRef"); got != "refs/ora/revisions/"+scene.runID {
+		t.Fatalf("revisionRef = %q, want the name Cloud owns for this run", got)
 	}
 	// The per-attempt object keys (D2): both live under the run's own prefix, so no two runs and no
 	// two attempts can overwrite each other's objects.
 	prefix := "revisions/" + scene.tenantID + "/" + scene.runID + "/"
-	if got := in.S("bundle_key"); !strings.HasPrefix(got, prefix) || !strings.HasSuffix(got, "/revision.bundle") {
-		t.Fatalf("bundle_key = %q, want a per-attempt key under %s", got, prefix)
+	if got := in.S("bundleKey"); !strings.HasPrefix(got, prefix) || !strings.HasSuffix(got, "/revision.bundle") {
+		t.Fatalf("bundleKey = %q, want a per-attempt key under %s", got, prefix)
 	}
-	if got := in.S("history_key"); !strings.HasPrefix(got, prefix) || !strings.HasSuffix(got, "/session.jsonl") {
-		t.Fatalf("history_key = %q, want a per-attempt key under %s", got, prefix)
+	if got := in.S("historyKey"); !strings.HasPrefix(got, prefix) || !strings.HasSuffix(got, "/session.jsonl") {
+		t.Fatalf("historyKey = %q, want a per-attempt key under %s", got, prefix)
 	}
 	// The third segment is the delivery attempt Cloud drew before this work item existed (D2). Both
 	// keys name the same one, and it is Cloud's own attempt id rather than the run or the execution:
 	// the Controller picks the execution id later, so a key read here cannot contain it.
-	attempt := strings.TrimSuffix(strings.TrimPrefix(in.S("bundle_key"), prefix), "/revision.bundle")
+	attempt := strings.TrimSuffix(strings.TrimPrefix(in.S("bundleKey"), prefix), "/revision.bundle")
 	if attempt == "" || attempt == scene.runID {
 		t.Fatalf("the attempt segment %q must be Cloud's own attempt id, not the run", attempt)
 	}
-	if got := strings.TrimSuffix(strings.TrimPrefix(in.S("history_key"), prefix), "/session.jsonl"); got != attempt {
+	if got := strings.TrimSuffix(strings.TrimPrefix(in.S("historyKey"), prefix), "/session.jsonl"); got != attempt {
 		t.Fatalf("both object keys must name the same attempt: %q vs %q", got, attempt)
 	}
-	if got := work.O("target").S("node_id"); got != scene.nodeID {
+	if got := work.O("target").S("nodeId"); got != scene.nodeID {
 		t.Fatalf("the delivery target node = %q, want the run Workspace's Node %q", got, scene.nodeID)
 	}
 
@@ -637,7 +767,7 @@ func TestDeliveryExecutionClaimCarriesTheFixedSpecAndMovesNothing(t *testing.T) 
 	f.registerDelivery(t, scene, work, execution)
 	// The keys were drawn before any execution existed and are never rewritten to name it: a key that
 	// carried the execution id could not have been written into the frozen input at all.
-	for _, key := range []string{in.S("bundle_key"), in.S("history_key")} {
+	for _, key := range []string{in.S("bundleKey"), in.S("historyKey")} {
 		if strings.Contains(key, execution) {
 			t.Fatalf("the per-attempt key %q names the execution id, which did not exist when Cloud drew it", key)
 		}
@@ -655,7 +785,7 @@ func TestDeliveryExecutionClaimCarriesTheFixedSpecAndMovesNothing(t *testing.T) 
 	// an execution it has already been given. The raw map is inspected rather than `O()`, which
 	// answers with an empty object for an absent key and so cannot express "nothing was claimed".
 	out, e := f.store.Control(context.Background(), &core.ControlRequest{
-		Action: "agent_work_claim", Body: core.Object{"epoch": 1}, Service: controllerClaims(),
+		Action: "clone_claim", Body: core.Object{"epoch": 1}, Service: controllerClaims(),
 	})
 	must(t, e)
 	if got := out["work"]; got != nil {
@@ -719,14 +849,16 @@ func TestFailedDeliveryKeepsDeliveringAndReleasesOneBackoffRetry(t *testing.T) {
 	if attempts[1].B("available") {
 		t.Fatalf("the released retry must not be claimable before its backoff elapses, got %v", attempts[1])
 	}
-	// One logical delivery: everything but the per-attempt keys is identical.
-	for _, key := range []string{"session_execution_id", "base_commit", "revision_ref"} {
+	// One logical delivery: everything but the per-attempt keys is identical. The frozen input is the
+	// control plane's own spelling (proto DeliverRevisionSpec), which is what a Controller reads.
+	for _, key := range []string{"sessionExecutionId", "checkoutExecutionId", "baseCommit", "revisionRef"} {
 		if attempts[0].S(key) != attempts[1].S(key) {
 			t.Fatalf("a retry must not become a new logical delivery: %s changed (%q → %q)", key, attempts[0].S(key), attempts[1].S(key))
 		}
 	}
-	if attempts[0].S("bundle_key") == attempts[1].S("bundle_key") {
-		t.Fatalf("a retry must not reuse the failed attempt's object key, got %q", attempts[0].S("bundle_key"))
+	if attempts[0].S("bundleKey") == attempts[1].S("bundleKey") || attempts[0].S("historyKey") == attempts[1].S("historyKey") {
+		t.Fatalf("a retry must not reuse the failed attempt's object keys, got %q / %q",
+			attempts[0].S("bundleKey"), attempts[0].S("historyKey"))
 	}
 	// The run stayed delivering, so nothing released it: no delete intent exists yet.
 	if got := deleteOperations(f.runOperations(scene.runID)); len(got) != 0 {
@@ -771,7 +903,7 @@ func TestDeliveryGiveUpReleasesTheRunWithD5StateAndD4Status(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := setup(t)
-			f.useRealControlPlane()
+			f.bindBusinessHooks()
 			scene := seedLiveThreadScene(t, f)
 			scene.start(t, f)
 			f.runningThread(t, scene)
@@ -780,11 +912,13 @@ func TestDeliveryGiveUpReleasesTheRunWithD5StateAndD4Status(t *testing.T) {
 			c.limit(f)
 			if c.age {
 				// The Node's heartbeat is the run Workspace's only evidence of liveness; one older
-				// than the window is exactly the "state unknown" D5 measures.
+				// than the window is exactly the "state unknown" D5 measures. A terminal result can
+				// no longer be taken over once the Node is that stale — the control plane's own fence
+				// refuses events from a Node it cannot reach — so Cloud applies this window on its own
+				// clock, through the give-up pass, rather than on an event the Node cannot deliver.
 				must(t, f.ageRunWorkspaceNode(scene.runID))
-			}
-
-			if _, e := f.deliveryTerminal(scene, execution, "p5-give-up", 1,
+				must(t, f.store.GiveUpStaleDeliveriesOnce(context.Background()))
+			} else if _, e := f.deliveryTerminal(scene, execution, "p5-give-up", 1,
 				revisionFailedResult(scene, controlpb.RevisionFailureReason_REVISION_FAILURE_REASON_UPLOAD_FAILED),
 				"revision_failed/upload_failed"); e != nil {
 				t.Fatalf("the give-up result must be taken over: %v", e)
@@ -925,8 +1059,9 @@ func TestReleasingDeclaresExactlyOneDeleteOperation(t *testing.T) {
 	}
 	// Operation D4's identity for a run-Workspace operation is (issue_run_id, kind), generated by
 	// Cloud: the Workspace binds one run uniquely, so its id is the same set, and the key must never
-	// come from a caller-supplied idempotency key.
-	if got := op.S("idempotencyKey"); got != "agent-run:"+scene.runID+":delete_workspace" {
+	// come from a caller-supplied idempotency key. The spelling is the seam's own run-scoped one,
+	// paired with the create key the same seam declares, so a retried declaration converges.
+	if got := op.S("idempotencyKey"); got != "run-workspace-"+scene.runID+"-delete" {
 		t.Fatalf("idempotency key = %q, want Cloud's own run-scoped key", got)
 	}
 	if !strings.Contains(op.S("request"), wid) {
@@ -937,22 +1072,44 @@ func TestReleasingDeclaresExactlyOneDeleteOperation(t *testing.T) {
 		t.Fatalf("the declaration must close admission for deletion, got %v", ws)
 	}
 
-	// A delivery result that arrives after the release is receipted as a fact about a finished attempt
-	// and decides nothing. Both shapes a Controller's recovery can produce are asserted, because they
-	// take different paths through the takeover: an exact replay of the already-committed event is the
-	// A layer's own no-op (identical receipt, identical result — it never reaches the hook), while a
-	// genuinely later event has to be committed and is then made inert by the settlement's own
-	// `phase != delivering` branch. Neither may declare a second delete or move the phase.
+	// A delivery execution settles once: the takeover writes its terminal result together with the
+	// receipt that accompanies it, and the A layer then accepts only an exact replay of the committed
+	// event. Both other shapes a Controller's recovery can produce are refused as conflicts with a
+	// durable fact — nothing new may be appended to a settled execution, and no second result may
+	// overwrite the settled one. Neither may write the run, move the phase or declare a second delete.
 	version := f.runVersion(scene.runID)
 	if _, e := f.deliveryTerminal(scene, execution, "", 1,
 		revisionFailedResult(scene, controlpb.RevisionFailureReason_REVISION_FAILURE_REASON_UPLOAD_FAILED),
 		"revision_failed/upload_failed"); e != nil {
 		t.Fatalf("an exact replay of the committed delivery event must be a no-op: %v", e)
 	}
-	if _, e := f.deliveryTerminal(scene, execution, "", 2,
-		revisionFailedResult(scene, controlpb.RevisionFailureReason_REVISION_FAILURE_REASON_CHECKOUT_UNAVAILABLE),
-		"revision_failed/checkout_unavailable"); e != nil {
-		t.Fatalf("a late delivery result for a released run must be receipted, not refused: %v", e)
+	refusals := []struct {
+		what     string
+		sequence uint64
+		result   *controlpb.ExecutionResult
+		event    string
+	}{
+		{
+			"a later sequence restating the settled result", 2,
+			revisionFailedResult(scene, controlpb.RevisionFailureReason_REVISION_FAILURE_REASON_UPLOAD_FAILED), "revision_failed/upload_failed",
+		},
+		{
+			"a different result at the settled sequence", 1,
+			revisionFailedResult(scene, controlpb.RevisionFailureReason_REVISION_FAILURE_REASON_CHECKOUT_UNAVAILABLE), "revision_failed/checkout_unavailable",
+		},
+	}
+	for _, c := range refusals {
+		if _, e := f.deliveryTerminal(scene, execution, "", c.sequence, c.result, c.event); e == nil {
+			t.Fatalf("%s must be refused: a settled delivery execution accepts only a replay of the committed event", c.what)
+		} else {
+			expectStatus(t, e, codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
+		}
+	}
+	if got := f.nodeSequence(execution); got != 1 {
+		t.Fatalf("a refused post-release event must not be receipted, got sequence %d", got)
+	}
+	if got := len(f.receipts(execution)); got != 1 {
+		t.Fatalf("a refused post-release event must not add a receipt, got %v", got)
 	}
 	if got := f.runVersion(scene.runID); got != version {
 		t.Fatalf("a post-release delivery result must not write the run: version %d → %d", version, got)
@@ -1013,7 +1170,7 @@ func TestDeleteTerminalStateSettlesTheRunToDone(t *testing.T) {
 // reachable through production code, in one uninterrupted trace.
 func TestFullLifecycleSessionEndToDoneSkipsNoPhase(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	f.useObjectStore()
 	scene := seedLiveThreadScene(t, f)
 	trace := []string{f.runPhase(scene.runID)}
@@ -1094,7 +1251,10 @@ func TestRevisionDeliveredIsVerifiedRegisteredAndReleasesTheRun(t *testing.T) {
 		deliveryState string
 		bundle        bool
 		result        func(liveThreadScene, core.Object) *controlpb.ExecutionResult
-		// verified are the objects Cloud must spend a HEAD on, in D4's order.
+		// verified are the objects Cloud must spend a HEAD on, in the merged control plane's own
+		// order: the history first, because every outcome declares one, and the bundle second, only
+		// for a changed checkout. D4 fixes the *set* of objects to verify ("对声明的每个对象调用
+		// HEAD"), not the sequence, so what this pins is which keys Cloud asks about.
 		verified func(core.Object) []core.Object
 	}{
 		{
@@ -1105,8 +1265,8 @@ func TestRevisionDeliveredIsVerifiedRegisteredAndReleasesTheRun(t *testing.T) {
 			},
 			verified: func(in core.Object) []core.Object {
 				return []core.Object{
-					{"key": in.S("bundle_key"), "size": int64(revisionBundleSize), "sha256": revisionBundleSHA},
-					{"key": in.S("history_key"), "size": int64(revisionHistorySize), "sha256": revisionHistorySHA},
+					{"key": in.S("historyKey"), "size": int64(revisionHistorySize), "sha256": revisionHistorySHA},
+					{"key": in.S("bundleKey"), "size": int64(revisionBundleSize), "sha256": revisionBundleSHA},
 				}
 			},
 		},
@@ -1115,7 +1275,7 @@ func TestRevisionDeliveredIsVerifiedRegisteredAndReleasesTheRun(t *testing.T) {
 			deliveryState: "unchanged",
 			result:        unchangedResult,
 			verified: func(in core.Object) []core.Object {
-				return []core.Object{{"key": in.S("history_key"), "size": int64(revisionHistorySize), "sha256": revisionHistorySHA}}
+				return []core.Object{{"key": in.S("historyKey"), "size": int64(revisionHistorySize), "sha256": revisionHistorySHA}}
 			},
 		},
 	}
@@ -1132,13 +1292,16 @@ func TestRevisionDeliveredIsVerifiedRegisteredAndReleasesTheRun(t *testing.T) {
 				t.Fatalf("a verified delivery must be taken over: %v", e)
 			}
 
-			// Step 2 ran before the transaction opened, over exactly the objects the result declares and
-			// in D4's order — and only those: the grants path is a different action and must not have run.
+			// Step 2 ran before the transaction opened, over exactly the objects the result declares —
+			// and only those: the grants path is a different action and must not have run.
 			if got, want := fmt.Sprint(objects.probed()), fmt.Sprint(c.verified(in)); got != want {
-				t.Fatalf("Cloud must verify exactly the declared objects, in D4's order:\n got %s\nwant %s", got, want)
+				t.Fatalf("Cloud must verify exactly the declared objects:\n got %s\nwant %s", got, want)
 			}
-			if got := objects.issuedKeys(); len(got) != 0 {
-				t.Fatalf("a delivery takeover must not sign upload grants, got %v", got)
+			// Signing a grant is local cryptography and sends nothing, so the store's only requests are
+			// the probes above: the takeover never asked the store for an upload capability, and the
+			// grant action is the only path that could have.
+			if got := objects.nonHeadRequests(); got != 0 {
+				t.Fatalf("the store must see probes only, got %d other requests", got)
 			}
 
 			// Step 3: one row per run, carrying the run's own placement and the attempt's own input.
@@ -1158,18 +1321,18 @@ func TestRevisionDeliveredIsVerifiedRegisteredAndReleasesTheRun(t *testing.T) {
 				t.Fatalf("the Revision must carry the run Workspace's placement: got ws=%s project=%s repo=%q, want %s/%s/%q",
 					row.WorkspaceID, row.ProjectID, row.RepositoryURL, wid, projectID, repositoryURL)
 			}
-			if row.BaseCommit != in.S("base_commit") || row.RevisionRef != in.S("revision_ref") {
+			if row.BaseCommit != in.S("baseCommit") || row.RevisionRef != in.S("revisionRef") {
 				t.Fatalf("the Revision must carry the attempt's own baseline and ref, got %s/%s", row.BaseCommit, row.RevisionRef)
 			}
 			// Invariant 5: the session history is saved for every Revision, including an unchanged one.
-			if row.HistoryKey != in.S("history_key") || row.HistorySHA256 != revisionHistorySHA || row.HistorySize != revisionHistorySize {
+			if row.HistoryKey != in.S("historyKey") || row.HistorySHA256 != revisionHistorySHA || row.HistorySize != revisionHistorySize {
 				t.Fatalf("the history measured by the Node must be recorded verbatim, got %v", row)
 			}
 			if row.ExpiresAt != nil {
 				t.Fatalf("expiry is an explicit non-goal: expires_at must stay NULL, got %v", row.ExpiresAt)
 			}
 			if c.bundle {
-				if row.BundleKey != in.S("bundle_key") || row.BundleSHA256 != revisionBundleSHA {
+				if row.BundleKey != in.S("bundleKey") || row.BundleSHA256 != revisionBundleSHA {
 					t.Fatalf("a changed checkout must record the bundle it declared, got %v", row)
 				}
 				if row.BundleSize == nil || *row.BundleSize != revisionBundleSize {
@@ -1184,7 +1347,7 @@ func TestRevisionDeliveredIsVerifiedRegisteredAndReleasesTheRun(t *testing.T) {
 				if row.BundleKey != "" || row.BundleSHA256 != "" || row.BundleSize != nil {
 					t.Fatalf("an unchanged delivery must record no bundle, got %v", row)
 				}
-				if row.FinalCommit != in.S("base_commit") {
+				if row.FinalCommit != in.S("baseCommit") {
 					t.Fatalf("an unchanged delivery's final commit IS the baseline, got %q", row.FinalCommit)
 				}
 			}
@@ -1230,134 +1393,193 @@ func TestRevisionDeliveredIsVerifiedRegisteredAndReleasesTheRun(t *testing.T) {
 }
 
 // P5-14, §8/§16/§31 — when Cloud cannot confirm the declared objects it records its OWN verdict, never
-// the Node's claim (D4 step 4): `failed{verification_failed}` is written in place of the delivered
-// result, no Revision row exists, and the run stays `delivering` under D5's retry policy. That is the
-// whole reason `verification_failed` is outside the wire's closed set — a Node may not assert a
-// verdict about objects Cloud has not looked at.
+// the Node's claim (D4 step 4): the delivery is settled as `failed{verification_failed}`, no Revision
+// row exists, and the run stays `delivering` under D5's retry policy. That is the whole reason
+// `verification_failed` is outside the wire's closed set — a Node may not assert a verdict about
+// objects Cloud has not looked at.
 //
-// The second case is the deployment without an object store (D1 invariant 6): a delivered result then
-// cannot be verified at all, which is a rejection rather than a skip.
+// The merged control plane keeps the two facts apart in the schema rather than by rewriting one:
+// `node_executions.result` stays exactly what the Node reported, and Cloud's verdict is its own row
+// in `revision_verifications` (upstream's table: `outcome` in delivered|unchanged|failed, with
+// `reason` non-null exactly when the outcome is failed). The settlement the B side sees is built from
+// that verdict, so the run still retries. Asserting the durable result *still holds the Node's
+// payload* is therefore part of the contract here and not a detail: it is what makes an exact replay
+// of the original payload compare equal and stay a no-op.
 //
-// An exact replay of the Node's original payload afterwards must be a no-op and not a conflict. The
-// durable result no longer holds what the Node sent — Cloud rewrote it — so a takeover that compared
-// against it would refuse every replay of this delivery forever.
+// The store's verdict is definitive here, not a transport failure: it holds every declared object but
+// answers for the bundle with metadata that disagrees with the declaration, so the object Cloud was
+// told to expect is not the object that is there. A store that is merely unreachable is the other
+// case, and is a refusal that settles nothing (see the transient test below).
 func TestRevisionVerificationFailureIsCloudsOwnVerdict(t *testing.T) {
-	cases := []struct {
-		name string
-		// breakStore makes the declared objects unverifiable for this case.
-		breakStore func(f *fixture, objects *revisionObjects, in core.Object)
-	}{
-		{
-			name: "a declared object does not match its declaration",
-			breakStore: func(_ *fixture, objects *revisionObjects, in core.Object) {
-				objects.rejectAt = in.S("bundle_key")
-			},
-		},
-		{
-			name: "the deployment has no object store",
-			breakStore: func(f *fixture, _ *revisionObjects, _ core.Object) {
-				f.store.RevisionObjects = nil
-			},
-		},
+	f := setup(t)
+	objects := f.useObjectStore()
+	scene := deliveringScene(t, f)
+	execution := f.deliverRevision(t, scene)
+	in := f.deliveryInputOf(execution)
+	objects.breakObject(in.S("bundleKey"))
+
+	res := deliveredResult(scene, in, revisionFinalCommit)
+	if _, e := f.deliveryTerminal(scene, execution, "p5-verification-failed", 1, res, "revision_delivered"); e != nil {
+		t.Fatalf("an unverifiable delivery must be taken over as Cloud's own verdict: %v", e)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			f := setup(t)
-			objects := f.useObjectStore()
-			scene := deliveringScene(t, f)
-			execution := f.deliverRevision(t, scene)
-			in := f.deliveryInputOf(execution)
-			c.breakStore(f, objects, in)
 
-			res := deliveredResult(scene, in, revisionFinalCommit)
-			if _, e := f.deliveryTerminal(scene, execution, "p5-verification-failed", 1, res, "revision_delivered"); e != nil {
-				t.Fatalf("an unverifiable delivery must be taken over as Cloud's own verdict: %v", e)
-			}
+	if row := f.revisionRow(scene.runID); row != nil {
+		t.Fatalf("no Revision may be registered for objects Cloud could not confirm, got %v", row)
+	}
+	verdict := f.revisionVerification(execution)
+	if verdict == nil {
+		t.Fatal("Cloud's verdict on the declared objects must be recorded in revision_verifications")
+	}
+	if verdict.S("outcome") != "failed" || verdict.S("reason") != "verification_failed" {
+		t.Fatalf("Cloud's verdict must be failed{verification_failed}, got %v", verdict)
+	}
+	stored := f.nodeResult(execution)
+	if stored.S("outcome") != "revision_delivered" {
+		t.Fatalf("the durable result must stay the Node's own payload, with Cloud's verdict beside it, got %v", stored)
+	}
+	// The receipt keeps the Node's bytes untouched: it is the basis for the EventAck, and it is what the
+	// replay below is compared against.
+	if got := f.receiptEvent(execution, 1); got != "revision_delivered" {
+		t.Fatalf("the receipt must keep the Node's own event bytes, got %q", got)
+	}
+	if got := f.nodeSequence(execution); got != 1 {
+		t.Fatalf("the verdict must be receipted once, got sequence %d", got)
+	}
 
-			if row := f.revisionRow(scene.runID); row != nil {
-				t.Fatalf("no Revision may be registered for objects Cloud could not confirm, got %v", row)
-			}
-			stored := f.nodeResult(execution)
-			if stored.S("outcome") != "revision_failed" || stored.S("reason") != "verification_failed" {
-				t.Fatalf("the durable result must be Cloud's own verdict, got %v", stored)
-			}
-			// The receipt keeps the Node's bytes and payload untouched: it is the basis for the EventAck,
-			// and it is the copy the replay below is compared against. Cloud's verdict must not leak
-			// into it, or the Node's own retry would look like a conflicting claim.
-			claim := f.receiptResult(execution, 1)
-			if got := claim.S("outcome"); got != "revision_delivered" {
-				t.Fatalf("the receipt must keep the Node's own claim, got %v", claim)
-			}
-			if _, rewritten := claim["reason"]; rewritten {
-				t.Fatalf("Cloud's verdict must not be written into the Node's receipt, got %v", claim)
-			}
-			if got := claim.S("revisionRef"); got != in.S("revision_ref") {
-				t.Fatalf("the receipt must keep the payload's own Revision ref, got %q", got)
-			}
-			if got := f.nodeSequence(execution); got != 1 {
-				t.Fatalf("the verdict must be receipted once, got sequence %d", got)
-			}
+	// A failure Cloud recorded is a failure the delivery retries (D5): the run keeps its sandbox
+	// and gets one new attempt with D5's backoff — it is not released.
+	if got := f.runPhase(scene.runID); got != "delivering" {
+		t.Fatalf("a failed verification must keep the run delivering, got %q", got)
+	}
+	if got := f.runResult(scene.runID).S("deliveryState"); got != "" {
+		t.Fatalf("a run still delivering must have decided no delivery state, got %q", got)
+	}
+	if got := len(f.deliveryAttempts(scene.runID)); got != 2 {
+		t.Fatalf("a failed verification must release exactly one retry, got %d attempts", got)
+	}
+	if got := deleteOperations(f.runOperations(scene.runID)); len(got) != 0 {
+		t.Fatalf("a run still delivering must have no delete intent, got %v", got)
+	}
 
-			// A failure Cloud recorded is a failure the delivery retries (D5): the run keeps its sandbox
-			// and gets one new attempt with D5's backoff — it is not released.
-			if got := f.runPhase(scene.runID); got != "delivering" {
-				t.Fatalf("a failed verification must keep the run delivering, got %q", got)
-			}
-			if got := f.runResult(scene.runID).S("deliveryState"); got != "" {
-				t.Fatalf("a run still delivering must have decided no delivery state, got %q", got)
-			}
-			if got := len(f.deliveryAttempts(scene.runID)); got != 2 {
-				t.Fatalf("a failed verification must release exactly one retry, got %d attempts", got)
-			}
-			if got := deleteOperations(f.runOperations(scene.runID)); len(got) != 0 {
-				t.Fatalf("a run still delivering must have no delete intent, got %v", got)
-			}
-
-			// The Node's retry loop is bounded by the receipt: replaying the very payload that was
-			// rejected is a deterministic no-op, not a conflict against the rewritten durable result.
-			if _, e := f.deliveryTerminal(scene, execution, "", 1, res, "revision_delivered"); e != nil {
-				t.Fatalf("an exact replay of a rewritten result must be a no-op, not a fault: %v", e)
-			}
-			if got := f.nodeSequence(execution); got != 1 {
-				t.Fatalf("a replay must not advance the sequence, got %d", got)
-			}
-			if got := f.receipts(execution); len(got) != 1 {
-				t.Fatalf("a replay must not write a receipt, got %v", got)
-			}
-			if got := len(f.deliveryAttempts(scene.runID)); got != 2 {
-				t.Fatalf("a replay must not release a second attempt, got %d", got)
-			}
-		})
+	// The Node's retry loop is bounded by the receipt: replaying the very payload that was
+	// rejected is a deterministic no-op, not a conflict against the rewritten durable result.
+	if _, e := f.deliveryTerminal(scene, execution, "", 1, res, "revision_delivered"); e != nil {
+		t.Fatalf("an exact replay of a rewritten result must be a no-op, not a fault: %v", e)
+	}
+	if got := f.nodeSequence(execution); got != 1 {
+		t.Fatalf("a replay must not advance the sequence, got %d", got)
+	}
+	if got := f.receipts(execution); len(got) != 1 {
+		t.Fatalf("a replay must not write a receipt, got %v", got)
+	}
+	if got := len(f.deliveryAttempts(scene.runID)); got != 2 {
+		t.Fatalf("a replay must not release a second attempt, got %d", got)
 	}
 }
 
-// P5-17, §8/§16 — D4 step 1 is deliberately local and I/O-free, and it runs before step 2, so a result
-// Cloud can already tell contradicts its own frozen input never reaches the object store: the two HEADs
-// step 2 would spend are requests against a store holding objects Cloud has already decided it will not
-// register. The refusal takes the same shape as a failed probe — Cloud's own verdict, no Revision row,
-// D5's retry — because a payload that disagrees with what the run was dispatched with may not settle it.
+// P5-14b, §4/§8 — a store Cloud cannot reach is a different verdict from a store that disagrees. The
+// endpoint is contacted between two transactions, so a delivery result that arrives while the store is
+// down must be refused as transient: nothing is settled, nothing is receipted, and the Node's next
+// attempt with the very same submission is a clean first request. Recording a failure instead would
+// turn an outage into durable evidence that the objects are wrong, and D5 would then retry a delivery
+// whose objects nobody ever looked at.
 //
-// Which fields must agree is `revisionResultMatchesInput`'s matrix (unit level, in core); what this test
-// fixes is that the integration path performs the comparison *before* the store, once per address the
-// payload and the input share.
+// The store is removed after the delivery was dispatched, which is what an outage mid-delivery looks
+// like from Cloud's side: the work item and its frozen keys were drawn while storage was healthy.
+func TestDeliveryWithAnUnreachableObjectStoreIsRefusedTransiently(t *testing.T) {
+	f := setup(t)
+	objects := f.useObjectStore()
+	scene := deliveringScene(t, f)
+	execution := f.deliverRevision(t, scene)
+	in := f.deliveryInputOf(execution)
+	res := deliveredResult(scene, in, revisionFinalCommit)
+	before := f.runVersion(scene.runID)
+
+	f.store.ObjectStore = nil
+	_, e := f.deliveryTerminal(scene, execution, "p5-store-down", 1, res, "revision_delivered")
+	expectStatus(t, e, codes.Unavailable, controlpb.ErrorCode_ERROR_CODE_UNAVAILABLE)
+	// Nothing was written: no verdict, no durable result, no receipt, no Revision, no retry. In
+	// particular the run's status is untouched, so the refusal did not move the lifecycle either.
+	if got := f.nodeResult(execution); len(got) != 0 {
+		t.Fatalf("a refused verification must write no durable result, got %v", got)
+	}
+	if got := f.receipts(execution); len(got) != 0 {
+		t.Fatalf("a refused verification must write no receipt, got %v", got)
+	}
+	if row := f.revisionRow(scene.runID); row != nil {
+		t.Fatalf("a refused verification must register no Revision, got %v", row)
+	}
+	if got := len(f.deliveryAttempts(scene.runID)); got != 1 {
+		t.Fatalf("a refusal that settled nothing must release no retry, got %d attempts", got)
+	}
+	if got := f.runVersion(scene.runID); got != before {
+		t.Fatalf("a refused verification must not touch the run, version %d want %d", got, before)
+	}
+	// The store never saw a request at all: Cloud short-circuits on the missing configuration rather
+	// than signing a probe it knows cannot be answered.
+	if got := objects.probed(); len(got) != 0 {
+		t.Fatalf("an unconfigured store must not be contacted, got %v", got)
+	}
+
+	// The same submission, unchanged, is a first request once storage is reachable again — the refusal
+	// left no trace for it to conflict with.
+	f.store.ObjectStore = objects.config
+	if _, e := f.deliveryTerminal(scene, execution, "p5-store-down", 1, res, "revision_delivered"); e != nil {
+		t.Fatalf("the retry after the store came back must settle the delivery: %v", e)
+	}
+	if row := f.revisionRow(scene.runID); row == nil {
+		t.Fatal("the retry must register the Revision")
+	}
+	if got := f.runPhase(scene.runID); got != "releasing" {
+		t.Fatalf("the retry must release the run, got phase %q", got)
+	}
+}
+
+// P5-17, §8/§16 — the local input comparison is I/O-free and it precedes the object-store probes, so a
+// result Cloud can already tell contradicts its own frozen input never reaches the object store: the
+// HEADs would be requests against a store holding objects Cloud has already decided it will not
+// register.
+//
+// The merged control plane answers this contradiction as a *refusal* rather than as a settlement. The
+// approved Revision ADR D4 step 1/4 asks for the event to be taken over and the delivery recorded as
+// `failed{verification_failed}` on this path too, and upstream's authoritative control plane does not
+// do that: `validateDeliveryDeclaration` runs inside the fence transaction of `prepareRevision` and
+// rejects the call — 409 `result_conflict` for a field that disagrees with the input or with the
+// declared shape, 400 `invalid_result` for a malformed stored-object declaration — so nothing is
+// receipted, nothing is settled and no verdict row is written. This test pins what the merged service
+// actually does. The obligations that survive are the ones it asserts: the store is never contacted,
+// no Revision is registered, nothing at all commits (no receipt, no durable result, no
+// `revision_verifications` row, no retry, no run write), and the refusal is deterministic on replay.
+//
+// The divergence is reported rather than papered over. It is inherited from upstream `main` — the
+// step-1 verdict lived in functionB's own A side, which the integration decision retires — and it is
+// narrower than it looks: a contradictory declaration cannot wedge the run, because the attempt it
+// never settles is still released by D5's give-up pass on the clock, which the last block drives. What
+// is lost is only the *retry* an ADR-conformant verdict would have bought before that window closes.
 func TestRevisionResultContradictingItsInputNeverReachesTheObjectStore(t *testing.T) {
 	cases := []struct {
 		name string
 		// contradict rewrites one address the delivered result and the frozen input must agree on.
 		contradict func(r *controlpb.RevisionDelivered, in core.Object)
+		// wantCode and wantError are the refusal the merged control plane classifies this
+		// contradiction as. The split follows upstream's own declaration validator, which has the
+		// request never reach the store in both halves: a contradiction *about the attempt* is a
+		// result conflict, while a malformed object declaration is a bad request.
+		wantCode  codes.Code
+		wantError controlpb.ErrorCode
 	}{
 		{"revision_ref", func(r *controlpb.RevisionDelivered, _ core.Object) {
 			r.RevisionRef = "refs/ora/revisions/someone-else"
-		}},
+		}, codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT},
 		{"base_commit", func(r *controlpb.RevisionDelivered, _ core.Object) {
 			r.BaseCommit = strings.Repeat("f", 40)
-		}},
+		}, codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT},
 		{"bundle_key", func(r *controlpb.RevisionDelivered, in core.Object) {
-			r.Bundle.Key = in.S("history_key")
-		}},
+			r.Bundle.Key = in.S("historyKey")
+		}, codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT},
 		{"history_key", func(r *controlpb.RevisionDelivered, in core.Object) {
-			r.History.Key = in.S("bundle_key")
-		}},
+			r.History.Key = in.S("bundleKey")
+		}, codes.InvalidArgument, controlpb.ErrorCode_ERROR_CODE_INVALID_INPUT},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1366,68 +1588,162 @@ func TestRevisionResultContradictingItsInputNeverReachesTheObjectStore(t *testin
 			scene := deliveringScene(t, f)
 			execution := f.deliverRevision(t, scene)
 			in := f.deliveryInputOf(execution)
+			before := f.runVersion(scene.runID)
 
 			res := deliveredResult(scene, in, revisionFinalCommit)
 			c.contradict(res.GetRevisionDelivered(), in)
-			if _, e := f.deliveryTerminal(scene, execution, "p5-input-mismatch", 1, res, "revision_delivered"); e != nil {
-				t.Fatalf("a result contradicting its own input is a verdict for Cloud to record, not a fault: %v", e)
-			}
+			expectStatus(t, errOnly(f.deliveryTerminal(scene, execution, "p5-input-mismatch", 1, res, "revision_delivered")),
+				c.wantCode, c.wantError)
 
 			if probed := objects.probed(); len(probed) != 0 {
-				t.Fatalf("step 1 must precede step 2: %d object(s) probed for a result Cloud could already refuse (%v)", len(probed), probed)
+				t.Fatalf("the input comparison must precede the probes: %d object(s) probed for a result Cloud could already refuse (%v)", len(probed), probed)
 			}
 			if row := f.revisionRow(scene.runID); row != nil {
 				t.Fatalf("no Revision may be registered for a result that contradicts its input, got %v", row)
 			}
-			stored := f.nodeResult(execution)
-			if stored.S("outcome") != "revision_failed" || stored.S("reason") != "verification_failed" {
-				t.Fatalf("the durable result must be Cloud's own verdict, got %v", stored)
+			// A refusal settles nothing: the whole takeover — receipt, durable result, verdict and
+			// settlement — is refused before it opens, so there is no half-recorded attempt to reconcile.
+			if got := f.nodeResult(execution); len(got) != 0 {
+				t.Fatalf("a refused declaration must write no durable result, got %v", got)
 			}
-			// The Node's own payload survives in the receipt as it does on the probe-failure path, so
-			// the refusal below is compared against what the Node said rather than against Cloud's
-			// rewrite — the Node's retry loop stays bounded by its own bytes.
-			if got := f.receiptResult(execution, 1).S("revisionRef"); got != res.GetRevisionDelivered().GetRevisionRef() {
-				t.Fatalf("the receipt must keep the payload's own Revision ref, got %q", got)
+			if got := f.revisionVerification(execution); got != nil {
+				t.Fatalf("a refused declaration must record no verdict, got %v", got)
 			}
-			if _, e := f.deliveryTerminal(scene, execution, "", 1, res, "revision_delivered"); e != nil {
-				t.Fatalf("an exact replay of the refused payload must be a no-op, not a fault: %v", e)
+			if got := f.receipts(execution); len(got) != 0 {
+				t.Fatalf("a refused declaration must write no receipt, got %v", got)
 			}
-			if got := f.nodeSequence(execution); got != 1 {
-				t.Fatalf("a replay must not advance the sequence, got %d", got)
+			if got := f.nodeSequence(execution); got != 0 {
+				t.Fatalf("a refused declaration must not advance the sequence, got %d", got)
 			}
-
 			if got := f.runPhase(scene.runID); got != "delivering" {
 				t.Fatalf("a refused input comparison must keep the run delivering, got %q", got)
 			}
-			if got := len(f.deliveryAttempts(scene.runID)); got != 2 {
-				t.Fatalf("a refused input comparison must release exactly one retry, got %d attempts", got)
+			if got := f.runVersion(scene.runID); got != before {
+				t.Fatalf("a refused declaration must not write the run: version %d → %d", before, got)
+			}
+			if got := len(f.deliveryAttempts(scene.runID)); got != 1 {
+				t.Fatalf("a refusal that settled nothing must release no retry, got %d attempts", got)
 			}
 			if got := deleteOperations(f.runOperations(scene.runID)); len(got) != 0 {
 				t.Fatalf("a run still delivering must have no delete intent, got %v", got)
+			}
+			// The refusal is deterministic: replaying the very same payload is refused the same way and
+			// still commits nothing, so a Node's retry loop cannot talk Cloud into a different answer.
+			expectStatus(t, errOnly(f.deliveryTerminal(scene, execution, "", 1, res, "revision_delivered")),
+				c.wantCode, c.wantError)
+			if got := f.nodeSequence(execution); got != 0 {
+				t.Fatalf("a replay must not advance the sequence, got %d", got)
+			}
+			if got := f.scalar(`SELECT count(*) FROM revisions WHERE run_id=$1`, scene.runID); got != 0 {
+				t.Fatalf("a replay must not register a Revision, got %d rows", got)
+			}
+
+			// Because the attempt never settles, the run does not wait on it forever: D5's give-up pass
+			// releases it on the clock, with an explicit null revisionId. That is the whole reason the
+			// refusal above is bounded — a Node that keeps contradicting its own input costs the run its
+			// retries, not its convergence.
+			f.store.DeliveryGiveUpAfter = time.Nanosecond
+			must(t, f.store.GiveUpStaleDeliveriesOnce(context.Background()))
+			phase, status, _ := f.threadRunState(scene.runID)
+			if phase != "releasing" || status != "completed" {
+				t.Fatalf("the give-up pass must release a run whose delivery never settled, got %s/%s", phase, status)
+			}
+			settled := f.runResult(scene.runID)
+			if got := settled.S("deliveryState"); got != "failed" || settled["revisionId"] != nil {
+				t.Fatalf("the give-up must record deliveryState=failed and no Revision, got %v", settled)
 			}
 		})
 	}
 }
 
-// P5-18, §20 — D4's last clause and invariant 9 at the integration boundary: a delivery result that
-// arrives after the run left `delivering` decides nothing. The delivered shape is the one that matters,
-// because it is the only one that would otherwise register a Revision; the run it arrives at has already
-// been abandoned by D5 and released, with its delete declared and its result decided.
+// P5-19, D4 step 4 — the verdict on a delivery's declared objects is Cloud's alone: the Node declares
+// what it uploaded, Cloud decides whether the store agrees. The wire enum has to name
+// `VERIFICATION_FAILED` because Cloud stores and renders that verdict, so the enum cannot be the
+// enforcement point — the merged control plane enforces the rule in `revisionFailureReasons`, and a
+// Node that reports the verdict anyway is refused as a malformed result rather than recorded as having
+// verified anything.
 //
-// The result is receipted — the Node's attempt really did happen — and then stopped by the settlement's
-// own `phase != delivering` branch, which is why the run's version does not move even though a row was
-// written for the receipt.
+// This is the migrated half of functionB's `internal/controlgrpc/executions_test.go`, which pinned the
+// same obligation where functionB's own A side enforced it. The rule and every obligation it carries
+// are unchanged; the enforcement point is the merged control plane, so the test asserts it at the real
+// gRPC boundary. The refusal is proved by what did *not* happen — no receipt, no durable result, no
+// verdict row, no Revision, no retry, no run write — and by a replay being refused identically.
+func TestNodeMayNotReportCloudsOwnVerificationVerdict(t *testing.T) {
+	f := setup(t)
+	objects := f.useObjectStore()
+	scene := deliveringScene(t, f)
+	execution := f.deliverRevision(t, scene)
+	before := f.runVersion(scene.runID)
+
+	res := revisionFailedResult(scene, controlpb.RevisionFailureReason_REVISION_FAILURE_REASON_VERIFICATION_FAILED)
+	refusal := func() error {
+		return errOnly(f.deliveryTerminal(scene, execution, "", 1, res, "revision_failed"))
+	}
+	expectStatus(t, refusal(), codes.InvalidArgument, controlpb.ErrorCode_ERROR_CODE_INVALID_INPUT)
+
+	// Nothing about the attempt was recorded and nothing was verified: the refusal precedes both the
+	// store probe and the takeover, so the run is exactly where it was.
+	if probed := objects.probed(); len(probed) != 0 {
+		t.Fatalf("a malformed result must not reach the object store, probed %v", probed)
+	}
+	if got := f.nodeResult(execution); len(got) != 0 {
+		t.Fatalf("a refused result must write no durable result, got %v", got)
+	}
+	if got := f.revisionVerification(execution); got != nil {
+		t.Fatalf("a Node's verdict must never be recorded, got %v", got)
+	}
+	if got := f.receipts(execution); len(got) != 0 {
+		t.Fatalf("a refused result must write no receipt, got %v", got)
+	}
+	if got := f.nodeSequence(execution); got != 0 {
+		t.Fatalf("a refused result must not advance the sequence, got %d", got)
+	}
+	if got := f.runPhase(scene.runID); got != "delivering" {
+		t.Fatalf("a refused result must keep the run delivering, got %q", got)
+	}
+	if got := f.runVersion(scene.runID); got != before {
+		t.Fatalf("a refused result must not write the run: version %d → %d", before, got)
+	}
+	if got := len(f.deliveryAttempts(scene.runID)); got != 1 {
+		t.Fatalf("a refusal that settled nothing must release no retry, got %d attempts", got)
+	}
+	if got := f.scalar(`SELECT count(*) FROM revisions WHERE run_id=$1`, scene.runID); got != 0 {
+		t.Fatalf("a refused result must register no Revision, got %d rows", got)
+	}
+	// The refusal is deterministic, so a Node's retry loop cannot talk Cloud into a different answer.
+	expectStatus(t, refusal(), codes.InvalidArgument, controlpb.ErrorCode_ERROR_CODE_INVALID_INPUT)
+}
+
+// P5-18, §20 — D4's last clause and invariant 9 at the integration boundary: a delivery result that
+// arrives after the run left `delivering` decides nothing. The delivered shape is the one that
+// matters, because it is the only one that would otherwise register a Revision.
+//
+// The scene is the one D5's give-up describes: the pass releases a run whose delivery attempt is
+// still open because the Node never reported. The delivered result therefore arrives at a run that has
+// already been released, with its delete declared and its result decided — and the control plane's own
+// fence stops it there, before verification: a released run's Workspace is no longer `ready` with
+// admission open, so the takeover is refused with the classified conflict and never reaches the
+// object store or the registration step. The refusal is asserted rather than assumed, because
+// "registers nothing" is only meaningful if the call really was refused.
 func TestLateDeliveredRevisionRegistersNothingOnAReleasedRun(t *testing.T) {
 	f := setup(t)
-	f.useObjectStore()
-	scene, execution := givingUpScene(t, f)
+	objects := f.useObjectStore()
+	scene := deliveringScene(t, f)
+	execution := f.deliverRevision(t, scene)
+	f.store.DeliveryGiveUpAfter = time.Nanosecond
+	must(t, f.store.GiveUpStaleDeliveriesOnce(context.Background()))
+	if got := f.runPhase(scene.runID); got != "releasing" {
+		t.Fatalf("the give-up pass must release the run before the late result arrives, got %q", got)
+	}
 	in := f.deliveryInputOf(execution)
 	version := f.runVersion(scene.runID)
 	status, _ := f.runStatusVersion(scene.runID)
 
 	res := deliveredResult(scene, in, revisionFinalCommit)
-	if _, e := f.deliveryTerminal(scene, execution, "p5-late-delivered", 2, res, "revision_delivered"); e != nil {
-		t.Fatalf("a late delivered result must be receipted as a fact, not refused: %v", e)
+	expectStatus(t, errOnly(f.deliveryTerminal(scene, execution, "p5-late-delivered", 1, res, "revision_delivered")),
+		codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
+	if probed := objects.probed(); len(probed) != 0 {
+		t.Fatalf("a released run's late delivery must not reach the object store, probed %v", probed)
 	}
 
 	if row := f.revisionRow(scene.runID); row != nil {
@@ -1455,21 +1771,19 @@ func TestLateDeliveredRevisionRegistersNothingOnAReleasedRun(t *testing.T) {
 	if got := len(f.deliveryAttempts(scene.runID)); got != 1 {
 		t.Fatalf("a late delivered result must not release another attempt, got %d", got)
 	}
-	// Receipted once, at its own sequence, and replay-stable: the fact is recorded, the decision is not.
-	if got := f.nodeSequence(execution); got != 2 {
-		t.Fatalf("the late result must be receipted at its own sequence, got %d", got)
+	// The refused event is receipted not at all: the fence refuses it before the takeover commits
+	// anything, including the receipt that would otherwise tell the Node it may forget the event.
+	if got := f.nodeSequence(execution); got != 0 {
+		t.Fatalf("a refused late result must not be receipted, got sequence %d", got)
 	}
-	if got := len(f.receipts(execution)); got != 2 {
-		t.Fatalf("the attempt's two events must have exactly one receipt each, got %d", got)
+	if got := len(f.receipts(execution)); got != 0 {
+		t.Fatalf("a refused late result must not write a receipt, got %v", got)
 	}
-	if _, e := f.deliveryTerminal(scene, execution, "", 2, res, "revision_delivered"); e != nil {
-		t.Fatalf("replaying the late result must be a no-op: %v", e)
-	}
-	if got := len(f.receipts(execution)); got != 2 {
-		t.Fatalf("a replay must not write a receipt, got %d", got)
-	}
+	// The refusal is deterministic: the Node's replay gets the same answer and commits nothing more.
+	expectStatus(t, errOnly(f.deliveryTerminal(scene, execution, "", 1, res, "revision_delivered")),
+		codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
 	if got := f.runVersion(scene.runID); got != version {
-		t.Fatalf("a replay must not write the run: version %d → %d", version, got)
+		t.Fatalf("a replay of the refused result must not write the run: version %d → %d", version, got)
 	}
 }
 
@@ -1487,6 +1801,12 @@ type deliveryRevisionRow struct {
 // delivery: under the phase machine the first registration moves the run off `delivering` in the same
 // transaction that writes the receipt, so the branches below are backstops — and a backstop can only
 // be exercised by putting the state it defends against in place.
+//
+// The merged schema chains the Revision to Cloud's verdict, which is chained to the execution that
+// produced it (`revisions.execution_id → revision_verifications.execution_id → node_executions`), so a
+// believable earlier attempt is three rows. The execution carries a settled result — which is also
+// what keeps it off the `one_pending_run_execution` index — and no work item, because nothing below
+// reads the earlier attempt's dispatch: only the Revision row it left behind matters here.
 func (f *fixture) seedRevision(t *testing.T, scene liveThreadScene, in core.Object, row deliveryRevisionRow) string {
 	t.Helper()
 	id := uuid.NewString()
@@ -1494,45 +1814,62 @@ func (f *fixture) seedRevision(t *testing.T, scene liveThreadScene, in core.Obje
 	projectID, repositoryURL := f.runPlacement(scene.runID)
 	var bundleKey, bundleSHA *string
 	var bundleSize *int64
+	outcome := "unchanged"
 	if row.withBundle {
-		key, size, sha := in.S("bundle_key"), int64(revisionBundleSize), revisionBundleSHA
+		key, size, sha := in.S("bundleKey"), int64(revisionBundleSize), revisionBundleSHA
 		bundleKey, bundleSize, bundleSHA = &key, &size, &sha
+		outcome = "delivered"
 	}
-	_, e := f.store.Pool.Exec(`
-		INSERT INTO revisions(id, tenant_id, run_id, workspace_id, project_id, repository_url,
+	prior := "exec-prior-" + uuid.NewString()
+	input, e := json.Marshal(in)
+	must(t, e)
+	_, e = f.store.Pool.Exec(`
+		INSERT INTO node_executions(execution_id, kind, operation_id, workspace_id, node_id,
+		                            node_operation_id, input, result, dispatched_epoch)
+		VALUES ($1,'deliver_revision',$2,$3,$4,$1,$5,'{"outcome":"revision_delivered"}',1)`,
+		prior, scene.runID, wid, scene.nodeID, string(input))
+	must(t, e)
+	_, e = f.store.Pool.Exec(`
+		INSERT INTO revision_verifications(execution_id, outcome, reason) VALUES ($1,$2,NULL)`, prior, outcome)
+	must(t, e)
+	_, e = f.store.Pool.Exec(`
+		INSERT INTO revisions(id, execution_id, tenant_id, run_id, workspace_id, project_id, repository_url,
 		                      base_commit, final_commit, revision_ref,
 		                      bundle_key, bundle_size, bundle_sha256,
 		                      history_key, history_size, history_sha256)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-		id, scene.tenantID, scene.runID, wid, projectID, repositoryURL,
-		in.S("base_commit"), row.finalCommit, in.S("revision_ref"),
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		id, prior, scene.tenantID, scene.runID, wid, projectID, repositoryURL,
+		in.S("baseCommit"), row.finalCommit, in.S("revisionRef"),
 		bundleKey, bundleSize, bundleSHA,
-		in.S("history_key"), revisionHistorySize, revisionHistorySHA)
+		in.S("historyKey"), revisionHistorySize, revisionHistorySHA)
 	must(t, e)
 	return id
 }
 
-// P5-15, §19/§21 — invariant 7's backstop, both directions. `UNIQUE (run_id)` makes a run's Revision
-// unique however many delivery attempts it took, and the takeover compares the stored row against the
-// payload rather than trusting the insert: a row that already describes THIS outcome is reused (the
-// registration is idempotent, and the run is settled on the id the earlier attempt registered), while
-// a row that describes a DIFFERENT one is an invariant failure rather than a second registration.
+// P5-15, §19/§21 — invariant 7 ("at most one Revision row per run") has one writer and two guards.
+// The control plane's own guard is what a Controller meets in practice: once a run has a Revision no
+// further delivery attempt is declared for it at all (`delivery_already_settled`), which is the first
+// block below. `UNIQUE (run_id)` is the database backstop behind it, and this case is a backstop test:
+// an attempt that was already registered when another one's Revision landed is put in place directly,
+// because no sequence of control actions can produce it.
 //
-// The rejection rolls the whole takeover back — receipt, durable result, Revision and settlement —
-// because keeping any of them would leave Cloud believing half of a delivery it could not reconcile.
-// The reuse case is what makes the comparison a comparison rather than "any existing row is a
-// conflict": it is also where the identity round trip is exercised, because the delivered payload and
-// the stored row spell the same Revision in different ways and must still reduce to one identity.
-func TestRevisionRegistrationReusesAnIdenticalRowAndRollsBackADifferentOne(t *testing.T) {
+// The takeover must refuse rather than register a second row, and the refusal must roll the whole
+// transaction back — receipt, durable result, Revision and settlement — because keeping any of it
+// would leave Cloud believing half of a delivery it could not reconcile. The pre-existing row is left
+// exactly as it was: whichever payload shape the late attempt reports, and whether or not it agrees
+// with the row already there, a registration never overwrites one.
+//
+// Two of the three shapes below agree with the stored Revision exactly. They are still refusals: this
+// model settles a run on the Revision its own successful attempt registered, and a second attempt's
+// registration is not an idempotent re-registration of it — the run has already left `delivering`, and
+// a delivery settlement that could adopt another attempt's row would be a second writer.
+func TestRevisionRegistrationIsUniquePerRunAndRollsBackAConflictingAttempt(t *testing.T) {
 	cases := []struct {
 		name string
 		// registered is what an earlier attempt already left for this run.
 		registered deliveryRevisionRow
 		// delivered is the terminal result this attempt reports.
 		delivered func(scene liveThreadScene, in core.Object) *controlpb.ExecutionResult
-		// wantRegistered is the delivery state the settlement must record, or "" when the takeover must
-		// be refused instead.
-		wantRegistered string
 	}{
 		{
 			name:       "the same outcome an earlier attempt already registered",
@@ -1540,7 +1877,6 @@ func TestRevisionRegistrationReusesAnIdenticalRowAndRollsBackADifferentOne(t *te
 			delivered: func(scene liveThreadScene, in core.Object) *controlpb.ExecutionResult {
 				return deliveredResult(scene, in, revisionFinalCommit)
 			},
-			wantRegistered: "saved",
 		},
 		{
 			name:       "a different final commit",
@@ -1569,71 +1905,79 @@ func TestRevisionRegistrationReusesAnIdenticalRowAndRollsBackADifferentOne(t *te
 			res := c.delivered(scene, in)
 
 			takeover := errOnly(f.deliveryTerminal(scene, execution, "p5-revision-conflict", 1, res, "revision_delivered"))
-			if c.wantRegistered == "" {
-				expectStatus(t, takeover, codes.Unavailable, controlpb.ErrorCode_ERROR_CODE_UNAVAILABLE)
+			// A constraint violation carries no Fault of its own, so it takes the mapping's safe
+			// default: the caller is told persistence refused the write, never which constraint and
+			// never any SQL. What the Node must act on is the rollback asserted below, not the code.
+			expectStatus(t, takeover, codes.Unavailable, controlpb.ErrorCode_ERROR_CODE_UNAVAILABLE)
 
-				// Nothing committed: no receipt, no durable result, no sequence move, no retry, no release.
-				if got := f.receipts(execution); len(got) != 0 {
-					t.Fatalf("a conflicting Revision must roll the receipt back, got %v", got)
-				}
-				if got := f.nodeResult(execution); got != nil {
-					t.Fatalf("a conflicting Revision must roll the durable result back, got %v", got)
-				}
-				if got := f.nodeSequence(execution); got != 0 {
-					t.Fatalf("a conflicting Revision must not advance the sequence, got %d", got)
-				}
-				if got := len(f.deliveryAttempts(scene.runID)); got != 1 {
-					t.Fatalf("a conflicting Revision must release no retry, got %d attempts", got)
-				}
-				if got := f.runPhase(scene.runID); got != "delivering" {
-					t.Fatalf("a conflicting Revision must not move the run, got phase %q", got)
-				}
-				if got := f.runVersion(scene.runID); got != before {
-					t.Fatalf("a conflicting Revision must not write the run: version %d → %d", before, got)
-				}
-				if got := deleteOperations(f.runOperations(scene.runID)); len(got) != 0 {
-					t.Fatalf("a conflicting Revision must declare no delete, got %v", got)
-				}
-				// The row that was already there is left exactly as it was: a registration never
-				// overwrites one, and this one describes an outcome Cloud could not reconcile.
-				if got := f.scalar(`SELECT count(*) FROM revisions WHERE run_id=$1`, scene.runID); got != 1 {
-					t.Fatalf("the existing Revision must not be duplicated, got %d rows", got)
-				}
-				row := f.revisionRow(scene.runID)
-				if row == nil || row.ID != registeredID || row.FinalCommit != c.registered.finalCommit {
-					t.Fatalf("the existing Revision must be left untouched, got %v", row)
-				}
-				return
+			// Nothing committed: no receipt, no durable result, no sequence move, no retry, no release.
+			if got := f.receipts(execution); len(got) != 0 {
+				t.Fatalf("a conflicting Revision must roll the receipt back, got %v", got)
 			}
-
-			must(t, takeover)
-			// The same outcome, registered once: the row the earlier attempt wrote is the Revision this
-			// delivery is settled on, and no second row appears.
+			if got := f.nodeResult(execution); got != nil {
+				t.Fatalf("a conflicting Revision must roll the durable result back, got %v", got)
+			}
+			if got := f.nodeSequence(execution); got != 0 {
+				t.Fatalf("a conflicting Revision must not advance the sequence, got %d", got)
+			}
+			if got := f.scalar(`SELECT count(*) FROM revision_verifications WHERE execution_id=$1`, execution); got != 0 {
+				t.Fatalf("a conflicting Revision must roll its verification row back, got %d", got)
+			}
+			if got := len(f.deliveryAttempts(scene.runID)); got != 1 {
+				t.Fatalf("a conflicting Revision must release no retry, got %d attempts", got)
+			}
+			if got := f.runPhase(scene.runID); got != "delivering" {
+				t.Fatalf("a conflicting Revision must not move the run, got phase %q", got)
+			}
+			if got := f.runVersion(scene.runID); got != before {
+				t.Fatalf("a conflicting Revision must not write the run: version %d → %d", before, got)
+			}
+			if got := deleteOperations(f.runOperations(scene.runID)); len(got) != 0 {
+				t.Fatalf("a conflicting Revision must declare no delete, got %v", got)
+			}
 			if got := f.scalar(`SELECT count(*) FROM revisions WHERE run_id=$1`, scene.runID); got != 1 {
-				t.Fatalf("an identical outcome must not register a second Revision, got %d rows", got)
+				t.Fatalf("the existing Revision must not be duplicated, got %d rows", got)
 			}
 			row := f.revisionRow(scene.runID)
-			if row == nil || row.ID != registeredID {
-				t.Fatalf("the settlement must reuse the id already registered for this run, got %v", row)
+			if row == nil || row.ID != registeredID || row.FinalCommit != c.registered.finalCommit {
+				t.Fatalf("the existing Revision must be left untouched, got %v", row)
 			}
-			if got := f.runPhase(scene.runID); got != "releasing" {
-				t.Fatalf("a verified delivery must release the run, got phase %q", got)
-			}
-			result := f.runResult(scene.runID)
-			if got := result.S("deliveryState"); got != c.wantRegistered {
-				t.Fatalf("deliveryState = %q, want %q", got, c.wantRegistered)
-			}
-			if got := result.S("revisionId"); got != registeredID {
-				t.Fatalf("revisionId = %q, want the registered %q", got, registeredID)
-			}
-			if got := f.nodeSequence(execution); got != 1 {
-				t.Fatalf("the reused registration must be receipted once, got sequence %d", got)
-			}
-			if got := len(deleteOperations(f.runOperations(scene.runID))); got != 1 {
-				t.Fatalf("the release must declare exactly one delete, got %d", got)
+			// The refusal is deterministic: replaying the very same result is refused the same way and
+			// still commits nothing, so a Node's retry loop cannot talk Cloud into a second row.
+			expectStatus(t, errOnly(f.deliveryTerminal(scene, execution, "", 1, res, "revision_delivered")),
+				codes.Unavailable, controlpb.ErrorCode_ERROR_CODE_UNAVAILABLE)
+			if got := f.scalar(`SELECT count(*) FROM revisions WHERE run_id=$1`, scene.runID); got != 1 {
+				t.Fatalf("a replay must not add a Revision, got %d rows", got)
 			}
 		})
 	}
+
+	// The control plane's own guard, which is the one a Controller actually meets: with a Revision
+	// already on the run, the settlement declares no further delivery attempt. The re-declaration below
+	// repeats the attempt that is already on the run, whole — same frozen input, same target — so the
+	// refusal is about the Revision and not about anything the caller got wrong.
+	t.Run("the control plane declares no further attempt once a Revision exists", func(t *testing.T) {
+		f := setup(t)
+		f.useObjectStore()
+		scene := deliveringScene(t, f)
+		execution := f.deliverRevision(t, scene)
+		in := f.deliveryInputOf(execution)
+		registeredID := f.seedRevision(t, scene, in, deliveryRevisionRow{finalCommit: revisionFinalCommit, withBundle: true})
+		target := f.deliveryTarget(scene.runID)
+
+		if _, e := f.store.EnqueueExecutionWork(context.Background(), scene.runID, "deliver_revision", in, target, time.Time{}); e == nil {
+			t.Fatal("a run that already has a Revision must not be handed a second delivery attempt")
+		}
+		if got := f.scalar(`SELECT count(*) FROM execution_work WHERE run_id=$1 AND kind='deliver_revision'`, scene.runID); got != 1 {
+			t.Fatalf("the refused attempt must not be declared, got %d delivery work items", got)
+		}
+		if got := f.scalar(`SELECT count(*) FROM revisions WHERE run_id=$1`, scene.runID); got != 1 {
+			t.Fatalf("the refusal must leave the run's single Revision alone, got %d rows", got)
+		}
+		if row := f.revisionRow(scene.runID); row == nil || row.ID != registeredID {
+			t.Fatalf("the run's Revision must be unchanged, got %v", row)
+		}
+	})
 }
 
 // P5-16, §18/§22 — D2/D3's upload grants over the contract the Controller actually speaks. Cloud signs
@@ -1664,7 +2008,7 @@ func TestGrantRevisionUploadSignsOneGrantPerObjectKey(t *testing.T) {
 	if len(out.GetGrants()) != 2 {
 		t.Fatalf("one attempt gets one grant per object key of its input, got %d", len(out.GetGrants()))
 	}
-	wantKeys := []string{in.S("bundle_key"), in.S("history_key")}
+	wantKeys := []string{in.S("bundleKey"), in.S("historyKey")}
 	for i, g := range out.GetGrants() {
 		if g.GetObjectKey() != wantKeys[i] {
 			t.Fatalf("grant %d names %q, want the input's own key %q", i, g.GetObjectKey(), wantKeys[i])
@@ -1675,16 +2019,30 @@ func TestGrantRevisionUploadSignsOneGrantPerObjectKey(t *testing.T) {
 		if !strings.Contains(g.GetUrl(), wantKeys[i]) {
 			t.Fatalf("grant %d URL %q must be bound to its own key %q", i, g.GetUrl(), wantKeys[i])
 		}
-		if len(g.GetHeaders()) != 0 {
-			t.Fatalf("the first version's grant binds no header, got %v", g.GetHeaders())
+		// The signature covers a create-only condition and the endpoint's own host. Both are headers
+		// the Node must send back verbatim, so a grant that omitted them would be refused by S3 — and
+		// the create-only condition is what stops a second capability from replacing an object Cloud
+		// has already verified.
+		if got := g.GetHeaders()["if-none-match"]; got != "*" {
+			t.Fatalf("grant %d must bind the create-only condition, got headers %v", i, g.GetHeaders())
+		}
+		if g.GetHeaders()["host"] == "" {
+			t.Fatalf("grant %d must bind the host it was signed for, got headers %v", i, g.GetHeaders())
+		}
+		// D1 caps the lifetime. Nothing configured one here, so the object-store default applies; the
+		// reply must report the instant the server will actually enforce, not a rounded one.
+		expires := g.GetExpiresAt().AsTime()
+		if age := time.Until(expires); age < 14*time.Minute || age > 15*time.Minute {
+			t.Fatalf("grant %d expires in %s, want the object-store default of 15m", i, age)
 		}
 	}
-	// The object store saw the same keys Cloud returned, and the lifetime is D1's configured one.
-	if got := fmt.Sprint(objects.issuedKeys()); got != fmt.Sprint(wantKeys) {
-		t.Fatalf("Cloud must sign the attempt's own keys:\n got %s\nwant %s", got, fmt.Sprint(wantKeys))
+	// The store saw the same keys Cloud signed, in the same order: the grant path is local signing and
+	// writes nothing, so it is the reply itself that has to name the attempt's own keys.
+	if got := grantKeys(out.GetGrants()); got == nil || fmt.Sprint(got) != fmt.Sprint(wantKeys) {
+		t.Fatalf("Cloud must sign the attempt's own keys in order:\n got %v\nwant %v", got, wantKeys)
 	}
-	if got := objects.issuedTTL(); got != core.DefaultRevisionUploadTTL {
-		t.Fatalf("grant lifetime = %s, want D1's default %s", got, core.DefaultRevisionUploadTTL)
+	if got := objects.nonHeadRequests(); got != 0 {
+		t.Fatalf("signing a grant must not contact the store, got %d request(s)", got)
 	}
 	// A grant is a capability, not a record: signing one writes nothing. The two durable rows the
 	// attempt is made of are compared whole across a second, repeated grant, because "the input is
@@ -1713,11 +2071,14 @@ func TestGrantRevisionUploadSignsOneGrantPerObjectKey(t *testing.T) {
 		t.Fatalf("the schema must have nowhere to persist an upload grant, got %d column(s)", got)
 	}
 
-	// Unknown execution: Cloud never registered it.
+	// Unknown execution: Cloud never registered it. A session execution gets the same answer, because
+	// the merged control plane resolves an upload subject as "a registered deliver_revision execution"
+	// and reports anything else as not-found rather than distinguishing "Cloud has no such execution"
+	// from "this execution is not a delivery" — which is also what keeps the call from telling a
+	// Controller which execution identities exist for other purposes. What D3 requires is that no
+	// grant is signed, and neither execution gets one.
 	expectStatus(t, grantErr("exec-delivery-nobody"), codes.NotFound, controlpb.ErrorCode_ERROR_CODE_NOT_FOUND)
-
-	// A session execution: its identity is not an upload subject, whatever its Node asks for.
-	expectStatus(t, grantErr(scene.executionID), codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
+	expectStatus(t, grantErr(scene.executionID), codes.NotFound, controlpb.ErrorCode_ERROR_CODE_NOT_FOUND)
 
 	// An attempt that already has a result is over: its objects can no longer be referred to by any
 	// registration, so authorizing a write would only create garbage.
@@ -1753,10 +2114,20 @@ func TestGrantRevisionUploadSignsOneGrantPerObjectKey(t *testing.T) {
 	}
 	expectStatus(t, grantErr2(live), codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
 
-	// The deployment has no object store: a missing capability, not a bad request. The refusal is the
-	// same for every execution, which is why it is decided before the execution is even read.
-	f2.store.RevisionObjects = nil
-	expectStatus(t, grantErr2(live), codes.Unavailable, controlpb.ErrorCode_ERROR_CODE_UNAVAILABLE)
+	// A deployment that loses its object store cannot sign anything, so the refusal is the same for
+	// every execution — and it is a refusal, not an empty reply: a grant-less answer would read as
+	// "this attempt has nothing left to upload". The store is removed after a healthy dispatch so the
+	// attempt itself is valid and the missing capability is the only reason left; granting succeeds
+	// again once it is back, which is what shows the refusal was about the capability.
+	f3 := setup(t)
+	objects3 := f3.useObjectStore()
+	live3 := f3.deliverRevision(t, deliveringScene(t, f3))
+	f3.store.ObjectStore = nil
+	expectStatus(t, grantErrOnly(f3, live3), codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
+	f3.store.ObjectStore = objects3.config
+	if _, e := f3.grantRevisionUpload(live3); e != nil {
+		t.Fatalf("granting must work again once the object store is back: %v", e)
+	}
 }
 
 // P5-14, §19 — the replay matrix. Every shape a Controller's retry can take is one effect: a
@@ -1884,8 +2255,16 @@ func TestDeliverySerializesWithConcurrentWriters(t *testing.T) {
 		wg.Wait()
 
 		must(t, passErr)
-		if takeErr != nil {
-			t.Fatalf("the delivery takeover must win or lose legally, got %v", takeErr)
+		// The two writers race under the same predicate, and either may win. A takeover that arrives
+		// after the pass released the run loses to the control plane's own fence — `liveDelivery`
+		// requires a Workspace that is still `ready` with admission open, and the release's delete
+		// declaration has already closed it — so it is refused with the classified conflict instead of
+		// being receipted against a run that is no longer delivering. That is a legal loss, and the Node
+		// learns it must stop reporting through the same conflict every late event gets; what it must
+		// never become is an unclassified fault.
+		taken := takeErr == nil
+		if !taken {
+			expectStatus(t, takeErr, codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
 		}
 		// Whichever writer won, the outcome is the same single release: one phase move, one delete
 		// intent, one recorded failure, and never a second attempt declared after the release.
@@ -1893,16 +2272,25 @@ func TestDeliverySerializesWithConcurrentWriters(t *testing.T) {
 		// The attempt count is exactly one, not "one or two", because both writers evaluate the same
 		// give-up predicate under the same serialization: the pass releases the run, and the takeover
 		// either settles it while the window is already open (release, no retry) or arrives after the
-		// release and takes the settlement's no-op branch (also no retry). The retry branch is
-		// unreachable while `DeliveryGiveUpAfter` is open, so a count that varied would be a real bug.
+		// release and is refused (also no retry). The retry branch is unreachable while
+		// `DeliveryGiveUpAfter` is open, so a count that varied would be a real bug.
 		if got := f.runPhase(scene.runID); got != "releasing" {
 			t.Fatalf("the run must end releasing, got %q", got)
 		}
 		if got := f.runResult(scene.runID).S("deliveryState"); got != "failed" {
 			t.Fatalf("deliveryState = %q, want failed", got)
 		}
-		if got := f.nodeSequence(execution); got != 1 {
-			t.Fatalf("the failure must be receipted exactly once, got sequence %d", got)
+		// The event is a fact about the attempt exactly when it was taken over: one receipt and one
+		// durable result, never two, and none at all when the fence refused it before the takeover.
+		wantReceipts := int64(0)
+		if taken {
+			wantReceipts = 1
+		}
+		if got := f.nodeSequence(execution); got != wantReceipts {
+			t.Fatalf("a taken-over failure must be receipted exactly once and a refused one not at all, got sequence %d (taken=%v)", got, taken)
+		}
+		if got := int64(len(f.receipts(execution))); got != wantReceipts {
+			t.Fatalf("receipts must match the takeover's outcome, got %d (taken=%v)", got, taken)
 		}
 		if got := len(f.deliveryAttempts(scene.runID)); got != 1 {
 			t.Fatalf("the release must not leave a second attempt behind, got %d", got)

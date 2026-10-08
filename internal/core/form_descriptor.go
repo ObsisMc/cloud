@@ -52,6 +52,14 @@ const (
 // maxFieldValueLength bounds a single text/textarea form value.
 const maxFieldValueLength = 4000
 
+// maxFormFields / maxFormOptions bound one descriptor so no form is unbounded. A provider projecting
+// its own schema onto this shape reads the same limits, which is why they are named here rather than
+// written into the validator.
+const (
+	maxFormFields  = 100
+	maxFormOptions = 100
+)
+
 func supportedFieldType(t string) bool {
 	switch t {
 	case fieldText, fieldTextarea, fieldNumber, fieldBoolean, fieldSelect, fieldMultiSelect:
@@ -86,7 +94,7 @@ func validOpaqueToken(s string) bool {
 func validateFormDescriptor(d FormDescriptor) {
 	require(validOpaqueToken(d.FormRef), 500, "invalid_form_descriptor")
 	require(len(d.Title) <= 200 && len(d.Description) <= 2000, 500, "invalid_form_descriptor")
-	require(len(d.Fields) <= 100, 500, "invalid_form_descriptor")
+	require(len(d.Fields) <= maxFormFields, 500, "invalid_form_descriptor")
 	seen := map[string]bool{}
 	for i := range d.Fields {
 		f := &d.Fields[i]
@@ -96,7 +104,7 @@ func validateFormDescriptor(d FormDescriptor) {
 		require(f.Label != "" && len(f.Label) <= 200, 500, "invalid_form_descriptor")
 		require(len(f.Description) <= 1000 && len(f.Placeholder) <= 200, 500, "invalid_form_descriptor")
 		if fieldTakesOptions(f.Type) {
-			require(len(f.Options) > 0 && len(f.Options) <= 100, 500, "invalid_form_descriptor")
+			require(len(f.Options) > 0 && len(f.Options) <= maxFormOptions, 500, "invalid_form_descriptor")
 			values := map[string]bool{}
 			for _, o := range f.Options {
 				require(o.Value != "" && len(o.Value) <= 200 && len(o.Label) <= 200, 500, "invalid_form_descriptor")
@@ -293,7 +301,12 @@ func appliedContextRefs(body Object) []Object {
 // scratch: the target is re-resolved through the directory (which owns the target -> formRef mapping),
 // then the provider resolves the descriptor, then the descriptor is validated. Every failure is a typed
 // fault, never a partially usable form (§38.19).
-func workflowFormDescriptor(t *transaction, tid, targetType, targetID string) FormDescriptor {
+//
+// `issue` is the issue context the descriptor is tailored with. GET, assist and confirm must all pass
+// the same one: assist re-validates submitted values against this descriptor, and confirm re-validates
+// them against a freshly resolved one, so a descriptor that disagreed with what the client rendered
+// would reject values the user was legitimately shown.
+func workflowFormDescriptor(t *transaction, tid, targetType, targetID string, issue *IssueFormContext) FormDescriptor {
 	require(targetType == "workflow", 409, "interaction_not_confirmable")
 	require(t.directory != nil, 503, "form_descriptor_unavailable")
 	summary, ok, err := t.directory.ResolveTarget(t.ctx, tid, targetType, targetID)
@@ -304,7 +317,9 @@ func workflowFormDescriptor(t *transaction, tid, targetType, targetID string) Fo
 	require(summary.InteractionDescriptor.Mode == "form", 409, "interaction_not_confirmable")
 	formRef := summary.InteractionDescriptor.FormRef
 	require(formRef != "" && t.forms != nil, 503, "form_descriptor_unavailable")
-	descriptor, ok, err := t.forms.ResolveFormDescriptor(t.ctx, tid, formRef)
+	// The port itself stays value-typed — see the nolint on ResolveFormDescriptor — so the context is
+	// dereferenced at the one place the two conventions meet.
+	descriptor, ok, err := t.forms.ResolveFormDescriptor(t.ctx, tid, formRef, *issue)
 	if err != nil {
 		panic(databaseFailure{err})
 	}
@@ -315,11 +330,17 @@ func workflowFormDescriptor(t *transaction, tid, targetType, targetID string) Fo
 
 // formDescriptorByRef is the public read path for `GET /collaboration/forms/{formRef}`: a read-only,
 // tenant-scoped, provider-backed projection. It exposes no Workflow domain internals.
+//
+// The optional `issueId` query parameter supplies the issue context, which is what makes the form carry
+// the platform fields. Omitting it is not an error and not a degraded mode — it is the projection this
+// route served before the fields existed, which is what keeps a client that knows nothing about them
+// working.
 func formDescriptorByRef(t *transaction, r *PublicRequest) Object {
 	ref := strings.TrimSpace(r.FormRef)
 	require(validOpaqueToken(ref), 404, "form_descriptor_not_found")
 	require(t.forms != nil, 503, "form_descriptor_unavailable")
-	descriptor, ok, err := t.forms.ResolveFormDescriptor(t.ctx, r.TenantID, ref)
+	issue := issueFormContext(t, r.TenantID, strings.TrimSpace(r.FormIssueID))
+	descriptor, ok, err := t.forms.ResolveFormDescriptor(t.ctx, r.TenantID, ref, issue)
 	if err != nil {
 		panic(databaseFailure{err})
 	}

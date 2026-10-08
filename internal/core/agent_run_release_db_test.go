@@ -64,7 +64,7 @@ func seedReleaseScene(t *testing.T, store *Store, phase, status string) releaseS
 func settleRunDeleted(t *testing.T, store *Store, runID string) error {
 	t.Helper()
 	_, err := store.transact(context.Background(), func(tx *transaction) Object {
-		if e := store.runWorkspaceDeleted(tx, Object{"id": runID}); e != nil {
+		if e := store.settleRunWorkspaceDeleted(tx, runID); e != nil {
 			panic(databaseFailure{e})
 		}
 		return Object{}

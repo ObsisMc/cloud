@@ -86,7 +86,7 @@ func (f *fixture) threadRunState(runID string) (phase, status, threadState strin
 // nothing else: no entry, no `seq`, no change to the run's own phase/status, and no `ended`.
 func TestThreadEndAcceptsTheFirstRequest(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 	f.seedThreadEntry(scene.runID, "system", "user_turn", `{"content":"Begin this task."}`, nil, nil)
 
@@ -148,7 +148,7 @@ func (f *fixture) assertEndRecorded(scene threadScene, key string, want int) {
 // cases around it are the generic idempotency mechanism's, reused rather than reimplemented.
 func TestThreadEndIsIdempotentUnderTheSameKey(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 
 	first := f.endThread(scene, "end-replay", 202, "")
@@ -206,7 +206,7 @@ func TestThreadEndIsIdempotentUnderTheSameKey(t *testing.T) {
 // turn red — the recorded response would be shadowed by a conflict the caller already resolved.
 func TestThreadEndReplayOutlivesTheStateItRecorded(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 
 	first := f.endThread(scene, "end-replay", 202, "")
@@ -228,7 +228,7 @@ func TestThreadEndReplayOutlivesTheStateItRecorded(t *testing.T) {
 // assertion is on the complete set of permitted outcomes, never on a sleep.
 func TestThreadEndConcurrentSameKeyMakesOneTransition(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 
 	const callers = 4
@@ -271,7 +271,7 @@ func TestThreadEndConcurrentSameKeyMakesOneTransition(t *testing.T) {
 // exist. Every refusal writes nothing.
 func TestThreadEndAuthorizesLikeTheThreadRead(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 	otherTenant := f.moreTenant()
 
@@ -328,21 +328,28 @@ func TestThreadEndAuthorizesLikeTheThreadRead(t *testing.T) {
 	}
 }
 
-// T4C-18 (plan §4C.4) — the A seam is unavailable, so nothing about this request survives: no
-// `ending`, no command, and no idempotency record. The retry under the same key once the seam returns
+// T4C-18 (plan §4C.4) — the request's transaction is refused, so nothing about it survives: no
+// `ending`, no command, and no idempotency record. The retry under the same key once the cause is gone
 // is therefore a clean first request rather than a replay of a half-written end — which is exactly
 // what the missing record proves.
-func TestThreadEndSeamFailureRollsBackEverything(t *testing.T) {
+//
+// The refusal is induced at the database boundary: the merged design has no seam that can return an
+// error here, because `enqueueThreadCommand` is in-transaction SQL whose body this path builds and
+// validates itself. The command write is the transaction's last statement, so the `ending` CAS has
+// already succeeded when the constraint refuses it.
+func TestThreadEndWriteFailureRollsBackEverything(t *testing.T) {
 	f := setup(t)
-	// setup() leaves the fail-closed UnavailableAgentRunControlPlane wired; this test never replaces it
-	// before the first attempt.
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 	before := f.scalar(`SELECT version FROM issue_runs WHERE id=$1`, scene.runID)
+	_, e := f.store.Pool.Exec(`ALTER TABLE thread_commands ADD CONSTRAINT thread_commands_end_probe CHECK (kind <> 'end_session')`)
+	must(t, e)
 
-	f.endThread(scene, "end-503", 503, "thread_command_unavailable")
+	f.endThread(scene, "end-503", 500, "internal_error")
 
 	f.assertEndRolledBack(scene, before)
-	f.useRealControlPlane()
+	_, e = f.store.Pool.Exec(`ALTER TABLE thread_commands DROP CONSTRAINT thread_commands_end_probe`)
+	must(t, e)
 	f.endThread(scene, "end-503", 202, "")
 	if reasons := f.endSessionReasons(scene.runID); len(reasons) != 1 || reasons[0] != "user_ended" {
 		t.Fatalf("the retry must release exactly the one command, got %v", reasons)
@@ -377,7 +384,7 @@ func (f *fixture) assertEndRolledBack(scene threadScene, versionBefore int) {
 func TestThreadEndRacesProduceExactlyOneTransition(t *testing.T) {
 	t.Run("against the idle window", func(t *testing.T) {
 		f := setup(t)
-		f.useRealControlPlane()
+		f.bindBusinessHooks()
 		scene := seedThreadScene(t, f)
 		f.store.ThreadIdleTimeout = 15 * time.Minute
 		// An idle Thread whose window expired long ago, written at the storage boundary: the window is
@@ -435,7 +442,7 @@ func TestThreadEndRacesProduceExactlyOneTransition(t *testing.T) {
 
 	t.Run("against a cancellation request", func(t *testing.T) {
 		f := setup(t)
-		f.useRealControlPlane()
+		f.bindBusinessHooks()
 		scene := seedThreadScene(t, f)
 		_, e := f.store.Pool.Exec(`UPDATE issue_runs SET cancel_requested_at=now() WHERE id=$1`, scene.runID)
 		must(t, e)
@@ -483,7 +490,7 @@ func TestThreadEndRacesProduceExactlyOneTransition(t *testing.T) {
 
 	t.Run("against a new user turn", func(t *testing.T) {
 		f := setup(t)
-		f.useRealControlPlane()
+		f.bindBusinessHooks()
 		scene := seedThreadScene(t, f)
 
 		var endStatus, postStatus int
@@ -540,7 +547,7 @@ func TestThreadEndRacesProduceExactlyOneTransition(t *testing.T) {
 
 	t.Run("twice from two keys", func(t *testing.T) {
 		f := setup(t)
-		f.useRealControlPlane()
+		f.bindBusinessHooks()
 		scene := seedThreadScene(t, f)
 
 		statuses := make([]int, 2)

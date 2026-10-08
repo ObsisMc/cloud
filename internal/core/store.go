@@ -15,6 +15,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/wanglongan587/cloud/internal/objectstore"
 )
 
 // Object is a JSON resource; database column names are converted at the persistence boundary.
@@ -74,69 +76,61 @@ type databaseFailure struct{ err error }
 type Store struct {
 	Pool *sql.DB
 
-	// Collaboration ports (consuming-side seams; see collaboration.go). Each is nil by default
-	// ("Unavailable"); dev/demo/integration wire the in-memory fixtures, production real adapters.
+	// PluginExecution remains for fixtures that still name the old simulation mode. Plugin installs
+	// are Node executions and are no longer gated on it.
+	PluginExecution    PluginExecutionCapability
+	legacyCloneFixture bool
+	// ObjectStore signs upload grants and verifies stored checksums outside SQL transactions.
+	// Nil means delivery is explicitly skipped through the transaction-scoped business hook.
+	ObjectStore *objectstore.Config
+	// OnThreadEvents receives only first-taken-over events and the caller's SQL transaction.
+	// Hooks must use that transaction; starting another Store transaction would deadlock.
+	OnThreadEvents func(context.Context, *sql.Tx, string, string, []Object) error
+	// OnSessionEnded runs inside the transaction that first stores a session's terminal result.
+	OnSessionEnded func(context.Context, *sql.Tx, string, string, Object) error
+	// OnRunWorkspaceSettled receives ready or failed in the Workspace operation's transaction.
+	OnRunWorkspaceSettled func(context.Context, *sql.Tx, string, string) error
+	// OnRunWorkspaceDeleted runs after successful data cleanup in the deletion transaction.
+	OnRunWorkspaceDeleted func(context.Context, *sql.Tx, string) error
+	// OnDeliverySettled receives saved/unchanged with revisionId and Revision metadata, failed with
+	// a safe reason, or skipped when storage is unconfigured. It runs after receipt/Revision writes.
+	OnDeliverySettled func(context.Context, *sql.Tx, string, string, Object) error
+
+	// Collaboration ports (consuming-side seams; see collaboration.go). NewStore wires the real
+	// workflow-backed Directory and Forms, because Cloud owns the workflow document and needs no
+	// external backend to serve those two. The remaining three stay nil ("Unavailable") until a
+	// deployment wires them: dev/demo/integration add the in-memory fixtures on top, which is why
+	// WireDevelopmentFixtures layers the Agent/Team targets in front of Directory instead of
+	// replacing it.
 	Directory  CollaborationDirectory
 	Context    ContextBuilder
 	Dispatcher ExecutionDispatcher
 	Forms      FormDescriptorProvider
 	Assist     InputAssistProvider
 
-	// AgentRunHooks is the business-side transition seam (controller-integration D6):
-	// control-plane transactions call these hooks inside their own transaction to move
-	// IssueRun/Thread business state. nil means "Unavailable": the control plane wires
-	// the explicit UnavailableAgentRunHooks stub in that case, so no control-plane
-	// transaction silently advances business state while the AgentRunDispatcher
-	// transitions are unimplemented. The call sites are part of the controller
-	// integration (A side), not this skeleton.
-	AgentRunHooks AgentRunHooks
-
-	// AgentRunControlPlane is the control-plane A-seam the business layer calls inside its
-	// own transactions to declare run Workspaces and execution work (controller-integration
-	// D6, B→A). nil means "Unavailable": B-side call sites use the explicit
-	// UnavailableAgentRunControlPlane stub (via agentRunControlPlane) so no business
-	// transaction fabricates a run Workspace or execution_work item while the A side is
-	// unimplemented. It is distinct from Dispatcher, which continues to own team/workflow
-	// dispatch.
-	AgentRunControlPlane AgentRunControlPlane
+	// Simulator is the workflow run executor under Cloud: a deterministic stand-in that
+	// walks a frozen snapshot graph and produces node_states/rounds, instead of an engine
+	// Cloud does not have. Wired by WireDevelopmentFixtures only; a production Store keeps
+	// it nil, leaving runs `pending` — the honest "no real work ran" convention issue_runs
+	// follows. A create that bumps a run straight to `succeeded` must not be possible
+	// without this port.
+	Simulator WorkflowRunSimulator
 
 	// ThreadIdleTimeout is how long a Thread may sit `idle` before Cloud asks the session to end
-	// (Thread D4's idle window, `issue_runs.thread_idle_timeout` in the plan's spelling). It is a
-	// deployment configuration value, not a column — the ADR calls it "Cloud 配置" and nothing
-	// suggests it varies per run — and it is judged entirely on the database clock. Zero (the
-	// zero-value Store) means the idle path is not configured: the scan is a no-op rather than a
-	// zero-length window that would end every Thread the moment it went idle.
+	// (Thread D4's idle window). It is a deployment configuration value, not a column, and it is
+	// judged entirely on the database clock. Zero (the zero-value Store) means the idle path is not
+	// configured: the scan is a no-op rather than a zero-length window that would end every Thread
+	// the moment it went idle.
 	ThreadIdleTimeout time.Duration
 
 	// DeliveryGiveUpAfter and DeliveryUnreachableAfter are IssueRun D5's two first-version give-up
 	// limits for a Revision delivery: how long delivery may fail continuously before Cloud abandons
 	// it, and how long the run Workspace's Node may be unreachable before Cloud does the same. They
-	// are deployment configuration values, not columns — the ADR calls them "Cloud 配置项" — and both
-	// are judged entirely on the database clock. Zero (the zero-value Store) means that condition
-	// never gives up, so the scan is a no-op rather than a zero-length window that would abandon every
-	// delivery the moment it was declared.
+	// are deployment configuration values, not columns, and both are judged entirely on the database
+	// clock. Zero (the zero-value Store) means that condition never gives up, so the scan is a no-op
+	// rather than a zero-length window that would abandon every delivery the moment it was declared.
 	DeliveryGiveUpAfter      time.Duration
 	DeliveryUnreachableAfter time.Duration
-
-	// RevisionObjects is the object-store boundary the Revision delivery path uses: it signs the
-	// single-key upload grants a Controller hands to a Node, and verifies an uploaded object by HEAD
-	// before Cloud registers a Revision (Cloud Revision D1/D2/D4). nil means object storage is not
-	// configured — a legal deployment (D1): the session still ends into `delivering` and still
-	// declares its delivery work, every grant is refused as UNAVAILABLE, and the delivery fails
-	// deterministically until IssueRun D5's give-up window releases the run. It is never consulted
-	// for anything but a Revision upload or a Revision verification.
-	RevisionObjects RevisionObjects
-
-	// RevisionUploadTTL is how long one upload grant stays usable (`object_store.upload_grant_ttl`;
-	// D1's first-version default 15 minutes, DefaultRevisionUploadTTL). Zero (the zero-value Store)
-	// means the default, never a zero-length grant: a grant that expires as it is issued is not a
-	// configuration this contract has a meaning for.
-	RevisionUploadTTL time.Duration
-
-	// AgentRunDispatcher owns Claim + Busy for queued real Space Agent IssueRuns (dispatch claim
-	// loop). It is populated in NewStore; agentRunDispatcher is the nil-safe accessor for Stores
-	// built or zero-valued without the constructor.
-	AgentRunDispatcher *AgentRunDispatcher
 
 	// Events broadcasts committed collaboration-space invalidation notices to live
 	// SSE subscribers. Every project belongs to its tenant's sole collaboration
@@ -148,6 +142,13 @@ type Store struct {
 	Signals *ControlHub
 }
 
+// WorkflowRunSimulator produces the execution trace for one workflow run. Cloud has no
+// engine, so only dev/demo deployments provide one; the result must never claim that real
+// work ran (see the mock's output wording).
+type WorkflowRunSimulator interface {
+	SimulateWorkflowRun(graph, input Object) (nodeStates Object, rounds []Object, status string)
+}
+
 // NewStore obtains the injected SQL pool without creating or migrating schema.
 func NewStore(db *gorm.DB) (*Store, error) {
 	if db == nil {
@@ -157,58 +158,52 @@ func NewStore(db *gorm.DB) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get database pool: %w", err)
 	}
-	return &Store{Pool: pool, Events: NewSpaceHub(), Signals: NewControlHub()}, nil
+	return &Store{
+		Pool:      pool,
+		Events:    NewSpaceHub(),
+		Signals:   NewControlHub(),
+		Directory: WorkflowDirectory{Pool: pool},
+		Forms:     WorkflowFormDescriptors{Pool: pool},
+	}, nil
 }
 
-// agentRunDispatcher returns the wired dispatcher, constructing a fresh one wrapping the Store when
-// the field is nil (zero-valued or non-constructor-built store). It only reads the field (never
-// writes it), so it is safe under the concurrent load the retry loop and per-request dispatch place
-// on it.
-func (s *Store) agentRunDispatcher() *AgentRunDispatcher {
-	if d := s.AgentRunDispatcher; d != nil {
-		return d
+// NewDevelopmentStore explicitly enables the retired unscoped clone test contract. Production
+// NewStore remains runtime-scoped; this constructor must never be used by the production server.
+func NewDevelopmentStore(db *gorm.DB) (*Store, error) {
+	s, err := NewStore(db)
+	if err != nil {
+		return nil, err
 	}
-	return &AgentRunDispatcher{store: s}
-}
-
-// agentRunControlPlane returns the wired control-plane seam, defaulting to the fail-closed
-// UnavailableAgentRunControlPlane when none is wired, so a Store with no A implementation
-// refuses to declare run Workspaces or execution work rather than silently succeeding.
-func (s *Store) agentRunControlPlane() AgentRunControlPlane {
-	if s.AgentRunControlPlane == nil {
-		return UnavailableAgentRunControlPlane{}
-	}
-	return s.AgentRunControlPlane
+	s.legacyCloneFixture = true
+	return s, nil
 }
 
 type transaction struct {
 	tx  *sql.Tx
 	ctx context.Context
+	// store is the Store that opened this transaction. The B-side business hooks are invoked with
+	// the raw handle and need their way back to the owning Store's policy; carrying it here keeps
+	// that lookup from becoming another context value.
+	store *Store
 	// collaboration ports shadowed from the Store so transaction-scoped helpers can use them.
 	directory      CollaborationDirectory
 	contextBuilder ContextBuilder
 	forms          FormDescriptorProvider
 	assist         InputAssistProvider
-	// hooks is the business-side AgentRun transition seam (controller-integration D6), shadowed
-	// from the Store so free control-plane functions can call it inside their Caller's transaction.
-	// It mirrors the collaboration ports: it is nil-safe through a default only at the call sites
-	// that need it, and nil means the caller fails closed (G-003: an unwired hook rolls back rather
-	// than advance business state silently). It never opens its own transaction.
-	hooks AgentRunHooks
+	simulator      WorkflowRunSimulator
 	// queued names operations this transaction made claimable; they are published only after commit.
-	queued []string
-	// threadRuns names the runs whose Thread commands this transaction persisted. Like queued it is
-	// published only after a successful commit, so a rolled-back command can never produce a
-	// ThreadCommandAvailable signal for a command that does not exist (controller-integration D5).
-	threadRuns []string
-	// appends holds the Thread invalidation hints this transaction's entry writes queued. Like the
-	// two above it is released only after a successful commit, so the SSE hint can never describe an
-	// entry that rolled back (Thread D5, T4C-25).
-	appends []SpaceEvent
-	// threadChanges holds A4's generalized hints — one per run whose Thread REST representation this
-	// transaction changed, including state-only changes that append no entry. Released only after a
-	// successful commit, exactly like `appends` (Thread D5, A4/G-023).
-	threadChanges []SpaceEvent
+	legacyCloneFixture    bool
+	pluginExecution       PluginExecutionCapability
+	objectStore           *objectstore.Config
+	onThreadEvents        func(context.Context, *sql.Tx, string, string, []Object) error
+	onSessionEnded        func(context.Context, *sql.Tx, string, string, Object) error
+	onRunWorkspaceSettled func(context.Context, *sql.Tx, string, string) error
+	onRunWorkspaceDeleted func(context.Context, *sql.Tx, string) error
+	onDeliverySettled     func(context.Context, *sql.Tx, string, string, Object) error
+	queued                []string
+	workSignals           []string
+	commandSignals        []string
+	events                []SpaceEvent
 }
 
 func (t *transaction) exec(q string, args ...any) {
@@ -251,6 +246,11 @@ func (t *transaction) list(q string, args ...any) []Object {
 		o := Object{}
 		for k, v := range raw {
 			o[camel(k)] = v
+		}
+		// A null association is not part of the public Workspace document. Run Workspaces carry the id
+		// and are filtered out of public lists, so clients never see this column.
+		if o["issueRunId"] == nil {
+			delete(o, "issueRunId")
 		}
 		out = append(out, o)
 	}
@@ -309,14 +309,24 @@ func (s *Store) transact(ctx context.Context, fn func(*transaction) Object) (out
 			}
 		}
 	}()
-	t := &transaction{tx: tx, ctx: ctx, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist, hooks: s.AgentRunHooks}
+	t := &transaction{tx: tx, ctx: ctx, store: s, pluginExecution: s.PluginExecution, legacyCloneFixture: s.legacyCloneFixture, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist, simulator: s.Simulator, objectStore: s.ObjectStore, onThreadEvents: s.OnThreadEvents, onSessionEnded: s.OnSessionEnded}
+	t.onRunWorkspaceSettled, t.onRunWorkspaceDeleted, t.onDeliverySettled = s.OnRunWorkspaceSettled, s.OnRunWorkspaceDeleted, s.OnDeliverySettled
+	// Publish this transaction to the B-side hooks, which the seams below invoke with the *sql.Tx
+	// alone. Without it a hook could only wrap the handle in a second transaction view, and every
+	// enqueue, Thread entry and post-commit hint it produced would be collected in a set that is
+	// discarded when the control plane's own transaction commits. See businessTransaction.
+	t.ctx = context.WithValue(t.ctx, businessTransactionKey{}, t)
 	t.exec("SELECT pg_advisory_xact_lock(67420911)")
 	out = fn(t)
 	if err = tx.Commit(); err == nil {
 		s.signalOperations(t.queued)
-		s.signalThreadCommands(t.threadRuns)
-		s.publishThreadHints(t.appends)
-		s.publishThreadHints(t.threadChanges)
+		s.signalRuns(SignalWorkAvailable, t.workSignals)
+		s.signalRuns(SignalThreadCommandAvailable, t.commandSignals)
+		if s.Events != nil {
+			for _, ev := range t.events {
+				s.Events.Publish(ev)
+			}
+		}
 	}
 	return out, err
 }
@@ -563,21 +573,16 @@ func project(t *transaction, tid, uid, pid string) Object {
 	return p
 }
 
-// workspace loads a live runtime workspace in the tenant. Non-admin access
-// inherits the parent project's tenant membership. The admin form
-// (administrative-stop) requires tenant administration.
+// workspace loads authorized runtime content. Safe summaries use runtimeOverview instead.
 func workspace(t *transaction, tid, uid, wid string, admin bool) Object {
 	require(validID(wid), 404, "not_found")
-	if admin {
-		w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
-		require(w != nil, 404, "not_found")
-		return stripAgentRunSkeleton(w)
-	}
-	w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", wid, tid)
+	w := t.one("SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL AND issue_run_id IS NULL", wid, tid)
 	require(w != nil, 404, "not_found")
-	proj := t.one("SELECT space_id FROM projects WHERE id=$1 AND tenant_id=$2", w.S("projectId"), tid)
-	require(proj != nil && workspaceRole(t, proj.S("spaceId"), uid) != "", 404, "not_found")
-	return stripAgentRunSkeleton(w)
+	require(runtimeUsable(t, w, uid), 403, "runtime_use_forbidden")
+	if admin {
+		membership(t, tid, uid, true)
+	}
+	return w
 }
 
 func version(o Object, v int64) {

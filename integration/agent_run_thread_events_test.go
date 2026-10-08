@@ -66,11 +66,19 @@ type liveThreadScene struct {
 // seedLiveThreadScene seeds the scene at the storage boundary — tenant, project, Space Agent, issue,
 // `starting` agent run, its run Workspace and Node — and joins the fixture's user to it. The session
 // itself is NOT declared here: the caller subscribes first, then calls start, so the notice the
-// declaration publishes is observed rather than missed. The A seam is left exactly as setup left it
-// (the fail-closed stub), so a test that needs the production one wires it explicitly.
+// declaration publishes is observed rather than missed. Cloud's IssueRun/Thread lifecycle is bound
+// onto the control plane's seam exactly as cmd/server wires it (`core.BindBusinessHooks`), so the
+// transitions below are the shipped B side and not a test double.
 func seedLiveThreadScene(t *testing.T, f *fixture) liveThreadScene {
 	t.Helper()
-	f.store.AgentRunHooks = core.NewBusinessAgentRunHooks(f.store)
+	core.BindBusinessHooks(f.store)
+	// The scene is a deployment with object storage configured, because that is the only deployment in
+	// which the session's own end has a delivery to declare: Cloud declares a DeliverRevision attempt
+	// only when it will be able to verify the objects the Node uploads, and settles the delivery as
+	// `skipped` (releasing the run at once) when the Store has no ObjectStore. Tests that need the
+	// unconfigured deployment clear the field themselves, and `useObjectStore` is idempotent, so a
+	// test that installed its own store first keeps watching the same endpoint.
+	f.useObjectStore()
 
 	runID, _, nodeID := seedStartingAgentRun(t, f.store)
 	var tenantID, issueID string
@@ -94,7 +102,7 @@ func (s *liveThreadScene) start(t *testing.T, f *fixture) {
 	must(t, f.store.StartQueuedAgentSessionsOnce(ctx))
 
 	claims := &core.Claims{Kind: "service", Role: "controller", RegisteredClaims: jwt.RegisteredClaims{Subject: "ctrl-a"}}
-	picked, e := f.store.Control(ctx, &core.ControlRequest{Action: "agent_work_claim", Body: core.Object{"epoch": 1}, Service: claims})
+	picked, e := f.store.Control(ctx, &core.ControlRequest{Action: "clone_claim", Body: core.Object{"epoch": 1}, Service: claims})
 	must(t, e)
 	work := picked.O("work")
 	if work == nil {
@@ -105,8 +113,8 @@ func (s *liveThreadScene) start(t *testing.T, f *fixture) {
 	}
 	s.executionID = "exec-sse-" + work.S("id")[:8]
 	_, e = f.store.Control(ctx, &core.ControlRequest{
-		Action:  "agent_work_dispatch",
-		Body:    core.Object{"workId": work.S("id"), "executionId": s.executionID, "nodeId": s.nodeID, "input": work.O("input"), "epoch": 1},
+		Action:  "clone_dispatch",
+		Body:    core.Object{"operationId": s.runID, "executionId": s.executionID, "nodeId": s.nodeID, "input": work.O("input"), "epoch": 1},
 		Service: claims,
 	})
 	must(t, e)
@@ -314,14 +322,6 @@ func assertChanged(t *testing.T, ev core.Object, scene liveThreadScene, lastSeq 
 	assertNotice(t, ev, threadChangedType, scene, lastSeq, what)
 }
 
-// threadLineObject adapts threadLine's wire JSON to the Object a control batch carries.
-func threadLineObject(t *testing.T, tag, text string) core.Object {
-	t.Helper()
-	o := core.Object{}
-	must(t, json.Unmarshal([]byte(threadLine(tag, text)), &o))
-	return o
-}
-
 // takeover submits one Thread event batch through the control action a Controller reaches over gRPC
 // (Store.Control is the internal command API; the gRPC wire mapping is covered by
 // TestAgentRunThreadTakeoverOverGRPC). submissionID is optional: empty submits an unkeyed batch.
@@ -329,7 +329,7 @@ func (f *fixture) takeover(t *testing.T, scene liveThreadScene, submissionID str
 	t.Helper()
 	claims := &core.Claims{Kind: "service", Role: "controller", RegisteredClaims: jwt.RegisteredClaims{Subject: "ctrl-a"}}
 	out, e := f.store.Control(context.Background(), &core.ControlRequest{
-		Action:       "agent_thread_takeover",
+		Action:       "thread_events",
 		SubmissionID: submissionID,
 		Body: core.Object{
 			"operationId": scene.runID, "executionId": scene.executionID, "epoch": 1, "events": events,
@@ -358,7 +358,7 @@ func (f *fixture) turnStatus(runID, turnID string) string {
 // exactly what committed.
 func TestThreadAppendedIsPublishedOnlyAfterCommit(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 
 	// The subscriber exists before the first write: a notice nobody was watching for would not prove
@@ -504,7 +504,7 @@ func (f *fixture) threadStateOf(runID string) (state string, idleSince *time.Tim
 // a widened one.
 func TestThreadChangedCoversStateOnlyCommits(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 
@@ -616,7 +616,7 @@ func TestThreadChangedCoversStateOnlyCommits(t *testing.T) {
 // appended entries") and the batch did append one — so the assertion is one of each, not one overall.
 func TestThreadChangedIsDedupedPerCommit(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 	posted := f.postThread(scene.threadScene, "sse-turn-1", threadBody("please rename it"), 201, "")
@@ -651,20 +651,29 @@ func TestThreadChangedIsDedupedPerCommit(t *testing.T) {
 }
 
 // T4C-25, rollback half — a notice queued by an entry write is released only if the transaction
-// commits. The Thread POST queues its hint on the user-turn INSERT and then fails on the A-seam
-// enqueue in that same transaction (the fail-closed stub setup leaves wired), which is exactly the
-// shape the guarantee is about: the write happened, the hint was queued right after it, and the commit
-// never did. Nothing is durable, so nothing may be published.
+// commits. The Thread POST queues its hint on the user-turn INSERT and then fails on a later statement
+// of that same transaction, which is exactly the shape the guarantee is about: the write happened, the
+// hint was queued right after it, and the commit never did. Nothing is durable, so nothing may be
+// published.
+//
+// The failing statement is induced at the database boundary rather than through an injectable seam,
+// because the merged design has none: the delivery command is written by in-transaction SQL
+// (`enqueueThreadCommand`) with a body this path builds and validates itself, so the only way it can
+// fail is the database refusing it — which is what the probe constraint does. The command write is
+// the transaction's last statement, so an entry, both hint events and the Thread-state CAS have all
+// already succeeded when it is refused.
 func TestThreadAppendedRollbackReleasesNothing(t *testing.T) {
 	f := setup(t)
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
-	// The Thread state a declared session would have; deliberately no useRealControlPlane(), so the
-	// POST's own enqueue is what fails.
+	// The Thread state a declared session would have, so the POST reaches its own writes.
 	must(t, f.setThreadState(scene.runID, "starting", "pending"))
+	_, e := f.store.Pool.Exec(`ALTER TABLE thread_commands ADD CONSTRAINT thread_commands_rollback_probe CHECK (kind <> 'submit_user_turn')`)
+	must(t, e)
 
 	hints, cancel := f.watchSpace(scene.spaceID)
 	defer cancel()
-	f.postThread(scene.threadScene, "sse-rollback", threadBody("will not land"), 503, "thread_command_unavailable")
+	f.postThread(scene.threadScene, "sse-rollback", threadBody("will not land"), 500, "internal_error")
 	requireSilent(t, hints, "a rolled-back Thread POST")
 	if n := f.threadEntries(scene.runID); n != 0 {
 		t.Fatalf("a rolled-back POST must leave no entry, got %d", n)
@@ -687,7 +696,7 @@ func TestThreadAppendedRollbackReleasesNothing(t *testing.T) {
 // exists for, and the one a publish-inside-the-transaction implementation would fail.
 func TestThreadAppendedCommitFailureReleasesNothing(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 
@@ -727,7 +736,7 @@ func TestThreadAppendedCommitFailureReleasesNothing(t *testing.T) {
 // from the client's own cursor still returns the complete, ordered window.
 func TestThreadAppendedDuplicatesAndLossAreHarmless(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 
@@ -788,7 +797,7 @@ func TestThreadAppendedDuplicatesAndLossAreHarmless(t *testing.T) {
 // be never contradicted.
 func TestOnlyTheFirstRecordAdvancesRunning(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	claims := &core.Claims{Kind: "service", Role: "controller", RegisteredClaims: jwt.RegisteredClaims{Subject: "ctrl-a"}}
 
@@ -829,22 +838,22 @@ func TestOnlyTheFirstRecordAdvancesRunning(t *testing.T) {
 
 	// (3) ClaimThreadCommands is a pure read that returns the command the POST released.
 	claimed, e := f.store.Control(context.Background(), &core.ControlRequest{
-		Action: "agent_thread_claim", Body: core.Object{"epoch": 1, "limit": 100}, Service: claims,
+		Action: "thread_claim", Body: core.Object{"epoch": 1, "limit": 100}, Service: claims,
 	})
 	must(t, e)
 	commands, _ := claimed["commands"].([]core.Object)
 	if len(commands) != 1 {
 		t.Fatalf("the POST's command must be claimable, got %v", commands)
 	}
-	if got := commands[0].O("body").O("turn").S("turn_id"); got != turnID {
+	if got := commands[0].O("body").S("turnId"); got != turnID {
 		t.Fatalf("claimed turn_id = %q, want the posted %q", got, turnID)
 	}
 	assertStillStarting("ClaimThreadCommands")
 
 	// (4) RecordThreadCommandDelivered registers the delivery, and the run has still not moved.
 	_, e = f.store.Control(context.Background(), &core.ControlRequest{
-		Action: "agent_thread_delivered", SubmissionID: "sub-authority",
-		Body: core.Object{"epoch": 1, "commandId": commands[0].S("id"), "executionId": scene.executionID}, Service: claims,
+		Action: "thread_delivered", SubmissionID: "sub-authority",
+		Body: core.Object{"epoch": 1, "commandId": commands[0].S("commandId"), "executionId": scene.executionID}, Service: claims,
 	})
 	must(t, e)
 	assertStillStarting("RecordThreadCommandDelivered")
@@ -853,7 +862,7 @@ func TestOnlyTheFirstRecordAdvancesRunning(t *testing.T) {
 	// registered delivered (the Node accepted it), while the turn's entry is still `queued` because the
 	// Node has not echoed the turn_id yet through the takeover. Registration never writes the entry.
 	var registered *string
-	must(t, f.store.Pool.QueryRow(`SELECT delivered_at::text FROM thread_commands WHERE id=$1`, commands[0].S("id")).Scan(&registered))
+	must(t, f.store.Pool.QueryRow(`SELECT delivered_at::text FROM thread_commands WHERE id=$1`, commands[0].S("commandId")).Scan(&registered))
 	if registered == nil {
 		t.Fatal("the delivery registration must record delivered_at")
 	}
@@ -885,11 +894,19 @@ func TestOnlyTheFirstRecordAdvancesRunning(t *testing.T) {
 	}
 }
 
-// threadLineObjectWith builds one Node record as the batch carries it: the flattened ora-history line
-// plus, for the echoes, the turn_id the Node is answering.
+// threadLineObjectWith builds one Node record as the control batch carries it: the flattened
+// ora-history line as the JSON *text* the wire's `record` field is (the control plane re-parses it
+// and stores the exact bytes as the receipt), plus, for the echoes, the turn_id the Node is
+// answering. The inner line is asserted to be a JSON object here so a malformed fixture fails the
+// test rather than the batch.
 func threadLineObjectWith(t *testing.T, sequence int64, turnID, tag, text string) core.Object {
 	t.Helper()
-	ev := core.Object{"sequence": sequence, "record": threadLineObject(t, tag, text)}
+	line := threadLine(tag, text)
+	parsed := core.Object{}
+	if e := json.Unmarshal([]byte(line), &parsed); e != nil || parsed == nil {
+		t.Fatalf("fixture: thread line %q is not a JSON object: %v", line, e)
+	}
+	ev := core.Object{"sequence": sequence, "record": line}
 	if turnID != "" {
 		ev["turnId"] = turnID
 	}

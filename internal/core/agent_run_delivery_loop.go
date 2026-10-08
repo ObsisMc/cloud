@@ -52,7 +52,7 @@ func (s *Store) giveUpStaleDelivery(ctx context.Context, runID string) error {
 		}
 		// No Revision id: this path gives a delivery up, so the run's result records an explicit null
 		// `revisionId` beside `deliveryState = failed` (Cloud Revision D4, IssueRun D5).
-		if err := s.releaseAfterDelivery(t, o, DeliveryFailed, ""); err != nil {
+		if err := s.releaseAfterDelivery(t, o, deliveryStateFailed, ""); err != nil {
 			panic(databaseFailure{err})
 		}
 		return Object{}

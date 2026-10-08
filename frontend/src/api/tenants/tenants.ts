@@ -41,6 +41,7 @@ import type {
   DeleteApiV1TenantsTidLabelsLidBody,
   Error,
   FormDescriptor,
+  GetApiV1TenantsTidCollaborationFormsFormRefParams,
   GetApiV1TenantsTidCollaborationTargets200,
   GetApiV1TenantsTidInvitations200,
   GetApiV1TenantsTidInvitationsParams,
@@ -57,6 +58,7 @@ import type {
   GetApiV1TenantsTidIssuesIidLabels200,
   GetApiV1TenantsTidIssuesIidLabelsParams,
   GetApiV1TenantsTidIssuesIidRuns200,
+  GetApiV1TenantsTidIssuesIidRunsParams,
   GetApiV1TenantsTidIssuesIidRunsRidThread200,
   GetApiV1TenantsTidIssuesIidRunsRidThreadParams,
   GetApiV1TenantsTidIssuesIidSubscribers200,
@@ -352,18 +354,20 @@ export const usePostApiV1Tenants = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/collaboration/forms/:formRef
  */
 export const getApiV1TenantsTidCollaborationFormsFormRef = (
     tid: string,
     formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<FormDescriptor>(
-      {url: `/api/v1/tenants/${tid}/collaboration/forms/${formRef}`, method: 'GET', signal
+      {url: `/api/v1/tenants/${tid}/collaboration/forms/${formRef}`, method: 'GET',
+        params, signal
     },
       options);
     }
@@ -372,24 +376,26 @@ export const getApiV1TenantsTidCollaborationFormsFormRef = (
 
 
 export const getGetApiV1TenantsTidCollaborationFormsFormRefQueryKey = (tid: string,
-    formRef: string,) => {
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams,) => {
     return [
-    `/api/v1/tenants/${tid}/collaboration/forms/${formRef}`
+    `/api/v1/tenants/${tid}/collaboration/forms/${formRef}`, ...(params ? [params] : [])
     ] as const;
     }
 
 
 export const getGetApiV1TenantsTidCollaborationFormsFormRefQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(tid: string,
-    formRef: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidCollaborationFormsFormRefQueryKey(tid,formRef);
+  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidCollaborationFormsFormRefQueryKey(tid,formRef,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>> = ({ signal }) => getApiV1TenantsTidCollaborationFormsFormRef(tid,formRef, requestOptions, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>> = ({ signal }) => getApiV1TenantsTidCollaborationFormsFormRef(tid,formRef,params, requestOptions, signal);
 
 
 
@@ -404,7 +410,8 @@ export type GetApiV1TenantsTidCollaborationFormsFormRefQueryError = ErrorType<Er
 
 export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(
  tid: string,
-    formRef: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>> & Pick<
+    formRef: string,
+    params: undefined |  GetApiV1TenantsTidCollaborationFormsFormRefParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>,
           TError,
@@ -415,7 +422,8 @@ export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<R
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(
  tid: string,
-    formRef: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>> & Pick<
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>,
           TError,
@@ -426,7 +434,8 @@ export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<R
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(
  tid: string,
-    formRef: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -435,11 +444,12 @@ export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<R
 
 export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError = ErrorType<Error>>(
  tid: string,
-    formRef: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    formRef: string,
+    params?: GetApiV1TenantsTidCollaborationFormsFormRefParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidCollaborationFormsFormRef>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetApiV1TenantsTidCollaborationFormsFormRefQueryOptions(tid,formRef,options)
+  const queryOptions = getGetApiV1TenantsTidCollaborationFormsFormRefQueryOptions(tid,formRef,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -452,7 +462,7 @@ export function useGetApiV1TenantsTidCollaborationFormsFormRef<TData = Awaited<R
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/collaboration/targets
  */
 export const getApiV1TenantsTidCollaborationTargets = (
@@ -545,7 +555,7 @@ export function useGetApiV1TenantsTidCollaborationTargets<TData = Awaited<Return
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/invitations
  */
 export const getApiV1TenantsTidInvitations = (
@@ -646,7 +656,7 @@ export function useGetApiV1TenantsTidInvitations<TData = Awaited<ReturnType<type
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/invitations
  */
 export const postApiV1TenantsTidInvitations = (
@@ -715,7 +725,7 @@ export const usePostApiV1TenantsTidInvitations = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidInvitationsMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/invitations/:iid
  */
 export const deleteApiV1TenantsTidInvitationsIid = (
@@ -785,7 +795,7 @@ export const useDeleteApiV1TenantsTidInvitationsIid = <TError = ErrorType<Error>
       return useMutation(getDeleteApiV1TenantsTidInvitationsIidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issue-groups
  */
 export const getApiV1TenantsTidIssueGroups = (
@@ -878,7 +888,7 @@ export function useGetApiV1TenantsTidIssueGroups<TData = Awaited<ReturnType<type
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issue-statuses
  */
 export const getApiV1TenantsTidIssueStatuses = (
@@ -979,7 +989,7 @@ export function useGetApiV1TenantsTidIssueStatuses<TData = Awaited<ReturnType<ty
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issue-statuses
  */
 export const postApiV1TenantsTidIssueStatuses = (
@@ -1048,7 +1058,7 @@ export const usePostApiV1TenantsTidIssueStatuses = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidIssueStatusesMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/issue-statuses/:sid
  */
 export const deleteApiV1TenantsTidIssueStatusesSid = (
@@ -1118,7 +1128,7 @@ export const useDeleteApiV1TenantsTidIssueStatusesSid = <TError = ErrorType<Erro
       return useMutation(getDeleteApiV1TenantsTidIssueStatusesSidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary PUT /api/v1/tenants/:tid/issue-statuses/:sid
  */
 export const putApiV1TenantsTidIssueStatusesSid = (
@@ -1188,7 +1198,7 @@ export const usePutApiV1TenantsTidIssueStatusesSid = <TError = ErrorType<Error>,
       return useMutation(getPutApiV1TenantsTidIssueStatusesSidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issue-views
  */
 export const getApiV1TenantsTidIssueViews = (
@@ -1289,7 +1299,7 @@ export function useGetApiV1TenantsTidIssueViews<TData = Awaited<ReturnType<typeo
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issue-views
  */
 export const postApiV1TenantsTidIssueViews = (
@@ -1358,7 +1368,7 @@ export const usePostApiV1TenantsTidIssueViews = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidIssueViewsMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/issue-views/:vid
  */
 export const deleteApiV1TenantsTidIssueViewsVid = (
@@ -1428,7 +1438,7 @@ export const useDeleteApiV1TenantsTidIssueViewsVid = <TError = ErrorType<Error>,
       return useMutation(getDeleteApiV1TenantsTidIssueViewsVidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary PUT /api/v1/tenants/:tid/issue-views/:vid
  */
 export const putApiV1TenantsTidIssueViewsVid = (
@@ -1498,7 +1508,7 @@ export const usePutApiV1TenantsTidIssueViewsVid = <TError = ErrorType<Error>,
       return useMutation(getPutApiV1TenantsTidIssueViewsVidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues
  */
 export const getApiV1TenantsTidIssues = (
@@ -1591,7 +1601,7 @@ export function useGetApiV1TenantsTidIssues<TData = Awaited<ReturnType<typeof ge
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues
  */
 export const postApiV1TenantsTidIssues = (
@@ -1660,7 +1670,7 @@ export const usePostApiV1TenantsTidIssues = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidIssuesMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/batch
  */
 export const postApiV1TenantsTidIssuesBatch = (
@@ -1729,7 +1739,7 @@ export const usePostApiV1TenantsTidIssuesBatch = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidIssuesBatchMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/issues/:iid
  */
 export const deleteApiV1TenantsTidIssuesIid = (
@@ -1799,7 +1809,7 @@ export const useDeleteApiV1TenantsTidIssuesIid = <TError = ErrorType<Error>,
       return useMutation(getDeleteApiV1TenantsTidIssuesIidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid
  */
 export const getApiV1TenantsTidIssuesIid = (
@@ -1899,7 +1909,7 @@ export function useGetApiV1TenantsTidIssuesIid<TData = Awaited<ReturnType<typeof
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary PUT /api/v1/tenants/:tid/issues/:iid
  */
 export const putApiV1TenantsTidIssuesIid = (
@@ -1969,7 +1979,7 @@ export const usePutApiV1TenantsTidIssuesIid = <TError = ErrorType<Error>,
       return useMutation(getPutApiV1TenantsTidIssuesIidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/collaboration/assist
  */
 export const postApiV1TenantsTidIssuesIidCollaborationAssist = (
@@ -2039,7 +2049,7 @@ export const usePostApiV1TenantsTidIssuesIidCollaborationAssist = <TError = Erro
       return useMutation(getPostApiV1TenantsTidIssuesIidCollaborationAssistMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid/comments
  */
 export const getApiV1TenantsTidIssuesIidComments = (
@@ -2147,7 +2157,7 @@ export function useGetApiV1TenantsTidIssuesIidComments<TData = Awaited<ReturnTyp
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/comments
  */
 export const postApiV1TenantsTidIssuesIidComments = (
@@ -2217,7 +2227,7 @@ export const usePostApiV1TenantsTidIssuesIidComments = <TError = ErrorType<Error
       return useMutation(getPostApiV1TenantsTidIssuesIidCommentsMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/issues/:iid/comments/:cid
  */
 export const deleteApiV1TenantsTidIssuesIidCommentsCid = (
@@ -2288,7 +2298,7 @@ export const useDeleteApiV1TenantsTidIssuesIidCommentsCid = <TError = ErrorType<
       return useMutation(getDeleteApiV1TenantsTidIssuesIidCommentsCidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary PUT /api/v1/tenants/:tid/issues/:iid/comments/:cid
  */
 export const putApiV1TenantsTidIssuesIidCommentsCid = (
@@ -2359,7 +2369,7 @@ export const usePutApiV1TenantsTidIssuesIidCommentsCid = <TError = ErrorType<Err
       return useMutation(getPutApiV1TenantsTidIssuesIidCommentsCidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid/context-refs
  */
 export const getApiV1TenantsTidIssuesIidContextRefs = (
@@ -2459,7 +2469,7 @@ export function useGetApiV1TenantsTidIssuesIidContextRefs<TData = Awaited<Return
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/context-refs
  */
 export const postApiV1TenantsTidIssuesIidContextRefs = (
@@ -2529,7 +2539,7 @@ export const usePostApiV1TenantsTidIssuesIidContextRefs = <TError = ErrorType<Er
       return useMutation(getPostApiV1TenantsTidIssuesIidContextRefsMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/issues/:iid/context-refs/:crid
  */
 export const deleteApiV1TenantsTidIssuesIidContextRefsCrid = (
@@ -2600,7 +2610,7 @@ export const useDeleteApiV1TenantsTidIssuesIidContextRefsCrid = <TError = ErrorT
       return useMutation(getDeleteApiV1TenantsTidIssuesIidContextRefsCridMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid/interactions
  */
 export const getApiV1TenantsTidIssuesIidInteractions = (
@@ -2700,7 +2710,7 @@ export function useGetApiV1TenantsTidIssuesIidInteractions<TData = Awaited<Retur
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/interactions/:ixid/confirm
  */
 export const postApiV1TenantsTidIssuesIidInteractionsIxidConfirm = (
@@ -2771,7 +2781,7 @@ export const usePostApiV1TenantsTidIssuesIidInteractionsIxidConfirm = <TError = 
       return useMutation(getPostApiV1TenantsTidIssuesIidInteractionsIxidConfirmMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid/labels
  */
 export const getApiV1TenantsTidIssuesIidLabels = (
@@ -2879,7 +2889,7 @@ export function useGetApiV1TenantsTidIssuesIidLabels<TData = Awaited<ReturnType<
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/labels
  */
 export const postApiV1TenantsTidIssuesIidLabels = (
@@ -2949,7 +2959,7 @@ export const usePostApiV1TenantsTidIssuesIidLabels = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidIssuesIidLabelsMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/issues/:iid/labels/:lid
  */
 export const deleteApiV1TenantsTidIssuesIidLabelsLid = (
@@ -3020,7 +3030,7 @@ export const useDeleteApiV1TenantsTidIssuesIidLabelsLid = <TError = ErrorType<Er
       return useMutation(getDeleteApiV1TenantsTidIssuesIidLabelsLidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/move
  */
 export const postApiV1TenantsTidIssuesIidMove = (
@@ -3090,18 +3100,20 @@ export const usePostApiV1TenantsTidIssuesIidMove = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidIssuesIidMoveMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid/runs
  */
 export const getApiV1TenantsTidIssuesIidRuns = (
     tid: string,
     iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams,
  options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
 ) => {
 
 
       return customInstance<GetApiV1TenantsTidIssuesIidRuns200>(
-      {url: `/api/v1/tenants/${tid}/issues/${iid}/runs`, method: 'GET', signal
+      {url: `/api/v1/tenants/${tid}/issues/${iid}/runs`, method: 'GET',
+        params, signal
     },
       options);
     }
@@ -3110,24 +3122,26 @@ export const getApiV1TenantsTidIssuesIidRuns = (
 
 
 export const getGetApiV1TenantsTidIssuesIidRunsQueryKey = (tid: string,
-    iid: string,) => {
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams,) => {
     return [
-    `/api/v1/tenants/${tid}/issues/${iid}/runs`
+    `/api/v1/tenants/${tid}/issues/${iid}/runs`, ...(params ? [params] : [])
     ] as const;
     }
 
 
 export const getGetApiV1TenantsTidIssuesIidRunsQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(tid: string,
-    iid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidIssuesIidRunsQueryKey(tid,iid);
+  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidIssuesIidRunsQueryKey(tid,iid,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>> = ({ signal }) => getApiV1TenantsTidIssuesIidRuns(tid,iid, requestOptions, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>> = ({ signal }) => getApiV1TenantsTidIssuesIidRuns(tid,iid,params, requestOptions, signal);
 
 
 
@@ -3142,7 +3156,8 @@ export type GetApiV1TenantsTidIssuesIidRunsQueryError = ErrorType<Error>
 
 export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(
  tid: string,
-    iid: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>> & Pick<
+    iid: string,
+    params: undefined |  GetApiV1TenantsTidIssuesIidRunsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>,
           TError,
@@ -3153,7 +3168,8 @@ export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<ty
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(
  tid: string,
-    iid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>> & Pick<
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>,
           TError,
@@ -3164,7 +3180,8 @@ export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<ty
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(
  tid: string,
-    iid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -3173,11 +3190,12 @@ export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<ty
 
 export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError = ErrorType<Error>>(
  tid: string,
-    iid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+    iid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRuns>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetApiV1TenantsTidIssuesIidRunsQueryOptions(tid,iid,options)
+  const queryOptions = getGetApiV1TenantsTidIssuesIidRunsQueryOptions(tid,iid,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -3190,7 +3208,7 @@ export function useGetApiV1TenantsTidIssuesIidRuns<TData = Awaited<ReturnType<ty
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/runs
  */
 export const postApiV1TenantsTidIssuesIidRuns = (
@@ -3260,7 +3278,7 @@ export const usePostApiV1TenantsTidIssuesIidRuns = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidIssuesIidRunsMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid/runs/:rid
  */
 export const getApiV1TenantsTidIssuesIidRunsRid = (
@@ -3367,7 +3385,7 @@ export function useGetApiV1TenantsTidIssuesIidRunsRid<TData = Awaited<ReturnType
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Reads one ascending-by-seq window of an agent run's Thread together with the run's threadState and idleSince, all taken from one database snapshot, so the entries and the state are never mixed across instants. after and before are exclusive decimal seq cursors in opposite directions and are mutually exclusive: after=0 reads from the first entry, before=N returns the entries closest to N from below, and sending both is 400 invalid_pagination. Sending neither reads the tail — the newest limit entries — which is the window a panel opening on a live conversation wants. The response is always ascending by seq whichever cursor was used, and it reports the window's own nextCursor and prevCursor so a client pages in both directions by feeding each back as after and before. limit defaults to 200 and must not exceed 500; a limit outside 1..500 is 400 invalid_pagination and a cursor that is not a non-negative decimal integer is 400 invalid_cursor. Windows are chosen by seq range, never by OFFSET, so a concurrent append neither shifts a page nor duplicates an entry; entries are append-only and seq is gapless, so a client that re-reads with after set to its highest seen seq never misses or repeats an entry. There is no cross-request snapshot guarantee. This read changes nothing: it allocates no seq, writes no state and publishes no event. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Reads one ascending-by-seq window of an agent run's Thread together with the run's threadState and idleSince, all taken from one database snapshot, so the entries and the state are never mixed across instants. after and before are exclusive decimal seq cursors in opposite directions and are mutually exclusive: after=0 reads from the first entry, before=N returns the entries closest to N from below, and sending both is 400 invalid_pagination. Sending neither reads the tail — the newest limit entries — which is the window a panel opening on a live conversation wants. The response is always ascending by seq whichever cursor was used, and it reports the window's own nextCursor and prevCursor so a client pages in both directions by feeding each back as after and before. limit defaults to 200 and must not exceed 500; a limit outside 1..500 is 400 invalid_pagination and a cursor that is not a non-negative decimal integer is 400 invalid_cursor. Windows are chosen by seq range, never by OFFSET, so a concurrent append neither shifts a page nor duplicates an entry; entries are append-only and seq is gapless, so a client that re-reads with after set to its highest seen seq never misses or repeats an entry. There is no cross-request snapshot guarantee. This read changes nothing: it allocates no seq, writes no state and publishes no event. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread
  */
 export const getApiV1TenantsTidIssuesIidRunsRidThread = (
@@ -3482,7 +3500,7 @@ export function useGetApiV1TenantsTidIssuesIidRunsRidThread<TData = Awaited<Retu
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Ends an agent run's Thread at the user's request, which is what makes the Thread's upper lifecycle reachable from the UI rather than only from an expired idle window or a cancellation. The body is an empty JSON object and any field is 400 unknown_field. Accepted while the Thread is pending, active or idle, answering 202 with the Thread's new state ending; a Thread already ending or ended answers 409 thread_closed. The transition and the EndSession command it releases commit together with the idempotency record, so a 503 thread_command_unavailable — the control plane is not wired in this deployment — leaves nothing behind and the same key may be retried as a first request. This endpoint never advances the Thread to ended, never marks a queued turn discarded and never touches the run's phase, status, result or Workspace: ending a Thread asks the session to stop and the session's own terminal state decides what follows. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Ends an agent run's Thread at the user's request, which is what makes the Thread's upper lifecycle reachable from the UI rather than only from an expired idle window or a cancellation. The body is an empty JSON object and any field is 400 unknown_field. Accepted while the Thread is pending, active or idle, answering 202 with the Thread's new state ending; a Thread already ending or ended answers 409 thread_closed. The transition and the EndSession command it releases commit together with the idempotency record, so a failure anywhere in that transaction leaves nothing behind and the same key may be retried as a first request. This endpoint never advances the Thread to ended, never marks a queued turn discarded and never touches the run's phase, status, result or Workspace: ending a Thread asks the session to stop and the session's own terminal state decides what follows. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/end
  */
 export const postApiV1TenantsTidIssuesIidRunsRidThreadEnd = (
@@ -3553,7 +3571,7 @@ export const usePostApiV1TenantsTidIssuesIidRunsRidThreadEnd = <TError = ErrorTy
       return useMutation(getPostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Appends one user turn to an agent run's Thread and returns the entry that was created, with the Cloud-generated turnId the Node will echo back. Authorized like a comment: any active tenant member who can read the Issue. content accepts text blocks only and their total text must not exceed 64 KiB, otherwise 400 content_too_large; an unrecognized block type is 400 invalid_field_type, never a silent drop. Accepted while the Thread is pending, active or idle and no cancellation has been requested; a Thread that is ending or ended, and a run whose cancellation request is already recorded, both answer 409 thread_closed — a turn accepted after a cancellation would be persisted and never executed. The entry and the delivery command for it commit together with the idempotency record, so a 503 thread_command_unavailable — the control plane is not wired in this deployment — leaves nothing behind and the same key may be retried as a first request. A missing or mismatched tenant, Issue or run is 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Appends one user turn to an agent run's Thread and returns the entry that was created, with the Cloud-generated turnId the Node will echo back. Authorized like a comment: any active tenant member who can read the Issue. content accepts text blocks only and their total text must not exceed 64 KiB, otherwise 400 content_too_large; an unrecognized block type is 400 invalid_field_type, never a silent drop. Accepted while the Thread is pending, active or idle and no cancellation has been requested; a Thread that is ending or ended, and a run whose cancellation request is already recorded, both answer 409 thread_closed — a turn accepted after a cancellation would be persisted and never executed. The entry and the delivery command for it commit together with the idempotency record, so a failure anywhere in that transaction leaves nothing behind and the same key may be retried as a first request. A missing or mismatched tenant, Issue or run is 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages
  */
 export const postApiV1TenantsTidIssuesIidRunsRidThreadMessages = (
@@ -3624,7 +3642,7 @@ export const usePostApiV1TenantsTidIssuesIidRunsRidThreadMessages = <TError = Er
       return useMutation(getPostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/issues/:iid/subscribers
  */
 export const deleteApiV1TenantsTidIssuesIidSubscribers = (
@@ -3694,7 +3712,7 @@ export const useDeleteApiV1TenantsTidIssuesIidSubscribers = <TError = ErrorType<
       return useMutation(getDeleteApiV1TenantsTidIssuesIidSubscribersMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid/subscribers
  */
 export const getApiV1TenantsTidIssuesIidSubscribers = (
@@ -3802,7 +3820,7 @@ export function useGetApiV1TenantsTidIssuesIidSubscribers<TData = Awaited<Return
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/issues/:iid/subscribers
  */
 export const postApiV1TenantsTidIssuesIidSubscribers = (
@@ -3872,7 +3890,7 @@ export const usePostApiV1TenantsTidIssuesIidSubscribers = <TError = ErrorType<Er
       return useMutation(getPostApiV1TenantsTidIssuesIidSubscribersMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/issues/:iid/timeline
  */
 export const getApiV1TenantsTidIssuesIidTimeline = (
@@ -3972,7 +3990,7 @@ export function useGetApiV1TenantsTidIssuesIidTimeline<TData = Awaited<ReturnTyp
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/join-links
  */
 export const getApiV1TenantsTidJoinLinks = (
@@ -4073,7 +4091,7 @@ export function useGetApiV1TenantsTidJoinLinks<TData = Awaited<ReturnType<typeof
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/join-links
  */
 export const postApiV1TenantsTidJoinLinks = (
@@ -4142,7 +4160,7 @@ export const usePostApiV1TenantsTidJoinLinks = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidJoinLinksMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/join-links/:lid
  */
 export const deleteApiV1TenantsTidJoinLinksLid = (
@@ -4212,7 +4230,7 @@ export const useDeleteApiV1TenantsTidJoinLinksLid = <TError = ErrorType<Error>,
       return useMutation(getDeleteApiV1TenantsTidJoinLinksLidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/join-requests
  */
 export const getApiV1TenantsTidJoinRequests = (
@@ -4313,7 +4331,7 @@ export function useGetApiV1TenantsTidJoinRequests<TData = Awaited<ReturnType<typ
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/join-requests/:rid/approve
  */
 export const postApiV1TenantsTidJoinRequestsRidApprove = (
@@ -4383,7 +4401,7 @@ export const usePostApiV1TenantsTidJoinRequestsRidApprove = <TError = ErrorType<
       return useMutation(getPostApiV1TenantsTidJoinRequestsRidApproveMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/join-requests/:rid/reject
  */
 export const postApiV1TenantsTidJoinRequestsRidReject = (
@@ -4453,7 +4471,7 @@ export const usePostApiV1TenantsTidJoinRequestsRidReject = <TError = ErrorType<E
       return useMutation(getPostApiV1TenantsTidJoinRequestsRidRejectMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/labels
  */
 export const getApiV1TenantsTidLabels = (
@@ -4554,7 +4572,7 @@ export function useGetApiV1TenantsTidLabels<TData = Awaited<ReturnType<typeof ge
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary POST /api/v1/tenants/:tid/labels
  */
 export const postApiV1TenantsTidLabels = (
@@ -4623,7 +4641,7 @@ export const usePostApiV1TenantsTidLabels = <TError = ErrorType<Error>,
       return useMutation(getPostApiV1TenantsTidLabelsMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/labels/:lid
  */
 export const deleteApiV1TenantsTidLabelsLid = (
@@ -4693,7 +4711,7 @@ export const useDeleteApiV1TenantsTidLabelsLid = <TError = ErrorType<Error>,
       return useMutation(getDeleteApiV1TenantsTidLabelsLidMutationOptions(options), queryClient);
     }
     /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary PUT /api/v1/tenants/:tid/labels/:lid
  */
 export const putApiV1TenantsTidLabelsLid = (
@@ -4864,7 +4882,7 @@ export function useGetApiV1TenantsTidPeople<TData = Awaited<ReturnType<typeof ge
 
 
 /**
- * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Administrator response explicitly excludes repository URL, worktree details, credentials, execution output and operation request/result/error details. Administrative stop still requires idle evidence. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Administrator response explicitly excludes repository URL, worktree details, credentials, execution output and operation request/result/error details. Administrative stop still requires idle evidence. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary GET /api/v1/tenants/:tid/resource-status
  */
 export const getApiV1TenantsTidResourceStatus = (

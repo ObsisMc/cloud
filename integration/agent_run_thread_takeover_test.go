@@ -5,19 +5,21 @@ package integration
 // reader can follow it without guessing:
 //
 //	Controller → controlpb.AgentRunService.TakeOverThreadEvents          (gRPC, this file)
-//	  → controlgrpc.agentRunService.TakeOverThreadEvents                 (internal/controlgrpc/agentruns.go)
-//	  → Store.Control("agent_thread_takeover")                           (internal/core/control.go)
+//	  → controlgrpc.agentRunService.TakeOverThreadEvents                 (internal/controlgrpc/agent_runs.go)
+//	  → Store.Control(Action: "thread_events")                           (internal/core/control.go)
 //	  → Store.transact: lease check + pg_advisory_xact_lock              (internal/core/store.go)
-//	  → agentThreadTakeover: node_event_receipts + fence                 (internal/core/agent_run_thread_takeover.go)
-//	  → businessAgentRunHooks.ThreadEventsTakenOver                      (internal/core/agent_run_settle.go)
-//	  → Store.threadEventsTakenOver: thread_entries + starting→running   (internal/core/agent_run_thread.go)
+//	  → takeOverThreadEvents: node_event_receipts + per-event fence      (internal/core/thread_commands.go)
+//	  → threadEventsTakenOver → Store.OnThreadEvents                     (internal/core/agent_run_hooks.go)
+//	  → onThreadEvents → threadEventsTakenOver                           (internal/core/business_hooks.go)
+//	  → thread_entries + the Thread lifecycle transition                 (internal/core/agent_run_thread.go)
 //	  → COMMIT → TakeOverThreadEventsResponse{ taken_over_through }
 //
 // Everything before the gRPC call is production code too: the run reaches `starting` through the
 // real Phase 3A recovery pass (Store.StartQueuedAgentSessionsOnce) and the session execution is
-// registered through the real Phase 4A control actions (agent_work_claim / agent_work_dispatch).
-// Only the scene itself — tenant, project, Space Agent, issue, run and its run Workspace — is seeded
-// directly, because run creation and CreateRunWorkspace are still G-001 placeholders.
+// registered through the real Phase 4A control actions (the `clone_claim` and `clone_dispatch`
+// commands, whose execution-centric names the merged control plane kept). Only the scene itself —
+// tenant, project, Space Agent, issue, run and its run Workspace — is seeded directly, because run
+// creation and CreateRunWorkspace are still G-001 placeholders.
 
 import (
 	"context"
@@ -54,16 +56,16 @@ type seededAgentSession struct {
 func seedAgentSessionScene(t *testing.T, store *core.Store) seededAgentSession {
 	t.Helper()
 	ctx := context.Background()
-	// The production seams, wired exactly as cmd/server/main.go wires them. Without both of these the
-	// takeover below would roll back fail-closed (G-003) rather than prove the real path.
-	store.AgentRunControlPlane = core.NewStoreAgentRunControlPlane()
-	store.AgentRunHooks = core.NewBusinessAgentRunHooks(store)
+	// The production seam, wired exactly as cmd/server/main.go wires it. Without it the takeover below
+	// would roll back fail-closed (G-003) rather than prove the real path: the control plane leaves the
+	// B side a no-op handoff until Cloud's lifecycle is bound onto it.
+	core.BindBusinessHooks(store)
 
 	runID, _, nodeID := seedStartingAgentRun(t, store)
 	must(t, store.StartQueuedAgentSessionsOnce(ctx))
 
 	claims := &core.Claims{Kind: "service", Role: "controller", RegisteredClaims: jwt.RegisteredClaims{Subject: "ctrl-a"}}
-	picked, e := store.Control(ctx, &core.ControlRequest{Action: "agent_work_claim", Body: core.Object{"epoch": 1}, Service: claims})
+	picked, e := store.Control(ctx, &core.ControlRequest{Action: "clone_claim", Body: core.Object{"epoch": 1}, Service: claims})
 	must(t, e)
 	work := picked.O("work")
 	if work == nil {
@@ -71,8 +73,8 @@ func seedAgentSessionScene(t *testing.T, store *core.Store) seededAgentSession {
 	}
 	executionID := "exec-grpc-" + work.S("id")[:8]
 	_, e = store.Control(ctx, &core.ControlRequest{
-		Action:  "agent_work_dispatch",
-		Body:    core.Object{"workId": work.S("id"), "executionId": executionID, "nodeId": nodeID, "input": work.O("input"), "epoch": 1},
+		Action:  "clone_dispatch",
+		Body:    core.Object{"operationId": runID, "executionId": executionID, "nodeId": nodeID, "input": work.O("input"), "epoch": 1},
 		Service: claims,
 	})
 	must(t, e)
@@ -95,12 +97,16 @@ func seedStartingAgentRun(t *testing.T, store *core.Store) (runID, workspaceID, 
 	// without re-deriving the schema's own linkage.
 	baselineOperationID, baselineExecutionID := uuid.NewString(), "exec-baseline-"+workspaceID[:8]
 	// The frozen run-create snapshot: renderAgentInitialTurn and the AgentSession spec both read it.
+	// `gitIdentity` is part of it because the AgentSession wire contract carries one and
+	// runGitIdentity refuses to invent it: a run whose input names none resolves its trigger actor
+	// instead, and a directly seeded run has no `run.enqueued` activity to resolve one from.
 	input := core.Object{
 		"task":               "Fix the auth flow",
 		"interactionValues":  core.Object{"scope": "web"},
 		"target":             core.Object{"type": "issue", "id": issue},
 		"agentPluginId":      "official/hello-world",
 		"agentPluginVersion": "1.0.0",
+		"gitIdentity":        core.Object{"name": "takeover", "email": user + "@users.noreply.ora.invalid"},
 	}
 	tx, e := store.Pool.Begin()
 	must(t, e)
@@ -127,7 +133,13 @@ func seedStartingAgentRun(t *testing.T, store *core.Store) (runID, workspaceID, 
 	// is open because that is what `ready` means here: the create_workspace path's last step is
 	// openWorkspace, which commits observed_state='ready' and admission_open=true together, so a
 	// `ready` Workspace with admission closed is a state the production path never produces.
-	exec("run-workspace", `INSERT INTO workspaces(id,tenant_id,owner_user_id,project_id,kind,desired_state,observed_state,admission_open,runtime_generation,requested_ref,issue_run_id) VALUES($1,$2,$3,$4,'isolated','running','ready',true,1,'HEAD',$5)`, workspaceID, tenant, user, project, runID)
+	//
+	// creator_user_id/creator_evidence are part of the scene because the run Workspace's own deletion
+	// (the run's terminal settlement releases it) reads the creator as the operation's actor, and
+	// insertWorkspace always records the resolved trigger actor with 'verified_request' evidence. A
+	// row with the column left NULL is a state createRunWorkspace cannot produce, and the delete would
+	// then enqueue an operation with an empty actor.
+	exec("run-workspace", `INSERT INTO workspaces(id,tenant_id,owner_user_id,creator_user_id,creator_evidence,project_id,kind,desired_state,observed_state,admission_open,runtime_generation,requested_ref,issue_run_id) VALUES($1,$2,$3,$4,'verified_request',$5,'isolated','running','ready',true,1,'HEAD',$6)`, workspaceID, tenant, user, user, project, runID)
 	exec("task", `INSERT INTO tasks(id,workspace_id,title) VALUES($1,$2,'takeover task')`, uuid.NewString(), workspaceID)
 	exec("run-workspace-bind", `UPDATE issue_runs SET workspace_id=$2, version=version+1, updated_at=now() WHERE id=$1`, runID, workspaceID)
 	// The run Workspace's baseline. A Workspace observed `ready` reached that state through its
@@ -137,18 +149,30 @@ func seedStartingAgentRun(t *testing.T, store *core.Store) (runID, workspaceID, 
 	// state the production path can actually reach.
 	exec("run-workspace-operation", `INSERT INTO operations(id,tenant_id,actor_user_id,project_id,workspace_id,kind,state,step,request,idempotency_key,request_hash,controller_epoch) VALUES($1,$2,$3,$4,$5,'create_workspace','succeeded','done','{}',$6,'baseline-hash',1)`,
 		baselineOperationID, tenant, user, project, workspaceID, "run-workspace-"+workspaceID[:8])
-	exec("run-workspace-clone", `INSERT INTO clone_executions(execution_id,operation_id,workspace_id,node_id,input,result,dispatched_epoch) VALUES($1,$2,$3,$4,$5,$6,1)`,
-		baselineExecutionID, baselineOperationID, workspaceID, nodeID,
+	exec("run-workspace-clone", `INSERT INTO clone_executions(execution_id,operation_id,workspace_id,node_id,node_operation_id,input,result,dispatched_epoch) VALUES($1,$2,$3,$4,$5,$6,$7,1)`,
+		baselineExecutionID, baselineOperationID, workspaceID, nodeID, baselineExecutionID,
 		mustJSON(t, core.Object{"kind": "clone", "repositoryUrl": "https://example.invalid/takeover.git", "branch": "main"}),
 		mustJSON(t, core.Object{"node": core.Object{"nodeId": nodeID, "nodeIncarnationId": "inc-" + nodeID[:8]}, "outcome": "clone_ready", "path": "/work", "commit": seedRunWorkspaceCommit}))
 	exec("run-workspace-baseline", `UPDATE workspaces SET base_commit_id=$2, version=version+1 WHERE id=$1`, workspaceID, seedRunWorkspaceCommit)
+	// The run's runtime binding, in exactly the state the create_workspace operation's last step
+	// leaves it (finishRuntimeMaintenance): the maintenance intent has moved from the operation to the
+	// run, the epoch has advanced and the Node has not yet confirmed the new binding. Both the session
+	// dispatch and every delivery settlement re-read this row, and the Node's own acknowledgement is
+	// what closes it — so seeding anything else here would test a state the production path cannot
+	// produce. maintenance_operation_id is NULL because 0026 allows exactly one of the two intents.
+	exec("run-runtime-control", `INSERT INTO runtime_controls(workspace_id,state,maintenance_run_id,control_epoch,binding_confirmed,input_closed) VALUES($1,'maintenance',$2,2,false,false)`, workspaceID, runID)
 	exec("sandbox", `INSERT INTO sandbox_instances(id,workspace_id,generation,observed_state) VALUES($1,$2,1,'running')`, sandboxID, workspaceID)
-	exec("node", `INSERT INTO node_instances(id,workspace_id,sandbox_instance_id,service_subject,connection_state,protocol_version,initialized) VALUES($1,$2,$3,'node','connected',1,true)`, nodeID, workspaceID, sandboxID)
+	// The Node carries the desktop's two-part identity (0016): `node_id` is the identity the Node
+	// service itself owns and the one every control action addresses it by, while the row id is
+	// Cloud's own registration handle. Both are the seeded nodeID here so a test names one value.
+	// node_id is text and the row id is uuid, so the identity is bound once as its own parameter: one
+	// placeholder used for both columns would leave PostgreSQL unable to deduce either type.
+	exec("node", `INSERT INTO node_instances(id,workspace_id,sandbox_instance_id,service_subject,connection_state,protocol_version,initialized,node_id,node_incarnation_id) VALUES($1,$2,$3,'node','connected',1,true,$4,$5)`, nodeID, workspaceID, sandboxID, nodeID, "inc-"+nodeID[:8])
 	// The global Controller lease. On a fresh schema this seeds it; in a fixture schema that already
 	// has one (its own simulator controller) it re-points that row to the Controller the test speaks
 	// as, so the lease-validated takeover actions below are validated against exactly this holder.
-	exec("lease", `INSERT INTO controller_leases(name,holder_id,epoch,expires_at) VALUES('global','ctrl-a',1,clock_timestamp()+interval '30 seconds')
-		ON CONFLICT (name) DO UPDATE SET holder_id='ctrl-a', epoch=1, expires_at=clock_timestamp()+interval '30 seconds'`)
+	exec("lease", `INSERT INTO controller_leases(name,holder_id,epoch,expires_at) VALUES('global','ctrl-a',1,clock_timestamp()+interval '30 minutes')
+		ON CONFLICT (name) DO UPDATE SET holder_id='ctrl-a', epoch=1, expires_at=clock_timestamp()+interval '30 minutes'`)
 	must(t, tx.Commit())
 	return runID, workspaceID, nodeID
 }

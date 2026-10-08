@@ -196,7 +196,7 @@ func drainSpace(hints <-chan core.SpaceEvent) []core.SpaceEvent {
 // and publishes one `thread_changed` with no `thread_appended` and no new seq.
 func TestSessionEndedEndsThreadDiscardsQueuedAndReleasesDelivery(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	stream := f.openThreadStream(t, scene.tenantID, scene.spaceID)
 	defer stream.close()
@@ -354,7 +354,7 @@ func TestSessionEndedEndsThreadDiscardsQueuedAndReleasesDelivery(t *testing.T) {
 // writes a second receipt, moves the lifecycle again or publishes a second notice.
 func TestSessionEndedReplayIsANoOp(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 	f.runningThread(t, scene)
@@ -412,7 +412,7 @@ func TestSessionEndedReplayIsANoOp(t *testing.T) {
 // the Thread, the lifecycle and the sequence are left alone.
 func TestSessionEndedRefusalsLeaveNoTrace(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 	f.runningThread(t, scene)
@@ -466,7 +466,7 @@ func errOnly(_ *controlpb.TakeOverNodeEventResponse, err error) error { return e
 // exercises the actual after-receipt failure path rather than a stubbed hook.
 func TestSessionEndedHookFailureRollsBackTheWholeTakeover(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 	f.runningThread(t, scene)
@@ -486,7 +486,10 @@ func TestSessionEndedHookFailureRollsBackTheWholeTakeover(t *testing.T) {
 
 	hints, cancel := f.watchSpace(scene.spaceID)
 	defer cancel()
-	expectStatus(t, errOnly(f.sessionEnd(scene, "", 2, controlpb.AgentSessionEndReason_AGENT_SESSION_END_REASON_USER_ENDED, "", "")), codes.Unavailable, controlpb.ErrorCode_ERROR_CODE_UNAVAILABLE)
+	// The seam classifies a hook failure as the business-precondition conflict it is. The obligation
+	// under test is the rollback, not the code: the event is not acknowledged, so the Node's durable
+	// ledger keeps it and replays it.
+	expectStatus(t, errOnly(f.sessionEnd(scene, "", 2, controlpb.AgentSessionEndReason_AGENT_SESSION_END_REASON_USER_ENDED, "", "")), codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
 	if got := drainSpace(hints); len(got) != 0 {
 		t.Fatalf("a rolled-back terminal takeover must publish nothing, got %v", got)
 	}
@@ -514,8 +517,9 @@ func TestSessionEndedHookFailureRollsBackTheWholeTakeover(t *testing.T) {
 // §9, §13 — the precondition matrix. The approved row is unconditional (Thread D4's last row is
 // stated for the session execution's terminal event, and IssueRun D3's `delivering` entry condition
 // is "any end reason"), so every live Thread state reaches `ended`; the states the ADR does not
-// reach — an already-terminal Thread and a run that is not in a session phase at all — are refused
-// as invariant errors and roll back whole rather than being tolerated.
+// reach — an already-terminal Thread and a run that is not in a session phase at all — contradict
+// the authoritative row, so the seam refuses the call as a conflict and the whole takeover rolls
+// back rather than being tolerated.
 func TestSessionEndedPreconditionMatrix(t *testing.T) {
 	live := []struct {
 		name string
@@ -579,7 +583,7 @@ func TestSessionEndedPreconditionMatrix(t *testing.T) {
 	for _, c := range live {
 		t.Run(c.name, func(t *testing.T) {
 			f := setup(t)
-			f.useRealControlPlane()
+			f.bindBusinessHooks()
 			scene := seedLiveThreadScene(t, f)
 			scene.start(t, f)
 			sequence, turn := c.drive(t, f, scene)
@@ -630,7 +634,7 @@ func TestSessionEndedPreconditionMatrix(t *testing.T) {
 	for _, c := range refused {
 		t.Run(c.name, func(t *testing.T) {
 			f := setup(t)
-			f.useRealControlPlane()
+			f.bindBusinessHooks()
 			scene := seedLiveThreadScene(t, f)
 			scene.start(t, f)
 			f.runningThread(t, scene)
@@ -647,9 +651,13 @@ func TestSessionEndedPreconditionMatrix(t *testing.T) {
 			// comparison below must see the NULL rather than fail while reading it.
 			phase, status, state := f.runState(scene.runID)
 
-			// An invariant violation is "retry later", never "this event is wrong": the Node must
-			// replay, so the fault is UNAVAILABLE and nothing about it is committed.
-			expectStatus(t, errOnly(f.sessionEnd(scene, "", 2, controlpb.AgentSessionEndReason_AGENT_SESSION_END_REASON_USER_ENDED, "", "")), codes.Unavailable, controlpb.ErrorCode_ERROR_CODE_UNAVAILABLE)
+			// The refusal is a business-precondition contradiction, so the seam's classification is
+			// CONFLICT: the control-plane evidence (the receipt that was written) and the business
+			// transition roll back together and nothing about the event is committed. "Not committed"
+			// is what carries the no-silent-loss obligation — the event is not acknowledged, so the
+			// Node's durable ledger still holds it — and the Controller's approved behavior on
+			// CONFLICT is to clear its own queue, not acknowledge, and wait for that replay.
+			expectStatus(t, errOnly(f.sessionEnd(scene, "", 2, controlpb.AgentSessionEndReason_AGENT_SESSION_END_REASON_USER_ENDED, "", "")), codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
 
 			if got := f.receipts(scene.executionID); len(got) != len(receipts) {
 				t.Fatalf("a refused terminal event must not be receipted: got %v want %v", got, receipts)
@@ -679,7 +687,7 @@ func TestSessionEndedPreconditionMatrix(t *testing.T) {
 // kind guard, not the mechanism that creates such a row.
 func TestSessionEndedRefusesADeliveryExecution(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 	f.runningThread(t, scene)
@@ -690,9 +698,13 @@ func TestSessionEndedRefusesADeliveryExecution(t *testing.T) {
 		t.Fatalf("the scene must hold one released delivery work item, got %d", len(work))
 	}
 	deliveryExecution := "exec-delivery-" + scene.runID[:8]
+	// The row carries exactly the shape the delivery pipeline registers — the work item it was
+	// dispatched from, the run Workspace it targets and the two-part Node identity — so the refusal
+	// under test is the A layer's kind guard and not a scene the production path could not produce.
 	_, e := f.store.Pool.Exec(`
-		INSERT INTO node_executions(execution_id, kind, operation_id, work_id, node_id, input, dispatched_epoch)
-		VALUES($1,'deliver_revision',$2,$3,$4,'{}',1)`, deliveryExecution, scene.runID, work[0].S("id"), scene.nodeID)
+		INSERT INTO node_executions(execution_id, kind, operation_id, work_id, workspace_id, node_id, node_operation_id, input, dispatched_epoch)
+		VALUES($1,'deliver_revision',$2,$3,(SELECT workspace_id FROM issue_runs WHERE id=$2),$4,$1,'{}',1)`,
+		deliveryExecution, scene.runID, work[0].S("id"), scene.nodeID)
 	must(t, e)
 
 	delivery := scene
@@ -717,7 +729,7 @@ func TestSessionEndedRefusesADeliveryExecution(t *testing.T) {
 // over, may dispose of it.
 func TestDiscardedAppearsOnlyOnTheSessionTerminalTakeover(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	scene.start(t, f)
 	f.runningThread(t, scene)
@@ -755,7 +767,7 @@ func TestDiscardedAppearsOnlyOnTheSessionTerminalTakeover(t *testing.T) {
 func TestSessionEndedSerializesWithConcurrentThreadMutations(t *testing.T) {
 	t.Run("a new turn posted while the session ends", func(t *testing.T) {
 		f := setup(t)
-		f.useRealControlPlane()
+		f.bindBusinessHooks()
 		scene := seedLiveThreadScene(t, f)
 		scene.start(t, f)
 		f.runningThread(t, scene)
@@ -810,7 +822,7 @@ func TestSessionEndedSerializesWithConcurrentThreadMutations(t *testing.T) {
 
 	t.Run("the same terminal event sent twice", func(t *testing.T) {
 		f := setup(t)
-		f.useRealControlPlane()
+		f.bindBusinessHooks()
 		scene := seedLiveThreadScene(t, f)
 		scene.start(t, f)
 		f.runningThread(t, scene)
@@ -856,7 +868,7 @@ func TestSessionEndedSerializesWithConcurrentThreadMutations(t *testing.T) {
 
 	t.Run("the idle scanner ticks while the session ends", func(t *testing.T) {
 		f := setup(t)
-		f.useRealControlPlane()
+		f.bindBusinessHooks()
 		f.store.ThreadIdleTimeout = 15 * time.Minute
 		scene := seedLiveThreadScene(t, f)
 		scene.start(t, f)

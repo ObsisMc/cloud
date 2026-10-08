@@ -39,10 +39,26 @@ type skeletonSeed struct {
 	userID, tenantID, spaceID, projectID, mainWorkspaceID, issueID, runID, agentID, runWorkspaceID string
 }
 
-// seedAgentIssueRunSkeleton inserts the ownership chain the new business tables
-// reference. All inserts and the mutual run-workspace binding happen in one
-// transaction so the deferred project_main/tenant_admin triggers stay satisfied.
+// seedAgentIssueRunSkeleton inserts the ownership chain the business tables reference and binds the
+// run and its Workspace both ways. It needs the whole schema, including the business half.
 func seedAgentIssueRunSkeleton(t *testing.T, pool *sql.DB) skeletonSeed {
+	t.Helper()
+	s := seedOwnershipChain(t, pool)
+	bindWorkspaceToRun(t, pool, s)
+	bindRunToWorkspace(t, pool, s)
+	return s
+}
+
+// seedOwnershipChain inserts one minimal ownership chain: user, tenant, the tenant's collaboration
+// space, a project with its main workspace, one issue, one agent IssueRun, and the run's isolated
+// workspace.
+//
+// It deliberately writes neither half of the run↔Workspace binding, because which of those columns
+// exists depends on how far the migrations under test have been applied: the control plane's
+// back-reference arrives in 0024 and the business layer's handle in 0030. Upgrade-path tests seed a
+// live database *before* the migration they exercise runs, so they bind afterwards through one of the
+// two helpers below; fresh-schema tests use seedAgentIssueRunSkeleton.
+func seedOwnershipChain(t *testing.T, pool *sql.DB) skeletonSeed {
 	t.Helper()
 	newID := func() string { return uuid.NewString() }
 	s := skeletonSeed{
@@ -68,11 +84,24 @@ func seedAgentIssueRunSkeleton(t *testing.T, pool *sql.DB) skeletonSeed {
 	// 0003: a live isolated workspace must own exactly one task identity; the
 	// deferred task_identity trigger checks this at commit, so seed the task here.
 	exec(`INSERT INTO tasks(id, workspace_id, title) VALUES($1, $2, 'Skeleton run workspace task')`, newID(), s.runWorkspaceID)
-	// IssueRun D2: the run Workspace is exclusive to one IssueRun and vice versa.
-	exec(`UPDATE issue_runs SET workspace_id=$1 WHERE id=$2`, s.runWorkspaceID, s.runID)
-	exec(`UPDATE workspaces SET issue_run_id=$1 WHERE id=$2`, s.runID, s.runWorkspaceID)
 	must(t, tx.Commit())
 	return s
+}
+
+// bindWorkspaceToRun writes the control plane's half of the binding (0024): the Workspace names the
+// IssueRun that owns it. It is what the control plane resolves run operations by.
+func bindWorkspaceToRun(t *testing.T, pool *sql.DB, s skeletonSeed) {
+	t.Helper()
+	_, e := pool.Exec(`UPDATE workspaces SET issue_run_id=$1 WHERE id=$2`, s.runID, s.runWorkspaceID)
+	must(t, e)
+}
+
+// bindRunToWorkspace writes the business layer's half of the binding (0030): the run names its
+// exclusive run Workspace. Only the business layer writes it, so it does not exist before 0030.
+func bindRunToWorkspace(t *testing.T, pool *sql.DB, s skeletonSeed) {
+	t.Helper()
+	_, e := pool.Exec(`UPDATE issue_runs SET workspace_id=$1 WHERE id=$2`, s.runWorkspaceID, s.runID)
+	must(t, e)
 }
 
 // wantPGError asserts err is a PostgreSQL error with the given SQLSTATE.
@@ -126,8 +155,8 @@ func TestAgentIssueRunSkeletonSchemaConstraints(t *testing.T) {
 	wantPGError(t, e, "23505") // one row per (space, plugin), even across statuses
 	_, e = pool.Exec(`INSERT INTO space_agents(id, space_id, tenant_id, plugin_id, display_name, status) VALUES($1, $2, $3, 'official/other', 'Other', 'broken')`, uuid.NewString(), s.spaceID, s.tenantID)
 	wantPGError(t, e, "23514") // status must be active|retired
-	_, e = pool.Exec(`INSERT INTO space_agents(id, space_id, tenant_id, plugin_id, display_name, status) VALUES($1, $2, $3, 'no-slash', 'No slash', 'active')`, uuid.NewString(), s.spaceID, s.tenantID)
-	wantPGError(t, e, "23514") // plugin_id must be namespace/identifier
+	_, e = pool.Exec(`INSERT INTO space_agents(id, space_id, tenant_id, plugin_id, display_name, status) VALUES($1, $2, $3, $4, 'Long id', 'active')`, uuid.NewString(), s.spaceID, s.tenantID, strings.Repeat("p", 301))
+	wantPGError(t, e, "23514") // plugin_id is bounded, not interpreted: the catalog owns its shape
 	_, e = pool.Exec(`INSERT INTO space_agents(id, space_id, tenant_id, plugin_id, display_name, status) VALUES($1, $2, $3, 'official/ghost', 'Ghost', 'active')`, uuid.NewString(), uuid.NewString(), s.tenantID)
 	wantPGError(t, e, "23503") // space must exist
 

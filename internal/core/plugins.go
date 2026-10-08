@@ -117,7 +117,11 @@ func (t *transaction) spacePluginRow(spaceID, namespace, identifier string) Obje
 // observed state. Desired/observed split makes the UI able to show "installing"
 // while the fan-out effects are still running.
 func spacePluginList(t *transaction, spaceID string) Object {
-	return Object{"items": t.list(`SELECT space_id,tenant_id,source_namespace,identifier,desired_state,desired_version,observed_state,observed_version,install_error,version,created_at,updated_at,(source_namespace||'/'||identifier) AS id FROM space_plugins WHERE space_id=$1 ORDER BY source_namespace,identifier`, spaceID)}
+	rows := t.list(`SELECT space_id,tenant_id,source_namespace,identifier,desired_state,desired_version,observed_state,observed_version,install_error,version,created_at,updated_at,(source_namespace||'/'||identifier) AS id FROM space_plugins WHERE space_id=$1 ORDER BY source_namespace,identifier`, spaceID)
+	for i, row := range rows {
+		rows[i] = pluginSelection(t, spaceID, row.S("sourceNamespace"), row.S("identifier"))
+	}
+	return Object{"items": rows}
 }
 
 // pluginIdentity splits a canonical plugin id into its namespace and identifier
@@ -135,126 +139,69 @@ func pluginIdentity(id string) (namespace, identifier string, ok bool) {
 // plane may still provision or stop it; admission at effect time gates the
 // actual dispatch).
 func livePluginWorkspaces(t *transaction, spaceID string) []Object {
-	return t.list(`SELECT w.* FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE p.space_id=$1 AND w.deleted_at IS NULL ORDER BY w.id`, spaceID)
+	// Run Workspaces install plugins through their own create_workspace step. They are not fan-out
+	// targets: a user install must not queue an operation against a Workspace the user cannot see.
+	return t.list(`SELECT w.* FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE p.space_id=$1 AND w.deleted_at IS NULL AND w.issue_run_id IS NULL ORDER BY w.id`, spaceID)
 }
 
-// installSpacePlugin records the member's install intent and fans it out:
-// one workspace_plugin_instances row per live runtime workspace plus one
-// install_plugin operation per target workspace. The one_project_operation
-// constraint serializes projects: a project with an in-flight operation makes
-// the whole install 409, and one install never creates two operations for the
-// same project (a second live workspace of a busy project is covered by the
-// next install, which re-fans-out pending instances).
+// installSpacePlugin records an administrator's pinned selection. Execution waits durably;
+// accepting selection is never evidence that a real runtime installed the plugin.
 func installSpacePlugin(t *transaction, r *PublicRequest, uid string) Object {
-	spaceMember(t, r.SpaceID, uid)
+	requireSpaceRole(spaceMember(t, r.SpaceID, uid), "admin")
 	namespace, identifier, ok := pluginIdentity(r.Body.S("identifier"))
 	require(ok, 400, "invalid_plugin_id")
 	entry := t.pluginCatalogEntry(namespace + "/" + identifier)
 	require(entry != nil, 404, "plugin_not_found")
-	// Packs are orchestration entries; v1 does not expand them (plan Q4).
 	require(entry.S("kind") != "pack", 400, "plugin_kind_not_installable")
-	desiredVersion := r.Body.S("pluginVersion")
-	if desiredVersion == "" {
-		desiredVersion = entry.S("version")
+	desired := r.Body.S("pluginVersion")
+	if desired == "" {
+		desired = entry.S("version")
 	}
-	// Versions are pinned at install time; the catalog only lists its current
-	// version, so anything else cannot be installed from it (decision D2).
-	require(desiredVersion == entry.S("version"), 400, "plugin_version_unavailable")
-
-	// The already-pinned case short-circuits before any fan-out admission:
-	// re-installing the same version is an idempotent success that must not
-	// depend on the projects being idle.
+	require(desired == entry.S("version"), 400, "plugin_version_unavailable")
 	old := t.spacePluginRow(r.SpaceID, namespace, identifier)
-	if old != nil && old.S("desiredState") == "installed" && old.S("desiredVersion") == desiredVersion {
-		return Object{"resource": old}
-	}
-
-	workspaces := livePluginWorkspaces(t, r.SpaceID)
-	// Fail before any write when a target project is busy; the unique index
-	// one_project_operation remains the final integrity guard.
-	for _, w := range workspaces {
-		idleProject(t, w.S("projectId"))
-	}
-
-	if old == nil {
-		t.exec(`INSERT INTO space_plugins(space_id,tenant_id,source_namespace,identifier,desired_state,desired_version,observed_state) VALUES($1,$2,$3,$4,'installed',$5,'pending')`,
-			r.SpaceID, r.TenantID, namespace, identifier, desiredVersion)
-	} else {
-		t.exec(`UPDATE space_plugins SET desired_state='installed',desired_version=$4,observed_state='pending',observed_version=NULL,install_error=NULL,version=version+1,updated_at=now() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3`,
-			r.SpaceID, namespace, identifier, desiredVersion)
-	}
-
-	// Fan-out: reset every live workspace's instance to pending and create the
-	// install operation where the project admits one. A space without live
-	// runtime workspaces has nothing to execute: the aggregate is already
-	// terminal (plan aggregation rule), so the row converges immediately.
-	projectOps := map[string]bool{}
-	hash := requestHash(r.Method, r.Path, r.Body)
-	for _, w := range workspaces {
-		t.exec(`INSERT INTO workspace_plugin_instances(workspace_id,tenant_id,owner_user_id,project_id,source_namespace,identifier,observed_state) VALUES($1,$2,$3,$4,$5,$6,'pending')
-			ON CONFLICT (workspace_id,source_namespace,identifier) DO UPDATE SET observed_state='pending',observed_version=NULL,install_error=NULL,version=workspace_plugin_instances.version+1,updated_at=now()`,
-			w.S("id"), w.S("tenantId"), w.S("ownerUserId"), w.S("projectId"), namespace, identifier)
-		if projectOps[w.S("projectId")] {
-			continue
+	if old != nil {
+		version(old, r.Body.N("version"))
+		if old.S("desiredState") == "installed" && old.S("desiredVersion") == desired {
+			schedulePluginMaintenance(t)
+			return Object{"resource": pluginSelection(t, r.SpaceID, namespace, identifier)}
 		}
-		req := Object{"pluginId": namespace + "/" + identifier, "version": desiredVersion}
-		newOperation(t, r, uid, w.S("projectId"), w.S("id"), "install_plugin", "plugin", hash, req)
-		projectOps[w.S("projectId")] = true
+		t.exec("UPDATE space_plugins SET desired_state='installed',desired_version=$4,observed_state='pending',install_error=NULL,requested_by_user_id=$5,selected_release=$6,desired_revision=desired_revision+1,version=version+1,updated_at=clock_timestamp() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3", r.SpaceID, namespace, identifier, desired, uid, jsonText(entry))
+	} else {
+		require(r.Body.N("version") == 0, 409, "version_conflict")
+		t.exec("INSERT INTO space_plugins(space_id,tenant_id,source_namespace,identifier,desired_state,desired_version,observed_state,requested_by_user_id,selected_release) VALUES($1,$2,$3,$4,'installed',$5,'pending',$6,$7)", r.SpaceID, r.TenantID, namespace, identifier, desired, uid, jsonText(entry))
 	}
-	if len(workspaces) == 0 {
-		t.exec(`UPDATE space_plugins SET observed_state='installed',observed_version=$4,install_error=NULL,version=version+1,updated_at=now() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3`,
-			r.SpaceID, namespace, identifier, desiredVersion)
-		// No runtime workspace means the aggregate is already terminal: an
-		// agent-class plugin converges to installed in this same transaction, so
-		// its roster row activates here too (plugin-marketplace D3).
-		reconcileAgentOnAggregate(t, r.SpaceID, namespace+"/"+identifier, "installed")
-	}
-	return Object{"resource": t.spacePluginRow(r.SpaceID, namespace, identifier)}
+	recordPluginTargets(t, r, namespace, identifier)
+	schedulePluginMaintenance(t)
+	return Object{"resource": pluginSelection(t, r.SpaceID, namespace, identifier)}
 }
 
-// removeSpacePlugin records the removal intent and fans a remove_plugin
-// operation out to the same workspace set an install would target.
+// removeSpacePlugin uses the same administrator, version and maintenance boundary as install.
 func removeSpacePlugin(t *transaction, r *PublicRequest, uid string) Object {
-	spaceMember(t, r.SpaceID, uid)
+	requireSpaceRole(spaceMember(t, r.SpaceID, uid), "admin")
 	namespace, identifier, ok := pluginIdentity(r.Body.S("identifier"))
 	require(ok, 400, "invalid_plugin_id")
 	old := t.spacePluginRow(r.SpaceID, namespace, identifier)
 	require(old != nil, 404, "plugin_not_installed")
 	version(old, r.Body.N("version"))
+	t.exec("UPDATE space_plugins SET desired_state='removed',observed_state='pending',install_error=NULL,requested_by_user_id=$4,desired_revision=desired_revision+1,version=version+1,updated_at=clock_timestamp() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3", r.SpaceID, namespace, identifier, uid)
+	syncSpaceAgent(t, r.SpaceID, r.TenantID, namespace+"/"+identifier, "removing", "removed")
+	recordPluginTargets(t, r, namespace, identifier)
+	schedulePluginMaintenance(t)
+	return Object{"resource": pluginSelection(t, r.SpaceID, namespace, identifier)}
+}
 
-	workspaces := livePluginWorkspaces(t, r.SpaceID)
-	for _, w := range workspaces {
-		idleProject(t, w.S("projectId"))
+// recordPluginTargets covers only runtimes that existed when the selection was accepted.
+// A later-created runtime is not silently added to this maintenance responsibility.
+func recordPluginTargets(t *transaction, r *PublicRequest, namespace, identifier string) {
+	row := t.spacePluginRow(r.SpaceID, namespace, identifier)
+	targets := livePluginWorkspaces(t, r.SpaceID)
+	for _, w := range targets {
+		t.exec("INSERT INTO workspace_plugin_instances(workspace_id,tenant_id,owner_user_id,project_id,source_namespace,identifier,observed_state,desired_revision) VALUES($1,$2,$3,$4,$5,$6,'pending',$7) ON CONFLICT(workspace_id,source_namespace,identifier) DO UPDATE SET observed_state=CASE WHEN workspace_plugin_instances.maintenance_operation_id IS NULL THEN 'pending' ELSE workspace_plugin_instances.observed_state END,desired_revision=EXCLUDED.desired_revision,install_error=NULL,version=workspace_plugin_instances.version+1,updated_at=clock_timestamp()", w.S("id"), w.S("tenantId"), w.S("ownerUserId"), w.S("projectId"), namespace, identifier, row.N("desiredRevision"))
 	}
-
-	t.exec(`UPDATE space_plugins SET desired_state='removed',observed_state='removing',observed_version=NULL,install_error=NULL,version=version+1,updated_at=now() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3`,
-		r.SpaceID, namespace, identifier)
-	// D3 (plugin-marketplace "node executes plugin installs"): removing is driven
-	// by the plugin's desired_state becoming `removed` — the intent transition,
-	// not the eventual removing/removed aggregate. An agent-class plugin retiring
-	// the roster row here keeps the agent out of @-lists immediately; non-agent
-	// kinds never touch the roster. Idempotent: a retired row is a no-op.
-	if e := t.pluginCatalogEntry(namespace + "/" + identifier); e != nil && e.S("kind") == agentKind {
-		retireSpaceAgent(t, r.SpaceID, namespace+"/"+identifier)
+	if len(targets) == 0 {
+		t.exec("UPDATE space_plugins SET observed_state=desired_state,observed_version=CASE WHEN desired_state='installed' THEN desired_version END WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3", r.SpaceID, namespace, identifier)
+		syncSpaceAgent(t, r.SpaceID, r.TenantID, namespace+"/"+identifier, row.S("desiredState"), row.S("desiredState"))
 	}
-	projectOps := map[string]bool{}
-	hash := requestHash(r.Method, r.Path, r.Body)
-	for _, w := range workspaces {
-		t.exec(`UPDATE workspace_plugin_instances SET observed_state='removing',observed_version=NULL,install_error=NULL,version=version+1,updated_at=now() WHERE workspace_id=$1 AND source_namespace=$2 AND identifier=$3`,
-			w.S("id"), namespace, identifier)
-		if projectOps[w.S("projectId")] {
-			continue
-		}
-		req := Object{"pluginId": namespace + "/" + identifier, "version": old.S("desiredVersion")}
-		newOperation(t, r, uid, w.S("projectId"), w.S("id"), "remove_plugin", "plugin", hash, req)
-		projectOps[w.S("projectId")] = true
-	}
-	if len(workspaces) == 0 {
-		// Nothing to remove on the execution plane: converge immediately.
-		t.exec(`UPDATE space_plugins SET observed_state='removed',observed_version=NULL,install_error=NULL,version=version+1,updated_at=now() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3`,
-			r.SpaceID, namespace, identifier)
-	}
-	return Object{"resource": t.spacePluginRow(r.SpaceID, namespace, identifier)}
 }
 
 // pluginAggregate folds the fan-out instance states into the space-level
@@ -282,16 +229,22 @@ func pluginAggregate(desired string, states []string) string {
 	return terminal
 }
 
-// pluginInstanceWriteback updates one fan-out instance from an effect outcome
-// and recomputes the space-level aggregate in the same transaction, returning
-// the space the SSE invalidation must target. The space is derived through the
-// instance's project, never from caller input.
-func pluginInstanceWriteback(t *transaction, op Object, state, version string, installError *string, spaceEvents *[]SpaceEvent) {
-	namespace, identifier, ok := pluginIdentity(op.O("request").S("pluginId"))
+// pluginInstanceWriteback updates one fan-out instance from a Node execution outcome and recomputes
+// the space-level aggregate in the same transaction. The space is derived through the instance's
+// project, never from caller input. A terminal result that does not match the revision snapshotted
+// for this operation becomes pending again, so a newer selection is not overwritten.
+func pluginInstanceWriteback(t *transaction, op Object, pluginID, state, version string, installError *string, revision int64) {
+	if pluginID == "" {
+		pluginID = op.O("request").S("pluginId")
+	}
+	if revision == 0 {
+		revision = op.O("request").N("desiredRevision")
+	}
+	namespace, identifier, ok := pluginIdentity(pluginID)
 	if !ok {
 		return
 	}
-	row := t.one(`SELECT wi.workspace_id,p.space_id FROM workspace_plugin_instances wi JOIN workspaces ws ON ws.id=wi.workspace_id JOIN projects p ON p.id=ws.project_id WHERE wi.workspace_id=$1 AND wi.source_namespace=$2 AND wi.identifier=$3`,
+	row := t.one(`SELECT wi.workspace_id,wi.desired_revision,p.space_id,ws.tenant_id FROM workspace_plugin_instances wi JOIN workspaces ws ON ws.id=wi.workspace_id JOIN projects p ON p.id=ws.project_id WHERE wi.workspace_id=$1 AND wi.source_namespace=$2 AND wi.identifier=$3`,
 		op.S("workspaceId"), namespace, identifier)
 	if row == nil || row.S("spaceId") == "" {
 		return
@@ -300,25 +253,60 @@ func pluginInstanceWriteback(t *transaction, op Object, state, version string, i
 	if installError != nil {
 		err = *installError
 	}
+	terminal := state == "installed" || state == "removed" || state == "failed"
+	if terminal && row.N("desiredRevision") != revision {
+		state = "pending"
+		// A late failure settles its original attempt without poisoning the newer selection.
+		err = nil
+	}
 	t.exec(`UPDATE workspace_plugin_instances SET observed_state=$4,observed_version=$5,install_error=$6,version=version+1,updated_at=now() WHERE workspace_id=$1 AND source_namespace=$2 AND identifier=$3`,
 		op.S("workspaceId"), namespace, identifier, state, nullable(version), err)
-	states := t.list("SELECT observed_state FROM workspace_plugin_instances WHERE source_namespace=$1 AND identifier=$2 AND workspace_id IN (SELECT w.id FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE p.space_id=$3 AND w.deleted_at IS NULL)", namespace, identifier, row.S("spaceId"))
+	if terminal {
+		t.exec("UPDATE workspace_plugin_instances SET maintenance_operation_id=NULL,pending_reason=NULL WHERE workspace_id=$1 AND source_namespace=$2 AND identifier=$3", op.S("workspaceId"), namespace, identifier)
+	}
+	// Run Workspace instances are execution facts for that run. They do not change the Space aggregate,
+	// so one disposable install failure cannot retire an Agent the Space still has selected.
+	states := t.list("SELECT observed_state FROM workspace_plugin_instances wi WHERE source_namespace=$1 AND identifier=$2 AND workspace_id IN (SELECT w.id FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE p.space_id=$3 AND w.deleted_at IS NULL AND w.issue_run_id IS NULL)", namespace, identifier, row.S("spaceId"))
 	aggregate := "installed"
-	if desired := t.one("SELECT desired_state FROM space_plugins WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3", row.S("spaceId"), namespace, identifier); desired != nil {
+	if desired := t.one("SELECT desired_state,tenant_id FROM space_plugins WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3", row.S("spaceId"), namespace, identifier); desired != nil {
+		desiredState := desired.S("desiredState")
 		flat := make([]string, 0, len(states))
 		for _, s := range states {
 			flat = append(flat, s.S("observedState"))
 		}
-		aggregate = pluginAggregate(desired.S("desiredState"), flat)
+		aggregate = pluginAggregate(desiredState, flat)
+		syncSpaceAgent(t, row.S("spaceId"), desired.S("tenantId"), pluginID, aggregate, desiredState)
 	}
 	t.exec(`UPDATE space_plugins SET observed_state=$4,observed_version=$5,install_error=$6,version=version+1,updated_at=now() WHERE space_id=$1 AND source_namespace=$2 AND identifier=$3`,
 		row.S("spaceId"), namespace, identifier, aggregate, nullable(version), err)
-	// D3 (node-executes-plugin-installs): when the recomputed aggregate converges
-	// this agent-class plugin to installed, create/revive its Space Agent row in
-	// this same transaction — never in a separate or deferred one. Only the
-	// installed aggregate (this terminal transition) activates; any intermediate
-	// installing/failed/removing aggregate is a no-op, so the roster only ever sees
-	// a converged install.
-	reconcileAgentOnAggregate(t, row.S("spaceId"), namespace+"/"+identifier, aggregate)
-	*spaceEvents = append(*spaceEvents, SpaceEvent{Type: "space.plugins_updated", SpaceID: row.S("spaceId")})
+	t.events = append(t.events, SpaceEvent{Type: "space.plugins_updated", SpaceID: row.S("spaceId")})
+}
+
+// syncSpaceAgent keeps the Space Agent row aligned with an agent-kind plugin's selection. A failed
+// instance does not retire the row; only a removed selection does.
+func syncSpaceAgent(t *transaction, spaceID, tenantID, pluginID, aggregate, desired string) {
+	if desired == "removed" {
+		t.exec("UPDATE space_agents SET status='retired',updated_at=now() WHERE space_id=$1 AND plugin_id=$2", spaceID, pluginID)
+		return
+	}
+	if aggregate != "installed" {
+		return
+	}
+	// The selected release is the accepted identity snapshot; a later catalog refresh must not
+	// change whether an existing selection represents an Agent.
+	namespace, identifier, ok := pluginIdentity(pluginID)
+	if !ok {
+		return
+	}
+	entry := t.spacePluginRow(spaceID, namespace, identifier).O("selectedRelease")
+	if entry.S("kind") != "agent" {
+		return
+	}
+	title := entry.S("title")
+	if title == "" {
+		title = pluginID
+	}
+	t.exec(`INSERT INTO space_agents(id,space_id,tenant_id,plugin_id,display_name,status) VALUES($1,$2,$3,$4,$5,'active')
+		ON CONFLICT(space_id,plugin_id) DO UPDATE SET status='active',display_name=EXCLUDED.display_name,updated_at=now()`,
+		newID(), spaceID, tenantID, pluginID, title)
 }

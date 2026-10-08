@@ -256,7 +256,7 @@ func (s *Store) giveUpRunWorkspaceRelease(t *transaction, o Object) error {
 	return nil
 }
 
-// runWorkspaceDeleted is the B-owned core behind the A→B hook RunWorkspaceDeleted
+// settleRunWorkspaceDeleted is the B-owned core behind the A→B hook OnRunWorkspaceDeleted
 // (controller-integration D6 runWorkspaceDeleted, IssueRun D3; plan §5 Batch 2).
 //
 // It runs on the caller-owned *transaction in which the run Workspace's delete_workspace operation
@@ -275,10 +275,9 @@ func (s *Store) giveUpRunWorkspaceRelease(t *transaction, o Object) error {
 // terminally failed, so a Controller that replays a late success for that operation is refused by the
 // operation's own state check long before it gets here, and a replayed hook invocation finds the run
 // `done` and writes nothing. Neither path can turn D8's give-up back into a reported deletion.
-func (s *Store) runWorkspaceDeleted(t *transaction, run Object) error {
-	runID := run.S("id")
+func (s *Store) settleRunWorkspaceDeleted(t *transaction, runID string) error {
 	if !validID(runID) {
-		return fmt.Errorf("runWorkspaceDeleted: invalid run id %q", run.S("id"))
+		return fmt.Errorf("runWorkspaceDeleted: invalid run id %q", runID)
 	}
 	o := t.one("SELECT * FROM issue_runs WHERE id=$1 AND deleted_at IS NULL", runID)
 	if o == nil {

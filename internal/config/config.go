@@ -27,75 +27,27 @@ type Config struct {
 	ObjectStore   ObjectStoreConfig   `mapstructure:"object_store"`
 }
 
-// ObjectStoreConfig is Cloud's own object-store access (Cloud Revision D1). Leaf keys are bound to
-// CLOUD_OBJECT_STORE_* environment overrides like every other section.
-//
-// The whole section is optional: a deployment that leaves it empty runs without object storage, which
-// the approved decision makes a legal state rather than a startup failure. What that deployment
-// cannot do is save a Revision — every upload grant is refused as UNAVAILABLE and the delivery fails
-// deterministically until IssueRun D5's give-up window closes the run out — so an empty section is
-// reported at startup and never silently substituted for a working one.
-type ObjectStoreConfig struct {
-	// Endpoint is the S3-compatible endpoint Cloud talks to. Required once any other key is set.
-	Endpoint string `mapstructure:"endpoint"`
-
-	// PublicEndpoint optionally replaces Endpoint in presigned URLs, for deployments whose Nodes
-	// resolve the store at a different address than Cloud does. Empty means the two are the same.
-	PublicEndpoint string `mapstructure:"public_endpoint"`
-
-	// Region is the SigV4 signing region. It is not discovered: the signature must name the same
-	// region the store is configured with.
-	Region string `mapstructure:"region"`
-
-	// Bucket is the bucket Revision objects live in. Cloud never creates it (D1).
-	Bucket string `mapstructure:"bucket"`
-
-	// PathStyle selects path-style addressing (`<endpoint>/<bucket>/<key>`) over virtual-host style,
-	// which MinIO and most local deployments need.
-	PathStyle bool `mapstructure:"path_style"`
-
-	// AccessKeyIDFile and SecretAccessKeyFile are PATHS to the credential files; the values never
-	// appear in configuration, logs or the database (D1).
-	AccessKeyIDFile     string `mapstructure:"access_key_id_file"`
-	SecretAccessKeyFile string `mapstructure:"secret_access_key_file"`
-
-	// UploadGrantTTL is how long one presigned upload stays usable. Zero or negative selects D1's
-	// approved default (15 minutes).
-	UploadGrantTTL time.Duration `mapstructure:"upload_grant_ttl"`
-}
-
-// Configured reports whether the deployment asked for object storage at all. Any key set means the
-// section was meant to be used, so a partially filled one is a configuration error rather than an
-// empty section — see Load.
-//
-//nolint:gocritic // hugeParam: a predicate over one section's own fields takes no shared state.
-func (o ObjectStoreConfig) Configured() bool {
-	return o.Endpoint != "" || o.PublicEndpoint != "" || o.Region != "" || o.Bucket != "" ||
-		o.AccessKeyIDFile != "" || o.SecretAccessKeyFile != "" || o.UploadGrantTTL != 0
-}
-
 // IssueRunsConfig holds the Thread lifecycle policy that belongs to Cloud's own dispatch loop
-// rather than to any individual run. Leaf keys are bound to CLOUD_ISSUE_RUNS_* environment
-// overrides like every other section.
+// rather than to any individual run (IssueRun B side). Leaf keys are bound to CLOUD_ISSUE_RUNS_*
+// environment overrides like every other section.
 type IssueRunsConfig struct {
-	// ThreadIdleTimeout is Thread D4's idle window (`issue_runs.thread_idle_timeout` in the plan's
-	// spelling): how long a Thread may sit `idle` before Cloud asks the session to end. It is a
-	// duration configured per deployment, never a per-run column, and the comparison that judges it
-	// runs on database time — no Cloud, Controller or Node process clock decides that a Thread is
-	// idle. Zero or negative selects the approved default (15 minutes) rather than a zero-length
-	// window that would end every Thread the moment it went idle.
+	// ThreadIdleTimeout is Thread D4's idle window: how long a Thread may sit `idle` before Cloud
+	// asks the session to end. It is a duration configured per deployment, never a per-run column,
+	// and the comparison that judges it runs on database time — no Cloud, Controller or Node process
+	// clock decides that a Thread is idle. Zero or negative selects the approved default (15 minutes)
+	// rather than a zero-length window that would end every Thread the moment it went idle.
 	ThreadIdleTimeout time.Duration `mapstructure:"thread_idle_timeout"`
 
 	// DeliveryGiveUpAfter is IssueRun D5's continuous-delivery-failure window: how long a Revision
-	// delivery may keep failing before Cloud abandons it (`deliveryState = failed`) and releases the
-	// run's Workspace. It is the limit that keeps a Workspace from being held indefinitely by a
-	// delivery that will never succeed. Zero or negative selects the approved default (2 hours).
+	// delivery may keep failing before Cloud abandons it and releases the run's Workspace. It is the
+	// limit that keeps a Workspace from being held indefinitely by a delivery that will never
+	// succeed. Zero or negative selects the approved default (2 hours).
 	DeliveryGiveUpAfter time.Duration `mapstructure:"delivery_give_up_after"`
 
 	// DeliveryUnreachableAfter is IssueRun D5's unreachability window: how long the run Workspace's
-	// Node may be in an unknown state before Cloud treats the Workspace as unreachable and abandons
-	// the delivery the same way, without waiting out the full failure window. Zero or negative
-	// selects the approved default (30 minutes).
+	// Node may be unreachable before Cloud treats it as gone and closes the run out in the G-032
+	// give-up path, without waiting out the full failure window. Zero or negative selects the
+	// approved default (30 minutes).
 	DeliveryUnreachableAfter time.Duration `mapstructure:"delivery_unreachable_after"`
 }
 
@@ -131,11 +83,14 @@ type DirectoryConfig struct {
 	AppKeyFile  string `mapstructure:"app_key_file"`
 }
 
-// ControlConfig binds the Controller-facing gRPC listener. Until the authentication ADR adds TLS,
-// the address must stay on a loopback or private network; the contract carries bearer credentials
-// only.
+// ControlConfig binds the mutually authenticated Controller-facing gRPC listener.
+// Deployment files and the verified Controller identity remain separate from user credentials.
 type ControlConfig struct {
-	GRPCAddr string `mapstructure:"grpc_addr"`
+	GRPCAddr           string `mapstructure:"grpc_addr"`
+	CertificateFile    string `mapstructure:"certificate_file"`
+	PrivateKeyFile     string `mapstructure:"private_key_file"`
+	ClientCAFile       string `mapstructure:"client_ca_file"`
+	ControllerIdentity string `mapstructure:"controller_identity"`
 }
 
 // AuthConfig contains only internal verification keys, never an external login SDK.
@@ -215,14 +170,7 @@ func Load(configPath string) (*Config, error) {
 	if cfg.IssueRuns.DeliveryUnreachableAfter <= 0 {
 		cfg.IssueRuns.DeliveryUnreachableAfter = DefaultDeliveryUnreachableAfter
 	}
-	// Cloud Revision D1's approved upload-grant lifetime, applied for the same reason as the two
-	// defaults above. Validation of the section's *contents* (a URL that parses, credentials that
-	// exist) belongs to the object-store client's own constructor, which the wiring calls: a
-	// deployment error there must fail startup before any delivery is attempted, but an unreachable
-	// or not-yet-created bucket must not (D1), and only the client can tell the two apart.
-	if cfg.ObjectStore.Configured() && cfg.ObjectStore.UploadGrantTTL <= 0 {
-		cfg.ObjectStore.UploadGrantTTL = core.DefaultRevisionUploadTTL
-	}
+
 	return &cfg, nil
 }
 
@@ -231,8 +179,7 @@ func Load(configPath string) (*Config, error) {
 const DefaultThreadIdleTimeout = 15 * time.Minute
 
 // DefaultDeliveryGiveUpAfter and DefaultDeliveryUnreachableAfter are IssueRun D5's first-version
-// give-up limits ("这两个上限是第一版默认值（Cloud 配置项）"), applied when the corresponding key is
-// absent or not positive.
+// give-up limits, applied when the corresponding key is absent or not positive.
 const (
 	DefaultDeliveryGiveUpAfter      = 2 * time.Hour
 	DefaultDeliveryUnreachableAfter = 30 * time.Minute

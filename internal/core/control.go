@@ -14,23 +14,23 @@ type ControlRequest struct {
 	Body                                                 Object
 	Service                                              *Claims
 	Identity                                             *Claims
+	verification                                         *revisionVerification
 }
 
 // Control is the finite internal command API. Controllers have no table-write or SQL interface.
 // Committed plugin instance writebacks broadcast space invalidation notices exactly like public
 // mutations, so live subscribers see fan-out progress without polling.
 func (s *Store) Control(ctx context.Context, r *ControlRequest) (Object, error) {
-	var events []SpaceEvent
-	// Cloud Revision D4 steps 1–2 — the local input-consistency and shape comparison, and the
-	// object-store HEAD for every declared object — run here, deliberately outside the transaction:
-	// this repository forbids holding a transaction across HTTP, and the verdict is a pure function of
-	// the request and the registered execution, so it can be computed before the transaction opens and
-	// consumed inside it. The work is idempotent and writes nothing, which is what makes the
-	// on-commit replay path (a retry that only replays a recorded response) no more than a repeated
-	// read of the same objects.
-	verdict := revisionNotVerified
-	if r.Action == "agent_delivery_takeover" && r.Service != nil && r.Service.Role == "controller" {
-		verdict = s.verifyDeliveryObjects(ctx, r)
+	// Object storage is contacted between two short transactions. A committed replay never
+	// requires the objects or endpoint to still be reachable.
+	if r.Action == "clone_takeover" && revisionSuccess(r.Body.O("result")) {
+		prepared, err := s.prepareRevision(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		copyRequest := *r
+		copyRequest.verification = prepared
+		r = &copyRequest
 	}
 	out, err := s.transact(ctx, func(t *transaction) Object {
 		if r.Action == "access" || r.Action == "admit" {
@@ -53,12 +53,17 @@ func (s *Store) Control(ctx context.Context, r *ControlRequest) (Object, error) 
 		if r.Action == "clone_get" || r.Action == "clone_pending" {
 			return cloneCommand(t, r)
 		}
-		// Recovery reads for a registered execution need no lease: a replacement worker locates
-		// the original dispatch (C2, Phase 4A) before it can hold one, and reading fences nothing.
-		if r.Action == "agent_work_get" || r.Action == "agent_work_pending" {
-			return agentWorkCommand(t, r)
-		}
 		leaseValid(t, r)
+		refreshRuntimeControls(t)
+		if r.Action == "effect_permit" {
+			return effectPermit(t, r)
+		}
+		if strings.HasPrefix(r.Action, "force_") {
+			return submitted(t, r, func() Object { return forceStopCommand(t, r) })
+		}
+		if strings.HasPrefix(r.Action, "runtime_") {
+			return submitted(t, r, func() Object { return runtimeControlCommand(t, r) })
+		}
 		if r.Action == "claim" {
 			return claim(t, r)
 		}
@@ -68,72 +73,28 @@ func (s *Store) Control(ctx context.Context, r *ControlRequest) (Object, error) 
 		if isCloneAction(r.Action) {
 			return cloneCommand(t, r)
 		}
-		if strings.HasPrefix(r.Action, "agent_work_") {
-			return agentWorkCommand(t, r)
-		}
-		if r.Action == "agent_thread_takeover" {
-			// State change, so it carries the submission identity like every other takeover: a
-			// Controller that retries after a lost reply replays the recorded response instead of
-			// re-running the batch (which the receipt identity would turn into a no-op anyway).
-			return submitted(t, r, func() Object { return agentThreadTakeover(t, r) })
-		}
-		if r.Action == "agent_session_takeover" {
-			// State change, so it carries the submission identity like every other takeover: a
-			// Controller that retries after a lost reply replays the recorded response instead of
-			// re-running the terminal takeover (whose receipt identity would make it a no-op anyway).
-			return submitted(t, r, func() Object { return agentSessionTakeover(t, r) })
-		}
-		if r.Action == "agent_delivery_takeover" {
-			// State change, like the two takeovers above: a Controller that retries after a lost reply
-			// replays the recorded response instead of re-running the terminal takeover (whose receipt
-			// identity would make a second attempt a no-op anyway).
-			return submitted(t, r, func() Object { return s.agentDeliveryTakeover(t, r, verdict) })
-		}
-		if r.Action == "agent_revision_grant" {
-			// A pure read, and deliberately not submission-wrapped: a recorded response would answer a
-			// Controller with a capability that has since expired, which is worse than asking again.
-			// The lease below still gates it — a grant is a bearer capability, so it is only ever
-			// handed to the Controller that currently holds the control plane.
-			return s.revisionUploadGrant(t, r)
-		}
-		if r.Action == "agent_thread_claim" {
-			// Pure read of the deliverable Thread command backlog; the lease was already checked, so
-			// the answer is only ever given to the current holder.
-			return agentThreadClaim(t, r)
-		}
-		if r.Action == "agent_thread_delivered" {
-			// State change, so it carries the submission identity: a Controller that retries after a
-			// lost reply replays the recorded response instead of re-registering the delivery (which
-			// the first-registration-wins rule would turn into a no-op anyway).
-			return submitted(t, r, func() Object { return agentThreadDelivered(t, r) })
-		}
 		if strings.HasPrefix(r.Action, "report_node_") {
 			return submitted(t, r, func() Object { return nodeReport(t, r) })
 		}
 		// The submission wraps the operation lookup too: a replay after the version moved on must
 		// return the recorded response, not fail the version check it already passed.
-		return submitted(t, r, func() Object { return operationCommand(t, r, &events) })
+		return submitted(t, r, func() Object { return operationCommand(t, r) })
 	})
-	if err == nil && s.Events != nil {
-		for _, ev := range events {
-			s.Events.Publish(ev)
-		}
-	}
 	return out, err
 }
 
 // operationCommand runs one Effect-level action on the operation the caller claimed.
-func operationCommand(t *transaction, r *ControlRequest, events *[]SpaceEvent) Object {
+func operationCommand(t *transaction, r *ControlRequest) Object {
 	o := operation(t, r)
 	switch r.Action {
 	case "snapshot":
 		return snapshot(t, o)
 	case "plan":
-		return planEffect(t, r, o, events)
+		return planEffect(t, r, o)
 	case "effect_result":
-		return effectResult(t, r, o, events)
+		return effectResult(t, r, o)
 	case "advance":
-		return advance(t, r, o, events)
+		return advance(t, r, o)
 	case "defer":
 		state := r.Body.S("state")
 		code := r.Body.S("errorCode")
@@ -182,12 +143,17 @@ func leaseValid(t *transaction, r *ControlRequest) {
 }
 
 func claim(t *transaction, r *ControlRequest) Object {
+	schedulePluginMaintenance(t)
 	o := t.one("SELECT * FROM operations WHERE state='queued' OR (state='retry_wait' AND retry_at<=clock_timestamp()) OR state='running' ORDER BY created_at,id LIMIT 1")
 	if o == nil {
 		return Object{"operation": nil}
 	}
 	t.exec("UPDATE operations SET state='running',controller_epoch=$2,version=version+1,updated_at=now() WHERE id=$1", o.S("id"), r.Body.N("epoch"))
 	o = t.one("SELECT * FROM operations WHERE id=$1", o.S("id"))
+	if o.S("step") == "plugin" {
+		enterPluginStep(t, o)
+		o = t.one("SELECT * FROM operations WHERE id=$1", o.S("id"))
+	}
 	return snapshot(t, o)
 }
 
@@ -206,11 +172,21 @@ func operation(t *transaction, r *ControlRequest) Object {
 // original execution instead of registering a second one.
 func snapshot(t *transaction, o Object) Object {
 	p := t.one("SELECT p.*,c.secret_ref FROM projects p LEFT JOIN credential_refs c ON c.id=p.credential_ref_id WHERE p.id=$1", o.S("projectId"))
-	workspaces := t.list("SELECT w.* FROM workspaces w WHERE w.project_id=$1 AND w.deleted_at IS NULL ORDER BY w.id", o.S("projectId"))
-	for _, w := range workspaces {
-		stripAgentRunSkeleton(w)
+	out := Object{
+		"operation":  o,
+		"project":    p,
+		"workspaces": t.list("SELECT w.* FROM workspaces w WHERE w.project_id=$1 AND w.deleted_at IS NULL ORDER BY w.id", o.S("projectId")),
+		"sandboxes":  t.list("SELECT s.* FROM sandbox_instances s JOIN workspaces w ON w.id=s.workspace_id WHERE w.project_id=$1 ORDER BY s.id", o.S("projectId")),
+		"nodes":      t.list("SELECT n.* FROM node_instances n JOIN sandbox_instances s ON s.id=n.sandbox_instance_id JOIN workspaces w ON w.id=s.workspace_id WHERE w.project_id=$1 ORDER BY n.id", o.S("projectId")),
+		// Retired plugin effects stay in the table as history and are not part of the live snapshot.
+		"effects":          t.list("SELECT * FROM external_effects WHERE operation_id=$1 AND kind NOT IN ('plugin_ensure','plugin_delete') ORDER BY created_at,id", o.S("id")),
+		"clones":           t.list("SELECT * FROM clone_executions WHERE operation_id=$1 ORDER BY created_at,execution_id", o.S("id")),
+		"pluginExecutions": t.list("SELECT * FROM node_executions WHERE operation_id=$1 AND kind IN ('install_plugins','remove_plugins') ORDER BY created_at,execution_id", o.S("id")),
 	}
-	return Object{"operation": o, "project": p, "workspaces": workspaces, "sandboxes": t.list("SELECT s.* FROM sandbox_instances s JOIN workspaces w ON w.id=s.workspace_id WHERE w.project_id=$1 ORDER BY s.id", o.S("projectId")), "nodes": t.list("SELECT n.* FROM node_instances n JOIN sandbox_instances s ON s.id=n.sandbox_instance_id JOIN workspaces w ON w.id=s.workspace_id WHERE w.project_id=$1 ORDER BY n.id", o.S("projectId")), "effects": t.list("SELECT * FROM external_effects WHERE operation_id=$1 ORDER BY created_at,id", o.S("id")), "clones": t.list("SELECT * FROM clone_executions WHERE operation_id=$1 ORDER BY created_at,execution_id", o.S("id"))}
+	if input := pluginInputOf(o); len(input) > 0 {
+		out["pluginInput"] = input
+	}
+	return out
 }
 
 func operationWorkspaces(t *transaction, o Object) []Object {
@@ -224,7 +200,7 @@ func operationWorkspaces(t *transaction, o Object) []Object {
 // Retired storage and worktree effects of an operation that crossed migration 0016 are history no
 // Substrate serves any more, so they cannot be reconciled and do not block it.
 func reconciled(t *transaction, o Object) {
-	require(t.one("SELECT id FROM external_effects WHERE operation_id=$1 AND reconciled_epoch<>$2 AND kind NOT IN ('storage_ensure','worktree_ensure','worktree_delete','storage_delete')", o.S("id"), o.N("controllerEpoch")) == nil, 409, "reconcile_required")
+	require(t.one("SELECT id FROM external_effects WHERE operation_id=$1 AND reconciled_epoch<>$2 AND kind NOT IN ('storage_ensure','worktree_ensure','worktree_delete','storage_delete','plugin_ensure','plugin_delete')", o.S("id"), o.N("controllerEpoch")) == nil, 409, "reconcile_required")
 }
 
 func effectFor(t *transaction, oid, kind, wid string) Object {
@@ -238,7 +214,7 @@ func nullable(s string) any {
 	return s
 }
 
-func planEffect(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEvent) Object {
+func planEffect(t *transaction, r *ControlRequest, o Object) Object {
 	reconciled(t, o)
 	kind, wid := r.Body.S("kind"), r.Body.S("workspaceId")
 	require(validID(wid), 400, "invalid_effect_scope")
@@ -249,6 +225,8 @@ func planEffect(t *transaction, r *ControlRequest, o Object, spaceEvents *[]Spac
 		}
 	}
 	require(found, 403, "invalid_effect_scope")
+	requireNoForceStop(t, wid)
+	require(kind != "plugin_ensure" && kind != "plugin_delete", 409, "invalid_step")
 	if existing := effectFor(t, o.S("id"), kind, wid); existing != nil {
 		return Object{"effect": existing, "operation": o}
 	}
@@ -256,91 +234,38 @@ func planEffect(t *transaction, r *ControlRequest, o Object, spaceEvents *[]Spac
 	// drawn before the step-specific request building below.
 	id := newID()
 	var request Object
-	switch o.S("step") {
-	case "plugin":
-		request = planPluginEffect(t, o, kind, wid, spaceEvents)
-	default:
-		// Only the three lifecycle effects remain; the clone step dispatches through the execution
-		// registry, not through a Substrate effect.
-		allowed := map[string]string{"sandbox": "sandbox_ensure", "terminate": "sandbox_terminate", "cleanup": "workspace_data_delete"}
-		require(allowed[o.S("step")] == kind, 409, "invalid_step")
-		request = Object{"kind": kind, "projectId": o.S("projectId"), "workspaceId": wid}
-		if kind == "sandbox_ensure" {
-			w := t.one("SELECT * FROM workspaces WHERE id=$1", wid)
-			require(w.S("desiredState") == "running", 409, "resource_unavailable")
-			require(t.one("SELECT id FROM sandbox_instances WHERE workspace_id=$1 AND terminated_at IS NULL", wid) == nil, 409, "termination_unconfirmed")
-			t.exec("UPDATE workspaces SET runtime_generation=runtime_generation+1,observed_state='starting',version=version+1 WHERE id=$1", wid)
-			t.exec("INSERT INTO sandbox_instances(id,workspace_id,generation,observed_state) SELECT $1,id,runtime_generation,'allocating' FROM workspaces WHERE id=$2", id, wid)
-		}
-		if kind == "sandbox_terminate" {
-			s := t.one("SELECT * FROM sandbox_instances WHERE workspace_id=$1 AND terminated_at IS NULL", wid)
-			require(s != nil, 409, "no_current_sandbox")
-			request["sandboxInstanceId"] = s.S("id")
-			t.exec("UPDATE sandbox_instances SET observed_state='terminating' WHERE id=$1", s.S("id"))
-		}
-		if kind == "workspace_data_delete" {
-			// The data is deleted only once no sandbox of this Workspace can still write to it.
-			require(t.one("SELECT id FROM sandbox_instances WHERE workspace_id=$1 AND terminated_at IS NULL", wid) == nil, 409, "termination_unconfirmed")
-		}
+	// Plugin installs are Node executions of the plugin step, not Substrate effects. The three
+	// lifecycle effects are the only ones still planned.
+	allowed := map[string]string{"sandbox": "sandbox_ensure", "terminate": "sandbox_terminate", "cleanup": "workspace_data_delete"}
+	require(allowed[o.S("step")] == kind, 409, "invalid_step")
+	request = Object{"kind": kind, "projectId": o.S("projectId"), "workspaceId": wid}
+	if kind == "sandbox_ensure" {
+		w := t.one("SELECT * FROM workspaces WHERE id=$1", wid)
+		require(w.S("desiredState") == "running", 409, "resource_unavailable")
+		require(t.one("SELECT id FROM sandbox_instances WHERE workspace_id=$1 AND terminated_at IS NULL", wid) == nil, 409, "termination_unconfirmed")
+		t.exec("UPDATE workspaces SET runtime_generation=runtime_generation+1,observed_state='starting',version=version+1 WHERE id=$1", wid)
+		t.exec("INSERT INTO sandbox_instances(id,workspace_id,generation,observed_state) SELECT $1,id,runtime_generation,'allocating' FROM workspaces WHERE id=$2", id, wid)
+	}
+	if kind == "sandbox_terminate" {
+		s := t.one("SELECT * FROM sandbox_instances WHERE workspace_id=$1 AND terminated_at IS NULL", wid)
+		require(s != nil, 409, "no_current_sandbox")
+		request["sandboxInstanceId"] = s.S("id")
+		t.exec("UPDATE sandbox_instances SET observed_state='terminating' WHERE id=$1", s.S("id"))
+	}
+	if kind == "workspace_data_delete" {
+		// The data is deleted only once no sandbox of this Workspace can still write to it.
+		require(t.one("SELECT id FROM sandbox_instances WHERE workspace_id=$1 AND terminated_at IS NULL", wid) == nil, 409, "termination_unconfirmed")
 	}
 	t.exec("INSERT INTO external_effects(id,operation_id,project_id,workspace_id,kind,state,request,reconciled_epoch) VALUES($1,$2,$3,$4,$5,'planned',$6,$7)", id, o.S("id"), o.S("projectId"), nullable(wid), kind, jsonText(request), o.N("controllerEpoch"))
 	t.exec("UPDATE operations SET version=version+1,updated_at=now() WHERE id=$1", o.S("id"))
 	return Object{"effect": t.one("SELECT * FROM external_effects WHERE id=$1", id), "operation": t.one("SELECT * FROM operations WHERE id=$1", o.S("id"))}
 }
 
-// planPluginEffect builds the self-contained plugin effect payload and admits
-// the dispatch. The payload carries the release info (url/sha256/targets)
-// straight from the catalog snapshot, so the Node execution plane never needs
-// a registry index or marketplace sync of its own; field names match the
-// desktop plugin-manager DownloadRequest capabilities.
-func planPluginEffect(t *transaction, o Object, kind, wid string, spaceEvents *[]SpaceEvent) Object {
-	// An Agent run Workspace's create_workspace plugin step plans a plugin_ensure for the run's
-	// *pinned* agent plugin, admitted from the run snapshot (never the roster) and written back
-	// to a run-instance-only row (G-002).
-	if agentRunWorkspaceOp(t, o) {
-		require(kind == "plugin_ensure", 409, "invalid_step")
-		return planAgentRunPluginEffect(t, o, wid)
-	}
-	switch {
-	case o.S("kind") == "install_plugin":
-		require(kind == "plugin_ensure", 409, "invalid_step")
-	case o.S("kind") == "remove_plugin":
-		require(kind == "plugin_delete", 409, "invalid_step")
-	default:
-		reject(409, "invalid_step")
-	}
-	require(wid == o.S("workspaceId"), 403, "invalid_effect_scope")
-	pluginID := o.O("request").S("pluginId")
-	version := o.O("request").S("version")
-	require(pluginID != "", 409, "invalid_plugin_request")
-	request := Object{"kind": kind, "projectId": o.S("projectId"), "workspaceId": wid, "pluginId": pluginID}
-	if kind == "plugin_delete" {
-		request["version"] = version
-		pluginInstanceWriteback(t, o, "removing", "", nil, spaceEvents)
-		return request
-	}
-	entry := t.pluginCatalogEntry(pluginID)
-	require(entry != nil, 409, "plugin_not_found")
-	// Admission: plugin_ensure dispatches only to a ready workspace, mirroring
-	// the node step gate — a provisioning or stopped workspace is not a valid
-	// download target.
-	w := t.one("SELECT * FROM workspaces WHERE id=$1", wid)
-	require(w.S("observedState") == "ready", 409, "workspace_not_ready")
-	request["version"] = entry.S("version")
-	if entry.S("url") != "" {
-		request["universal"] = Object{"url": entry.S("url"), "sha256": entry.S("sha256")}
-	}
-	if entry["targets"] != nil {
-		request["targets"] = entry["targets"]
-	}
-	pluginInstanceWriteback(t, o, "installing", entry.S("version"), nil, spaceEvents)
-	return request
-}
-
-func effectResult(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEvent) Object {
+func effectResult(t *transaction, r *ControlRequest, o Object) Object {
 	require(validID(r.EffectID), 404, "not_found")
 	e := t.one("SELECT * FROM external_effects WHERE id=$1 AND operation_id=$2", r.EffectID, o.S("id"))
 	require(e != nil, 404, "not_found")
+	require(e.S("kind") != "plugin_ensure" && e.S("kind") != "plugin_delete", 409, "invalid_step")
 	state := r.Body.S("state")
 	require(state == "running" || state == "succeeded" || state == "failed" || state == "absent", 400, "invalid_effect_state")
 	result := r.Body.O("result")
@@ -376,20 +301,13 @@ func effectResult(t *transaction, r *ControlRequest, o Object, spaceEvents *[]Sp
 		}
 	}
 	if state == "failed" && (e.S("kind") == "plugin_ensure" || e.S("kind") == "plugin_delete") {
+		// A failed install/remove surfaces on the space row immediately so the
+		// UI can render the failure while the operation waits for retry.
 		message := result.S("error")
 		if message == "" {
 			message = "external_failure"
 		}
-		if agentRunWorkspaceOp(t, o) {
-			// A failed pinned plugin on a run Workspace writes ONLY the run instance row —
-			// the evidence the run settle classifies agent_plugin_unavailable from. It must not
-			// touch the space_plugins aggregate or roster (D-011).
-			writeRunPluginInstance(t, e, "failed", "", &message)
-		} else {
-			// A failed install/remove surfaces on the space aggregate immediately so the
-			// UI can render the failure while the operation waits for retry.
-			pluginInstanceWriteback(t, o, "failed", "", &message, spaceEvents)
-		}
+		pluginInstanceWriteback(t, o, "", "failed", "", &message, 0)
 	}
 	t.exec("UPDATE external_effects SET state=$2,external_id=COALESCE($3,external_id),result=$4,reconciled_epoch=$5 WHERE id=$1", e.S("id"), state, nullable(external), jsonText(result), o.N("controllerEpoch"))
 	t.exec("UPDATE operations SET version=version+1,updated_at=now() WHERE id=$1", o.S("id"))
@@ -414,7 +332,7 @@ func completedEffect(t *transaction, o Object, kind, wid string) Object {
 	return e
 }
 
-func advance(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEvent) Object {
+func advance(t *transaction, r *ControlRequest, o Object) Object {
 	reconciled(t, o)
 	next := ""
 	wid := o.S("workspaceId")
@@ -426,24 +344,19 @@ func advance(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEv
 	case "node":
 		currentNode(t, wid)
 		t.exec("UPDATE sandbox_instances SET observed_state='running' WHERE workspace_id=$1 AND terminated_at IS NULL", wid)
-		if o.S("kind") == "create_project" || o.S("kind") == "create_workspace" {
-			// A new Workspace has a connected Node but no code yet: admission waits for the clone.
+		switch o.S("kind") {
+		case "create_project", "create_workspace":
+			// A new Workspace has a connected Node but no code yet: admission waits for clone and plugins.
 			next = "clone"
-		} else {
+		case "start", "restart":
+			next = finishPluginGate(t, o, wid)
+		default:
 			openWorkspace(t, o, wid)
 			next = "done"
 		}
 	case "clone":
 		advanceClone(t, o, wid)
-		if agentRunWorkspaceOp(t, o) {
-			// An Agent run's Workspace is not admitted at clone time: admission waits for the
-			// pinned agent plugin step, so the terminal settle can classify the run against the
-			// plugin evidence (priority G-002). openWorkspace runs once the plugin step ends.
-			next = "plugin"
-		} else {
-			openWorkspace(t, o, wid)
-			next = "done"
-		}
+		next = finishPluginGate(t, o, wid)
 	case "quiesce":
 		for _, w := range operationWorkspaces(t, o) {
 			checkActivities(t, w)
@@ -462,10 +375,15 @@ func advance(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEv
 				t.exec("UPDATE sandbox_instances SET observed_state='terminated',terminated_at=now() WHERE id=$1", live.S("id"))
 			}
 		}
-		if o.S("kind") == "stop" || o.S("kind") == "administrative_stop" {
+		switch o.S("kind") {
+		case "restart":
+			t.exec("UPDATE workspaces SET desired_state='running',observed_state='starting',version=version+1 WHERE id=$1", wid)
+			t.exec("UPDATE runtime_controls SET control_epoch=control_epoch+1,binding_confirmed=false,bound_sandbox_id=NULL,input_closed=false,version=version+1 WHERE workspace_id=$1", wid)
+			next = "sandbox"
+		case "stop", "administrative_stop":
 			t.exec("UPDATE workspaces SET observed_state='stopped',version=version+1 WHERE id=$1", wid)
 			next = "done"
-		} else {
+		default:
 			next = "cleanup"
 		}
 	case "cleanup":
@@ -484,48 +402,26 @@ func advance(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEv
 		}
 		next = "done"
 	case "plugin":
-		// An Agent run Workspace (G-002): the pinned plugin step completes and opens admission;
-		// the terminal settle later classifies the run from the instance evidence.
-		if agentRunWorkspaceOp(t, o) {
-			// A run that pins no agent plugin (legacy engine) has nothing to install and opens
-			// immediately, keyed to plan §2.6 legacy compatibility.
-			if _, _, required := runPinnedAgentPlugin(t, wid); !required {
-				openWorkspace(t, o, wid)
-				next = "done"
-			} else {
-				next = advanceRunWorkspacePlugin(t, o, wid)
-			}
-			break
+		// Item failures are already on the instances. The step still finishes so one broken plugin
+		// cannot keep the Workspace from becoming ready.
+		require(pluginStepSettled(t, o), 409, "plugin_incomplete")
+		if openAfterPlugins(o.S("kind")) {
+			openWorkspace(t, o, wid)
 		}
-		// The plugin step completes the install/remove for exactly the
-		// operation's bound workspace; the space-level aggregate is recomputed
-		// from the fan-out rows in the same transaction.
-		kind := "plugin_ensure"
-		state, version := "installed", o.O("request").S("version")
-		if o.S("kind") == "remove_plugin" {
-			kind, state, version = "plugin_delete", "removed", ""
-		}
-		completedEffect(t, o, kind, wid)
-		pluginInstanceWriteback(t, o, state, version, nil, spaceEvents)
 		next = "done"
 	default:
 		reject(409, "invalid_step")
 	}
 	if next == "done" {
-		t.exec("UPDATE operations SET step='done',state='succeeded',result=jsonb_build_object('resourceId',COALESCE(workspace_id,project_id)),version=version+1,updated_at=now() WHERE id=$1", o.S("id"))
-		// Terminal A→B wiring (G-003): settle the run in this same transaction. A hook error
-		// rolls the 'succeeded' write back too, so the operation never commits while the run
-		// stays provisioning (plan §4/§6). Only creator run Workspaces settle; everything else
-		// is untouched here.
-		if agentRunWorkspaceOp(t, o) {
-			settleRunWorkspaceOnDone(t, o)
-		}
-		// The release half of the same wiring: a run Workspace's delete_workspace operation reaching
-		// `succeeded` is what moves the run `releasing → done` (IssueRun D3). It is a separate
-		// predicate from the create path because the two operations settle different phases and a
-		// delete must never be classified as a create.
-		if agentRunWorkspaceDeleteOp(t, o) {
-			settleRunWorkspaceDeleted(t, o)
+		t.exec("UPDATE operations SET step='done',state='succeeded',error_code=NULL,retry_at=NULL,result=jsonb_build_object('resourceId',COALESCE(workspace_id,project_id)),version=version+1,updated_at=now() WHERE id=$1", o.S("id"))
+		finishRuntimeMaintenance(t, o.S("id"))
+		if w := t.one("SELECT issue_run_id FROM workspaces WHERE id=$1", nullable(wid)); w.S("issueRunId") != "" {
+			switch o.S("kind") {
+			case "create_workspace":
+				runWorkspaceSettled(t, w.S("issueRunId"), "ready")
+			case "delete_workspace":
+				runWorkspaceDeleted(t, w.S("issueRunId"))
+			}
 		}
 	} else {
 		t.exec("UPDATE operations SET step=$2,version=version+1,updated_at=now() WHERE id=$1", o.S("id"), next)

@@ -41,12 +41,12 @@ func threadRecordKind(record Object) (string, bool) {
 	return kind, threadRecordKinds[kind]
 }
 
-// threadEventsTakenOver is the B-owned core behind the A→B hook ThreadEventsTakenOver
+// settleThreadEvents is the B-owned core behind the A→B hook OnThreadEvents
 // (controller-integration D6, IssueRun D3, Thread D1/D4; plan §4B.7).
 //
 //	authoritative re-read: issue_runs, node_executions and execution_work are read here, never taken
-//	                      from the caller Object; the execution must be an agent_session execution
-//	                      whose work item is this run's own session work.
+//	                      from the caller; the execution must be an agent_session execution whose
+//	                      work item is this run's own session work.
 //	echo dedupe:          an event whose turn_id is the Thread's first prompt turn_id is the echo of
 //	                      the prompt Cloud already wrote as seq=1: it is persisted as a receipt by
 //	                      the caller but produces no entry and consumes no seq (Thread D3 rule).
@@ -68,37 +68,35 @@ func threadRecordKind(record Object) (string, bool) {
 //	                      workspace are not advanced (G-011 fail-closed, §17/§20) but the taken-over
 //	                      records are still appended to the Thread, so an acked event is never
 //	                      silently dropped from the conversation.
-func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, events []Object) error {
-	runID := run.S("id")
+func (s *Store) settleThreadEvents(t *transaction, runID, executionID string, events []Object) error {
 	if !validID(runID) {
-		return fmt.Errorf("threadEventsTakenOver: invalid run id %q", run.S("id"))
+		return fmt.Errorf("settleThreadEvents: invalid run id %q", runID)
 	}
-	executionID := execution.S("executionId")
 	if executionID == "" {
-		return fmt.Errorf("threadEventsTakenOver: run %s has no execution identity", runID)
+		return fmt.Errorf("settleThreadEvents: run %s has no execution identity", runID)
 	}
 
 	o := t.one("SELECT * FROM issue_runs WHERE id=$1 AND deleted_at IS NULL", runID)
 	if o == nil {
 		// No authoritative run to accept the events: an invariant violation, not a replay, so the
 		// batch must not be acked (plan §4.10 "unknown run").
-		return fmt.Errorf("threadEventsTakenOver: issue_run %s not found", runID)
+		return fmt.Errorf("settleThreadEvents: issue_run %s not found", runID)
 	}
 	if o.S("executorType") != "agent" {
-		return fmt.Errorf("threadEventsTakenOver: run %s is executor_type=%q, not agent", runID, o.S("executorType"))
+		return fmt.Errorf("settleThreadEvents: run %s is executor_type=%q, not agent", runID, o.S("executorType"))
 	}
 	e := t.one("SELECT * FROM node_executions WHERE execution_id=$1", executionID)
 	if e == nil {
-		return fmt.Errorf("threadEventsTakenOver: execution %s is not registered", executionID)
+		return fmt.Errorf("settleThreadEvents: execution %s is not registered", executionID)
 	}
 	if e.S("kind") != "agent_session" {
-		return fmt.Errorf("threadEventsTakenOver: execution %s is kind=%q, not agent_session", executionID, e.S("kind"))
+		return fmt.Errorf("settleThreadEvents: execution %s is kind=%q, not agent_session", executionID, e.S("kind"))
 	}
 	work := t.one("SELECT * FROM execution_work WHERE id=$1", e.S("workId"))
 	if work == nil || work.S("runId") != runID || work.S("kind") != "agent_session" {
 		// The execution belongs to a different run's work item: refusing here is what keeps a
 		// mis-addressed batch from being written into another run's Thread (§18).
-		return fmt.Errorf("threadEventsTakenOver: execution %s does not belong to run %s agent_session work", executionID, runID)
+		return fmt.Errorf("settleThreadEvents: execution %s does not belong to run %s agent_session work", executionID, runID)
 	}
 
 	// The Thread's first entry is immutable (Phase 3A, §21) and is also the authoritative echo
@@ -108,7 +106,7 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 	// seq=1 for a Node record.
 	firstTurn := t.one("SELECT turn_id FROM thread_entries WHERE run_id=$1 AND seq=1", runID)
 	if firstTurn == nil {
-		return fmt.Errorf("threadEventsTakenOver: run %s has no first prompt entry (seq=1); refusing to allocate seq=1 to a Node record", runID)
+		return fmt.Errorf("settleThreadEvents: run %s has no first prompt entry (seq=1); refusing to allocate seq=1 to a Node record", runID)
 	}
 	initialTurnID := firstTurn.S("turnId")
 
@@ -127,7 +125,7 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 		}
 		kind, ok := threadRecordKind(ev.O("record"))
 		if !ok {
-			return fmt.Errorf("threadEventsTakenOver: run %s node sequence %d carries unknown record type %q", runID, ev.N("sequence"), ev.O("record").S("type"))
+			return fmt.Errorf("settleThreadEvents: run %s node sequence %d carries unknown record type %q", runID, ev.N("sequence"), ev.O("record").S("type"))
 		}
 		lastKind = kind
 		// A Cloud-written user turn echoed back by the Node (Thread D3, D-4C-08). The event carries
@@ -147,7 +145,7 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 					// a predicate this transaction did not observe — invariant corruption that rolls
 					// the batch back rather than being silently tolerated.
 					if moved := t.execRows(`UPDATE thread_entries SET status='delivered' WHERE run_id=$1 AND seq=$2 AND status='queued'`, runID, echo.N("seq")); moved != 1 {
-						return fmt.Errorf("threadEventsTakenOver: run %s user turn %s was not marked delivered (rows affected %d)", runID, turnID, moved)
+						return fmt.Errorf("settleThreadEvents: run %s user turn %s was not marked delivered (rows affected %d)", runID, turnID, moved)
 					}
 					// A4: the row moved, so the Thread's REST representation changed even though no
 					// entry was appended. A turn already `delivered` (an identical replay) moves
@@ -162,7 +160,7 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 		// no-op; different content under the same identity is an invariant error, never a rewrite.
 		if prior := t.one("SELECT * FROM thread_entries WHERE node_execution_id=$1 AND node_sequence=$2", executionID, ev.N("sequence")); prior != nil {
 			if prior.S("kind") != kind || jsonText(prior.O("record")) != jsonText(ev.O("record")) {
-				return fmt.Errorf("threadEventsTakenOver: run %s already has a different entry for execution %s node sequence %d", runID, executionID, ev.N("sequence"))
+				return fmt.Errorf("settleThreadEvents: run %s already has a different entry for execution %s node sequence %d", runID, executionID, ev.N("sequence"))
 			}
 			continue
 		}
@@ -204,7 +202,7 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 			UPDATE issue_runs
 			SET phase='running', status='running', thread_state='active', version=version+1, updated_at=now()
 			WHERE id=$1 AND executor_type='agent' AND phase='starting' AND status='dispatched' AND cancel_requested_at IS NULL`, runID); moved != 1 {
-			return fmt.Errorf("threadEventsTakenOver: run %s was not moved to running (rows affected %d)", runID, moved)
+			return fmt.Errorf("settleThreadEvents: run %s was not moved to running (rows affected %d)", runID, moved)
 		}
 	}
 
@@ -240,7 +238,7 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 		if moved := t.execRows(`
 			UPDATE issue_runs SET thread_state='idle', idle_since=now(), version=version+1, updated_at=now()
 			WHERE id=$1 AND thread_state='active'`, runID); moved != 1 {
-			return fmt.Errorf("threadEventsTakenOver: run %s was not moved to idle (rows affected %d)", runID, moved)
+			return fmt.Errorf("settleThreadEvents: run %s was not moved to idle (rows affected %d)", runID, moved)
 		}
 		threadChanged(t, o)
 	case threadState == "idle" && !ended:
@@ -250,7 +248,7 @@ func (s *Store) threadEventsTakenOver(t *transaction, run, execution Object, eve
 		if moved := t.execRows(`
 			UPDATE issue_runs SET thread_state='active', idle_since=NULL, version=version+1, updated_at=now()
 			WHERE id=$1 AND thread_state='idle'`, runID); moved != 1 {
-			return fmt.Errorf("threadEventsTakenOver: run %s was not moved back to active (rows affected %d)", runID, moved)
+			return fmt.Errorf("settleThreadEvents: run %s was not moved back to active (rows affected %d)", runID, moved)
 		}
 		threadChanged(t, o)
 	}

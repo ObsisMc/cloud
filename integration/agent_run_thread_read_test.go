@@ -606,7 +606,7 @@ func TestThreadReadAuthorizationMatchesComments(t *testing.T) {
 // it ran.
 func TestThreadReadPagingIsGapFreeUnderConcurrentAppend(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 	f.seedThreadEntry(scene.runID, "system", "user_turn", `{"content":"Begin this task."}`, nil, nil)
 

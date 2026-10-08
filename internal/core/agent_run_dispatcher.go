@@ -9,12 +9,14 @@ import (
 // without starving; runs beyond the bound are claimed on the next tick.
 const agentDispatchBatchSize = 100
 
-// AgentRunDispatcher is the Slice 1 Claim + Busy owner of a queued real Space Agent IssueRun (IssueRun
-// D6, B→A). It runs the single short claim transaction that re-validates the run is claimable,
-// reflects project busy/idle, and — only when the AgentRunControlPlane seam *accepts* — moves the run
-// to status='dispatched', phase='provisioning'. It never creates execution/session/delivery work
-// (later slices own the back-half); it only claims. Team, workflow and dev-fixture agent runs keep the
-// legacy ExecutionDispatcher.
+// AgentRunDispatcher is the B-side Claim owner of a queued real Space Agent IssueRun (IssueRun D6,
+// B→A). It runs one short claim transaction that re-validates the run is claimable and then hands the
+// run to the control plane's own in-transaction create seam, advancing the run only when that seam
+// actually created (or found) the run Workspace. It never creates session or delivery work — later
+// stages own those — and it never writes execution evidence: the Workspace row, its
+// create_workspace operation and the run's `workspaces.issue_run_id` binding are all the A side's.
+//
+// Team, workflow and dev-fixture agent runs keep the legacy ExecutionDispatcher.
 type AgentRunDispatcher struct {
 	store *Store
 }
@@ -28,37 +30,30 @@ func isSpaceAgentRun(t *transaction, tid, agentID string) bool {
 	return t.one("SELECT id FROM space_agents WHERE id=$1 AND tenant_id=$2", agentID, tid) != nil
 }
 
-// projectBusy is the non-panicking busy predicate the dispatcher uses (it deliberately never reuses the
-// idleProject 409-guard panic, which is reserved for request-time validation). A project is busy when it
-// has an operation in flight; the authoritative acceptance nonetheless comes from the seam below, so
-// this is only an optimization that avoids a needless seam call when the run's project is known busy.
-func projectBusy(t *transaction, pid string) bool {
-	return t.one("SELECT id FROM operations WHERE project_id=$1 AND state IN ('queued','running','retry_wait','blocked')", pid) != nil
-}
-
-// Dispatch claims a single queued real Space Agent IssueRun. It is the exact beforeEach-safe switch the
-// ADR requires:
+// Dispatch claims a single queued real Space Agent IssueRun. It is the exact claim switch the ADR
+// requires:
 //
 //	queried contract:  executor_type='agent' AND status='queued' AND phase IS NULL, and the executor
 //	                    id is a space_agents row in the tenant — otherwise no-op, stays queued.
-//	busy precheck:     a best-effort skip (projectBusy). It is never authoritative: the seam's
-//	                    Busy/Accepted outcome wins, so a precheck-idle-then-seam-busy race stays queued.
-//	seam accept:       only RunWorkspaceOutcome.Accepted advances; Busy commits and stays queued; a
-//	                    genuine seam error panics databaseFailure so the shared advisory-lock claim
-//	                    transaction rolls back (stay queued) — never marks the run failed (Slice 1).
-//	atomicity:         the A-seam declaration and the B-side phase/status transition land in one
-//	                    transaction; a seam error rolls back the whole claim with no partial state.
+//	control-plane claim: createRunWorkspace decides. It answers `busy` while the run's Project has
+//	                    another operation in flight (IssueRun D3 accepts that a Project's runs queue
+//	                    behind one operation slot), in which case the run stays queued for the next
+//	                    tick. Its refusals (no Project, no default branch, no unambiguous trigger
+//	                    actor) are control-plane Faults that abort this transaction, again leaving the
+//	                    run queued rather than marking it failed.
+//	atomicity:        the Workspace row, its create_workspace operation and the B-side
+//	                    phase/status/workspace_id transition land in one transaction, so a run can
+//	                    never be `provisioning` without the operation that will settle it.
 //	CAS/replay-guard:  the phase/status UPDATE matches status='queued' AND phase IS NULL, so a claim
 //	                    that lost the race to a concurrent dispatcher (defense-in-depth on top of the
-//	                    global advisory tx lock) does not double-transition.
+//	                    global advisory tx lock) does not double-transition; the seam call it already
+//	                    made is idempotent (keyed on run + create_workspace).
 //
 // It returns an error only for a real failure (which keeps the run queued); a busy or no-op is nil.
 func (d *AgentRunDispatcher) Dispatch(ctx context.Context, runID string) error {
 	_, err := d.store.transact(ctx, func(t *transaction) Object {
 		o := t.one(`
-			SELECT ir.*, iss.project_ref AS project_ref
-			FROM issue_runs ir
-			LEFT JOIN issues iss ON iss.id = ir.issue_id AND iss.tenant_id = ir.tenant_id
+			SELECT ir.id FROM issue_runs ir
 			WHERE ir.id = $1
 			  AND ir.executor_type = 'agent'
 			  AND ir.status = 'queued'
@@ -68,38 +63,18 @@ func (d *AgentRunDispatcher) Dispatch(ctx context.Context, runID string) error {
 			    SELECT 1 FROM space_agents sa WHERE sa.id = ir.executor_id AND sa.tenant_id = ir.tenant_id
 			  )`, runID)
 		if o == nil {
-			// Not a claimable real Space Agent run: leave it untouched, no claim, no seam call.
+			// Not a claimable real Space Agent run: leave it untouched, no Workspace, no transition.
 			return Object{}
 		}
-		// Busy precheck — optimization only, never authoritative. An empty/absent project ref has no
-		// operation to be busy about, so defer entirely to the seam.
-		if pid := o.S("projectRef"); pid != "" && projectBusy(t, pid) {
+		out := createRunWorkspace(t, runID)
+		if out.B("busy") {
 			return Object{}
 		}
-		// Authoritative claim: the seam decides. Busy is a value, not an error, so returning normally
-		// commits and keeps the run queued for the retry loop.
-		out, err := d.store.agentRunControlPlane().CreateRunWorkspace(t, o)
-		if err != nil {
-			// Real seam failure: roll back the shared claim transaction (run stays queued). Never
-			// mark failed in Slice 1; the retry loop resurfaces it.
-			panic(databaseFailure{err})
-		}
-		if out.Busy {
-			return Object{}
-		}
-		if !out.Accepted {
-			// The seam neither accepted nor declared busy — the fail-closed default or an undefined
-			// outcome. Stay queued rather than advancing on an ambiguity.
-			return Object{}
-		}
-		// Accept → CAS to provisioning/dispatched inside the same transaction as the acceptance.
-		// The WHERE guard is single-flight insurance: if a concurrent claim already advanced the run
-		// (impossible under the advisory tx lock, but defense-in-depth), we do not double-transition;
-		// the seam call already made is idempotent (keyed on run+create_workspace).
+		wid := out.O("workspace").S("id")
 		t.execRows(`
 			UPDATE issue_runs
-			SET phase = 'provisioning', status = 'dispatched', version = version + 1, updated_at = now()
-			WHERE id = $1 AND status = 'queued' AND phase IS NULL`, runID)
+			SET phase = 'provisioning', status = 'dispatched', workspace_id = $2, version = version + 1, updated_at = now()
+			WHERE id = $1 AND status = 'queued' AND phase IS NULL`, runID, wid)
 		return Object{}
 	})
 	return err
@@ -137,10 +112,9 @@ func (s *Store) scanQueuedAgentRuns(ctx context.Context, limit int) ([]string, e
 
 // DispatchQueuedAgentRunsOnce is one bounded retry-loop pass: scan the eligible queued real Space Agent
 // runs (read-only) and claim each in its own short Dispatch transaction, with the sleep between ticks
-// owned by the caller. Per-run failures are deliberately not surfaced here — Dispatch already keeps the
-// run queued and rolls back on error, and the loop must not flood logs merely because the A seam is
-// unwired (Unavailable) or a single run is transiently stuck. Only a scan-level failure cancels the
-// pass.
+// owned by the caller. Per-run failures are deliberately not surfaced here — Dispatch already keeps
+// the run queued and rolls back on error, and the loop must not flood logs merely because a single run
+// is transiently stuck. Only a scan-level failure cancels the pass.
 func (s *Store) DispatchQueuedAgentRunsOnce(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -153,4 +127,11 @@ func (s *Store) DispatchQueuedAgentRunsOnce(ctx context.Context) error {
 		_ = s.agentRunDispatcher().Dispatch(ctx, id)
 	}
 	return nil
+}
+
+// agentRunDispatcher returns the dispatcher for this Store, constructing a fresh per-call value. No
+// Store field is needed: the struct only owns a pointer back to the Store, so a zero-value Store still
+// has a nil-safe accessor and no package-global state exists.
+func (s *Store) agentRunDispatcher() *AgentRunDispatcher {
+	return &AgentRunDispatcher{store: s}
 }

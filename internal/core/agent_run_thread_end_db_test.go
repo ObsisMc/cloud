@@ -250,8 +250,6 @@ func idleAgeOnly(t *testing.T, store *Store, runID string) sql.NullString {
 // because there is no session to shut down. The two cancel outcomes are distinct transitions.
 func TestCancelWithoutASessionReleasesTheRun(t *testing.T) {
 	store := dispatcherDB(t)
-	stub := &stubAgentRunControlPlane{accepted: true}
-	store.AgentRunControlPlane = stub
 	scene := seedStartingRun(t, store, sessionStartInput())
 	if state := runThreadState(t, store, scene.seed.run); state.Valid {
 		t.Fatalf("precondition: a run whose session was never declared has no thread_state, got %v", state)
@@ -281,8 +279,8 @@ func TestCancelWithoutASessionReleasesTheRun(t *testing.T) {
 	}
 	// The Workspace delete is declared in the same transaction as the releasing transition: a run is
 	// never releasing while the delete intent did not commit (IssueRun invariant 3).
-	if stub.deleteN != 1 {
-		t.Fatalf("exactly one delete declaration is expected, got %d", stub.deleteN)
+	if n := countDeleteOperations(t, store, scene.seed.run); n != 1 {
+		t.Fatalf("exactly one delete declaration is expected, got %d", n)
 	}
 	if n := countRunActivities(t, store, runIssueID(t, store, scene.seed.run), "run.cancelled"); n != 1 {
 		t.Fatalf("the cancel must be recorded once on the issue timeline, got %d", n)
@@ -392,12 +390,12 @@ func TestCancelAfterEndingEmitsNoSecondRequest(t *testing.T) {
 // Workspace delete while the operation is still building that Workspace.
 func TestCancelDuringProvisioningIsLeftToSettlement(t *testing.T) {
 	store := dispatcherDB(t)
-	stub := &stubAgentRunControlPlane{accepted: true}
-	store.AgentRunControlPlane = stub
-	seed := seedDispatchScene(t, store.Pool, false)
-	if _, err := store.Pool.Exec(`UPDATE issue_runs SET phase='provisioning', status='dispatched', version=version+1, updated_at=now() WHERE id=$1`, seed.run); err != nil {
-		t.Fatalf("stage provisioning run: %v", err)
-	}
+	// The scene is a run that owns a real run Workspace whose create_workspace operation has already
+	// succeeded (that is what makes it `starting`), so a delete declaration from here would commit: the
+	// scan's silence below is a decision, not a busy Project.
+	starting := seedStartingRun(t, store, sessionStartInput())
+	seed := starting.seed
+	stageSettleState(t, store, seed.run, "provisioning", "dispatched", false)
 	requestCancel(t, store, seed.run)
 
 	cancelPass(t, store)
@@ -415,8 +413,8 @@ func TestCancelDuringProvisioningIsLeftToSettlement(t *testing.T) {
 	if result.Valid {
 		t.Fatalf("the Thread scan must not write a result here, got %v", result)
 	}
-	if stub.deleteN != 0 {
-		t.Fatalf("the Thread scan must not declare a delete, got %d", stub.deleteN)
+	if n := countDeleteOperations(t, store, seed.run); n != 0 {
+		t.Fatalf("the Thread scan must not declare a delete, got %d", n)
 	}
 	if got := endSessionRequests(t, store, seed.run); len(got) != 0 {
 		t.Fatalf("a provisioning cancel emits no EndSession, got %v", got)
@@ -543,11 +541,7 @@ func TestThreadEndingConcurrencyMatrix(t *testing.T) {
 		errs := race(
 			func() error { return store.EndIdleAgentThreadsOnce(context.Background()) },
 			func() error {
-				_, err := store.Control(context.Background(), &ControlRequest{
-					Action:  "agent_thread_takeover",
-					Body:    Object{"epoch": 1, "operationId": scene.run, "executionId": scene.execution, "events": []Object{threadEvent(2, threadRecord("update", 1, "b"), "")}},
-					Service: scene.claims,
-				})
+				_, err := takeOver(t, store, scene, scene.execution, []Object{threadEvent(2, threadRecord("update", 1, "b"), "")})
 				return err
 			},
 		)
@@ -614,11 +608,7 @@ func TestThreadEndingConcurrencyMatrix(t *testing.T) {
 		for _, err := range race(
 			func() error { return store.ReactToCancelledAgentRunsOnce(context.Background()) },
 			func() error {
-				_, err := store.Control(context.Background(), &ControlRequest{
-					Action:  "agent_thread_takeover",
-					Body:    Object{"epoch": 1, "operationId": scene.run, "executionId": scene.execution, "events": []Object{threadEvent(2, threadRecord("update", 1, "b"), "")}},
-					Service: scene.claims,
-				})
+				_, err := takeOver(t, store, scene, scene.execution, []Object{threadEvent(2, threadRecord("update", 1, "b"), "")})
 				return err
 			},
 		) {

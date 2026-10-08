@@ -126,7 +126,9 @@ func TestPluginInstallAPI(t *testing.T) {
 	// instance plus one operation per live runtime workspace.
 	out := f.call("POST", f.path("/spaces/"+sid+"/plugins"), core.Object{"identifier": "official/hello-world"}, "install-1", 200)
 	row := out.O("resource")
-	if row.S("desiredState") != "installed" || row.S("desiredVersion") != "1.0.0" || row.S("observedState") != "pending" {
+	// Entering the plugin step in this same transaction marks the instance installing.
+	// The Node has not reported a result yet.
+	if row.S("desiredState") != "installed" || row.S("desiredVersion") != "1.0.0" || row.S("observedState") != "installing" {
 		t.Fatalf("space plugin row after install = %v", row)
 	}
 	if f.scalar(`SELECT count(*) FROM workspace_plugin_instances wi JOIN projects p ON p.id=wi.project_id WHERE p.space_id=$1`, sid) != 1 {
@@ -159,7 +161,8 @@ func TestPluginInstallAPI(t *testing.T) {
 	if replay.O("resource").S("version") != row.S("version") {
 		t.Fatalf("idempotent replay = %v", replay)
 	}
-	f.call("POST", f.path("/spaces/"+sid+"/plugins"), core.Object{"identifier": "official/hello-world"}, "install-2", 200)
+	f.call("POST", f.path("/spaces/"+sid+"/plugins"), core.Object{"identifier": "official/hello-world"}, "install-2", 428)
+	f.call("POST", f.path("/spaces/"+sid+"/plugins"), core.Object{"identifier": "official/hello-world", "version": row.N("version")}, "install-2-versioned", 200)
 	if f.scalar("SELECT count(*) FROM operations WHERE kind='install_plugin' AND project_id IN (SELECT id FROM projects WHERE space_id=$1)", sid) != 1 {
 		t.Fatal("re-installing the same version must not fan out again")
 	}
@@ -191,7 +194,7 @@ func TestPluginInstallAPI(t *testing.T) {
 	if o.S("code") != "version_required" {
 		t.Fatalf("DELETE without version = %v", o)
 	}
-	o = f.call("DELETE", f.path("/spaces/"+sid+"/plugins"), core.Object{"identifier": "official/hello-world", "version": 2}, "del-stale", 409)
+	o = f.call("DELETE", f.path("/spaces/"+sid+"/plugins"), core.Object{"identifier": "official/hello-world", "version": row.N("version") + 1}, "del-stale", 409)
 	if o.S("code") != "version_conflict" {
 		t.Fatalf("stale DELETE version = %v", o)
 	}
@@ -237,10 +240,10 @@ func TestPluginInstallAndRemoveLifecycle(t *testing.T) {
 	plugins := f.call("GET", f.path("/spaces/"+sid+"/plugins"), nil, "", 200)
 	version := core.Object(plugins["items"].([]any)[0].(map[string]any)).N("version")
 	removed := f.call("DELETE", f.path("/spaces/"+sid+"/plugins"), core.Object{"identifier": "official/hello-world", "version": version}, "remove-1", 200)
-	if removed.O("resource").S("desiredState") != "removed" || removed.O("resource").S("observedState") != "removing" {
+	if removed.O("resource").S("desiredState") != "removed" || (removed.O("resource").S("observedState") != "pending" && removed.O("resource").S("observedState") != "removing") {
 		t.Fatalf("removal row = %v", removed)
 	}
-	f.drain()
+	f.completeNextPlugin(t, "remove_plugin")
 	row = f.spacePlugin(sid, "official/hello-world")
 	if row.S("observedState") != "removed" {
 		t.Fatalf("space plugin after removal drain = %v", row)

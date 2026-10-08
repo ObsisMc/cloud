@@ -24,14 +24,14 @@ type Route struct {
 }
 
 // ThreadMessagePath is the Thread POST route. It is named because it needs a transport body limit
-// of its own: the contract bounds the *decoded* message text at 64 KiB (Thread D3), which the
-// default 64 KiB request cap cannot contain once the JSON envelope around the text is counted.
+// of its own: the contract bounds the *decoded* message text (Thread D3), which the default request
+// cap cannot contain once the JSON envelope around the text is counted.
 const ThreadMessagePath = "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages"
 
 // ThreadPath is the Thread GET route (Thread D5). It is named because it is the one public read that
-// may ask for more than the shared list window: D5 caps `limit` at 500, while every other pageable
-// route keeps the 100 the core's `window` helper enforces. The two bounds stay separate on purpose —
-// raising the shared one would silently widen every existing list's contract.
+// may ask for more than the shared list window: D5 caps `limit` at `core.ThreadPageLimit`, while
+// every other pageable route keeps the 100 the core's `window` helper enforces. The two bounds stay
+// separate on purpose — raising the shared one would silently widen every existing list's contract.
 const ThreadPath = "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread"
 
 // ThreadEndPath is the user-initiated end route (Thread D4, G-018). It is named for the same reason
@@ -76,6 +76,18 @@ func Routes() []Route {
 		{"POST", "/api/v1/tenants/:tid/labels", "", []string{"name", "color"}},
 		{"PUT", "/api/v1/tenants/:tid/labels/:lid", "", []string{"name", "color", "version"}},
 		{"DELETE", "/api/v1/tenants/:tid/labels/:lid", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/workflows", "", nil},
+		{"POST", "/api/v1/tenants/:tid/workflows", "", []string{"name", "description", "graph"}},
+		{"GET", "/api/v1/tenants/:tid/workflows/:wfid", "", nil},
+		{"PUT", "/api/v1/tenants/:tid/workflows/:wfid", "", []string{"name", "description", "graph", "version"}},
+		{"DELETE", "/api/v1/tenants/:tid/workflows/:wfid", "", []string{"version"}},
+		{"POST", "/api/v1/tenants/:tid/workflows/:wfid/publish", "", []string{"name"}},
+		{"GET", "/api/v1/tenants/:tid/workflows/:wfid/snapshots", "", nil},
+		{"GET", "/api/v1/tenants/:tid/workflows/:wfid/snapshots/:snapshotId", "", nil},
+		{"PUT", "/api/v1/tenants/:tid/workflows/:wfid/snapshots/:snapshotId/restore", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/workflows/:wfid/runs", "", nil},
+		{"POST", "/api/v1/tenants/:tid/workflows/:wfid/runs", "", []string{"name", "snapshotId", "input"}},
+		{"GET", "/api/v1/tenants/:tid/workflows/:wfid/runs/:rid", "", nil},
 		{"GET", "/api/v1/tenants/:tid/issue-views", "", nil},
 		{"POST", "/api/v1/tenants/:tid/issue-views", "", []string{"name", "filter"}},
 		{"PUT", "/api/v1/tenants/:tid/issue-views/:vid", "", []string{"name", "filter", "version"}},
@@ -124,16 +136,22 @@ func Routes() []Route {
 		{"GET", "/api/v1/tenants/:tid/projects/:pid/workspaces", "", nil},
 		{"POST", "/api/v1/tenants/:tid/projects/:pid/workspaces", "", []string{"title", "baseRef"}},
 		{"GET", "/api/v1/tenants/:tid/workspaces/:wid", "", nil},
-		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/start", "", []string{"version"}},
-		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/stop", "", []string{"version"}},
-		{"DELETE", "/api/v1/tenants/:tid/workspaces/:wid", "", []string{"version"}},
+		{"GET", "/api/v1/tenants/:tid/workspaces/:wid/control", "", nil},
+		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/control/acquire", "", []string{"version"}},
+		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/control/renew", "", []string{"version", "sessionId"}},
+		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/control/release", "", []string{"version", "sessionId"}},
+		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/start", "", []string{"version", "sessionId"}},
+		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/stop", "", []string{"version", "sessionId"}},
+		{"DELETE", "/api/v1/tenants/:tid/workspaces/:wid", "", []string{"version", "sessionId"}},
 		{"GET", "/api/v1/tenants/:tid/clones", "", nil},
 		{"POST", "/api/v1/tenants/:tid/clones", "", []string{"requestId", "repository", "branch"}},
 		{"GET", "/api/v1/tenants/:tid/clones/:cloneId", "", nil},
 		{"GET", "/api/v1/tenants/:tid/operations/:oid", "", nil},
 		{"POST", "/api/v1/tenants/:tid/operations/:oid/retry", "", []string{"version"}},
 		{"GET", "/api/v1/tenants/:tid/resource-status", "", nil},
-		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/administrative-stop", "", []string{"version"}},
+		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/force-stop", "", []string{"version", "reason", "impactConfirmed"}},
+		{"GET", "/api/v1/tenants/:tid/workspaces/:wid/force-stop", "", nil},
+		{"POST", "/api/v1/tenants/:tid/workspaces/:wid/restart", "", []string{"version", "sessionId"}},
 		{"GET", "/api/v1/tenants/:tid/spaces", "", nil},
 		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId", "", nil},
 		{"PATCH", "/api/v1/tenants/:tid/spaces/:spaceId", "", []string{"name", "description", "version"}},
@@ -141,10 +159,10 @@ func Routes() []Route {
 		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/projects", "", []string{"name", "repositoryUrl", "defaultBranch", "credentialRefId"}},
 		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/plugins/catalog", "", nil},
 		{"GET", "/api/v1/tenants/:tid/spaces/:spaceId/plugins", "", nil},
-		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/plugins", "", []string{"identifier", "pluginVersion"}},
+		{"POST", "/api/v1/tenants/:tid/spaces/:spaceId/plugins", "", []string{"identifier", "pluginVersion", "version"}},
 		{"DELETE", "/api/v1/tenants/:tid/spaces/:spaceId/plugins", "", []string{"identifier", "version"}},
-		{"POST", "/internal/v1/access", "access", []string{"tenantId", "workspaceId", "action", "epoch"}},
-		{"POST", "/internal/v1/admissions", "admit", []string{"tenantId", "workspaceId", "action", "ticketId", "kind", "epoch"}},
+		{"POST", "/internal/v1/access", "access", []string{"tenantId", "workspaceId", "action", "epoch", "sessionId"}},
+		{"POST", "/internal/v1/admissions", "admit", []string{"tenantId", "workspaceId", "action", "ticketId", "kind", "epoch", "sessionId"}},
 		{"POST", "/internal/v1/controller-lease/acquire", "lease_acquire", []string{}},
 		{"POST", "/internal/v1/controller-lease/renew", "lease_renew", []string{"epoch"}},
 		{"POST", "/internal/v1/controller-lease/release", "lease_release", []string{"epoch"}},
@@ -163,6 +181,15 @@ func Routes() []Route {
 
 // New injects the store, trust configuration, and logger. No public user CRUD is registered.
 func New(store *core.Store, auth *core.Authenticator, log *zap.Logger, directories ...Directory) *gin.Engine {
+	return newRouter(store, auth, log, false, directories...)
+}
+
+// NewDevelopment keeps the simulator's internal JSON entry points separate from production.
+func NewDevelopment(store *core.Store, auth *core.Authenticator, log *zap.Logger, directories ...Directory) *gin.Engine {
+	return newRouter(store, auth, log, true, directories...)
+}
+
+func newRouter(store *core.Store, auth *core.Authenticator, log *zap.Logger, legacy bool, directories ...Directory) *gin.Engine {
 	var directory Directory
 	if len(directories) > 0 {
 		directory = directories[0]
@@ -185,10 +212,18 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger, directori
 			failure(c, &core.Fault{Code: "database_unavailable", Status: 503, Params: core.Object{}})
 			return
 		}
-		c.JSON(200, gin.H{"status": "ok"})
+		storage := "unconfigured"
+		if store.ObjectStore != nil {
+			storage = "configured"
+		}
+		c.JSON(200, gin.H{"status": "ok", "dependencies": gin.H{"objectStore": storage}})
 	})
 	for _, route := range Routes() {
 		r.Handle(route.Method, route.Path, func(c *gin.Context) {
+			if route.Action != "" && !legacy {
+				failure(c, &core.Fault{Code: "retired_management_transport", Status: 410, Params: core.Object{}})
+				return
+			}
 			raw, ok := bearerToken(c.GetHeader("Authorization"))
 			if !ok {
 				failure(c, &core.Fault{Code: "invalid_service_credential", Status: 401, Params: core.Object{}})
@@ -267,7 +302,7 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger, directori
 						return
 					}
 				}
-				for _, k := range []string{"idle", "initialized"} {
+				for _, k := range []string{"idle", "initialized", "impactConfirmed"} {
 					for _, f := range route.Fields {
 						if f == k {
 							if _, ok := body[k]; !ok {
@@ -311,7 +346,7 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger, directori
 				if v := c.Query("limit"); v != "" {
 					limit, e = strconv.Atoi(v)
 					// Every pageable route shares the core's 100-row window except the Thread read,
-					// which Thread D5 caps at 500. The bound is chosen per route rather than raised
+					// which Thread D5 caps higher. The bound is chosen per route rather than raised
 					// globally so no existing list's contract widens as a side effect.
 					maxLimit := 100
 					if route.Path == ThreadPath {
@@ -322,7 +357,7 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger, directori
 						return
 					}
 				}
-				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), SpaceID: c.Param("spaceId"), OperationID: c.Param("oid"), CloneID: c.Param("cloneId"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), InteractionID: c.Param("ixid"), FormRef: c.Param("formRef"), InvitationID: c.Param("iid"), JoinLinkID: c.Param("lid"), JoinRequestID: c.Param("rid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Before: c.Query("before"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user, Person: person})
+				out, status, e = store.Public(c.Request.Context(), &core.PublicRequest{Method: c.Request.Method, Path: c.Request.URL.Path, TenantID: c.Param("tid"), ProjectID: c.Param("pid"), WorkspaceID: c.Param("wid"), SpaceID: c.Param("spaceId"), OperationID: c.Param("oid"), CloneID: c.Param("cloneId"), UserID: c.Param("uid"), IssueID: c.Param("iid"), CommentID: c.Param("cid"), LabelID: c.Param("lid"), StatusID: c.Param("sid"), ViewID: c.Param("vid"), RunID: c.Param("rid"), ContextRefID: c.Param("crid"), InteractionID: c.Param("ixid"), WorkflowID: c.Param("wfid"), SnapshotID: c.Param("snapshotId"), FormRef: c.Param("formRef"), FormIssueID: c.Query("issueId"), InvitationID: c.Param("iid"), JoinLinkID: c.Param("lid"), JoinRequestID: c.Param("rid"), Key: c.GetHeader("Idempotency-Key"), Limit: limit, After: c.Query("after"), Before: c.Query("before"), Query: c.Query("q"), GroupBy: c.Query("by"), Body: body, Identity: user, Person: person})
 			} else {
 				out, e = store.Control(c.Request.Context(), &core.ControlRequest{Action: route.Action, OperationID: c.Param("oid"), EffectID: c.Param("eid"), TicketID: c.Param("ticket"), Body: body, Service: service, Identity: user})
 			}
@@ -490,7 +525,7 @@ func validField(name string, value any) bool {
 			}
 		}
 		return true
-	case "filter", "properties", "input", "values":
+	case "filter", "properties", "input", "values", "graph":
 		_, ok := value.(map[string]any)
 		return ok
 	case "targetId":
@@ -518,7 +553,7 @@ func validField(name string, value any) bool {
 			}
 		}
 		return true
-	case "idle", "initialized":
+	case "idle", "initialized", "impactConfirmed":
 		_, ok := value.(bool)
 		return ok
 	case "result":
@@ -528,7 +563,7 @@ func validField(name string, value any) bool {
 		}
 		for k, v := range o {
 			switch k {
-			case "jobTerminated", "removed", "terminated", "installed":
+			case "jobTerminated", "removed", "terminated", "lateEnsureFenced", "installed":
 				if _, ok := v.(bool); !ok {
 					return false
 				}

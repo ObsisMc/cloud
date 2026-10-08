@@ -9,7 +9,8 @@ package integration
 //
 // The scene is seeded at the storage boundary (issue + agent run + its run Workspace), because run
 // creation and CreateRunWorkspace are still G-001 placeholders; everything the POST itself does is
-// production code, including the A→B seam, which is wired to the real StoreAgentRunControlPlane.
+// production code, including the delivery command, which the control plane's own in-transaction seam
+// writes (`enqueueThreadCommand`) rather than a second writer on the Cloud side.
 
 import (
 	"context"
@@ -66,11 +67,12 @@ func (f *fixture) setThreadState(runID, phase string, state any) error {
 	return e
 }
 
-// useRealControlPlane wires the production A seam. setup() leaves the fail-closed
-// UnavailableAgentRunControlPlane in place, so a test that expects a command to be written has to ask
-// for the real one explicitly — and the test that expects 503 deliberately does not.
-func (f *fixture) useRealControlPlane() {
-	f.store.AgentRunControlPlane = core.NewStoreAgentRunControlPlane()
+// bindBusinessHooks wires the shipped B side onto the control plane's five callbacks, exactly as
+// cmd/server does. setup() deliberately leaves them unset — an unbound seam is the control-plane-only
+// deployment, where the A side keeps working and Cloud's lifecycle stays a no-op handoff — so a test
+// that expects a run's phase, Thread state or Workspace to move has to ask for the bound seam.
+func (f *fixture) bindBusinessHooks() {
+	core.BindBusinessHooks(f.store)
 }
 
 func threadMessagesPath(tenant, issue, run string) string {
@@ -194,7 +196,9 @@ func (f *fixture) queuedTurns(runID string) []string {
 // commandTurns lists the turn_id inside every submit_user_turn command a run holds, oldest first.
 func (f *fixture) commandTurns(runID string) []string {
 	f.t.Helper()
-	rows, e := f.store.Pool.Query(`SELECT body->'turn'->>'turn_id' FROM thread_commands WHERE run_id=$1 AND kind='submit_user_turn' ORDER BY created_at, id`, runID)
+	// The stored command body is the control plane's flat canonical shape (`turnId` and `content`),
+	// which is also what the Node-bound wire message is rendered from.
+	rows, e := f.store.Pool.Query(`SELECT body->>'turnId' FROM thread_commands WHERE run_id=$1 AND kind='submit_user_turn' ORDER BY queue_sequence`, runID)
 	must(f.t, e)
 	defer rows.Close()
 	var out []string
@@ -215,7 +219,7 @@ func TestThreadMessagePostAcceptsPendingActiveAndIdle(t *testing.T) {
 	for _, state := range []string{"pending", "active", "idle"} {
 		t.Run(state, func(t *testing.T) {
 			f := setup(t)
-			f.useRealControlPlane()
+			f.bindBusinessHooks()
 			scene := seedThreadScene(t, f)
 
 			out := f.postThread(scene, "key-"+state, threadBody("hello "+state), 201, "")
@@ -293,7 +297,7 @@ func seedForeignThreadScene(t *testing.T, f *fixture) threadScene {
 // not yours". No refusal writes anything.
 func TestThreadMessagePostRejectsClosedAndUnknownRuns(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 	foreign := seedForeignThreadScene(t, f)
 
@@ -343,7 +347,7 @@ func TestThreadMessagePostRejectsClosedAndUnknownRuns(t *testing.T) {
 // Cloud's own broken state. The transaction aborts, so nothing is written either way.
 func TestThreadMessagePostInvariantBreakIsInternal(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 
 	// D-4C-01 materializes `pending` inside StartSession, so an activated session with no Thread
@@ -374,7 +378,7 @@ func TestThreadMessagePostInvariantBreakIsInternal(t *testing.T) {
 // second state change. The replay is the same logical response, not a re-render of current state.
 func TestThreadMessagePostReplaysUnderTheSameKey(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 
 	first := f.postThread(scene, "key-replay", threadBody("hello"), 201, "")
@@ -398,7 +402,7 @@ func TestThreadMessagePostReplaysUnderTheSameKey(t *testing.T) {
 // hash covers the method, the path and the body.
 func TestThreadMessagePostRejectsIdempotencyConflicts(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 	f.postThread(scene, "key-once", threadBody("the first body"), 201, "")
 
@@ -423,7 +427,7 @@ func TestThreadMessagePostRejectsIdempotencyConflicts(t *testing.T) {
 // independent user turns, two commands, two Cloud-generated turn_ids, contiguous Thread seq.
 func TestThreadMessageDistinctKeysCreateIndependentTurns(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 
 	first := f.postThread(scene, "key-a", threadBody("same words"), 201, "")
@@ -448,7 +452,7 @@ func TestThreadMessageDistinctKeysCreateIndependentTurns(t *testing.T) {
 // No sleeps: the outcome is read after both goroutines have returned.
 func TestThreadMessageConcurrentSameKeyCreatesOneTurn(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 
 	path := threadMessagesPath(scene.tenantID, scene.issueID, scene.runID)
@@ -488,37 +492,47 @@ func TestThreadMessageConcurrentSameKeyCreatesOneTurn(t *testing.T) {
 	}
 }
 
-// T4C-18 (mandate) / plan §4C.4 — the best-effort Thread D3 branch. When the A seam is unavailable
-// the POST is a retryable 503, and the whole request rolls back: no entry, no state change, no
-// command and no idempotency record. The retry under the same key after the seam recovers is then a
-// clean first request — which is exactly what the absent idempotency record proves, because a
-// recorded 503 would have been replayed instead of the 201.
-func TestThreadMessageSeamFailureRollsBackEverything(t *testing.T) {
+// T4C-18 (mandate) / plan §4C.4 — all-or-nothing. The POST writes the user entry, both hint events,
+// the Thread-state CAS and the delivery command in one transaction; when a statement of that
+// transaction is refused, the whole request rolls back: no entry, no state change, no command and no
+// idempotency record. The retry under the same key after the cause is gone is then a clean first
+// request — which is exactly what the absent idempotency record proves, because a recorded failure
+// would have been replayed instead of the 201.
+//
+// The refusal is induced at the database boundary because there is no injectable seam left to fail:
+// `enqueueThreadCommand` is in-transaction SQL whose body this path builds and validates itself. A
+// request the database will not take is the one failure the production path can actually reach, so it
+// is the one worth proving the rollback against.
+func TestThreadMessageWriteFailureRollsBackEverything(t *testing.T) {
 	f := setup(t)
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
-	// setup() leaves the fail-closed UnavailableAgentRunControlPlane wired; this test never replaces
-	// it before the first attempt.
 	before := int64(f.scalar(`SELECT version FROM issue_runs WHERE id=$1`, scene.runID))
+	// `thread_commands` is the transaction's last write, so by the time the constraint refuses it the
+	// entry, both hint events and the CAS have all already succeeded inside the doomed transaction.
+	_, e := f.store.Pool.Exec(`ALTER TABLE thread_commands ADD CONSTRAINT thread_commands_message_probe CHECK (kind <> 'submit_user_turn')`)
+	must(t, e)
 
-	f.postThread(scene, "key-503", threadBody("will not land"), 503, "thread_command_unavailable")
+	f.postThread(scene, "key-503", threadBody("will not land"), 500, "internal_error")
 
 	if n := f.threadEntries(scene.runID); n != 0 {
-		t.Fatalf("a 503 must leave no user entry, got %d", n)
+		t.Fatalf("a refused write must leave no user entry, got %d", n)
 	}
 	if n := f.threadCommands(scene.runID); n != 0 {
-		t.Fatalf("a 503 must leave no command, got %d", n)
+		t.Fatalf("a refused write must leave no command, got %d", n)
 	}
 	if n := f.scalar(`SELECT count(*) FROM idempotency_records WHERE tenant_id=$1 AND key='key-503'`, scene.tenantID); n != 0 {
-		t.Fatalf("a 503 must not be recorded as a response, got %d records", n)
+		t.Fatalf("a refused write must not be recorded as a response, got %d records", n)
 	}
 	var threadState string
 	var version int64
 	must(t, f.store.Pool.QueryRow(`SELECT thread_state, version FROM issue_runs WHERE id=$1`, scene.runID).Scan(&threadState, &version))
 	if threadState != "pending" || version != before {
-		t.Fatalf("a 503 must not move the Thread: state=%s version=%d want pending/%d", threadState, version, before)
+		t.Fatalf("a refused write must not move the Thread: state=%s version=%d want pending/%d", threadState, version, before)
 	}
 
-	f.useRealControlPlane()
+	_, e = f.store.Pool.Exec(`ALTER TABLE thread_commands DROP CONSTRAINT thread_commands_message_probe`)
+	must(t, e)
 	out := f.postThread(scene, "key-503", threadBody("will not land"), 201, "")
 	if got := messageText(t, out.O("resource")); got != "will not land" {
 		t.Fatalf("the retry must write the original body, got %q", got)
@@ -537,7 +551,7 @@ func TestThreadMessageSeamFailureRollsBackEverything(t *testing.T) {
 // a stable 400 code and none of them reaches the database.
 func TestThreadMessageRejectsMalformedAndOversizedRequests(t *testing.T) {
 	f := setup(t)
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedThreadScene(t, f)
 
 	cases := []struct {
@@ -593,7 +607,7 @@ func TestThreadMessageRejectsAfterCancellationRequested(t *testing.T) {
 	for _, state := range []string{"pending", "active", "idle"} {
 		t.Run(state, func(t *testing.T) {
 			f := setup(t)
-			f.useRealControlPlane()
+			f.bindBusinessHooks()
 			scene := seedThreadScene(t, f)
 			must(t, f.setThreadState(scene.runID, "starting", state))
 

@@ -35,12 +35,12 @@ const agentThreadEndBatchSize = 100
 // `idle_since` is cleared with the state (Thread D4, §4C.10): the instant is only meaningful while
 // the Thread is idle, and leaving it behind would let a later reader — a second tick, or anything
 // consulting the partial index — treat an already-ending Thread as an expired idle one.
-// It returns the A seam's error rather than panicking on it, because the two callers answer a seam
-// failure differently: the background scans have no client to tell and fold it into the rolling-back
-// transaction, while the public end endpoint answers 503 thread_command_unavailable and the caller
-// retries. A CAS that moved no row is still a panic — that one is invariant corruption no caller can
-// act on.
-func (s *Store) endAgentThread(t *transaction, o Object, reason string) error {
+// The command write cannot fail on anything the caller sent (its body is built and validated here),
+// so there is no seam error to report: a database failure inside `enqueueThreadCommand` panics and
+// rolls the whole caller's transaction back, which is what makes the retry under the same key a clean
+// first request. What this function still refuses to tolerate is a CAS that moved no row — that is
+// invariant corruption no caller can act on.
+func (s *Store) endAgentThread(t *transaction, o Object, reason string) {
 	runID := o.S("id")
 	if moved := t.execRows(`
 		UPDATE issue_runs
@@ -48,18 +48,15 @@ func (s *Store) endAgentThread(t *transaction, o Object, reason string) error {
 		WHERE id=$1 AND thread_state IN ('pending','active','idle')`, runID); moved != 1 {
 		panic(databaseFailure{fmt.Errorf("end agent thread: run %s was not moved to ending (rows affected %d)", runID, moved)})
 	}
-	// The command is released through the A seam inside this same transaction (controller-integration
-	// D6): the business layer never writes thread_commands, and a seam failure rolls the `ending`
-	// write back with it, so a Thread can never be `ending` without the request that makes it so.
-	// ThreadCommandAvailable is published by the commit that follows, never before it (D5).
-	if _, err := s.agentRunControlPlane().EnqueueThreadCommand(t, Object{"id": runID, "tenantId": o.S("tenantId")}, EndSessionCommand(reason)); err != nil {
-		return err
-	}
+	// The command is released through the control plane's own in-transaction seam
+	// (controller-integration D6): the business layer never writes thread_commands, and a failure
+	// rolls the `ending` write back with it, so a Thread can never be `ending` without the request
+	// that makes it so. The commit that follows publishes ThreadCommandAvailable, never this call.
+	enqueueThreadCommand(t, runID, "end_session", Object{"reason": reason})
 	// `ending` is a state-only change — no entry, so no appended hint — but the Thread's REST
 	// representation now reports a different threadState and a cleared idleSince, so A4's generalized
 	// hint is exactly the one that covers it.
 	threadChanged(t, o)
-	return nil
 }
 
 // endIdleAgentThread ends one run whose idle window has expired, in its own short transaction
@@ -89,9 +86,7 @@ func (s *Store) endIdleAgentThread(ctx context.Context, runID string) error {
 		if o == nil {
 			return Object{}
 		}
-		if err := s.endAgentThread(t, o, "idle_timeout"); err != nil {
-			panic(databaseFailure{err})
-		}
+		s.endAgentThread(t, o, "idle_timeout")
 		return Object{}
 	})
 	return err
@@ -190,12 +185,7 @@ func endThreadByUser(t *transaction, s *Store, r *PublicRequest) Object {
 	default:
 		panic(databaseFailure{fmt.Errorf("end thread by user: run %s has thread_state=%q, outside the closed set", run.S("id"), state)})
 	}
-	// The seam's failure is retryable rather than internal: the command body is built and validated
-	// here, so nothing the caller sent can make it invalid, and the rollback means the retry under the
-	// same key is a clean first request rather than a replay of a half-written end.
-	if err := s.endAgentThread(t, run, "user_ended"); err != nil {
-		reject(503, "thread_command_unavailable")
-	}
+	s.endAgentThread(t, run, "user_ended")
 	return Object{"threadState": "ending"}
 }
 
@@ -238,9 +228,7 @@ func (s *Store) reactToAgentRunCancel(ctx context.Context, runID string) error {
 			}
 			return Object{}
 		}
-		if err := s.endAgentThread(t, o, "cancelled"); err != nil {
-			panic(databaseFailure{err})
-		}
+		s.endAgentThread(t, o, "cancelled")
 		return Object{}
 	})
 	return err

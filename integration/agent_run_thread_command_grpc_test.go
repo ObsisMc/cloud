@@ -39,15 +39,29 @@ func seedThreadCommandRun(t *testing.T, h *controlHarness) threadCommandScene {
 func registerThreadCommandExecution(t *testing.T, h *controlHarness, s threadCommandScene, execution, node string, epoch int64) {
 	t.Helper()
 	workID := newTestID()
-	_, e := h.store.Pool.Exec(`INSERT INTO execution_work(id,tenant_id,run_id,workspace_id,kind,input,target)
-		VALUES($1,$2,$3,$4,'agent_session','{}','{}')`, workID, s.tenantID, s.runID, s.workspaceID)
+	_, e := h.store.Pool.Exec(`INSERT INTO execution_work(id,run_id,kind,input,target)
+		VALUES($1,$2,'agent_session','{}','{}')`, workID, s.runID)
 	must(t, e)
 	// RecordDispatch registers the work item and the execution together (D6); the work row's own
 	// execution_id is what keeps a second un-registered work item per run impossible.
 	_, e = h.store.Pool.Exec(`UPDATE execution_work SET execution_id=$1 WHERE id=$2`, execution, workID)
 	must(t, e)
-	_, e = h.store.Pool.Exec(`INSERT INTO node_executions(execution_id,kind,operation_id,work_id,node_id,input,dispatched_epoch)
-		VALUES($1,'agent_session',$2,$3,$4,'{}',$5)`, execution, s.runID, workID, node, epoch)
+	_, e = h.store.Pool.Exec(`INSERT INTO node_executions(execution_id,kind,operation_id,work_id,workspace_id,node_id,node_operation_id,input,dispatched_epoch)
+		VALUES($1,'agent_session',$2,$3,$4,$5,$1,'{}',$6)`, execution, s.runID, workID, s.workspaceID, node, epoch)
+	must(t, e)
+	// A claimed command carries the Node identity Cloud would deliver it to, and that target is read
+	// from the run Workspace's live runtime: the sandbox instance the execution's workspace currently
+	// runs in, and the Node serving it. The scene therefore has to carry a provisioned runtime, not
+	// only the execution row, or the claim would have no address to hand back.
+	sandboxID, nodeRowID := newTestID(), newTestID()
+	_, e = h.store.Pool.Exec(`UPDATE workspaces SET runtime_generation=1 WHERE id=$1`, s.workspaceID)
+	must(t, e)
+	_, e = h.store.Pool.Exec(`INSERT INTO sandbox_instances(id,workspace_id,generation,observed_state) VALUES($1,$2,1,'running')`, sandboxID, s.workspaceID)
+	must(t, e)
+	// node_id is the identity the Node service owns (text) and the row id is Cloud's own handle
+	// (uuid), so the identity is bound once as its own parameter.
+	_, e = h.store.Pool.Exec(`INSERT INTO node_instances(id,workspace_id,sandbox_instance_id,service_subject,connection_state,protocol_version,initialized,node_id,node_incarnation_id)
+		VALUES($1,$2,$3,'node','connected',1,true,$4,$5)`, nodeRowID, s.workspaceID, sandboxID, node, "inc-"+node)
 	must(t, e)
 }
 
@@ -73,8 +87,10 @@ func TestControlGRPCThreadCommandDeliveryLoop(t *testing.T) {
 	// Controller may not deliver to an execution Cloud never registered.
 	scene := seedThreadCommandRun(t, h)
 	turnID := "22222222-2222-2222-2222-222222222222"
+	// The durable body is the flat canonical shape the business layer writes and validateThreadCommand
+	// enforces: the turn id and the content blocks, not a nested turn object.
 	commandID := seedThreadCommand(t, h, scene.runID, "submit_user_turn",
-		`{"turn":{"turn_id":"`+turnID+`","content":[{"type":"text","text":"are you there?"}]}}`)
+		`{"turnId":"`+turnID+`","content":[{"text":"are you there?"}]}`)
 	endID := seedThreadCommand(t, h, scene.runID, "end_session", `{"reason":"user_ended"}`)
 	early, e := client.ClaimThreadCommands(holder, &controlpb.ClaimThreadCommandsRequest{Epoch: epoch, Limit: 100})
 	must(t, e)
@@ -128,14 +144,18 @@ func TestControlGRPCThreadCommandDeliveryLoop(t *testing.T) {
 		t.Fatalf("a registered command must not be claimed again, got %v", remaining.GetCommands())
 	}
 
-	// A different execution of the same run can never take the registration over.
+	// A different execution of the same run can never take the registration over. In the merged
+	// control plane that is structural as well as contractual: a run holds at most one in-flight
+	// agent_session execution (one_pending_run_execution), so no competing execution can be
+	// registered in the first place.
 	otherWork := newTestID()
-	_, e = h.store.Pool.Exec(`INSERT INTO execution_work(id,tenant_id,run_id,workspace_id,kind,input,target)
-		SELECT $1,tenant_id,run_id,workspace_id,kind,input,target FROM execution_work WHERE id=(SELECT work_id FROM node_executions WHERE execution_id=$2)`, otherWork, execution)
+	_, e = h.store.Pool.Exec(`INSERT INTO execution_work(id,run_id,kind,input,target) VALUES($1,$2,'agent_session','{}','{}')`, otherWork, scene.runID)
 	must(t, e)
-	_, e = h.store.Pool.Exec(`INSERT INTO node_executions(execution_id,kind,operation_id,work_id,node_id,input,dispatched_epoch)
-		SELECT 'exec-thread-2',kind,operation_id,$1,node_id,input,dispatched_epoch FROM node_executions WHERE execution_id=$2`, otherWork, execution)
-	must(t, e)
+	_, e = h.store.Pool.Exec(`INSERT INTO node_executions(execution_id,kind,operation_id,work_id,workspace_id,node_id,node_operation_id,input,dispatched_epoch)
+		VALUES('exec-thread-2','agent_session',$1,$2,$3,$4,'exec-thread-2','{}',$5)`, scene.runID, otherWork, scene.workspaceID, node, epoch)
+	wantPGError(t, e, "23505")
+	// And an execution Cloud never registered can never take the delivered registration over either,
+	// which is the answer a Controller gets when it guesses an execution identity.
 	_, e = client.RecordThreadCommandDelivered(holder, &controlpb.RecordThreadCommandDeliveredRequest{
 		SubmissionId: "s-deliver-2", Epoch: epoch, CommandId: commandID, ExecutionId: "exec-thread-2",
 	})

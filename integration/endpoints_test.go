@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"testing"
@@ -10,7 +11,28 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/wanglongan587/cloud/internal/core"
+	"github.com/wanglongan587/cloud/internal/objectstore"
 )
+
+func TestHealthReportsOptionalObjectStoreWithoutDisclosingConfiguration(t *testing.T) {
+	f := setup(t)
+	for _, configured := range []bool{false, true} {
+		want := "unconfigured"
+		if configured {
+			f.store.ObjectStore = &objectstore.Config{Endpoint: "http://private.invalid", AccessKeyID: "private-access", SecretAccessKey: "private-secret"}
+			want = "configured"
+		}
+		response, err := f.client.HTTP.Get(f.cloud.URL + "/healthz")
+		must(t, err)
+		var actual core.Object
+		err = json.NewDecoder(response.Body).Decode(&actual)
+		response.Body.Close()
+		must(t, err)
+		if response.StatusCode != http.StatusOK || len(actual) != 2 || actual.S("status") != "ok" || len(actual.O("dependencies")) != 1 || actual.O("dependencies").S("objectStore") != want {
+			t.Fatal("health must report only readiness and optional storage configuration")
+		}
+	}
+}
 
 func TestRemainingPublicContractsAndMembershipRevocation(t *testing.T) {
 	f := setup(t)
@@ -165,18 +187,20 @@ func TestProjectDeleteClosesEveryWorkspaceAndWaitsForCleanup(t *testing.T) {
 	wid := side.O("resource").S("id")
 	n := f.node(wid)
 	ticket := uuid.NewString()
-	f.internal("/internal/v1/admissions", core.Object{"tenantId": f.tid, "workspaceId": wid, "action": "execute", "ticketId": ticket, "kind": "task", "epoch": f.controller.Epoch}, 200)
+	f.internal("/internal/v1/admissions", core.Object{"tenantId": f.tid, "workspaceId": wid, "action": "execute", "ticketId": ticket, "kind": "task", "epoch": f.controller.Epoch, "sessionId": f.controlSession(wid)}, 200)
 	project := f.call("GET", f.path("/projects/"+pid), nil, "", 200)
 	f.call("DELETE", f.path("/projects/"+pid), core.Object{"version": project.N("version")}, "busy-delete", 409)
 	if !f.ws(main).B("admissionOpen") || !f.ws(wid).B("admissionOpen") {
 		t.Fatal("busy cascade partially closed admission")
 	}
 	f.finishTicket(ticket, n)
+	f.releaseRuntimeControl(wid)
 	deleting := f.call("DELETE", f.path("/projects/"+pid), core.Object{"version": project.N("version")}, "delete", 202)
 	for _, id := range []string{main, wid} {
 		f.internal("/internal/v1/admissions", core.Object{"tenantId": f.tid, "workspaceId": id, "action": "execute", "ticketId": uuid.NewString(), "kind": "task", "epoch": f.controller.Epoch}, 409)
 	}
 	f.substrate.SetFault("workspace_data_delete", "fail")
+	f.acknowledgeSimulatorBindings()
 	if err := f.controller.Drain(context.Background()); err == nil {
 		t.Fatal("expected data deletion failure")
 	}

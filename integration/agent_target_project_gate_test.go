@@ -10,18 +10,26 @@ import (
 	"github.com/wanglongan587/cloud/internal/core"
 )
 
-// seedSpaceAgent inserts a space_plugins pin (the desired version the run snapshot reads) plus a
-// space_agents roster row for the given tenant/space, bypassing the marketplace install lifecycle so
-// this file can focus solely on target resolution + project gate. pluginID is the canonical
-// namespace/identifier the agent's plugin_id column uses.
+// seedSpaceAgent inserts a space_plugins pin plus a space_agents roster row for the given
+// tenant/space, bypassing the marketplace install lifecycle so this file can focus solely on target
+// resolution + project gate. pluginID is the canonical namespace/identifier the agent's plugin_id
+// column uses.
+//
+// The pin carries selected_release as well as desired_version, because that column is what the
+// control plane's plugin snapshot reads when the run's Workspace has to converge the Agent's plugin:
+// pluginPayload builds the Node's install item — the id and the version the evidence is checked
+// against — from selected_release, which is exactly what a synced marketplace leaves there. A row
+// without it names no release, so the item would carry an empty version and Cloud would refuse the
+// Node's own success report.
 func (f *fixture) seedSpaceAgent(t *testing.T, sid, tid, agentID, pluginID, displayName, status, version string) {
 	t.Helper()
 	ns, id, ok := strings.Cut(pluginID, "/")
 	if !ok {
 		t.Fatalf("seedSpaceAgent: pluginID %q is not namespace/identifier", pluginID)
 	}
-	if _, err := f.store.Pool.Exec(`INSERT INTO space_plugins(space_id,tenant_id,source_namespace,identifier,desired_state,desired_version,observed_state)
-		VALUES($1,$2,$3,$4,'installed',$5,'installed')`, sid, tid, ns, id, version); err != nil {
+	release := mustJSON(t, core.Object{"id": pluginID, "version": version})
+	if _, err := f.store.Pool.Exec(`INSERT INTO space_plugins(space_id,tenant_id,source_namespace,identifier,desired_state,desired_version,observed_state,selected_release)
+		VALUES($1,$2,$3,$4,'installed',$5,'installed',$6)`, sid, tid, ns, id, version, release); err != nil {
 		t.Fatalf("seed space_plugins: %v", err)
 	}
 	if _, err := f.store.Pool.Exec(`INSERT INTO space_agents(id,space_id,tenant_id,plugin_id,display_name,status) VALUES($1,$2,$3,$4,$5,$6)`,
@@ -248,11 +256,11 @@ func TestAgentRunSnapshotPinsPluginVersion(t *testing.T) {
 	}
 
 	// Simulate a later upgrade of the SAME agent plugin (a business transition, allowed) to 2.0.0.
-	if _, err := f.store.Pool.Exec(`UPDATE space_plugins SET desired_version='2.0.0',version=version+1 WHERE space_id=$1 AND source_namespace='official' AND identifier='hello-world'`, sid); err != nil {
+	// The pin a new run reads is the pin the roster names, `space_plugins.desired_version`, and
+	// `selected_release` is moved with it so the plugin step still knows which release to name: the
+	// roster row itself has no version of its own to advance.
+	if _, err := f.store.Pool.Exec(`UPDATE space_plugins SET desired_version='2.0.0',selected_release=jsonb_set(selected_release,'{version}','"2.0.0"'),version=version+1 WHERE space_id=$1 AND source_namespace='official' AND identifier='hello-world'`, sid); err != nil {
 		t.Fatalf("upgrade plugin: %v", err)
-	}
-	if _, err := f.store.Pool.Exec(`UPDATE space_agents SET version=version+1 WHERE id=$1`, agentID); err != nil {
-		t.Fatalf("refresh agent: %v", err)
 	}
 
 	// A NEW run pin on the upgraded plugin; the historical run keeps its create-time snapshot.

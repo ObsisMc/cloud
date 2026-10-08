@@ -4,37 +4,148 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
-// agentSessionStartBatchSize bounds the Phase 3A retry-loop scan so a single tick releases at most
-// this many first prompts. Ordering is deterministic (created_at, id) so every tick drains the
+// agentSessionStartBatchSize bounds the Session Start retry-loop scan so a single tick releases at
+// most this many first prompts. Ordering is deterministic (created_at, id) so every tick drains the
 // oldest start first; work beyond the bound is released on the next tick (§19).
 const agentSessionStartBatchSize = 100
 
-// AgentRunSessionStart is the B-owned Session Start core (IssueRun D3, D-012..D-015, G-007). For a
-// run that has settled into phase='starting' (the run Workspace is provisioned and admitted), it
-// hands the first prompt to the Agent exactly once: it writes the immutable first produce as the
-// Thread's first entry (thread_entries seq=1, source='system', kind='user_turn') and, in the same
-// transaction, declares exactly one 'agent_session' execution_work item (D-014), and materializes
-// the Thread's `pending` state in that same transaction (D-4C-01, closing G-016). It never touches
-// issue_runs.phase/status (§16): the run leaves 'starting' only in Phase 4 upon authoritative
-// session-start/Thread-takeover evidence (D-014). Retry/recovery is a separate post-settle starting
-// scan owned by this type (D-015).
+// StartAgentSession is the B-owned Session Start core (IssueRun D3, D-012..D-015, G-007). For a run
+// that has settled into phase='starting' (the run Workspace is provisioned and admitted), it hands the
+// first prompt to the Agent exactly once: it writes the immutable first produce as the Thread's first
+// entry (thread_entries seq=1, source='system', kind='user_turn'), materializes the Thread's `pending`
+// state (D-4C-01, closing G-016), and — in the same transaction — releases exactly one 'agent_session'
+// execution_work item through the control plane's own enqueue (D-014). It never touches
+// issue_runs.phase/status (§16): the run leaves 'starting' only upon authoritative session-start/Thread
+// takeover evidence (D-014).
 //
-// Ownership boundary: this is the B side. The A seam it calls (AgentRunControlPlane.
-// EnqueueExecutionWork) runs and commits inside the caller's transaction; a non-nil seam error
-// panics databaseFailure so the shared transaction rolls back the seq=1 write together with the
-// declaration — never an orphan first produce, never double work.
-type AgentRunSessionStart struct {
-	store *Store
+// Ownership boundary: this is the B side. The control plane's enqueueExecutionWork runs inside the
+// caller's transaction and commits with it, and the work item's own identity (its row, its target's
+// re-validation at dispatch, its registration against a Node) stays A's. B never writes execution_work
+// directly.
+func (s *Store) startAgentSession(t *transaction, runID string) error {
+	o := t.one(`
+		SELECT ir.* FROM issue_runs ir
+		WHERE ir.id = $1
+		  AND ir.executor_type = 'agent'
+		  AND ir.phase = 'starting'
+		  AND ir.status = 'dispatched'
+		  AND ir.workspace_id IS NOT NULL
+		  AND ir.cancel_requested_at IS NULL
+		  AND ir.deleted_at IS NULL`, runID)
+	if o == nil {
+		// Not a startable run: already advanced, cancelled, or not an agent run.
+		return nil
+	}
+	wid := o.S("workspaceId")
+	if !runWorkspaceLive(t, wid, runID) {
+		// Fail closed (G-011): leave the run retryable, record no terminal state, release no work.
+		return nil
+	}
+	snap := o.O("input")
+	content := renderAgentInitialTurn(snap)
+	turnID := newID()
+	// Exactly-once marker write. 0 affected rows → a prior start already declared the first produce;
+	// keep the run 'starting' and skip the enqueue.
+	if t.execRows(`
+		INSERT INTO thread_entries(run_id, seq, source, kind, record, turn_id)
+		VALUES($1, 1, 'system', 'user_turn', $2, $3)
+		ON CONFLICT (run_id, seq) DO NOTHING`,
+		runID, jsonText(Object{"content": content}), turnID) == 0 {
+		return nil
+	}
+	// Materialize the Thread lifecycle state in the same transaction (D-4C-01, G-016): the session is
+	// now declared, which is exactly D4's `pending` — "session execution registered, no records yet".
+	// The CAS is exact rather than tolerant: this line is only reached when the INSERT above created
+	// seq=1 (a replay returns early), so under the caller's advisory lock nothing else can have moved
+	// the run, and zero affected rows is an invariant violation, not a race. Rolling back is the only
+	// honest outcome — a committed first prompt whose Thread state never materialized would leave the
+	// read model permanently inconsistent.
+	if t.execRows(`
+		UPDATE issue_runs SET thread_state='pending', version=version+1, updated_at=now()
+		WHERE id=$1 AND thread_state IS NULL`, runID) != 1 {
+		panic(databaseFailure{fmt.Errorf("session start: run %s Thread state was not materialized", runID)})
+	}
+	// seq=1 is a Thread entry write like any other, so the declaration queues the same invalidation
+	// hints the POST and the takeover queue (Thread D5): a subscriber watching this run learns that its
+	// Thread now has a first entry. The ON CONFLICT early return above is what keeps a replayed
+	// declaration from publishing — no entry was written, no hint. The hints are released only if this
+	// transaction commits, so a failure below rolls them back with the entry they describe.
+	threadAppended(t, o)
+	threadChanged(t, o)
+	// Authoritative declaration in the same transaction as seq=1 (§14). The payload fixes the frozen
+	// plugin identity/version and the run's git identity from the snapshot — never re-reads the roster
+	// (D-013, G-007/G-009) — and names the checkout execution the Node must run the session in, which
+	// is the clone that produced the Workspace's recorded baseline (controller-integration D1: the
+	// Controller and Cloud never pass a Node-local path).
+	spec, err := s.sessionStartSpec(t, o, snap, turnID, content)
+	if err != nil {
+		return err
+	}
+	enqueueExecutionWork(t, runID, "agent_session", spec, sessionStartTarget(t, wid), time.Time{})
+	return nil
+}
+
+// sessionStartSpec builds the fixed AgentSession snapshot the session work item carries
+// (controller-integration D1's AgentSession). Everything is read from authoritative rows in the
+// caller's transaction:
+//
+//	agentPluginId/Version: the run-create snapshot, so a later plugin install never changes what this
+//	                       run executes.
+//	checkoutExecutionId:   the clone execution that produced the run Workspace's recorded baseline.
+//	gitIdentity:           the run input's frozen identity when it carries one, else the trigger
+//	                       actor's default (identity-access D1; agent_run_identity.go names the
+//	                       divergence from D2's creation-time freeze).
+//	initialTurn:           the deterministic first prompt this transaction just wrote as seq=1.
+//
+// A run Workspace with no recorded baseline, or one whose baseline names no successful clone
+// execution, is an invariant violation: a session cannot run in a Workspace that was never cloned, so
+// failing closed (and rolling the seq=1 write back with it) is the only honest outcome.
+func (s *Store) sessionStartSpec(t *transaction, o, snap Object, turnID, content string) (Object, error) {
+	runID, wid := o.S("id"), o.S("workspaceId")
+	if wid == "" {
+		return nil, fmt.Errorf("session start: run %s has no run workspace", runID)
+	}
+	w := t.one("SELECT base_commit_id FROM workspaces WHERE id=$1 AND issue_run_id=$2 AND deleted_at IS NULL", wid, runID)
+	if w == nil {
+		return nil, fmt.Errorf("session start: run %s has no live run workspace %s", runID, wid)
+	}
+	base := w.S("baseCommitId")
+	if !commitID(base) {
+		return nil, fmt.Errorf("session start: run %s workspace %s has no usable base commit (%q)", runID, wid, base)
+	}
+	checkout := t.one(`
+		SELECT execution_id FROM clone_executions
+		WHERE workspace_id=$1 AND result->>'outcome'='clone_ready' AND result->>'commit'=$2
+		ORDER BY created_at DESC, execution_id DESC LIMIT 1`, wid, base)
+	if checkout == nil {
+		return nil, fmt.Errorf("session start: run %s workspace %s has no successful clone execution for base commit %s", runID, wid, base)
+	}
+	identity, err := runGitIdentity(t, o)
+	if err != nil {
+		return nil, err
+	}
+	// The wire carries the first prompt as an ordered list of text blocks; the snapshot's single
+	// deterministic string is projected as exactly one block, the shape the contract defines rather
+	// than a reinterpretation of it.
+	return Object{
+		"kind":                "agent_session",
+		"agentPluginId":       snap.S("agentPluginId"),
+		"agentPluginVersion":  snap.S("agentPluginVersion"),
+		"checkoutExecutionId": checkout.S("executionId"),
+		"gitIdentity":         identity,
+		"initialTurn":         Object{"turnId": turnID, "content": []Object{{"text": content}}},
+	}, nil
 }
 
 // renderAgentInitialTurn produces the deterministic first-prompt content from the frozen run-create
-// snapshot (D-013, G-007). It reads only the immutable issue_runs.input the business layer froze at
-// run creation (issue_run_lifecycle.buildRunContext + agent_target.snapshotAgentRunInput), never the
-// current roster. Determinism: the section order is fixed and each embedded structure is
-// canonicalised with encoding/json, which sorts map keys, so two renders of the same snapshot are
-// byte-identical — the replay once-guard depends on the content being stable.
+// snapshot (D-013, G-007). It reads only the immutable issue_runs.input the business layer froze at run
+// creation (issue_run_lifecycle.buildRunContext + agent_target.snapshotAgentRunInput), never the
+// current roster. Determinism: the section order is fixed and each embedded structure is canonicalised
+// with encoding/json, which sorts map keys, so two renders of the same snapshot are byte-identical —
+// the replay once-guard depends on the content being stable.
 func renderAgentInitialTurn(input Object) string {
 	s := input.S("task")
 	if s == "" {
@@ -62,138 +173,22 @@ func canonicalJSON(v any) string {
 	return string(b)
 }
 
-// runWorkspaceLive reports whether the run's Workspace is alive for a session start: it still
-// exists, is bound to this exact run, and is not soft-deleted. The workspaces.issue_run_id FK plus
-// the issue_runs_workspace_id_uniq unique already rule out dangling or cross-run bindings; this
-// predicate closes the soft-delete case (G-011). Callers fail closed when it is false — the run
-// stays 'starting' and the retry loop resurfaces it, recording no terminal state (§6/§11/G-011).
+// runWorkspaceLive reports whether the run's Workspace is alive for a session start: it still exists,
+// is bound to this exact run, and is not soft-deleted. The workspaces.issue_run_id unique already rules
+// out a second run binding, so this predicate's remaining job is the soft-delete case (G-011). Callers
+// fail closed when it is false — the run stays 'starting' and the retry loop resurfaces it, recording
+// no terminal state (§6/§11/G-011).
 func runWorkspaceLive(t *transaction, wid, runID string) bool {
 	return t.one(`SELECT id FROM workspaces WHERE id=$1 AND issue_run_id=$2 AND deleted_at IS NULL`, wid, runID) != nil
 }
 
-// sessionStartTarget derives the minimal deterministic execution-work target for an AgentSession
-// (D6 AgentSession target): the run Workspace always, plus the connected sandbox/node identities
-// when the provisioning already exposed them (so a Controller with connectivity can act
-// immediately). It is the latest-read view, not a frozen snapshot; the control plane correlates by
-// these ids and the controller validates them against the Workspace's live sandbox.
-func sessionStartTarget(t *transaction, wid string) Object {
-	target := Object{"workspace_id": wid}
-	if s := t.one(`SELECT id FROM sandbox_instances WHERE workspace_id=$1 AND terminated_at IS NULL ORDER BY created_at LIMIT 1`, wid); s != nil {
-		target["sandbox_instance_id"] = s.S("id")
-	}
-	if n := t.one(`
-		SELECT n.id FROM node_instances n
-		JOIN sandbox_instances sb ON sb.id = n.sandbox_instance_id
-		WHERE sb.workspace_id = $1 AND sb.terminated_at IS NULL
-		  AND n.connection_state = 'connected' AND n.ended_at IS NULL
-		ORDER BY n.id LIMIT 1`, wid); n != nil {
-		target["node_id"] = n.S("id")
-	}
-	return target
-}
-
-// StartSession releases the first prompt for a single run that has settled into phase='starting'. It
-// is the exact-once, cancel-first, atomic switch the ADR and D-012..D-015 require:
-//
-//	queried contract: executor_type='agent' AND phase='starting' AND status='dispatched' AND a
-//	                   live run Workspace, not cancelled, not soft-deleted — otherwise no-op.
-//	cancel first:     cancel_requested_at is excluded by the WHERE, so a cancelled run never reaches
-//	                   a declaration; a cancel that lands while this transaction waits on the
-//	                   advisory lock is re-checked by the re-read (§5). Zero execution work.
-//	workspace alive:  a missing/soft-deleted Workspace fails closed (runWorkspaceLive) and stays
-//	                   'starting' for the retry loop — no failure_reason, no terminal state (G-011).
-//	once guard:       thread_entries seq=1 (source='system', kind='user_turn') is B's durable
-//	                   declaration marker (D-013). INSERT ... ON CONFLICT DO NOTHING; a 0-affected
-//	                   replay means the first prompt was already declared, so the enqueue is skipped
-//	                   and work is never released twice (D-012, D-015).
-//	atomicity:        the seq=1 write, the Thread state and the enqueue land in ONE transaction
-//	                   (§14); a seam error panics databaseFailure and rolls back the seq=1 write with
-//	                   it (T3-13), so a first produce never exists without its declaration.
-//	thread state:     materializes thread_state='pending' (D-4C-01, G-016) — D4's "session execution
-//	                   registered, no records yet". The predicate is thread_state IS NULL and the CAS
-//	                   must move exactly one row; `active` is still written only by the Phase 4B
-//	                   takeover hook when the first real Node record commits.
-//	phase/status:     never written here — the run exits 'starting' only in Phase 4 (§16).
-//
-// It returns an error only for a real failure; cancellations, ineligible runs and already-declared
-// replays are nil no-ops that leave the run 'starting' for the loop to skip.
-func (ss *AgentRunSessionStart) StartSession(ctx context.Context, runID string) error {
-	_, err := ss.store.transact(ctx, func(t *transaction) Object {
-		o := t.one(`
-			SELECT ir.* FROM issue_runs ir
-			WHERE ir.id = $1
-			  AND ir.executor_type = 'agent'
-			  AND ir.phase = 'starting'
-			  AND ir.status = 'dispatched'
-			  AND ir.workspace_id IS NOT NULL
-			  AND ir.cancel_requested_at IS NULL
-			  AND ir.deleted_at IS NULL`, runID)
-		if o == nil {
-			// Not a startable run: already advanced (Phase 4), cancelled, or not an agent run.
-			return Object{}
-		}
-		wid := o.S("workspaceId")
-		if !runWorkspaceLive(t, wid, runID) {
-			// Fail closed (G-011): leave retryable, record no terminal state.
-			return Object{}
-		}
-		snap := o.O("input")
-		content := renderAgentInitialTurn(snap)
-		turnID := newID()
-		// Exactly-once marker write. 0 affected rows → a prior StartSession already declared the
-		// first produce; keep the run 'starting' and skip the enqueue.
-		if t.execRows(`
-			INSERT INTO thread_entries(run_id, seq, source, kind, record, turn_id)
-			VALUES($1, 1, 'system', 'user_turn', $2, $3)
-			ON CONFLICT (run_id, seq) DO NOTHING`,
-			runID, jsonText(Object{"content": content}), turnID) == 0 {
-			return Object{}
-		}
-		// Materialize the Thread lifecycle state in the same transaction (D-4C-01, G-016): the
-		// session is now declared, which is exactly D4's `pending` — "session execution registered,
-		// no records yet". The CAS is exact rather than tolerant: this line is only reached when the
-		// INSERT above created seq=1 (a replay returns early), so under the caller's advisory lock
-		// nothing else can have moved the run, and zero affected rows is an invariant violation, not
-		// a race. Rolling back is the only honest outcome — a committed first prompt whose Thread
-		// state never materialized would leave the read model permanently inconsistent.
-		if t.execRows(`
-			UPDATE issue_runs SET thread_state='pending', version=version+1, updated_at=now()
-			WHERE id=$1 AND thread_state IS NULL`, runID) != 1 {
-			panic(databaseFailure{fmt.Errorf("session start: run %s Thread state was not materialized", runID)})
-		}
-		// seq=1 is a Thread entry write like any other, so the declaration queues the same
-		// invalidation hint the POST and the takeover queue (Thread D5): a subscriber watching this
-		// run learns that its Thread now has a first entry. The ON CONFLICT early return above is
-		// what keeps a replayed declaration from publishing — no entry was written, no hint. The
-		// hint is released only if this transaction commits, so a seam failure below rolls it back
-		// with the entry it describes.
-		threadAppended(t, o)
-		threadChanged(t, o)
-		// Authoritative declaration in the same transaction as seq=1 (§14). The payload fixes the
-		// frozen plugin identity/version from the snapshot — never re-reads the roster (D-013,
-		// G-007/G-009). A seam error rolls back the seq=1 write too.
-		if _, err := ss.store.agentRunControlPlane().EnqueueExecutionWork(t, o, "agent_session",
-			AgentSessionWork{
-				AgentPluginID:      snap.S("agentPluginId"),
-				AgentPluginVersion: snap.S("agentPluginVersion"),
-				InitialTurn:        Object{"turn_id": turnID, "content": content},
-			}.inputObject(),
-			sessionStartTarget(t, wid),
-			nil); err != nil {
-			panic(databaseFailure{err})
-		}
-		return Object{}
-	})
-	return err
-}
-
 // scanStartingAgentRuns returns the bounded, deterministically ordered ids of runs that settled into
-// 'starting' but have not yet declared their first produce, for the retry loop. It is a read-only
-// short scan outside the advisory lock (exactness lives in each StartSession transaction), bounded
-// by LIMIT and ordered by (created_at, id). Eligibility mirrors StartSession: an agent run currently
+// 'starting' but have not yet declared their first produce, for the retry loop. It is a read-only short
+// scan outside the advisory lock (exactness lives in each start transaction), bounded by LIMIT and
+// ordered by (created_at, id). Eligibility mirrors startAgentSession: an agent run currently
 // 'starting'/'dispatched' with a live run Workspace, not cancelled, not soft-deleted, backing a real
-// space_agents executor, and with no Thread entry seq=1 yet (so already-started runs are excluded
-// from restart; the in-transaction once guard is still authoritative for races).
+// space_agents executor, and with no Thread entry seq=1 yet (so already-started runs are excluded from
+// restart; the in-transaction once guard is still authoritative for races).
 func (s *Store) scanStartingAgentRuns(ctx context.Context, limit int) ([]string, error) {
 	rows, err := s.Pool.QueryContext(ctx, `
 		SELECT ir.id FROM issue_runs ir
@@ -225,11 +220,10 @@ func (s *Store) scanStartingAgentRuns(ctx context.Context, limit int) ([]string,
 }
 
 // StartQueuedAgentSessionsOnce is one bounded retry-loop pass: scan the eligible 'starting' runs
-// (read-only) and start each in its own short StartSession transaction, with the sleep between ticks
-// owned by the caller (D-015, G-007). Per-run failures are deliberately not surfaced here —
-// StartSession already rolls back on error and keeps the run 'starting' for a later tick, and the
-// loop must not flood logs merely because the A seam is unwired (Unavailable) or one run is
-// transiently stuck. Only a scan-level failure cancels the pass.
+// (read-only) and start each in its own short transaction, with the sleep between ticks owned by the
+// caller (D-015, G-007). Per-run failures are deliberately not surfaced here — the start transaction
+// already rolls back on error and keeps the run 'starting' for a later tick, and the loop must not
+// flood logs because one run is transiently stuck. Only a scan-level failure cancels the pass.
 func (s *Store) StartQueuedAgentSessionsOnce(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -239,14 +233,14 @@ func (s *Store) StartQueuedAgentSessionsOnce(ctx context.Context) error {
 		return err
 	}
 	for _, id := range ids {
-		_ = s.agentRunSessionStart().StartSession(ctx, id)
+		if _, err := s.transact(ctx, func(t *transaction) Object {
+			if err := s.startAgentSession(t, id); err != nil {
+				panic(databaseFailure{err})
+			}
+			return Object{}
+		}); err != nil {
+			_ = err
+		}
 	}
 	return nil
-}
-
-// agentRunSessionStart returns the Session Start core for this Store, constructing a fresh
-// per-call value (nil-safe like agentRunDispatcher). No Store field is needed: the struct only
-// owns a pointer back to the Store.
-func (s *Store) agentRunSessionStart() *AgentRunSessionStart {
-	return &AgentRunSessionStart{store: s}
 }

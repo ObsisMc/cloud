@@ -167,13 +167,11 @@ func appendThreadMessage(t *transaction, s *Store, r *PublicRequest, uid string)
 		panic(databaseFailure{fmt.Errorf("thread message: run %s Thread state was not moved to active", runID)})
 	}
 
-	// The A seam writes the command in this same transaction (D-4C-05). Its returned error is a
-	// control-plane availability failure — the command body is built and validated here, so nothing
-	// the caller sent can make it invalid — and maps to a retryable 503 rather than a 500. The
-	// transaction rolls back, so the retry under the same key is a clean first request.
-	if _, err := s.agentRunControlPlane().EnqueueThreadCommand(t, Object{"id": runID}, SubmitUserTurnCommand(turnID, blocks)); err != nil {
-		reject(503, "thread_command_unavailable")
-	}
+	// The control plane's own in-transaction seam writes the command and its server-owned id
+	// (D-4C-05). It cannot fail on anything the caller sent — the body is built and validated here —
+	// so a refusal would be a control-plane availability failure, and the transaction rolling back
+	// is what makes the retry under the same key a clean first request.
+	enqueueThreadCommand(t, runID, "submit_user_turn", Object{"turnId": turnID, "content": blocks})
 
 	entry := t.one("SELECT * FROM thread_entries WHERE run_id=$1 AND seq=$2", runID, seq)
 	return Object{

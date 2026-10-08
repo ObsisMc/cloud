@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 )
 
@@ -10,8 +11,8 @@ import (
 // takeover owns — a Cloud-written user turn echoed by the Node, and the `active ⇄ idle` oscillation
 // of Thread D4.
 //
-// They drive the real control action ("agent_thread_takeover") through Store.Control with the
-// production hook set wired exactly the way cmd/server wires it, so what is proven is the shipped
+// They drive the real control action ("thread_events") through Store.Control with the production hook
+// set wired exactly the way cmd/server wires it (BindBusinessHooks), so what is proven is the shipped
 // path and not a double. White-box (package core) only because the A→B seam takes the unexported
 // *transaction and because one test must replay the hook past the A-side receipt guard; there is no
 // in-memory substitute for PostgreSQL anywhere in this file.
@@ -74,10 +75,22 @@ func idleAge(t *testing.T, store *Store, runID string) (sql.NullString, sql.Null
 // replayHook drives the B-owned takeover core directly, inside a real caller-owned transaction, so a
 // test can replay a batch the A-side receipt guard would otherwise have deduped. That is the only way
 // to observe the hook's *own* idempotency rather than the classification layer's.
+//
+// The batch is handed over in the wire shape and parsed exactly as the bound seam parses it
+// (business_hooks.onThreadEvents): the record travels as the opaque JSON string `ora-history` owns,
+// and the business core works on the object.
 func replayHook(t *testing.T, store *Store, scene takeoverScene, events []Object) error {
 	t.Helper()
+	parsed := make([]Object, 0, len(events))
+	for _, ev := range events {
+		var record Object
+		if err := json.Unmarshal([]byte(ev.S("record")), &record); err != nil || record == nil {
+			t.Fatalf("replay hook: event %d carries a record that is not a JSON object", ev.N("sequence"))
+		}
+		parsed = append(parsed, Object{"sequence": ev.N("sequence"), "turnId": ev.S("turnId"), "record": record})
+	}
 	_, err := store.transact(context.Background(), func(tx *transaction) Object {
-		if e := store.threadEventsTakenOver(tx, Object{"id": scene.run}, Object{"executionId": scene.execution}, events); e != nil {
+		if e := store.settleThreadEvents(tx, scene.run, scene.execution, parsed); e != nil {
 			panic(databaseFailure{e})
 		}
 		return Object{}

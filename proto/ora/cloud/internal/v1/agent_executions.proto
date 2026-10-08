@@ -124,8 +124,10 @@ message UploadGrant {
   string url = 2;
   // Always PUT in the first version.
   string method = 3;
-  // Headers the upload must carry unchanged. The Node adds `x-amz-checksum-sha256` with the digest
-  // it computed, so the store rejects content that differs from what the Node will report.
+  // Headers the upload must carry unchanged, including signed `If-None-Match: *` (create only).
+  // A checksum-bound grant includes `x-amz-checksum-sha256`; legacy uploaders add that digest.
+  // On 412, preserve the existing object and submit the declaration for Cloud verification;
+  // neither the uploader nor Controller may treat 412 alone as proof that its bytes match.
   map<string, string> headers = 4;
   google.protobuf.Timestamp expires_at = 5;
 }

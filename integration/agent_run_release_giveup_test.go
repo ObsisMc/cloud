@@ -37,7 +37,7 @@ type releasingRun struct {
 // intent that release declares. Every phase is observed as it happens.
 func driveToReleasing(t *testing.T, f *fixture, reason controlpb.AgentSessionEndReason) releasingRun {
 	t.Helper()
-	f.useRealControlPlane()
+	f.bindBusinessHooks()
 	scene := seedLiveThreadScene(t, f)
 	phases := []string{f.runPhase(scene.runID)}
 	scene.start(t, f)

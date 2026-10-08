@@ -91,14 +91,33 @@ func Document() map[string]any {
 	s["JoinRequest"] = object(obj{"id": uuid(), "tenantId": uuid(), "userId": uuid(), "linkId": uuid(), "status": enumeration("pending", "approved", "rejected"), "createdAt": timestamp(), "decidedAt": optional(timestamp()), "decidedBy": optional(uuid()), "version": number(), "name": str(), "displayName": str()}, "id", "tenantId", "userId", "linkId", "status", "createdAt", "version")
 	s["SpaceEvent"] = object(obj{"type": enumeration("space.updated", "space.member_updated", "project.created", "project.updated", "project.archived", "space.plugins_updated", "plugins.catalog_updated"), "spaceId": uuid(), "projectId": optional(uuid()), "version": number()}, "type", "spaceId")
 	s["Project"] = resource("id tenantId ownerUserId spaceId name repositoryUrl defaultBranch credentialRefId lifecycle version createdAt deletedAt", "credentialRefId deletedAt")
-	s["Workspace"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt requestedRef baseCommitId", "deletedAt baseCommitId")
+	properties(s, "Project")["repositoryCredentialRefId"] = optional(uuid())
+	s["Workspace"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt requestedRef baseCommitId creatorUserId creatorOperationId creatorEvidence", "deletedAt baseCommitId creatorUserId creatorOperationId")
 	// branchName is the retired linked-worktree branch; only Workspaces created before the Node
 	// clone flow have one.
-	s["WorkspaceListItem"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt requestedRef baseCommitId branchName title", "deletedAt baseCommitId branchName title")
+	s["WorkspaceListItem"] = object(fields("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version createdAt deletedAt creatorUserId creatorOperationId creatorEvidence canUse requestedRef baseCommitId branchName title admissionOpen admissionEpoch"), strings.Fields("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version createdAt deletedAt creatorUserId creatorEvidence canUse")...)
+	for _, key := range []string{"deletedAt", "creatorUserId", "creatorOperationId", "branchName", "title"} {
+		properties(s, "WorkspaceListItem")[key] = optional(asObject(properties(s, "WorkspaceListItem")[key]))
+	}
+	properties(s, "WorkspaceListItem")["canUse"] = boolean()
+
 	s["Comment"] = resource("id tenantId issueId authorUserId authorType authorId parentId body seq version createdAt updatedAt deletedAt", "authorUserId authorId parentId deletedAt")
 	commentProps := properties(s, "Comment")
 	commentProps["seq"] = number()
 	s["Label"] = resource("id tenantId name color version createdAt updatedAt deletedAt", "deletedAt")
+	s["Workflow"] = resource("id tenantId name description graph version createdAt updatedAt deletedAt", "deletedAt")
+	properties(s, "Workflow")["graph"] = obj{"type": "object", "additionalProperties": true, "description": "The authored graph document: nodes, edges, viewport, editor annotations and global variables. Stored and returned whole; the editor is its only reader."}
+	s["WorkflowSnapshot"] = resource("id tenantId workflowId version name graph createdAt", "")
+	properties(s, "WorkflowSnapshot")["graph"] = obj{"type": "object", "additionalProperties": true, "description": "The graph document frozen at publish time; restoring this snapshot writes it back to the workflow's live graph."}
+	s["WorkflowRun"] = resource("id tenantId workflowId snapshotId name status input nodeStates rounds error startedAt finishedAt createdAt updatedAt workflowName", "startedAt finishedAt")
+	workflowRunProps := properties(s, "WorkflowRun")
+	workflowRunProps["status"] = enumeration("pending", "running", "awaiting_input", "succeeded", "failed", "cancelled")
+	workflowRunProps["input"] = obj{"type": "object", "additionalProperties": true, "description": "The kickoff input passed to the run's start node."}
+	workflowRunProps["nodeStates"] = obj{"type": "object", "additionalProperties": true, "description": "Per-node execution state keyed by node id: status, output, error, timestamps."}
+	workflowRunProps["rounds"] = array(obj{"type": "object", "additionalProperties": true})
+	// definitionSnapshot lives only on a detail read (the history list trips without it);
+	// it is optional so one schema serves both list rows and the composed run page.
+	workflowRunProps["definitionSnapshot"] = optional(obj{"type": "object", "additionalProperties": true, "description": "The frozen graph document this run executed against, from the snapshot it captured."})
 	s["IssueStatus"] = resource("id tenantId key name description category color icon isSystem position version createdAt updatedAt deletedAt", "deletedAt")
 	statusProps := properties(s, "IssueStatus")
 	statusProps["isSystem"] = boolean()
@@ -190,6 +209,10 @@ func Document() map[string]any {
 	s["PluginCatalog"] = object(obj{"items": array(ref("PluginCatalogEntry")), "syncedAt": optional(timestamp())}, "items")
 	s["SpacePlugin"] = resource("id spaceId tenantId sourceNamespace identifier desiredState desiredVersion observedState observedVersion installError version createdAt updatedAt", "observedVersion installError")
 	spacePluginProps := properties(s, "SpacePlugin")
+	for _, key := range []string{"affectedCount", "completedCount", "waitingStartCount", "waitingControlCount", "unavailableCount", "failedCount", "desiredRevision"} {
+		spacePluginProps[key] = number()
+	}
+	spacePluginProps["requestedByUserId"] = optional(uuid())
 	spacePluginProps["desiredState"] = enumeration("installed", "removed")
 	spacePluginProps["observedState"] = enumeration("pending", "installing", "installed", "failed", "removing", "removed")
 	spacePluginProps["observedVersion"] = optional(str())
@@ -198,8 +221,8 @@ func Document() map[string]any {
 	s["PluginUniversalRelease"] = object(obj{"url": str(), "sha256": str()}, "url", "sha256")
 	s["PluginReleaseTarget"] = object(obj{"target": str(), "url": str(), "sha256": str()}, "target", "url", "sha256")
 	s["PluginLogoCandidate"] = object(obj{"role": enumeration("universal", "light", "dark"), "extension": enumeration("svg", "png", "webp", "jpg", "jpeg")}, "role", "extension")
-	s["OperationRequest"] = object(obj{"previous": obj{"type": "object", "additionalProperties": ref("Workspace")}, "pluginId": str(), "version": str()})
-	s["OperationResult"] = object(obj{"resourceId": uuid()})
+	s["OperationRequest"] = object(obj{"previous": obj{"type": "object", "additionalProperties": ref("Workspace")}, "pluginId": str(), "version": str(), "desiredRevision": number(), "release": ref("PluginCatalogEntry"), "plugins": array(obj{"type": "object", "additionalProperties": true}), "pluginMeta": array(object(obj{"pluginId": str(), "desiredRevision": number()}, "pluginId", "desiredRevision"))})
+	s["OperationResult"] = object(obj{"resourceId": uuid(), "forceStopId": uuid()})
 	s["Operation"] = resource("id tenantId actorUserId projectId workspaceId kind state step request result errorCode idempotencyKey requestHash controllerEpoch retryAt version createdAt updatedAt", "workspaceId errorCode controllerEpoch retryAt")
 	opProps := properties(s, "Operation")
 	opProps["request"] = ref("OperationRequest")
@@ -213,6 +236,8 @@ func Document() map[string]any {
 		p["desiredState"] = enumeration("running", "stopped", "deleted")
 		p["observedState"] = enumeration("provisioning", "starting", "ready", "stopping", "stopped", "unavailable", "deleting", "deleted")
 	}
+	s["RuntimeForceStop"] = object(obj{"id": uuid(), "tenantId": uuid(), "workspaceId": uuid(), "actorUserId": uuid(), "reason": str(), "state": enumeration("registered", "terminating", "succeeded"), "controlEpoch": number(), "runtimeGeneration": number(), "version": number(), "controllerEpoch": optional(number()), "createdAt": timestamp(), "confirmedAt": optional(timestamp())}, "id", "tenantId", "workspaceId", "actorUserId", "reason", "state", "controlEpoch", "runtimeGeneration", "version", "createdAt")
+	s["RuntimeControl"] = object(obj{"workspaceId": uuid(), "state": enumeration("idle", "acquiring", "held", "draining", "reconciling", "maintenance"), "controlEpoch": number(), "holderUserId": optional(uuid()), "expiresAt": optional(timestamp()), "version": number(), "sessionId": optional(uuid())}, "workspaceId", "state", "controlEpoch", "holderUserId", "expiresAt", "version")
 	s["Lease"] = resource("name holderId epoch expiresAt", "")
 	properties(s, "Lease")["holderId"] = str()
 	properties(s, "Lease")["epoch"] = number()
@@ -221,30 +246,48 @@ func Document() map[string]any {
 	s["Node"] = resource("id sandboxInstanceId serviceSubject connectionState protocolVersion initialized lastSeenAt endedAt idleAdmissionEpoch version workspaceId nodeId nodeIncarnationId", "endedAt idleAdmissionEpoch nodeId nodeIncarnationId")
 	properties(s, "Node")["nodeId"] = optional(str())
 	properties(s, "Node")["nodeIncarnationId"] = optional(str())
-	s["Ticket"] = resource("id tenantId workspaceId nodeInstanceId actorUserId admissionEpoch kind state createdAt finishedAt version", "finishedAt")
+	s["Ticket"] = resource("id tenantId workspaceId nodeInstanceId actorUserId admissionEpoch kind state createdAt finishedAt version controlSessionId controlEpoch terminatedByForceStopId", "finishedAt controlSessionId controlEpoch terminatedByForceStopId")
+	properties(s, "Ticket")["controlEpoch"] = optional(number())
 	// storage_ensure, worktree_ensure, worktree_delete and storage_delete are retired kinds that only
 	// historical effects carry.
 	s["EffectRequest"] = object(obj{"kind": enumeration("storage_ensure", "worktree_ensure", "sandbox_ensure", "sandbox_terminate", "worktree_delete", "storage_delete", "workspace_data_delete", "plugin_ensure", "plugin_delete"), "projectId": uuid(), "workspaceId": uuid(), "repositoryUrl": str(), "requestedRef": str(), "sandboxInstanceId": uuid(), "pluginId": str(), "version": str(), "universal": ref("PluginUniversalRelease"), "targets": array(ref("PluginReleaseTarget"))}, "kind", "projectId")
-	s["EffectResult"] = object(obj{"layoutVersion": number(), "commitId": obj{"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"}, "jobTerminated": boolean(), "removed": boolean(), "terminated": boolean(), "installed": boolean(), "sandboxInstanceId": uuid(), "nodeId": str(), "version": str(), "error": str(), "diagnostic": str()})
+	s["EffectResult"] = object(obj{"layoutVersion": number(), "commitId": obj{"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"}, "jobTerminated": boolean(), "removed": boolean(), "terminated": boolean(), "lateEnsureFenced": boolean(), "installed": boolean(), "sandboxInstanceId": uuid(), "nodeId": str(), "version": str(), "error": str(), "diagnostic": str()})
 	s["Effect"] = resource("id operationId projectId workspaceId kind state externalId request result reconciledEpoch createdAt version", "workspaceId externalId")
 	ep := properties(s, "Effect")
 	ep["externalId"] = optional(str())
 	ep["request"] = ref("EffectRequest")
 	ep["result"] = ref("EffectResult")
 	s["ControllerProject"] = resource("id tenantId ownerUserId spaceId name repositoryUrl defaultBranch credentialRefId lifecycle version createdAt deletedAt secretRef", "credentialRefId deletedAt secretRef")
-	s["ControllerWorkspace"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt requestedRef baseCommitId", "deletedAt baseCommitId")
+	properties(s, "ControllerProject")["repositoryCredentialRefId"] = optional(uuid())
+	s["ControllerWorkspace"] = resource("id tenantId ownerUserId projectId kind desiredState observedState runtimeGeneration version admissionOpen admissionEpoch createdAt deletedAt requestedRef baseCommitId creatorUserId creatorOperationId creatorEvidence", "deletedAt baseCommitId creatorUserId creatorOperationId")
+	properties(s, "ControllerWorkspace")["issueRunId"] = optional(uuid())
 	for _, name := range []string{"Workspace", "WorkspaceListItem", "ControllerWorkspace"} {
 		properties(s, name)["baseCommitId"] = optional(obj{"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"})
 	}
 	// A Workspace operation's clone executions, registered through the gRPC ExecutionService.
-	s["CloneExecution"] = resource("executionId operationId workspaceId cloneRequestId nodeId input result dispatchedEpoch createdAt updatedAt", "workspaceId cloneRequestId result")
+	s["CloneExecution"] = resource("executionId operationId workspaceId cloneRequestId nodeId input result dispatchedEpoch createdAt updatedAt nodeOperationId terminatedByForceStopId", "workspaceId cloneRequestId result terminatedByForceStopId")
 	ce := properties(s, "CloneExecution")
+	ce["credentialRefId"] = optional(uuid())
+	ce["credentialRefVersion"] = optional(number())
 	ce["nodeId"] = str()
+	ce["nodeOperationId"] = str()
 	ce["executionId"] = str()
 	ce["input"] = obj{"type": "object", "additionalProperties": true}
 	ce["result"] = optional(obj{"type": "object", "additionalProperties": true})
 	ce["dispatchedEpoch"] = number()
-	s["Snapshot"] = object(obj{"operation": ref("Operation"), "project": ref("ControllerProject"), "workspaces": array(ref("ControllerWorkspace")), "sandboxes": array(ref("Sandbox")), "nodes": array(ref("Node")), "effects": array(ref("Effect")), "clones": array(ref("CloneExecution"))}, "operation", "project", "workspaces", "sandboxes", "nodes", "effects", "clones")
+	// Plugin, session and delivery executions share one table. The JSON snapshot only carries the
+	// plugin step's executions; session and delivery work is claimed through gRPC.
+	s["NodeExecution"] = resource("executionId kind operationId workId workspaceId nodeId nodeOperationId input result dispatchedEpoch lastEventSequence terminatedByForceStopId createdAt updatedAt", "workId workspaceId result terminatedByForceStopId")
+	ne := properties(s, "NodeExecution")
+	ne["executionId"] = str()
+	ne["kind"] = str()
+	ne["nodeId"] = str()
+	ne["nodeOperationId"] = str()
+	ne["input"] = obj{"type": "object", "additionalProperties": true}
+	ne["result"] = optional(obj{"type": "object", "additionalProperties": true})
+	ne["dispatchedEpoch"] = number()
+	ne["lastEventSequence"] = number()
+	s["Snapshot"] = object(obj{"operation": ref("Operation"), "project": ref("ControllerProject"), "workspaces": array(ref("ControllerWorkspace")), "sandboxes": array(ref("Sandbox")), "nodes": array(ref("Node")), "effects": array(ref("Effect")), "clones": array(ref("CloneExecution")), "pluginExecutions": array(ref("NodeExecution")), "pluginInput": obj{"type": "object", "additionalProperties": true}}, "operation", "project", "workspaces", "sandboxes", "nodes", "effects", "clones", "pluginExecutions")
 	s["EmptyClaim"] = object(obj{"operation": obj{"type": "object", "nullable": true, "enum": []any{nil}}}, "operation")
 	s["Access"] = object(obj{"userId": uuid(), "tenantId": uuid(), "workspaceId": uuid(), "allowedAction": enumeration("read", "execute"), "executable": boolean(), "runtimeGeneration": number()}, "userId", "tenantId", "workspaceId", "allowedAction", "executable", "runtimeGeneration")
 	s["IdleRefusal"] = object(obj{"accepted": boolean(), "errorCode": enumeration("resource_in_use")}, "accepted", "errorCode")
@@ -299,6 +342,11 @@ func Document() map[string]any {
 				obj{"name": "after", "in": "query", "schema": obj{"type": "integer", "format": "int64", "minimum": 0}, "description": "Forward Thread seq cursor: the window starts after this seq. Mutually exclusive with before; neither cursor reads the tail."},
 				obj{"name": "before", "in": "query", "schema": obj{"type": "integer", "format": "int64", "minimum": 0}, "description": "Backward Thread seq cursor: the window ends just before this seq, taking the entries closest to it from below. Mutually exclusive with after."})
 		}
+		if strings.Contains(r.Path, "/collaboration/forms/") {
+			// Optional, and absent by default: a caller that omits it gets the descriptor without the
+			// platform fields, which is what every client served before they existed still sends.
+			parameters = append(parameters, obj{"name": "issueId", "in": "query", "schema": uuid(), "description": "Issue the form is being configured for. Tailors the descriptor with the platform fields (repository, prompt) and prefills them from the issue's project repository and the workflow's Start prompt. An unknown or foreign issue is 404."})
+		}
 		if r.Path == "/api/v1/tenants/:tid/people" {
 			parameters = append(parameters, obj{"name": "keyword", "in": "query", "required": true, "schema": obj{"type": "string", "minLength": 2, "maxLength": 100}})
 		}
@@ -340,7 +388,7 @@ func Document() map[string]any {
 			"404": obj{"description": errorDescription("404"), "content": obj{"application/json": obj{"schema": ref("Error")}}},
 		},
 	}}
-	paths["/healthz"] = obj{"get": obj{"operationId": "health", "tags": []string{"health"}, "summary": "PostgreSQL readiness", "responses": obj{"200": obj{"description": "Database reachable", "content": obj{"application/json": obj{"schema": object(obj{"status": enumeration("ok")}, "status")}}}, "503": obj{"description": "Database unavailable", "content": obj{"application/json": obj{"schema": ref("Error")}}}}}}
+	paths["/healthz"] = obj{"get": obj{"operationId": "health", "tags": []string{"health"}, "summary": "PostgreSQL readiness and optional dependency configuration", "responses": obj{"200": obj{"description": "Database reachable", "content": obj{"application/json": obj{"schema": object(obj{"status": enumeration("ok"), "dependencies": object(obj{"objectStore": enumeration("configured", "unconfigured")}, "objectStore")}, "status")}}}, "503": obj{"description": "Database unavailable", "content": obj{"application/json": obj{"schema": ref("Error")}}}}}}
 	return obj{"openapi": "3.0.3", "info": obj{"title": "Ora Cloud phase one", "version": "1.0.0", "description": "Authoritative PostgreSQL core. Simulation is separate; no production Controller/Node/Kubernetes implementation is implied."}, "servers": []any{obj{"url": "http://localhost:8080"}}, "paths": paths, "components": obj{"schemas": s, "securitySchemes": obj{"serviceCredential": obj{"type": "http", "scheme": "bearer", "bearerFormat": "EdDSA JWT", "description": "Pinned issuer/kid/kind=service/role, aud=ora-cloud, exp and iat required, <=5 minute lifetime. Public API requires gateway; internal control requires controller; nodes require scoped node role."}, "userCredential": obj{"type": "apiKey", "in": "header", "name": "X-Ora-User-Token", "description": "Separately signed EdDSA JWT: kind=user, source+sub, caller must equal authenticated service sub, aud=ora-cloud. User and membership status checked in PostgreSQL."}}}}
 }
 
@@ -365,6 +413,8 @@ func tag(r router.Route) string {
 		return "clones"
 	case strings.Contains(r.Path, "/spaces"):
 		return "spaces"
+	case strings.Contains(r.Path, "/workflows"):
+		return "workflows"
 	case strings.Contains(r.Path, "/workspaces"):
 		return "workspaces"
 	case strings.Contains(r.Path, "/projects"):
@@ -378,7 +428,7 @@ func tag(r router.Route) string {
 }
 
 func isList(r router.Route) bool {
-	return r.Method == "GET" && (strings.HasSuffix(r.Path, "/tenants") || strings.HasSuffix(r.Path, "/members") || strings.HasSuffix(r.Path, "/projects") || strings.HasSuffix(r.Path, "/workspaces") || strings.HasSuffix(r.Path, "/spaces") || strings.HasSuffix(r.Path, "/resource-status") || strings.HasSuffix(r.Path, "/issue-statuses") || strings.HasSuffix(r.Path, "/labels") || strings.HasSuffix(r.Path, "/issue-views") || strings.HasSuffix(r.Path, "/comments") || strings.HasSuffix(r.Path, "/subscribers") || strings.HasSuffix(r.Path, "/invitations") || strings.HasSuffix(r.Path, "/join-links") || strings.HasSuffix(r.Path, "/join-requests") || strings.HasSuffix(r.Path, "/clones"))
+	return r.Method == "GET" && (strings.HasSuffix(r.Path, "/tenants") || strings.HasSuffix(r.Path, "/members") || strings.HasSuffix(r.Path, "/projects") || strings.HasSuffix(r.Path, "/workspaces") || strings.HasSuffix(r.Path, "/spaces") || strings.HasSuffix(r.Path, "/resource-status") || strings.HasSuffix(r.Path, "/issue-statuses") || strings.HasSuffix(r.Path, "/labels") || strings.HasSuffix(r.Path, "/issue-views") || strings.HasSuffix(r.Path, "/workflows") || strings.HasSuffix(r.Path, "/snapshots") || strings.HasSuffix(r.Path, "/runs") || strings.HasSuffix(r.Path, "/comments") || strings.HasSuffix(r.Path, "/subscribers") || strings.HasSuffix(r.Path, "/invitations") || strings.HasSuffix(r.Path, "/join-links") || strings.HasSuffix(r.Path, "/join-requests") || strings.HasSuffix(r.Path, "/clones"))
 }
 
 func responseSchema(r router.Route) (schema obj, status string) {
@@ -519,6 +569,37 @@ func responseSchema(r router.Route) (schema obj, status string) {
 		return ref("IssueView"), "200"
 	case strings.Contains(r.Path, "/issue-groups"):
 		return object(obj{"groups": array(object(obj{"key": str(), "items": array(ref("Issue"))}, "key", "items"))}, "groups"), "200"
+	case strings.Contains(r.Path, "/workflows"):
+		if strings.HasSuffix(r.Path, "/publish") {
+			return object(obj{"resource": ref("WorkflowSnapshot")}, "resource"), "200"
+		}
+		if strings.HasSuffix(r.Path, "/restore") {
+			return ref("Workflow"), "200"
+		}
+		if strings.Contains(r.Path, "/runs") {
+			// Workflow runs branch before snapshots/detail: the run paths carry no `:snapshotId`
+			// and must not be read as Workflow resources.
+			if r.Method == "GET" && strings.HasSuffix(r.Path, "/runs") {
+				return object(obj{"items": array(ref("WorkflowRun")), "nextCursor": str()}, "items", "nextCursor"), "200"
+			}
+			if r.Method == "POST" {
+				return object(obj{"resource": ref("WorkflowRun")}, "resource"), "200"
+			}
+			return ref("WorkflowRun"), "200"
+		}
+		if strings.Contains(r.Path, "/snapshots") {
+			if r.Method == "GET" && strings.HasSuffix(r.Path, "/snapshots") {
+				return object(obj{"items": array(ref("WorkflowSnapshot")), "nextCursor": str()}, "items", "nextCursor"), "200"
+			}
+			return ref("WorkflowSnapshot"), "200"
+		}
+		if r.Method == "GET" && strings.HasSuffix(r.Path, "/workflows") {
+			return object(obj{"items": array(ref("Workflow")), "nextCursor": str()}, "items", "nextCursor"), "200"
+		}
+		if r.Method == "POST" {
+			return object(obj{"resource": ref("Workflow")}, "resource"), "200"
+		}
+		return ref("Workflow"), "200"
 	case strings.Contains(r.Path, "/labels"):
 		if r.Method == "GET" {
 			return object(obj{"items": array(ref("Label")), "nextCursor": str()}, "items", "nextCursor"), "200"
@@ -585,6 +666,9 @@ func responseSchema(r router.Route) (schema obj, status string) {
 	case r.Path == "/api/v1/tenants" && r.Method == "POST":
 		return ref("TenantCreated"), "201"
 	}
+	if strings.Contains(r.Path, "/workspaces/") && (strings.HasSuffix(r.Path, "/control") || strings.Contains(r.Path, "/control/")) {
+		return ref("RuntimeControl"), "200"
+	}
 	name := "Project"
 	switch {
 	case r.Path == "/api/v1/me":
@@ -600,6 +684,11 @@ func responseSchema(r router.Route) (schema obj, status string) {
 		name = "Operation"
 	case strings.HasSuffix(r.Path, "/resource-status"):
 		name = "AdminResource"
+	case strings.HasSuffix(r.Path, "/force-stop"):
+		if r.Method == "GET" {
+			return object(obj{"forceStop": optional(ref("RuntimeForceStop"))}, "forceStop"), "200"
+		}
+		return object(obj{"resource": ref("AdminResource"), "forceStop": ref("RuntimeForceStop")}, "resource", "forceStop"), "202"
 	case strings.HasSuffix(r.Path, "/administrative-stop"):
 		name = "AdminResource"
 	case strings.Contains(r.Path, "/workspaces"):
@@ -643,8 +732,15 @@ func optionalField(name string, r router.Route) bool {
 		}
 	}
 	switch name {
-	case "description", "category", "color", "icon", "filter", "position", "parentId", "input", "targets", "contextRefs":
+	case "description", "category", "color", "icon", "filter", "position", "parentId", "input", "targets", "contextRefs", "graph":
 		return true
+	case "name":
+		// Both publish and run creation default the name to the workflow's, so the
+		// request may carry none.
+		return strings.HasSuffix(r.Path, "/publish") || strings.HasSuffix(r.Path, "/runs")
+	case "snapshotId":
+		// A run may omit the snapshot to pin the latest published one.
+		return strings.HasSuffix(r.Path, "/runs")
 	case "pluginVersion":
 		// Omitted install pins the catalog's current version.
 		return true
@@ -652,7 +748,7 @@ func optionalField(name string, r router.Route) bool {
 		// Confirm must state what it is confirming; assist may be asked with a still-empty form.
 		return strings.HasSuffix(r.Path, "/assist")
 	}
-	return name == "credentialRefId" || name == "role" && strings.HasSuffix(r.Path, "/members/huawei") || name == "version" && r.Method == "PUT" || name == "epoch" && r.Action == "access" || name == "workspaceId" && r.Action == "plan" || name == "externalId" && r.Action == "effect_result"
+	return name == "version" && r.Method == "POST" && strings.HasSuffix(r.Path, "/plugins") || name == "credentialRefId" || name == "role" && strings.HasSuffix(r.Path, "/members/huawei") || name == "version" && r.Method == "PUT" || name == "epoch" && r.Action == "access" || name == "workspaceId" && r.Action == "plan" || name == "externalId" && r.Action == "effect_result"
 }
 
 func inputSchema(name string, r router.Route) obj {
@@ -663,7 +759,7 @@ func inputSchema(name string, r router.Route) obj {
 		return obj{"type": "integer", "minimum": 1, "maximum": 3600}
 	case "protocolVersion":
 		return obj{"type": "integer", "enum": []int{1}}
-	case "initialized", "idle":
+	case "initialized", "idle", "impactConfirmed":
 		return boolean()
 	case "result":
 		return ref("EffectResult")
@@ -697,7 +793,7 @@ func inputSchema(name string, r router.Route) obj {
 		}
 		return enumeration("sandbox_ensure", "sandbox_terminate", "workspace_data_delete", "plugin_ensure", "plugin_delete")
 	case "errorCode":
-		return enumeration("substrate_timeout", "termination_unconfirmed", "git_cleanup_failed", "node_unavailable", "external_failure", "clone_failed", "clone_result_unknown")
+		return enumeration("substrate_timeout", "termination_unconfirmed", "git_cleanup_failed", "node_unavailable", "external_failure", "clone_failed", "clone_result_unknown", "plugin_execution_failed", "plugin_result_unknown")
 	case "tenantId", "operationId", "ticketId", "credentialRefId":
 		return uuid()
 	case "category":
@@ -706,7 +802,7 @@ func inputSchema(name string, r router.Route) obj {
 		return uuid()
 	case "ids":
 		return array(uuid())
-	case "filter", "properties", "input", "values":
+	case "filter", "properties", "input", "values", "graph":
 		return obj{"type": "object", "additionalProperties": true}
 	case "contextRefs":
 		return array(ref("ContextRefRef"))
@@ -752,7 +848,7 @@ func description(r router.Route) string {
 	case "/api/v1/tenants/:tid/members/huawei":
 		return "Tenant administrators add a selected Huawei person by stable globalUserId. Cloud searches Tianzhou again and verifies current employment before creating or reactivating membership."
 	}
-	base := "Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. "
+	base := "Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. "
 	if r.Action != "" {
 		base = "Controller requests require an independent controller service credential; holder, active database-time lease epoch and operation version are checked. "
 	}
@@ -786,21 +882,24 @@ func description(r router.Route) string {
 			base += "Every tenant has one collaboration space. Active tenant members can read it. "
 		}
 	}
+	if strings.Contains(r.Path, "/workflows") {
+		base += "Workflows are tenant-owned graph documents. `graph` is the authored document (nodes, edges, viewport, editor annotations, global variables), stored and returned whole — the editor is its only reader, so no field inside it is validated or indexed here. A live workflow name is unique per tenant; archiving one frees its name. "
+	}
 	if r.Path == "/api/v1/tenants" && r.Method == "POST" {
 		base = "Public requests require a gateway service credential plus a caller-bound user credential. The verified identity authorizes self-service provisioning without prior membership. Atomically creates a tenant and its sole visible collaboration space with the same name and the given globally unique, immutable slug; the caller becomes its first administrator. The idempotency key is matched per user across tenants and recorded under the new tenant. "
 	}
 	if strings.Contains(r.Path, "/clones") {
-		base += "Clone requests are independent accepted work items outside the project/workspace operation model: Cloud accepts them in its own transaction, a Controller claims and dispatches them over the internal control contract, and only the submitting user can read them. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. "
+		base += "Unscoped clone submission is retired in production and returns 410 runtime_scope_required; existing requests remain readable by their original submitter. An explicit development store can exercise the legacy coordination fixture without enabling a production bypass. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. "
 	}
 	if strings.HasSuffix(r.Path, "/thread/messages") {
 		// The Thread POST's own fault vocabulary. It is stated here rather than added to the shared
 		// per-status descriptions, which every unrelated route also carries.
-		base += "Appends one user turn to an agent run's Thread and returns the entry that was created, with the Cloud-generated turnId the Node will echo back. Authorized like a comment: any active tenant member who can read the Issue. content accepts text blocks only and their total text must not exceed 64 KiB, otherwise 400 content_too_large; an unrecognized block type is 400 invalid_field_type, never a silent drop. Accepted while the Thread is pending, active or idle and no cancellation has been requested; a Thread that is ending or ended, and a run whose cancellation request is already recorded, both answer 409 thread_closed — a turn accepted after a cancellation would be persisted and never executed. The entry and the delivery command for it commit together with the idempotency record, so a 503 thread_command_unavailable — the control plane is not wired in this deployment — leaves nothing behind and the same key may be retried as a first request. A missing or mismatched tenant, Issue or run is 404 not_found. "
+		base += "Appends one user turn to an agent run's Thread and returns the entry that was created, with the Cloud-generated turnId the Node will echo back. Authorized like a comment: any active tenant member who can read the Issue. content accepts text blocks only and their total text must not exceed 64 KiB, otherwise 400 content_too_large; an unrecognized block type is 400 invalid_field_type, never a silent drop. Accepted while the Thread is pending, active or idle and no cancellation has been requested; a Thread that is ending or ended, and a run whose cancellation request is already recorded, both answer 409 thread_closed — a turn accepted after a cancellation would be persisted and never executed. The entry and the delivery command for it commit together with the idempotency record, so a failure anywhere in that transaction leaves nothing behind and the same key may be retried as a first request. A missing or mismatched tenant, Issue or run is 404 not_found. "
 	}
 	if strings.HasSuffix(r.Path, "/thread/end") {
 		// The user-initiated end's own fault vocabulary, stated here rather than in the shared
 		// per-status descriptions that unrelated routes also carry.
-		base += "Ends an agent run's Thread at the user's request, which is what makes the Thread's upper lifecycle reachable from the UI rather than only from an expired idle window or a cancellation. The body is an empty JSON object and any field is 400 unknown_field. Accepted while the Thread is pending, active or idle, answering 202 with the Thread's new state ending; a Thread already ending or ended answers 409 thread_closed. The transition and the EndSession command it releases commit together with the idempotency record, so a 503 thread_command_unavailable — the control plane is not wired in this deployment — leaves nothing behind and the same key may be retried as a first request. This endpoint never advances the Thread to ended, never marks a queued turn discarded and never touches the run's phase, status, result or Workspace: ending a Thread asks the session to stop and the session's own terminal state decides what follows. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. "
+		base += "Ends an agent run's Thread at the user's request, which is what makes the Thread's upper lifecycle reachable from the UI rather than only from an expired idle window or a cancellation. The body is an empty JSON object and any field is 400 unknown_field. Accepted while the Thread is pending, active or idle, answering 202 with the Thread's new state ending; a Thread already ending or ended answers 409 thread_closed. The transition and the EndSession command it releases commit together with the idempotency record, so a failure anywhere in that transaction leaves nothing behind and the same key may be retried as a first request. This endpoint never advances the Thread to ended, never marks a queued turn discarded and never touches the run's phase, status, result or Workspace: ending a Thread asks the session to stop and the session's own terminal state decides what follows. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. "
 	}
 	if strings.HasSuffix(r.Path, "/thread") {
 		// The Thread GET's own fault vocabulary and cursor semantics, stated here rather than in the

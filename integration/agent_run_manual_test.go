@@ -91,11 +91,11 @@ func TestManualAgentSnapshotPinIsImmutable(t *testing.T) {
 		t.Fatalf("first manual run pinned = %q, want 1.0.0", got)
 	}
 
-	if _, err := f.store.Pool.Exec(`UPDATE space_plugins SET desired_version='2.0.0',version=version+1 WHERE space_id=$1 AND source_namespace='official' AND identifier='hello-world'`, sid); err != nil {
+	// The roster row is identified by its id and carries no version of its own; the version a new run
+	// pins is the plugin pin the roster names, so the upgrade moves desired_version and the release it
+	// resolves to together.
+	if _, err := f.store.Pool.Exec(`UPDATE space_plugins SET desired_version='2.0.0',selected_release=jsonb_set(selected_release,'{version}','"2.0.0"'),version=version+1 WHERE space_id=$1 AND source_namespace='official' AND identifier='hello-world'`, sid); err != nil {
 		t.Fatalf("upgrade plugin: %v", err)
-	}
-	if _, err := f.store.Pool.Exec(`UPDATE space_agents SET version=version+1 WHERE id=$1`, agentID); err != nil {
-		t.Fatalf("refresh agent: %v", err)
 	}
 
 	iid2 := f.issueForAgent(t, "Manual pinned 2", "", "p2")

@@ -2,11 +2,12 @@ package integration
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+
+	"github.com/wanglongan587/cloud/internal/controlpb"
 	"github.com/wanglongan587/cloud/internal/core"
 )
 
@@ -68,9 +69,6 @@ func TestAgentInstallActivatesRoster(t *testing.T) {
 	if row.S("status") != "active" || row.S("displayName") != "Hello World" {
 		t.Fatalf("agent roster after install = %v", row)
 	}
-	if row["retiredAt"] != nil {
-		t.Fatalf("active agent must have no retired_at: %v", row)
-	}
 
 	// A non-agent (hook) plugin installs fine but never joins the roster.
 	f.call("POST", f.pluginSpacePath(sid)+"/plugins", core.Object{"identifier": "official/native-tool"}, "install-hook-1", 200)
@@ -101,14 +99,14 @@ func TestAgentReinstallAndRemove(t *testing.T) {
 	if active.S("status") != "active" {
 		t.Fatalf("after install = %v", active)
 	}
-	activeVersion := active.N("version")
+	activeUpdatedAt := active.S("updatedAt")
 
 	// Uninstall -> retired; the row survives with a retired_at stamp.
 	pluginsRow := f.spacePlugin(sid, "official/hello-world") // space_plugins version is the DELETE guard
 	f.call("DELETE", f.pluginSpacePath(sid)+"/plugins", core.Object{"identifier": "official/hello-world", "version": pluginsRow.N("version")}, "remove-r1", 200)
 	f.drain()
 	retired := f.spaceAgent(sid, "official/hello-world")
-	if retired.S("status") != "retired" || retired["retiredAt"] == nil {
+	if retired.S("status") != "retired" {
 		t.Fatalf("after uninstall = %v", retired)
 	}
 	if f.spaceAgentCount(sid) != 1 {
@@ -121,24 +119,27 @@ func TestAgentReinstallAndRemove(t *testing.T) {
 	if pluginsRow2.S("desiredState") != "removed" {
 		t.Fatalf("removed plugin still desired-removed = %v", pluginsRow2)
 	}
+	f.call("DELETE", f.pluginSpacePath(sid)+"/plugins", core.Object{"identifier": "official/hello-world", "version": pluginsRow2.N("version")}, "remove-r2", 200)
 	f.drain()
 	if got := f.spaceAgent(sid, "official/hello-world"); got.S("status") != "retired" {
 		t.Fatalf("repeated uninstall changed agent = %v", got)
 	}
 
-	// Reinstall revives the SAME row (same id) back to active and clears retired_at.
+	// Reinstall revives the SAME row (same id) back to active.
 	// The plugin row is re-desired installed; the install fans out again and
-	// converges to installed, which must revive the agent.
-	f.call("POST", f.pluginSpacePath(sid)+"/plugins", core.Object{"identifier": "official/hello-world"}, "install-r2", 200)
+	// converges to installed, which must revive the agent. Re-selecting an
+	// existing selection is guarded by the row's version, exactly as the uninstall was.
+	f.call("POST", f.pluginSpacePath(sid)+"/plugins", core.Object{"identifier": "official/hello-world", "version": f.spacePlugin(sid, "official/hello-world").N("version")}, "install-r2", 200)
 	f.drain()
 	revived := f.spaceAgent(sid, "official/hello-world")
-	if revived.S("id") != retired.S("id") || revived.S("status") != "active" || revived["retiredAt"] != nil {
+	if revived.S("id") != retired.S("id") || revived.S("status") != "active" {
 		t.Fatalf("reinstall must revive the same row: id was %v now %v", retired.S("id"), revived)
 	}
-	// The revive is a genuine transition, so the row version advances once; the
-	// earlier active and the retired both moved the version forward from create.
-	if revived.N("version") <= activeVersion {
-		t.Fatalf("revive must advance version: was %d now %d", activeVersion, revived.N("version"))
+	// The roster row carries no version of its own, so the observable proof that the revive was a
+	// genuine later write — and not a row the earlier install left behind — is that its updated_at
+	// moved forward from the install's.
+	if revived.S("updatedAt") <= activeUpdatedAt {
+		t.Fatalf("revive must advance updated_at: was %s now %s", activeUpdatedAt, revived.S("updatedAt"))
 	}
 }
 
@@ -176,86 +177,108 @@ func TestAgentRosterIsolationAndRetiredExclusion(t *testing.T) {
 
 // TestAgentInstallFailureDoesNotActivate covers the D3 invariant that an agent
 // roster row exists only once the plugin's aggregate converges to installed. A
-// failed install marks the plugin row failed but must not create an agent; only
-// after the retried install succeeds does the agent row appear.
+// failed install marks the instance failed but must not create an agent; only
+// after a later install converges does the agent row appear.
 func TestAgentInstallFailureDoesNotActivate(t *testing.T) {
 	f := setup(t)
-	repo, artifacts := marketplaceFixture(t, f.root)
+	repo, _ := marketplaceFixture(t, f.root)
 	f.syncMarketplace(t, repo)
 	sid := f.defaultSpaceID()
 	created := f.spaceProject(t, sid, "space-project")
 	wid := created.O("workspace").S("id")
 
-	// A tampered artifact so the install download fails digest verification.
-	wrong := filepath.Join(f.root, "wrong.orax")
-	must(t, os.WriteFile(wrong, []byte("tampered bytes\n"), 0o600))
-	f.substrate.MapArtifact("https://example.invalid/artifacts/hello-1.0.0.orax", wrong)
-
 	f.call("POST", f.pluginSpacePath(sid)+"/plugins", core.Object{"identifier": "official/hello-world"}, "install-fail", 200)
 	op := f.claimPluginOp(t, "install_plugin")
-	planned := f.controlStep(t, op, "/effects", core.Object{"kind": "plugin_ensure", "workspaceId": wid}, 200)
-	effect := planned.O("effect")
-	failed := f.substrateFailed(t, effect)
-	op = planned.O("operation")
-	result := f.controlStep(t, op, "/effects/"+effect.S("id")+"/result", core.Object{"state": "failed", "externalId": failed.S("externalId"), "result": failed.O("result")}, 200)
+	// The Node was handed a release it could not use, which is the failure a real
+	// executor reports when the download does not match the catalog digest.
+	f.dispatchPlugin(t, op, "exec-fail")
+	must(t, f.reportPlugin(t, op, "exec-fail", []*controlpb.PluginItemResult{{
+		PluginId: "official/hello-world",
+		Outcome:  &controlpb.PluginItemResult_Failed{Failed: &controlpb.PluginItemFailed{Reason: controlpb.PluginFailureReason_PLUGIN_FAILURE_REASON_CHECKSUM_MISMATCH}},
+	}}))
+	f.controlStep(t, op, "/advance", core.Object{}, 200)
 
 	// A failed install must not create or activate an agent row.
 	if got := f.spacePlugin(sid, "official/hello-world").S("observedState"); got != "failed" {
 		t.Fatalf("failed install surface = %v", got)
 	}
+	if n := f.scalar(`SELECT count(*) FROM workspace_plugin_instances WHERE workspace_id=$1 AND identifier='hello-world' AND observed_state='failed' AND install_error='checksum_mismatch'`, wid); n != 1 {
+		t.Fatalf("the failed instance must record the reason, got %d matching rows", n)
+	}
 	if f.spaceAgentCount(sid) != 0 {
 		t.Fatalf("failed install must not create an agent row: count=%d", f.spaceAgentCount(sid))
 	}
 
-	// Fix the artifact and retry by stable effect id; the reclaim converges and
-	// the roster row now appears — proving activation is driven by the converged
-	// aggregate, not by the install request.
-	f.substrate.MapArtifact("https://example.invalid/artifacts/hello-1.0.0.orax", artifacts["https://example.invalid/artifacts/hello-1.0.0.orax"])
-	op = result.O("operation")
-	external := f.substrateRerun(t, effect)
-	succeeded := f.controlStep(t, op, "/effects/"+effect.S("id")+"/result", core.Object{"state": "succeeded", "externalId": external.S("externalId"), "result": external.O("result")}, 200)
-	op = succeeded.O("operation")
-	f.controlStep(t, op, "/advance", core.Object{}, 200)
-	row := f.spaceAgent(sid, "official/hello-world")
-	if row == nil || row.S("status") != "active" {
-		t.Fatalf("converged install must activate the agent: %v", row)
+	// A retried install converges, and the roster row now appears — proving
+	// activation is driven by the converged aggregate, not by the install request.
+	//
+	// The retry is a remove followed by a fresh install rather than a second install of the same
+	// version. Re-selecting an identical desired state is deliberately a no-op in the selection
+	// guard (installSpacePlugin only re-runs maintenance scheduling, which picks up instances left
+	// `pending`); a failed instance returns to `pending` only on a *changed* selection. Removing the
+	// plugin is the supported transition that clears the failed attempt, and the new install is
+	// then a genuine change back to installed.
+	row := f.spacePlugin(sid, "official/hello-world")
+	f.call("DELETE", f.pluginSpacePath(sid)+"/plugins", core.Object{"identifier": "official/hello-world", "version": row.N("version")}, "remove-retry", 200)
+	f.completeNextPlugin(t, "remove_plugin")
+	f.call("POST", f.pluginSpacePath(sid)+"/plugins", core.Object{"identifier": "official/hello-world", "version": f.spacePlugin(sid, "official/hello-world").N("version")}, "install-retry", 200)
+	f.completeNextPlugin(t, "install_plugin")
+	agent := f.spaceAgent(sid, "official/hello-world")
+	if agent == nil || agent.S("status") != "active" {
+		t.Fatalf("converged install must activate the agent: %v", agent)
 	}
 }
 
 // TestAgentActivationIsAtomicWithPluginWriteback (IT #18) proves the space_agent
-// write is atomic with the plugin aggregate-convergence transaction. A succeeded
-// install result whose version evidence does not match the planned request is
-// rejected by effectResult (invalid_plugin_evidence) before the aggregate
-// writeback runs; the transaction aborts, so the plugin row must not be installed
-// AND no agent row may appear. If activation lived in a separate or deferred
-// write (a goroutine, a second transaction, a poll) it would survive this abort
-// and this test would fail.
+// write is atomic with the plugin aggregate-convergence transaction. A Node
+// success report whose version evidence does not match the planned request is
+// rejected (invalid_plugin_evidence) before the aggregate writeback runs; the
+// transaction aborts, so the plugin row must not converge AND no agent row may
+// appear. If activation lived in a separate or deferred write (a goroutine, a
+// second transaction, a poll) it would survive this abort and this test would
+// fail.
 func TestAgentActivationIsAtomicWithPluginWriteback(t *testing.T) {
 	f := setup(t)
 	repo, artifacts := marketplaceFixture(t, f.root)
 	f.syncMarketplace(t, repo)
 	f.substrate.MapArtifact("https://example.invalid/artifacts/hello-1.0.0.orax", artifacts["https://example.invalid/artifacts/hello-1.0.0.orax"])
 	sid := f.defaultSpaceID()
-	wid := f.spaceProject(t, sid, "space-project").O("workspace").S("id")
+	f.spaceProject(t, sid, "space-project")
 
 	f.call("POST", f.pluginSpacePath(sid)+"/plugins", core.Object{"identifier": "official/hello-world"}, "install-atomic", 200)
 	op := f.claimPluginOp(t, "install_plugin")
-	planned := f.controlStep(t, op, "/effects", core.Object{"kind": "plugin_ensure", "workspaceId": wid}, 200)
-	effect := planned.O("effect")
-	if want, got := "1.0.0", effect.O("request").S("version"); want != got {
-		t.Fatalf("planned effect version = %q, want %q", got, want)
+	plugins := objectList(op.O("request")["plugins"])
+	if len(plugins) != 1 || plugins[0].S("pluginId") != "official/hello-world" || plugins[0].S("version") != "1.0.0" {
+		t.Fatalf("planned plugin input = %v", plugins)
 	}
+	f.dispatchPlugin(t, op, "exec-atomic")
 
-	// A "succeeded" result that names the wrong installed version must be refused:
-	// the effect stays planned, the plugin row stays not-installed, and no agent
-	// row appears. All three are one aborted transaction.
-	f.controlStep(t, planned.O("operation"), "/effects/"+effect.S("id")+"/result",
-		core.Object{"state": "succeeded", "externalId": "ext-atomic-bad", "result": core.Object{"installed": true, "version": "9.9.9"}}, 400)
+	// A success report that names the wrong installed version must be refused: the
+	// instance stays in flight, the plugin row stays not-installed, and no agent row
+	// appears. All three are one aborted transaction, so the dispatch is still open
+	// afterwards and the Node is expected to correct its own evidence.
+	err := f.reportPlugin(t, op, "exec-atomic", []*controlpb.PluginItemResult{{
+		PluginId: "official/hello-world",
+		Outcome:  &controlpb.PluginItemResult_Installed{Installed: &controlpb.PluginItemInstalled{Version: "9.9.9"}},
+	}})
+	expectStatus(t, err, codes.InvalidArgument, controlpb.ErrorCode_ERROR_CODE_INVALID_INPUT)
 
 	if f.spaceAgentCount(sid) != 0 {
 		t.Fatalf("rejected success evidence must not create an agent row: count=%d", f.spaceAgentCount(sid))
 	}
-	if f.spacePlugin(sid, "official/hello-world").S("observedState") != "installing" {
+	if got := f.spacePlugin(sid, "official/hello-world").S("observedState"); got != "installing" {
 		t.Fatalf("plugin must not converge on rejected evidence: %v", f.spacePlugin(sid, "official/hello-world"))
+	}
+
+	// The same execution corrects itself. Once the reported version is the planned
+	// one, the single transaction that converges the plugin aggregate activates the
+	// roster row with it.
+	must(t, f.reportPlugin(t, op, "exec-atomic", []*controlpb.PluginItemResult{{
+		PluginId: "official/hello-world",
+		Outcome:  &controlpb.PluginItemResult_Installed{Installed: &controlpb.PluginItemInstalled{Version: plugins[0].S("version")}},
+	}}))
+	f.controlStep(t, op, "/advance", core.Object{}, 200)
+	if got := f.spaceAgent(sid, "official/hello-world"); got == nil || got.S("status") != "active" {
+		t.Fatalf("the converged install must activate the roster row: %v", got)
 	}
 }

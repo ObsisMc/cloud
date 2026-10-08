@@ -55,7 +55,7 @@ func threadAppended(t *transaction, run Object) {
 	if space == nil {
 		return
 	}
-	t.appends = append(t.appends, SpaceEvent{
+	queueThreadEvent(t, &SpaceEvent{
 		Type:    threadAppendedEvent,
 		SpaceID: space.S("id"),
 		IssueID: run.S("issueId"),
@@ -89,13 +89,13 @@ func threadChanged(t *transaction, run Object) {
 	// is a high-water mark ("there is data at or below this seq"), never a cursor: only a GET says
 	// what the log actually holds.
 	lastSeq := t.one("SELECT COALESCE(MAX(seq),0) AS m FROM thread_entries WHERE run_id=$1", runID).N("m")
-	for i := range t.threadChanges {
-		if t.threadChanges[i].RunID == runID {
-			t.threadChanges[i].LastSeq = lastSeq
+	for i := range t.events {
+		if t.events[i].Type == threadChangedEvent && t.events[i].RunID == runID {
+			t.events[i].LastSeq = lastSeq
 			return
 		}
 	}
-	t.threadChanges = append(t.threadChanges, SpaceEvent{
+	queueThreadEvent(t, &SpaceEvent{
 		Type:    threadChangedEvent,
 		SpaceID: space.S("id"),
 		IssueID: run.S("issueId"),
@@ -104,15 +104,14 @@ func threadChanged(t *transaction, run Object) {
 	})
 }
 
-// publishThreadHints releases the Thread hints a committed transaction queued — both the
-// append-specific events and A4's generalized ones. It runs strictly after Commit, never inside the
-// transaction: Publish is in-process fan-out to subscribers, and the repository rule is that no
-// transaction spans non-database work.
-func (s *Store) publishThreadHints(events []SpaceEvent) {
-	if s.Events == nil {
-		return
-	}
-	for _, ev := range events {
-		s.Events.Publish(ev)
-	}
+// queueThreadEvent appends one hint to the transaction's own event list — the same list
+// Store.transact publishes, in order, only after Commit returns nil. Appending here rather than
+// publishing is what makes "rollback publishes nothing" structural: no code path can publish from
+// inside a transaction, and every entry-write path, including the A→B takeover hook, reaches the
+// subscriber stream through this one mechanism.
+//
+// The list is deduped per (type, run) by the callers above rather than here, because raising an
+// already-queued hint's sequence requires reading it back.
+func queueThreadEvent(t *transaction, ev *SpaceEvent) {
+	t.events = append(t.events, *ev)
 }

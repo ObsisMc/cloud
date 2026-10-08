@@ -69,27 +69,6 @@ issue_runs:
   delivery_give_up_after: 2h
   delivery_unreachable_after: 30m
 
-object_store:
-  # Cloud's own S3-compatible object storage for Revision objects (Cloud Revision D1). The whole
-  # section is optional: leaving it out runs the server without object storage, in which case every
-  # Revision upload grant is refused as UNAVAILABLE and each delivery fails until IssueRun D5's
-  # give-up window releases the run — the server logs the missing capability at startup.
-  #
-  # Credentials are references, never values: `access_key_id_file` and `secret_access_key_file` name
-  # files that are read at startup and then live only in the Cloud process. Never put a key or secret
-  # in this file, an environment variable or a log. `public_endpoint` is only for deployments whose
-  # Nodes reach the store at a different address than Cloud does; `path_style` is what MinIO needs.
-  # Overrides: CLOUD_OBJECT_STORE_ENDPOINT / _PUBLIC_ENDPOINT / _REGION / _BUCKET / _PATH_STYLE /
-  # _ACCESS_KEY_ID_FILE / _SECRET_ACCESS_KEY_FILE / _UPLOAD_GRANT_TTL.
-  #
-  # endpoint: "http://127.0.0.1:9000"
-  # region: "us-east-1"
-  # bucket: "ora-revisions"
-  # path_style: true
-  # access_key_id_file: "/run/ora-secrets/object-store-access-key-id"
-  # secret_access_key_file: "/run/ora-secrets/object-store-secret-access-key"
-  # upload_grant_ttl: 15m  # Cloud Revision D1's default; omitting the key selects it
-
 plugins:
   # Plugin marketplace the cloud server syncs into its own catalog snapshot (git fetch + scan of
   # registry/**/orax.toml). The catalog API always reads the PostgreSQL snapshot and never the
@@ -99,3 +78,28 @@ plugins:
   marketplace_branch: "main"
   sync_interval: 5m
   sync_enabled: true
+
+object_store:
+  # Cloud's own S3-compatible object storage for Revision objects (Cloud Revision D1): optional
+  # S3-compatible upload-grant service. Credentials are mounted files, never values here.
+  # CLOUD_OBJECT_STORE_* overrides each key; this does not enable Revision verification (M3).
+  #
+  # `enabled: false` (or leaving the section out) runs the server without object storage: every
+  # Revision upload grant is refused as UNAVAILABLE and each delivery fails until IssueRun D5's
+  # give-up window releases the run — the server logs the missing capability at startup.
+  #
+  # Credentials are references, never values: `access_key_id_file` and `secret_access_key_file` name
+  # files that are read at startup and then live only in the Cloud process. Never put a key or secret
+  # in this file, an environment variable or a log. `public_endpoint` is only for deployments whose
+  # Nodes reach the store at a different address than Cloud does; `path_style` is what MinIO needs.
+  # Overrides: CLOUD_OBJECT_STORE_ENDPOINT / _PUBLIC_ENDPOINT / _REGION / _BUCKET / _PATH_STYLE /
+  # _ACCESS_KEY_ID_FILE / _SECRET_ACCESS_KEY_FILE / _UPLOAD_GRANT_TTL.
+  enabled: false
+  endpoint: ""
+  public_endpoint: ""
+  region: "us-east-1"
+  bucket: "revisions"
+  path_style: true
+  access_key_id_file: ""
+  secret_access_key_file: ""
+  upload_grant_ttl: 15m

@@ -5,7 +5,7 @@ import (
 )
 
 // settleRunWorkspace is the B-owned Phase 2A settlement core behind the A→B hook
-// RunWorkspaceSettled (controller-integration D6 runWorkspaceSettled, phase 2A).
+// OnRunWorkspaceSettled (controller-integration D6 runWorkspaceSettled, phase 2A).
 //
 // It runs on the caller-owned *transaction — the run Workspace's create_workspace
 // operation terminal transaction — inside which its B transition and the deleting
@@ -19,25 +19,20 @@ import (
 //	provisioning + cancel_requested_at set  → phase=releasing, status=cancelled, result.deliveryState=skipped (+ DeleteRunWorkspace)
 //	phase != provisioning                   → stale / replay no-op
 //
-// A caller-provided run Object carries identity only (id, tenant); every business
-// field used for the transition (phase, status, cancel_requested_at, workspace_id)
-// is re-read from authoritative issue_runs state in this transaction, never taken
-// from the caller Object (plan §3). The Phase 2 state machine is not re-designed
-// here; only the committed matrix above is implemented.
+// The caller names the run and the operation's own outcome word; every business field used for the
+// transition (phase, status, cancel_requested_at, workspace_id) is re-read from authoritative
+// issue_runs state in this transaction, never taken from the caller (plan §3). The Phase 2 state
+// machine is not re-designed here; only the committed matrix above is implemented.
 //
 // The plugin-specific failure (agent_plugin_unavailable) is deliberately NOT produced
 // here: the hook carries only a boolean ready and the create_workspace plugin step is
 // not wired (G-002), so there is no authoritative evidence to distinguish it. A
 // ready=false settlement always maps to the generic workspace_unavailable. Deferred
 // to Phase 2B (plan §18.2.6, §8).
-func (s *Store) settleRunWorkspace(t *transaction, run Object, ready bool) error {
-	// Identity from the caller; the rest of the row is re-read authoritatively below.
-	runID := run.S("id")
+func (s *Store) settleRunWorkspace(t *transaction, runID, status string) error {
 	if !validID(runID) {
-		return fmt.Errorf("runWorkspaceSettled: invalid run id %q", run.S("id"))
+		return fmt.Errorf("runWorkspaceSettled: invalid run id %q", runID)
 	}
-	callerTenant := run.S("tenantId")
-
 	o := t.one("SELECT * FROM issue_runs WHERE id=$1 AND deleted_at IS NULL", runID)
 	if o == nil {
 		// A create_workspace terminal firing for a run that does not exist is an invariant
@@ -47,8 +42,13 @@ func (s *Store) settleRunWorkspace(t *transaction, run Object, ready bool) error
 	if o.S("executorType") != "agent" {
 		return fmt.Errorf("runWorkspaceSettled: run %s is executor_type=%q, not agent", runID, o.S("executorType"))
 	}
-	if callerTenant != "" && callerTenant != o.S("tenantId") {
-		return fmt.Errorf("runWorkspaceSettled: run %s tenant mismatch (caller %s, authoritative %s)", runID, callerTenant, o.S("tenantId"))
+	// The control plane states the operation's outcome as its own word rather than a boolean, so the
+	// only value that means "the Workspace came up" is `ready`; anything else is the failure row.
+	// `failed` is the only other value it sends today, and an unknown word is an internal
+	// contradiction rather than a third outcome this matrix has a row for.
+	ready := status == "ready"
+	if !ready && status != "failed" {
+		return fmt.Errorf("runWorkspaceSettled: run %s carries operation outcome %q, not ready or failed", runID, status)
 	}
 
 	// Replay/stale: a settlement arriving after the run already left provisioning is a
@@ -159,73 +159,3 @@ func (s *Store) settleCancelled(t *transaction, o Object) error {
 		runActivityDetails(runID, o.S("executorType"), o.S("executorId"), nil))
 	return s.declareDelete(t, o)
 }
-
-// declareDelete declares the run Workspace's delete_workspace operation through the B→A
-// seam DeleteRunWorkspace in the same transaction as the releasing transition, so a
-// failure of the delete declaration aborts the whole transaction and the run can never
-// be left releasing while the delete intent did not commit (plan §4/§6/§13). The caller
-// owns atomicity; this declares, it never executes the delete.
-func (s *Store) declareDelete(t *transaction, o Object) error {
-	// Reconstruct the run object with authoritative identity/binding for the seam.
-	return s.agentRunControlPlane().DeleteRunWorkspace(t, Object{
-		"id":          o.S("id"),
-		"tenantId":    o.S("tenantId"),
-		"workspaceId": o.S("workspaceId"),
-	})
-}
-
-// businessAgentRunHooks is the B-side AgentRunHooks implementation. RunWorkspaceSettled
-// delegates to the Phase 2A settlement core, ThreadEventsTakenOver to the Phase 4B Thread
-// takeover core, SessionEnded to the Phase 5 session-terminal core, DeliverySettled to the
-// Phase 5 Batch 2 delivery-settlement core and RunWorkspaceDeleted to the Phase 5 Batch 2
-// release core. All five hooks are real, so every phase transition the approved IssueRun
-// decision defines now has exactly one implementation. NewBusinessAgentRunHooks binds it on the
-// Store in production, so the same control-plane transactions that persist A-side evidence drive
-// the B-side transitions.
-type businessAgentRunHooks struct {
-	store *Store
-}
-
-// NewBusinessAgentRunHooks returns the production B-side hook set for store, the value
-// cmd/server assigns to Store.AgentRunHooks. Every hook runs inside the caller's transaction;
-// the returned value holds no state beyond the store it delegates to.
-func NewBusinessAgentRunHooks(store *Store) AgentRunHooks {
-	return businessAgentRunHooks{store: store}
-}
-
-// RunWorkspaceSettled fulfills the A→B hook: it runs the B settlement core in the
-// caller-owned transaction.
-func (h businessAgentRunHooks) RunWorkspaceSettled(t *transaction, run Object, ready bool) error {
-	return h.store.settleRunWorkspace(t, run, ready)
-}
-
-// ThreadEventsTakenOver fulfills the A→B hook: it runs the Thread takeover core in the
-// caller-owned takeover transaction.
-func (h businessAgentRunHooks) ThreadEventsTakenOver(t *transaction, run, execution Object, events []Object) error {
-	return h.store.threadEventsTakenOver(t, run, execution, events)
-}
-
-// SessionEnded fulfills the A→B hook: it runs the session-terminal core in the caller-owned
-// terminal-takeover transaction (Thread `ended`, queued turns `discarded`, run `delivering` and
-// the released delivery work item — all one commit).
-func (h businessAgentRunHooks) SessionEnded(t *transaction, run, execution, ended Object) error {
-	return h.store.sessionEnded(t, run, execution, ended)
-}
-
-// DeliverySettled fulfills the A→B hook: it runs the delivery-settlement core in the caller-owned
-// terminal-takeover transaction. A failure keeps the run `delivering` and releases D5's backoff
-// retry; the two give-up limits release it instead; a `saved`/`unchanged` outcome is refused because
-// registering a Revision needs the still-unapproved Cloud Revision decision.
-func (h businessAgentRunHooks) DeliverySettled(t *transaction, run, execution Object, result DeliverySettledResult) error {
-	return h.store.deliverySettled(t, run, execution, result)
-}
-
-// RunWorkspaceDeleted fulfills the A→B hook: it runs the release core in the caller-owned
-// delete_workspace terminal transaction, moving the run `releasing → done`.
-func (h businessAgentRunHooks) RunWorkspaceDeleted(t *transaction, run Object) error {
-	return h.store.runWorkspaceDeleted(t, run)
-}
-
-// compile-time guard: businessAgentRunHooks satisfies the AgentRunHooks seam, with every hook of the
-// approved lifecycle implemented.
-var _ AgentRunHooks = businessAgentRunHooks{}
