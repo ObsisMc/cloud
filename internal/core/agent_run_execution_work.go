@@ -6,15 +6,17 @@ import (
 )
 
 // StoreAgentRunControlPlane is the production A-side control plane wired into a running Store by
-// cmd/server. It makes the execution seam (EnqueueExecutionWork) real: it persists an execution_work
-// row inside the caller's transaction, backed by the database partial-unique index, so a run's
-// AgentSession work is durably declared exactly once (G-001 execution portion, G-008, D-012).
+// cmd/server. It makes the execution seam (EnqueueExecutionWork) and the Thread command seam
+// (EnqueueThreadCommand, agent_run_thread_command.go) real: each persists its row inside the
+// caller's transaction, backed by the database's own constraints, so a run's AgentSession work is
+// durably declared exactly once (G-001 execution portion, G-008, D-012) and a Thread command is
+// durable from the moment the business transaction that produced it commits (D6, D-4C-05).
 //
-// The workspace and thread seams (CreateRunWorkspace/DeleteRunWorkspace/EnqueueThreadCommand) remain
-// fail-closed "not implemented" at this slice: Phase 3B deliberately closes the *execution* seam
-// (queued → claimable) while the run-Workspace/Thread command paths stay outstanding (G-001 is only
-// partially closed here, per the plan's PARTIAL marking). B never writes execution_work directly; the
-// business side reaches it only through this seam inside its own transaction, exactly as D6 requires.
+// The workspace seams (CreateRunWorkspace/DeleteRunWorkspace) remain fail-closed "not implemented"
+// at this slice: Phase 3B deliberately closed the *execution* seam (queued → claimable) while the
+// run-Workspace paths stay outstanding (G-001 is only partially closed here, per the plan's PARTIAL
+// marking). B never writes execution_work or thread_commands directly; the business side reaches
+// them only through these seams inside its own transaction, exactly as D6 requires.
 type StoreAgentRunControlPlane struct{}
 
 // NewStoreAgentRunControlPlane returns the production A-side execution seam bound to the caller's
@@ -88,12 +90,6 @@ func (StoreAgentRunControlPlane) EnqueueExecutionWork(t *transaction, run Object
 		return "", fmt.Errorf("enqueueExecutionWork conflict for run %s kind %s: declared work already exists with a different payload (%v)", runID, kind, existing.S("id"))
 	}
 	return existing.S("id"), nil
-}
-
-// EnqueueThreadCommand releases a Thread command. Not implemented in Phase 3B (Thread is Phase 4),
-// fails closed.
-func (StoreAgentRunControlPlane) EnqueueThreadCommand(*transaction, Object, Object) (string, error) {
-	return "", fmt.Errorf("control-plane seam enqueueThreadCommand not implemented: A side (Phase 4)")
 }
 
 // agentWorkCommand runs the execution_work pickup actions of the internal control contract. Lease

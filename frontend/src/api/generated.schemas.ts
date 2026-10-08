@@ -1127,6 +1127,46 @@ export interface TenantCreated {
   tenant: Tenant;
 }
 
+export type ThreadEntryRecord = { [key: string]: unknown };
+
+export type ThreadEntrySource = typeof ThreadEntrySource[keyof typeof ThreadEntrySource];
+
+
+export const ThreadEntrySource = {
+  node: 'node',
+  user: 'user',
+  system: 'system',
+} as const;
+
+/**
+ * User-turn lifecycle. Null for node and system entries.
+ * @nullable
+ */
+export type ThreadEntryStatus = typeof ThreadEntryStatus[keyof typeof ThreadEntryStatus] | null;
+
+
+export const ThreadEntryStatus = {
+  queued: 'queued',
+  delivered: 'delivered',
+  discarded: 'discarded',
+} as const;
+
+export interface ThreadEntry {
+  createdAt: string;
+  kind: string;
+  record: ThreadEntryRecord;
+  /** @minimum 1 */
+  seq: number;
+  source: ThreadEntrySource;
+  /**
+     * User-turn lifecycle. Null for node and system entries.
+     * @nullable
+     */
+  status?: ThreadEntryStatus;
+  /** @nullable */
+  turnId?: string | null;
+}
+
 export interface Ticket {
   actorUserId: string;
   admissionEpoch: number;
@@ -1770,6 +1810,26 @@ export type PostApiV1TenantsTidIssuesIidRunsBody = {
 
 export type PostApiV1TenantsTidIssuesIidRuns200 = {
   resource: IssueRun;
+};
+
+export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItemType = typeof PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItemType[keyof typeof PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItemType];
+
+
+export const PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItemType = {
+  text: 'text',
+} as const;
+
+export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItem = {
+  text: string;
+  type: PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItemType;
+};
+
+export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody = {
+  content: PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBodyContentItem[];
+};
+
+export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessages201 = {
+  resource: ThreadEntry;
 };
 
 export type DeleteApiV1TenantsTidIssuesIidSubscribersBody = {

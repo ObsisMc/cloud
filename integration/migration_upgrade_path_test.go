@@ -426,3 +426,260 @@ func TestMigration0020NodeExecutionsAppliesFreshAndUpgrades(t *testing.T) {
 		t.Fatalf("pending index must be partial over result IS NULL, got %q", pred.String)
 	}
 }
+
+// TestMigration0021NodeEventReceiptsAppliesFreshAndUpgrades (T4B, mandate §40): the 0021
+// node_event_receipts migration applies cleanly on a database already at 0020 (upgrade path), is
+// idempotent (re-running Migrate changes nothing and passes CheckSchema), and leaves the table with
+// exactly the shape receipt identity needs: PRIMARY KEY (execution_id, sequence) — one receipt per
+// (execution, node sequence), which is the identity a replayed batch is compared against (D-022) —
+// a FOREIGN KEY to node_executions so a receipt can never exist for an execution Cloud never
+// registered, an `event` jsonb column constrained to an object (the canonical ThreadEvent Cloud
+// stores verbatim), and the created_at index reserved for the still-deferred retention policy
+// (G-015). Fresh-DB coverage is the full-sequence test, which migrates from scratch; this test pins
+// the upgrade path.
+//
+// Evidence for the plan §4B.6 receipt obligation: the table and its constraints are the durable
+// basis for EventAck (protocol root D4) and for receipt-level replay idempotency.
+func TestMigration0021NodeEventReceiptsAppliesFreshAndUpgrades(t *testing.T) {
+	// Upgrade path: start from all migrations through 0020, then let store.Migrate run 0021.
+	pool, _ := testSchema(t, "test_ner21_")
+	entries, e := os.ReadDir(filepath.Join("..", "internal", "core", "migrations"))
+	must(t, e)
+	var previous []string
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".sql" && entry.Name() < "0021_node_event_receipts.sql" {
+			previous = append(previous, entry.Name())
+		}
+	}
+	applyMigrationsUpTo(t, pool, previous)
+	store := newStoreOnSchema(t, pool)
+	must(t, store.Migrate(context.Background()))
+	// Idempotent: a second Migrate + CheckSchema must be clean.
+	must(t, store.Migrate(context.Background()))
+	must(t, store.CheckSchema(context.Background()))
+
+	if !tableExists(t, pool, "node_event_receipts") {
+		t.Fatal("node_event_receipts table must exist after 0021")
+	}
+	// PRIMARY KEY (execution_id, sequence): the receipt identity D-022 is defined on.
+	var pkColumns []string
+	rows, e := pool.Query(`SELECT kcu.column_name FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		  ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema=current_schema() AND tc.table_name='node_event_receipts' AND tc.constraint_type='PRIMARY KEY'
+		ORDER BY kcu.ordinal_position`)
+	must(t, e)
+	defer rows.Close()
+	for rows.Next() {
+		var col string
+		must(t, rows.Scan(&col))
+		pkColumns = append(pkColumns, col)
+	}
+	must(t, rows.Err())
+	if len(pkColumns) != 2 || pkColumns[0] != "execution_id" || pkColumns[1] != "sequence" {
+		t.Fatalf("node_event_receipts PRIMARY KEY must be (execution_id, sequence), got %v", pkColumns)
+	}
+	// execution_id is an enforced reference to node_executions: no receipt without a registration.
+	var hasFK bool
+	must(t, pool.QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		  ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema=current_schema() AND tc.table_name='node_event_receipts'
+		  AND tc.constraint_type='FOREIGN KEY' AND kcu.column_name='execution_id'
+	)`).Scan(&hasFK))
+	if !hasFK {
+		t.Fatal("node_event_receipts.execution_id must be a foreign key reference to node_executions")
+	}
+	// `event` is jsonb: the canonical ThreadEvent is stored as JSON, compared structurally.
+	var eventType string
+	must(t, pool.QueryRow(`SELECT data_type FROM information_schema.columns
+		WHERE table_schema=current_schema() AND table_name='node_event_receipts' AND column_name='event'`).Scan(&eventType))
+	if eventType != "jsonb" {
+		t.Fatalf("node_event_receipts.event must be jsonb, got %q", eventType)
+	}
+	// A non-object event is refused by the database, not only by the caller.
+	_, e = pool.Exec(`INSERT INTO node_event_receipts(execution_id,sequence,event) VALUES('x',1,'[]')`)
+	if e == nil {
+		t.Fatal("node_event_receipts.event must reject a non-object JSON value")
+	}
+	// The created_at index backs the deferred retention sweep (G-015), which Phase 4B does not run.
+	var retentionIdx int
+	must(t, pool.QueryRow(`SELECT count(*) FROM pg_indexes WHERE schemaname=current_schema() AND tablename='node_event_receipts' AND indexname='node_event_receipts_retention'`).Scan(&retentionIdx))
+	if retentionIdx != 1 {
+		t.Fatalf("node_event_receipts_retention index must exist, got %d", retentionIdx)
+	}
+}
+
+// seedDeclaredAgentRun inserts one more agent run on the seeded issue with its own live isolated run
+// Workspace, optionally cancelled and optionally carrying the seq=1 first prompt. It reproduces the
+// pre-0022 worlds the pending backfill has to classify: a declared-but-unactivated session, a
+// cancelled one, a terminal one, and a run that merely reached a stage without a declaration.
+func seedDeclaredAgentRun(t *testing.T, pool *sql.DB, s skeletonSeed, phase, status string, cancelled, withFirstPrompt bool) string {
+	t.Helper()
+	runID, wsID := uuid.NewString(), uuid.NewString()
+	tx, e := pool.Begin()
+	must(t, e)
+	defer func() { _ = tx.Rollback() }()
+	exec := func(q string, args ...any) {
+		_, e := tx.Exec(q, args...)
+		must(t, e)
+	}
+	exec(`INSERT INTO issue_runs(id, tenant_id, issue_id, executor_type, executor_id, phase, status)
+		VALUES($1,$2,$3,'agent',$4,$5,$6)`, runID, s.tenantID, s.issueID, uuid.NewString(), phase, status)
+	exec(`INSERT INTO workspaces(id, tenant_id, owner_user_id, project_id, kind, desired_state, observed_state, requested_ref)
+		VALUES($1,$2,$3,$4,'isolated','running','ready','main')`, wsID, s.tenantID, s.userID, s.projectID)
+	// 0003: a live isolated workspace owns exactly one task identity (deferred task_identity trigger).
+	exec(`INSERT INTO tasks(id, workspace_id, title) VALUES($1,$2,'0022 run workspace task')`, uuid.NewString(), wsID)
+	exec(`UPDATE issue_runs SET workspace_id=$1 WHERE id=$2`, wsID, runID)
+	exec(`UPDATE workspaces SET issue_run_id=$1 WHERE id=$2`, runID, wsID)
+	if cancelled {
+		exec(`UPDATE issue_runs SET cancel_requested_at=now() WHERE id=$1`, runID)
+	}
+	if withFirstPrompt {
+		exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record, turn_id)
+			VALUES($1, 1, 'system', 'user_turn', '{"content":"Begin this task."}', $2)`, runID, uuid.NewString())
+	}
+	must(t, tx.Commit())
+	return runID
+}
+
+// TestMigration0022ThreadCommandsAndPendingAppliesFreshAndUpgrades (T4C-5, D-4C-12, G-016/G-022):
+// the 0022 migration applies cleanly on a database already at 0021 (upgrade path), is idempotent
+// (re-running Migrate changes nothing and passes CheckSchema), and lands the Thread API's persistence
+// with the shape the design requires.
+//
+// The upgrade path is what pins the two data decisions, because both are only observable when rows
+// exist before the migration runs:
+//
+//   - the `pending` backfill keys on the *business fact* — a real seq=1 session declaration — not on
+//     a stage proxy, and excludes cancelled and terminal runs;
+//   - the `thread_entries.status` CHECK is safe because a pre-existing source='user' row is
+//     backfilled to 'queued' first, so the constraint can never fail an upgrade.
+//
+// Evidence for the plan §4R.5 S1 obligation: migration 0022 fresh + upgrade, idempotent, and the
+// backfill scoped to declared, non-cancelled, non-terminal agent runs.
+func TestMigration0022ThreadCommandsAndPendingAppliesFreshAndUpgrades(t *testing.T) {
+	// Upgrade path: start from all migrations through 0021, then let store.Migrate run 0022.
+	pool, _ := testSchema(t, "test_tc22_")
+	entries, e := os.ReadDir(filepath.Join("..", "internal", "core", "migrations"))
+	must(t, e)
+	var previous []string
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".sql" && entry.Name() < "0022_thread_api_and_commands.sql" {
+			previous = append(previous, entry.Name())
+		}
+	}
+	applyMigrationsUpTo(t, pool, previous)
+
+	// The ownership chain (0018 columns included, since 0018 is already applied at this point).
+	seed := seedAgentIssueRunSkeleton(t, pool)
+	// Four runs differing only in the facts the backfill must read.
+	declared := seedDeclaredAgentRun(t, pool, seed, "starting", "dispatched", false, true)
+	cancelled := seedDeclaredAgentRun(t, pool, seed, "starting", "dispatched", true, true)
+	terminal := seedDeclaredAgentRun(t, pool, seed, "releasing", "cancelled", false, true)
+	undeclared := seedDeclaredAgentRun(t, pool, seed, "starting", "dispatched", false, false)
+	// A user turn that predates the column: the CHECK below is only safe if 0022 backfills it first.
+	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record, turn_id)
+		VALUES($1, 2, 'user', 'user_turn', '{"content":[{"type":"text","text":"hello"}]}', $2)`, declared, uuid.NewString())
+	must(t, e)
+
+	store := newStoreOnSchema(t, pool)
+	must(t, store.Migrate(context.Background()))
+	// Idempotent: a second Migrate + CheckSchema must be clean (the backfills are no-ops).
+	must(t, store.Migrate(context.Background()))
+	must(t, store.CheckSchema(context.Background()))
+
+	// The backfill materializes exactly the declared, live, non-cancelled, non-terminal run.
+	for _, tc := range []struct {
+		name string
+		run  string
+		want string
+	}{
+		{"declared session becomes pending", declared, "pending"},
+		{"cancelled run stays NULL", cancelled, ""},
+		{"terminal run stays NULL", terminal, ""},
+		{"run without a declaration stays NULL", undeclared, ""},
+		{"run with no session at all stays NULL", seed.runID, ""},
+	} {
+		var state sql.NullString
+		must(t, pool.QueryRow(`SELECT thread_state FROM issue_runs WHERE id=$1`, tc.run).Scan(&state))
+		if state.String != tc.want {
+			t.Fatalf("%s: thread_state = %q, want %q", tc.name, state.String, tc.want)
+		}
+	}
+
+	// The pre-existing user turn was backfilled before the CHECK was added, so the upgrade succeeded.
+	var status sql.NullString
+	must(t, pool.QueryRow(`SELECT status FROM thread_entries WHERE run_id=$1 AND seq=2`, declared).Scan(&status))
+	if !status.Valid || status.String != "queued" {
+		t.Fatalf("a pre-0022 user turn must be backfilled to 'queued', got %v", status)
+	}
+
+	// thread_entries.status: the turn lifecycle exists exactly for user turns.
+	_, e = pool.Exec(`UPDATE thread_entries SET status='bogus' WHERE run_id=$1 AND seq=2`, declared)
+	wantPGError(t, e, "23514")
+	_, e = pool.Exec(`UPDATE thread_entries SET status='queued' WHERE run_id=$1 AND seq=1`, declared)
+	wantPGError(t, e, "23514") // a system entry can never carry a turn lifecycle
+	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record) VALUES($1, 3, 'user', 'user_turn', '{}')`, declared)
+	wantPGError(t, e, "23514") // a user turn can never be missing one
+
+	// thread_commands: controller-integration D6's control-plane table, with the identity D3 needs.
+	if !tableExists(t, pool, "thread_commands") {
+		t.Fatal("thread_commands table must exist after 0022")
+	}
+	var pkColumns []string
+	rows, e := pool.Query(`SELECT kcu.column_name FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		  ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema=current_schema() AND tc.table_name='thread_commands' AND tc.constraint_type='PRIMARY KEY'
+		ORDER BY kcu.ordinal_position`)
+	must(t, e)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var col string
+		must(t, rows.Scan(&col))
+		pkColumns = append(pkColumns, col)
+	}
+	must(t, rows.Err())
+	if len(pkColumns) != 1 || pkColumns[0] != "id" {
+		t.Fatalf("thread_commands PRIMARY KEY must be (id) — the command_id the proto carries, got %v", pkColumns)
+	}
+	// A delivery is registered against an execution Cloud already registered (mirrors node_event_receipts).
+	var hasFK bool
+	must(t, pool.QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		  ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema=current_schema() AND tc.table_name='thread_commands'
+		  AND tc.constraint_type='FOREIGN KEY' AND kcu.column_name='delivered_execution_id'
+	)`).Scan(&hasFK))
+	if !hasFK {
+		t.Fatal("thread_commands.delivered_execution_id must be a foreign key reference to node_executions")
+	}
+	_, e = pool.Exec(`INSERT INTO thread_commands(id, run_id, kind, body) VALUES($1,$2,'bogus','{}')`, uuid.NewString(), declared)
+	wantPGError(t, e, "23514") // kind mirrors the proto oneof
+	_, e = pool.Exec(`INSERT INTO thread_commands(id, run_id, kind, body) VALUES($1,$2,'submit_user_turn','[]')`, uuid.NewString(), declared)
+	wantPGError(t, e, "23514") // body is a command payload object
+	_, e = pool.Exec(`INSERT INTO thread_commands(id, run_id, kind, body, delivered_at) VALUES($1,$2,'end_session','{}',now())`, uuid.NewString(), declared)
+	wantPGError(t, e, "23514") // a half-registered delivery is refused
+	_, e = pool.Exec(`INSERT INTO thread_commands(id, run_id, kind, body, delivered_at, delivered_execution_id) VALUES($1,$2,'end_session','{}',now(),'no-such-execution')`, uuid.NewString(), declared)
+	wantPGError(t, e, "23503")
+	// An undelivered command is a legal row: commands wait in Cloud until the session execution is
+	// registered (D3).
+	_, e = pool.Exec(`INSERT INTO thread_commands(id, run_id, kind, body) VALUES($1,$2,'submit_user_turn','{"turnId":"t"}')`, uuid.NewString(), declared)
+	must(t, e)
+
+	// The two partial indexes 4C's readers depend on: the undelivered backlog and the idle window.
+	for _, idx := range []struct{ table, name, predicate string }{
+		{"thread_entries", "thread_entries_queued", "status = 'queued'"},
+		{"thread_commands", "thread_commands_undelivered", "delivered_at IS NULL"},
+		{"issue_runs", "issue_runs_idle_threads", "thread_state = 'idle'"},
+	} {
+		var def string
+		must(t, pool.QueryRow(`SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND tablename=$1 AND indexname=$2`, idx.table, idx.name).Scan(&def))
+		if !strings.Contains(def, idx.predicate) {
+			t.Fatalf("%s must be partial over %q, got %q", idx.name, idx.predicate, def)
+		}
+	}
+}

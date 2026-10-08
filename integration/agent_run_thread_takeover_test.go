@@ -1,0 +1,273 @@
+package integration
+
+// Production-path acceptance for the Phase 4B Thread takeover (mandate §43, IssueRun D3,
+// controller-integration D2/D6). The chain under test is the one cmd/server wires, named here so a
+// reader can follow it without guessing:
+//
+//	Controller → controlpb.AgentRunService.TakeOverThreadEvents          (gRPC, this file)
+//	  → controlgrpc.agentRunService.TakeOverThreadEvents                 (internal/controlgrpc/agentruns.go)
+//	  → Store.Control("agent_thread_takeover")                           (internal/core/control.go)
+//	  → Store.transact: lease check + pg_advisory_xact_lock              (internal/core/store.go)
+//	  → agentThreadTakeover: node_event_receipts + fence                 (internal/core/agent_run_thread_takeover.go)
+//	  → businessAgentRunHooks.ThreadEventsTakenOver                      (internal/core/agent_run_settle.go)
+//	  → Store.threadEventsTakenOver: thread_entries + starting→running   (internal/core/agent_run_thread.go)
+//	  → COMMIT → TakeOverThreadEventsResponse{ taken_over_through }
+//
+// Everything before the gRPC call is production code too: the run reaches `starting` through the
+// real Phase 3A recovery pass (Store.StartQueuedAgentSessionsOnce) and the session execution is
+// registered through the real Phase 4A control actions (agent_work_claim / agent_work_dispatch).
+// Only the scene itself — tenant, project, Space Agent, issue, run and its run Workspace — is seeded
+// directly, because run creation and CreateRunWorkspace are still G-001 placeholders.
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"testing"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+
+	"github.com/wanglongan587/cloud/internal/controlpb"
+	"github.com/wanglongan587/cloud/internal/core"
+)
+
+// seededAgentSession is one `starting` agent run whose session execution is registered and whose
+// Thread is one takeover away from `running`.
+type seededAgentSession struct {
+	runID         string
+	executionID   string
+	initialTurnID string
+}
+
+// seedAgentSessionScene loads the scene and drives the real production path up to (and excluding)
+// the takeover: StartQueuedAgentSessionsOnce writes the immutable seq=1 first prompt and declares
+// the agent_session execution_work, then a Controller claims and registers it, which is exactly the
+// state the Node must be running in before it can send the first Thread event.
+func seedAgentSessionScene(t *testing.T, h *controlHarness) seededAgentSession {
+	t.Helper()
+	ctx := context.Background()
+	// The production seams, wired exactly as cmd/server/main.go wires them. Without both of these the
+	// takeover below would roll back fail-closed (G-003) rather than prove the real path.
+	h.store.AgentRunControlPlane = core.NewStoreAgentRunControlPlane()
+	h.store.AgentRunHooks = core.NewBusinessAgentRunHooks(h.store)
+
+	runID, _, nodeID := seedStartingAgentRun(t, h.store)
+	must(t, h.store.StartQueuedAgentSessionsOnce(ctx))
+
+	claims := &core.Claims{Kind: "service", Role: "controller", RegisteredClaims: jwt.RegisteredClaims{Subject: "ctrl-a"}}
+	picked, e := h.store.Control(ctx, &core.ControlRequest{Action: "agent_work_claim", Body: core.Object{"epoch": 1}, Service: claims})
+	must(t, e)
+	work := picked.O("work")
+	if work == nil {
+		t.Fatal("the started run must have declared exactly one agent_session work item")
+	}
+	executionID := "exec-grpc-" + work.S("id")[:8]
+	_, e = h.store.Control(ctx, &core.ControlRequest{
+		Action:  "agent_work_dispatch",
+		Body:    core.Object{"workId": work.S("id"), "executionId": executionID, "nodeId": nodeID, "input": work.O("input"), "epoch": 1},
+		Service: claims,
+	})
+	must(t, e)
+
+	var turnID string
+	must(t, h.store.Pool.QueryRow(`SELECT turn_id FROM thread_entries WHERE run_id=$1 AND seq=1`, runID).Scan(&turnID))
+	return seededAgentSession{runID: runID, executionID: executionID, initialTurnID: turnID}
+}
+
+// seedStartingAgentRun seeds the minimal schema-valid scene (tenant, admin member, collaboration
+// space, active project, live run Workspace with its task, active Space Agent, issue, `starting`
+// agent run with its frozen input snapshot, connected sandbox and Node) plus the global Controller
+// lease, and returns the run, its Workspace and its Node.
+func seedStartingAgentRun(t *testing.T, store *core.Store) (runID, workspaceID, nodeID string) {
+	t.Helper()
+	user, tenant, space, project, agent, issue := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	runID, workspaceID, nodeID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	sandboxID := uuid.NewString()
+	// The frozen run-create snapshot: renderAgentInitialTurn and the AgentSession spec both read it.
+	input := core.Object{
+		"task":               "Fix the auth flow",
+		"interactionValues":  core.Object{"scope": "web"},
+		"target":             core.Object{"type": "issue", "id": issue},
+		"agentPluginId":      "official/hello-world",
+		"agentPluginVersion": "1.0.0",
+	}
+	tx, e := store.Pool.Begin()
+	must(t, e)
+	exec := func(name, q string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(q, args...); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	exec("user", `INSERT INTO users(id,display_name,status) VALUES($1,'takeover','active')`, user)
+	exec("tenant", `INSERT INTO tenants(id,name,status) VALUES($1,'takeover','active')`, tenant)
+	exec("membership", `INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'admin','active')`, tenant, user)
+	exec("space", `INSERT INTO collab_workspaces(id,tenant_id,name,slug,created_by) VALUES($1,$2,'takeover',$3,$4)`, space, tenant, "takeover-"+space[:8], user)
+	exec("project", `INSERT INTO projects(id,tenant_id,owner_user_id,space_id,name,repository_url,default_branch,lifecycle) VALUES($1,$2,$3,$4,'takeover','https://example.invalid/takeover.git','main','active')`, project, tenant, user, space)
+	// A live project carries exactly one main workspace (deferred project_main trigger); the run
+	// Workspace is the separate kind='isolated' one below.
+	exec("main-workspace", `INSERT INTO workspaces(id,tenant_id,owner_user_id,project_id,kind,desired_state,observed_state,runtime_generation,requested_ref) VALUES($1,$2,$3,$4,'main','running','ready',1,'HEAD')`, uuid.NewString(), tenant, user, project)
+	exec("agent", `INSERT INTO space_agents(id,space_id,tenant_id,plugin_id,display_name,status) VALUES($1,$2,$3,'official/hello-world','Hello','active')`, agent, space, tenant)
+	exec("issue", `INSERT INTO issues(id,tenant_id,creator_user_id,project_ref,title,number) VALUES($1,$2,$3,$4,'takeover issue',1)`, issue, tenant, user, project)
+	exec("run", `INSERT INTO issue_runs(id,tenant_id,issue_id,executor_type,executor_id,status,phase,input) VALUES($1,$2,$3,'agent',$4,'dispatched','starting',$5)`, runID, tenant, issue, agent, mustJSON(t, input))
+	// The run Workspace: isolated, bound to this exact run, live — the G-011 predicate the session
+	// start and the takeover both re-read. A live isolated workspace needs exactly one task identity,
+	// and the workspace/task inserts must share the transaction for that deferred trigger.
+	exec("run-workspace", `INSERT INTO workspaces(id,tenant_id,owner_user_id,project_id,kind,desired_state,observed_state,runtime_generation,requested_ref,issue_run_id) VALUES($1,$2,$3,$4,'isolated','running','ready',1,'HEAD',$5)`, workspaceID, tenant, user, project, runID)
+	exec("task", `INSERT INTO tasks(id,workspace_id,title) VALUES($1,$2,'takeover task')`, uuid.NewString(), workspaceID)
+	exec("run-workspace-bind", `UPDATE issue_runs SET workspace_id=$2, version=version+1, updated_at=now() WHERE id=$1`, runID, workspaceID)
+	exec("sandbox", `INSERT INTO sandbox_instances(id,workspace_id,generation,observed_state) VALUES($1,$2,1,'running')`, sandboxID, workspaceID)
+	exec("node", `INSERT INTO node_instances(id,workspace_id,sandbox_instance_id,service_subject,connection_state,protocol_version,initialized) VALUES($1,$2,$3,'node','connected',1,true)`, nodeID, workspaceID, sandboxID)
+	exec("lease", `INSERT INTO controller_leases(name,holder_id,epoch,expires_at) VALUES('global','ctrl-a',1,clock_timestamp()+interval '30 seconds')`)
+	must(t, tx.Commit())
+	return runID, workspaceID, nodeID
+}
+
+// mustJSON renders a value as the JSON text a jsonb column expects.
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, e := json.Marshal(v)
+	must(t, e)
+	return string(b)
+}
+
+// threadLine renders one settled `ora-history` line as the Node sends it: the HistoryLine's `at`
+// and its own line `seq`, flattened with the HistoryRecord's `type` tag (desktop
+// crates/history/src/record.rs). The inner `seq` is the Node's line number and is deliberately
+// unrelated to the Cloud-assigned Thread seq.
+func threadLine(tag, text string) string {
+	line := core.Object{"at": "2026-09-30T10:00:00+00:00", "seq": 0, "type": tag}
+	if text != "" {
+		line["update"] = core.Object{"sessionUpdate": "agent_message_chunk", "content": core.Object{"type": "text", "text": text}}
+	}
+	b, e := json.Marshal(line)
+	if e != nil {
+		panic(e)
+	}
+	return string(b)
+}
+
+// TestAgentRunThreadTakeoverOverGRPC is the end-to-end production acceptance: a Controller takes
+// over one contiguous batch through the real gRPC surface. The batch carries the Node's first real
+// record plus the echo of the Cloud-authored first prompt, so one call proves both the running
+// authority (first real record → running/running/active in the same commit) and the echo dedupe
+// (receipt yes, entry no), and the replay call proves the C5 "commit landed, ack lost" case is an
+// idempotent no-op on the wire.
+func TestAgentRunThreadTakeoverOverGRPC(t *testing.T) {
+	h := newControlHarness(t)
+	scene := seedAgentSessionScene(t, h)
+	client := controlpb.NewAgentRunServiceClient(h.conn)
+
+	batch := []*controlpb.ThreadEvent{
+		{Sequence: 1, Record: threadLine("update", "working on the fix")},
+		{Sequence: 2, TurnId: &scene.initialTurnID, Record: threadLine("update", "Fix the auth flow")},
+	}
+	resp, e := client.TakeOverThreadEvents(asController("ctrl-a"), &controlpb.TakeOverThreadEventsRequest{
+		Epoch: 1, OperationId: scene.runID, ExecutionId: scene.executionID, Events: batch,
+	})
+	must(t, e)
+	if resp.GetTakenOverThrough() != 2 {
+		t.Fatalf("taken_over_through = %d, want 2 (the echo still advances the execution's sequence)", resp.GetTakenOverThrough())
+	}
+
+	// Durable receipts: the ack basis (protocol root D4), one row per event, echo included.
+	var receipts int
+	must(t, h.store.Pool.QueryRow(`SELECT count(*) FROM node_event_receipts WHERE execution_id=$1`, scene.executionID).Scan(&receipts))
+	if receipts != 2 {
+		t.Fatalf("receipts = %d, want 2", receipts)
+	}
+	var lastEventSequence int64
+	must(t, h.store.Pool.QueryRow(`SELECT last_event_sequence FROM node_executions WHERE execution_id=$1`, scene.executionID).Scan(&lastEventSequence))
+	if lastEventSequence != 2 {
+		t.Fatalf("last_event_sequence = %d, want 2", lastEventSequence)
+	}
+	// The Thread: the immutable Cloud-authored seq=1 plus exactly one node entry for the real record.
+	// The echoed prompt is not written a second time.
+	var firstSource, firstKind string
+	must(t, h.store.Pool.QueryRow(`SELECT source,kind FROM thread_entries WHERE run_id=$1 AND seq=1`, scene.runID).Scan(&firstSource, &firstKind))
+	if firstSource != "system" || firstKind != "user_turn" {
+		t.Fatalf("seq=1 must stay the Cloud-authored first prompt, got %s/%s", firstSource, firstKind)
+	}
+	var entries int
+	must(t, h.store.Pool.QueryRow(`SELECT count(*) FROM thread_entries WHERE run_id=$1`, scene.runID).Scan(&entries))
+	if entries != 2 {
+		t.Fatalf("thread entries = %d, want 2 (echo deduped)", entries)
+	}
+	var nodeSeq int64
+	var nodeKind, nodeCollection string
+	must(t, h.store.Pool.QueryRow(`SELECT seq,kind,node_execution_id FROM thread_entries WHERE run_id=$1 AND node_sequence=1`, scene.runID).Scan(&nodeSeq, &nodeKind, &nodeCollection))
+	if nodeSeq != 2 || nodeKind != "update" || nodeCollection != scene.executionID {
+		t.Fatalf("the real record must land as seq=2/kind=update for %s, got seq=%d kind=%s execution=%s", scene.executionID, nodeSeq, nodeKind, nodeCollection)
+	}
+	// The run itself: the takeover is the only running authority.
+	var phase, status, threadState string
+	must(t, h.store.Pool.QueryRow(`SELECT phase,status,thread_state FROM issue_runs WHERE id=$1`, scene.runID).Scan(&phase, &status, &threadState))
+	if phase != "running" || status != "running" || threadState != "active" {
+		t.Fatalf("first real record must commit running/running/active, got %s/%s/%s", phase, status, threadState)
+	}
+
+	// C5: the Controller lost the response and re-sends the same batch. Cloud replays the commit:
+	// identical response, no second receipt, no second entry, no re-run of the transition.
+	replay, e := client.TakeOverThreadEvents(asController("ctrl-a"), &controlpb.TakeOverThreadEventsRequest{
+		Epoch: 1, OperationId: scene.runID, ExecutionId: scene.executionID, Events: batch,
+	})
+	must(t, e)
+	if replay.GetTakenOverThrough() != resp.GetTakenOverThrough() {
+		t.Fatalf("replay reported %d, want the original %d", replay.GetTakenOverThrough(), resp.GetTakenOverThrough())
+	}
+	must(t, h.store.Pool.QueryRow(`SELECT count(*) FROM node_event_receipts WHERE execution_id=$1`, scene.executionID).Scan(&receipts))
+	must(t, h.store.Pool.QueryRow(`SELECT count(*) FROM thread_entries WHERE run_id=$1`, scene.runID).Scan(&entries))
+	if receipts != 2 || entries != 2 {
+		t.Fatalf("a replay must write nothing: receipts=%d entries=%d", receipts, entries)
+	}
+	must(t, h.store.Pool.QueryRow(`SELECT phase,status,thread_state FROM issue_runs WHERE id=$1`, scene.runID).Scan(&phase, &status, &threadState))
+	if phase != "running" || status != "running" || threadState != "active" {
+		t.Fatalf("a replay must not rewrite run state, got %s/%s/%s", phase, status, threadState)
+	}
+}
+
+// TestAgentRunThreadTakeoverGRPCRejections pins the wire contract for the batches Cloud refuses:
+// an empty batch is INVALID_INPUT, a gap or an out-of-order batch is CONFLICT, and an execution
+// Cloud never registered is NOT_FOUND (controller-integration D2, plan §4B.14). Every rejection
+// leaves the run `starting` with no receipt, so nothing is ever acked on a rejected batch.
+func TestAgentRunThreadTakeoverGRPCRejections(t *testing.T) {
+	h := newControlHarness(t)
+	scene := seedAgentSessionScene(t, h)
+	client := controlpb.NewAgentRunServiceClient(h.conn)
+	call := func(execution string, events ...*controlpb.ThreadEvent) error {
+		t.Helper()
+		_, e := client.TakeOverThreadEvents(asController("ctrl-a"), &controlpb.TakeOverThreadEventsRequest{
+			Epoch: 1, OperationId: scene.runID, ExecutionId: execution, Events: events,
+		})
+		return e
+	}
+
+	expectStatus(t, call(scene.executionID), codes.InvalidArgument, controlpb.ErrorCode_ERROR_CODE_INVALID_INPUT)
+	expectStatus(t, call(scene.executionID, &controlpb.ThreadEvent{Sequence: 2, Record: threadLine("update", "a")}),
+		codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
+	expectStatus(t, call(scene.executionID,
+		&controlpb.ThreadEvent{Sequence: 1, Record: threadLine("update", "a")},
+		&controlpb.ThreadEvent{Sequence: 3, Record: threadLine("update", "b")}),
+		codes.Aborted, controlpb.ErrorCode_ERROR_CODE_CONFLICT)
+	expectStatus(t, call(uuid.NewString(), &controlpb.ThreadEvent{Sequence: 1, Record: threadLine("update", "a")}),
+		codes.NotFound, controlpb.ErrorCode_ERROR_CODE_NOT_FOUND)
+
+	var receipts int
+	must(t, h.store.Pool.QueryRow(`SELECT count(*) FROM node_event_receipts WHERE execution_id=$1`, scene.executionID).Scan(&receipts))
+	if receipts != 0 {
+		t.Fatalf("rejected batches must write no receipt (nothing was acked), got %d", receipts)
+	}
+	var entries int
+	must(t, h.store.Pool.QueryRow(`SELECT count(*) FROM thread_entries WHERE run_id=$1`, scene.runID).Scan(&entries))
+	if entries != 1 {
+		t.Fatalf("rejected batches must leave only the seq=1 first prompt, got %d entries", entries)
+	}
+	var phase string
+	var status sql.NullString
+	must(t, h.store.Pool.QueryRow(`SELECT phase,status FROM issue_runs WHERE id=$1`, scene.runID).Scan(&phase, &status))
+	if phase != "starting" || status.String != "dispatched" {
+		t.Fatalf("a rejected batch must not run the run, got %s/%s", phase, status.String)
+	}
+}

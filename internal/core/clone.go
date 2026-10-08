@@ -41,6 +41,18 @@ func (s *Store) signalOperations(ids []string) {
 	}
 }
 
+// signalThreadCommands tells the lease holder that a run has Thread commands worth claiming. Like
+// signalWork and signalOperations it runs only after the persisting transaction committed, so a
+// Controller that claims immediately finds the commands and a rolled-back write stays silent.
+func (s *Store) signalThreadCommands(runIDs []string) {
+	if s.Signals == nil {
+		return
+	}
+	for _, id := range runIDs {
+		s.Signals.Publish(ControlSignal{Kind: SignalThreadCommandAvailable, RunID: id})
+	}
+}
+
 // enqueueClone records one clone request inside the caller's transaction. Repeating
 // (tenant, user, requestId) with the same input returns the original request and reports nothing
 // new; different input is a conflict. Nothing is dispatched here: a Controller claims the row.

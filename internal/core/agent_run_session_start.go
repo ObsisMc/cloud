@@ -15,7 +15,8 @@ const agentSessionStartBatchSize = 100
 // run that has settled into phase='starting' (the run Workspace is provisioned and admitted), it
 // hands the first prompt to the Agent exactly once: it writes the immutable first produce as the
 // Thread's first entry (thread_entries seq=1, source='system', kind='user_turn') and, in the same
-// transaction, declares exactly one 'agent_session' execution_work item (D-014). It never touches
+// transaction, declares exactly one 'agent_session' execution_work item (D-014), and materializes
+// the Thread's `pending` state in that same transaction (D-4C-01, closing G-016). It never touches
 // issue_runs.phase/status (§16): the run leaves 'starting' only in Phase 4 upon authoritative
 // session-start/Thread-takeover evidence (D-014). Retry/recovery is a separate post-settle starting
 // scan owned by this type (D-015).
@@ -105,9 +106,13 @@ func sessionStartTarget(t *transaction, wid string) Object {
 //	                   declaration marker (D-013). INSERT ... ON CONFLICT DO NOTHING; a 0-affected
 //	                   replay means the first prompt was already declared, so the enqueue is skipped
 //	                   and work is never released twice (D-012, D-015).
-//	atomicity:        the seq=1 write and the enqueue land in ONE transaction (§14); a seam error
-//	                   panics databaseFailure and rolls back the seq=1 write with it (T3-13), so a
-//	                   first produce never exists without its declaration.
+//	atomicity:        the seq=1 write, the Thread state and the enqueue land in ONE transaction
+//	                   (§14); a seam error panics databaseFailure and rolls back the seq=1 write with
+//	                   it (T3-13), so a first produce never exists without its declaration.
+//	thread state:     materializes thread_state='pending' (D-4C-01, G-016) — D4's "session execution
+//	                   registered, no records yet". The predicate is thread_state IS NULL and the CAS
+//	                   must move exactly one row; `active` is still written only by the Phase 4B
+//	                   takeover hook when the first real Node record commits.
 //	phase/status:     never written here — the run exits 'starting' only in Phase 4 (§16).
 //
 // It returns an error only for a real failure; cancellations, ineligible runs and already-declared
@@ -143,6 +148,18 @@ func (ss *AgentRunSessionStart) StartSession(ctx context.Context, runID string) 
 			ON CONFLICT (run_id, seq) DO NOTHING`,
 			runID, jsonText(Object{"content": content}), turnID) == 0 {
 			return Object{}
+		}
+		// Materialize the Thread lifecycle state in the same transaction (D-4C-01, G-016): the
+		// session is now declared, which is exactly D4's `pending` — "session execution registered,
+		// no records yet". The CAS is exact rather than tolerant: this line is only reached when the
+		// INSERT above created seq=1 (a replay returns early), so under the caller's advisory lock
+		// nothing else can have moved the run, and zero affected rows is an invariant violation, not
+		// a race. Rolling back is the only honest outcome — a committed first prompt whose Thread
+		// state never materialized would leave the read model permanently inconsistent.
+		if t.execRows(`
+			UPDATE issue_runs SET thread_state='pending', version=version+1, updated_at=now()
+			WHERE id=$1 AND thread_state IS NULL`, runID) != 1 {
+			panic(databaseFailure{fmt.Errorf("session start: run %s Thread state was not materialized", runID)})
 		}
 		// Authoritative declaration in the same transaction as seq=1 (§14). The payload fixes the
 		// frozen plugin identity/version from the snapshot — never re-reads the roster (D-013,

@@ -23,6 +23,19 @@ type Route struct {
 	Fields               []string
 }
 
+// ThreadMessagePath is the Thread POST route. It is named because it needs a transport body limit
+// of its own: the contract bounds the *decoded* message text at 64 KiB (Thread D3), which the
+// default 64 KiB request cap cannot contain once the JSON envelope around the text is counted.
+const ThreadMessagePath = "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages"
+
+// defaultBodyLimit is the request cap every other route keeps.
+const defaultBodyLimit = 64 << 10
+
+// threadMessageBodyLimit leaves room for the JSON envelope around a contract-legal message so an
+// over-long message is refused by the contract as 400 content_too_large instead of being truncated
+// into 400 invalid_json. It is still a cap: a body beyond it is a malformed request, not a message.
+const threadMessageBodyLimit = 256 << 10
+
 // Routes is an explicit allowlist. Unknown JSON properties cannot set server-owned bindings.
 func Routes() []Route {
 	return []Route{
@@ -70,6 +83,7 @@ func Routes() []Route {
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/runs", "", nil},
 		{"POST", "/api/v1/tenants/:tid/issues/:iid/runs", "", []string{"executorType", "executorId", "input"}},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/runs/:rid", "", nil},
+		{"POST", "/api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages", "", []string{"content"}},
 		{"GET", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", nil},
 		{"POST", "/api/v1/tenants/:tid/issues/:iid/context-refs", "", []string{"refType", "refId"}},
 		{"DELETE", "/api/v1/tenants/:tid/issues/:iid/context-refs/:crid", "", nil},
@@ -209,7 +223,11 @@ func New(store *core.Store, auth *core.Authenticator, log *zap.Logger, directori
 			}
 			body := core.Object{}
 			if c.Request.Method != "GET" {
-				c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
+				limit := int64(defaultBodyLimit)
+				if route.Path == ThreadMessagePath {
+					limit = threadMessageBodyLimit
+				}
+				c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 				decoder := json.NewDecoder(c.Request.Body)
 				decoder.UseNumber()
 				if e = decoder.Decode(&body); e != nil || body == nil {
@@ -427,6 +445,27 @@ func validField(name string, value any) bool {
 				default:
 					return false
 				}
+			}
+		}
+		return true
+	case "content":
+		// Thread D3 message content: an ordered list of blocks. v1 defines one block type, and a
+		// block carrying anything else — an unknown type, an extra key, a non-string text — is a
+		// client error at the boundary rather than something the core has to re-validate.
+		arr, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, v := range arr {
+			m, ok := v.(map[string]any)
+			if !ok {
+				return false
+			}
+			if len(m) != 2 || m["type"] != "text" {
+				return false
+			}
+			if _, ok := m["text"].(string); !ok {
+				return false
 			}
 		}
 		return true

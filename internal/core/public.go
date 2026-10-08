@@ -161,6 +161,12 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 			}
 		case r.IssueID != "" || strings.HasSuffix(r.Path, "/issues"):
 			switch {
+			case strings.HasSuffix(r.Path, "/thread/messages"):
+				// Thread D3: appending a user turn. Matched before the /runs arm because the path
+				// contains "/runs/" too, and the thread sub-resource is a different write.
+				require(r.Method == "POST", 404, "not_found")
+				out = Object{"resource": appendThreadMessage(t, s, r, uid)}
+				status = 201
 			case strings.Contains(r.Path, "/runs"):
 				switch r.Method {
 				case "POST":

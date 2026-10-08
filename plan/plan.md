@@ -2,9 +2,9 @@
 
 > Status: **Living design / execution record**  
 > Scope owner: **B — Cloud business / orchestration**  
-> Current target: **Phase 4 — Thread / Running Lifecycle（DESIGN REVIEW only，本轮不实现）**
-> Current Phase: **4 — Thread / Running Lifecycle（设计轮：3A+3B 已完成，Phase 4 尚未实现）**
-> Current Status: **DESIGN REVIEW**
+> Current target: **Phase 4B — Thread Takeover + `starting→running`（IMPLEMENTED；4C 未开始）**
+> Current Phase: **4 — Thread / Running Lifecycle（4A+4B 已实现；4C 仍为设计）**
+> Current Status: **PHASE_4B_DONE（架构可评审；4C 未实现）**
 > Update rule: **Every implementation round must read and update this file.**
 
 ---
@@ -373,9 +373,11 @@ Expected work (Phase 3B — A-side execution persistence + production seam): **I
 
 ### Phase 4 — Thread / Running Lifecycle
 
-Status: **Phase 4A IMPLEMENTED（A-side dispatch registration，architecturally reviewable）→ NOT_READY_FOR_PHASE_4B_IMPLEMENTATION**；4B（Thread takeover + running）与 4C（Thread API/SSE）未实现。详见 4.15 拆分。
+Status: **Phase 4A IMPLEMENTED（A-side dispatch registration）→ Phase 4B IMPLEMENTED（Thread takeover / running authority）→ Phase 4C DESIGN DONE（Thread API / SSE / commands / lifecycle；设计轮，未实现）**。
+Phase 4B 的 G-013/G-014 由架构决议轮关闭，本轮按该决议落地实现（见 "## Phase 4B — Thread Takeover + `starting→running` 架构决议"）。
+Phase 4C 的完整设计见 "## Phase 4C — Thread API / SSE / Thread Commands / Lifecycle 详细设计"（§4C.0–§4C.20）。
 
-Phase 4A delivered (this round, D-020/D-021, G-012 PARTIAL):
+Phase 4A delivered (D-020/D-021, G-012 PARTIAL):
 
 - new A-owned `node_executions` migration (0020): execution_id PK, work_id UNIQUE FK→execution_work, pending partial index by node
 - production `agent_work_dispatch` (`agentWorkDispatch`) — Controller supplies execution_id/node/input; A records `node_executions` + fences `execution_work.execution_id` in the same transaction, replay idempotent, different id/node/input → `dispatch_conflict`, never overwrite
@@ -384,14 +386,35 @@ Phase 4A delivered (this round, D-020/D-021, G-012 PARTIAL):
 - NO Phase 4B machinery: `node_event_receipts`/`TakeOverThreadEvents`/starting→running/thread seq≥2/D-023 seq allocation all forbidden and absent (T4A-16)
 - tests T4A-1..T4A-16 (real PostgreSQL) + `TestMigration0020NodeExecutionsAppliesFreshAndUpgrades`
 
+Phase 4B delivered (D-019/D-022/D-023/D-024, D-026; this round — implementation):
+
+- migration `0021_node_event_receipts.sql` — `node_event_receipts(execution_id, sequence, event, created_at)`, PK `(execution_id, sequence)`, FK → `node_executions(execution_id)`, `event jsonb` object CHECK, `created_at` index. The only new 4B table; no business-table change, no existing migration touched.
+- A side, `internal/core/agent_run_thread_takeover.go` — control action `agent_thread_takeover` (route added in `control.go`): batch classification (1..64 events, strictly ascending gap-free, first ≤ last+1, overlap must replay identically → `receipt_conflict`), receipt inserts, the B hook, then the fenced `last_event_sequence` advance — all in the caller-owned transaction.
+- B side, `internal/core/agent_run_thread.go` — `Store.threadEventsTakenOver`: authoritative re-read of `issue_runs`/`node_executions`/`execution_work`/seq=1, `kind` from the `ora-history` type tag against the closed known set, echo dedupe by `turn_id`, `MAX(seq)+1` allocation with `UNIQUE(node_execution_id, node_sequence)` as the business duplicate guard, and the `starting→running` CAS (`thread_state='active'`).
+- wiring: `businessAgentRunHooks.ThreadEventsTakenOver` (`agent_run_settle.go`), `NewBusinessAgentRunHooks`, `store.AgentRunHooks` in `cmd/server/main.go` (G-003 seam), `controlgrpc.agentRunService.TakeOverThreadEvents` registered in `controlgrpc/server.go`.
+- tests: T4B-1..T4B-19 real-PostgreSQL matrix (`internal/core/agent_run_thread_takeover_db_test.go`, incl. the §42 concurrency case), gRPC acceptance `TestAgentRunThreadTakeoverOverGRPC` / `...GRPCRejections`, migration `TestMigration0021NodeEventReceiptsAppliesFreshAndUpgrades`. T4B-14 (post-takeover cancel) and T4B-18 (event cap) are **DEFERRED** with reasons in §4B.13.
+- **G-013 CLOSED** (D-024, now implemented): running authority = first real Node Thread record takeover + committed `ThreadEventsTakenOver`; no synthetic session-start event; echo dedup keeps seq=1 immutable; empty batch rejected
+- **G-014 CLOSED / D-023 ACCEPTED** (now implemented): `seq` = `MAX(seq)+1` from 2 inside the takeover transaction; serialization from approved facts (one session execution per run + global advisory lock + PK(run_id,seq)), **not** the proposed controller-session ADR; Node `sequence` ≠ Thread `seq`
+- **G-009 CLOSED**: seq=1 preserved, seq≥2 continuous across batches, replay allocates nothing
+- **G-015 PARTIAL** (unchanged): initial bounds were given (cap 200,000; retention 30d post-`done`) but have **no approved ADR value**, so the enforcement is deliberately not implemented; the `created_at` index is the hook the future sweep will use
+- **G-016 → CLOSED by the Phase 4C design round** (D-4C-01, 2026-10-08): `thread_state='pending'` is materialized by B in the `StartSession` transaction; the 4B-era note below is preserved as history
+- **G-016 OPEN / NON-BLOCKING** (as recorded in the 4B round, now superseded): no in-scope writer materializes the literal `thread_state='pending'`; the takeover writes exactly `NULL/pending → active` (see D-026)
+- **G-012 → PARTIAL** re-evaluated: the takeover path is now real, but the A-side `ThreadEventsTakenOver` caller still exists only for a Node that Cloud has a Controller for; the production Controller loop remains the open half
+
+Phase 4C designed (D-4C-01..D-4C-12; **DESIGN ONLY — nothing implemented, no migration created, no tests written**):
+
+- `thread_state` ownership + `pending` materialization (**G-016 CLOSED**), Thread GET (snapshot/pagination/tail/`before`), Thread POST (ownership, transaction, 7-case idempotency, state acceptance matrix), `EnqueueThreadCommand` contract and the four identities, SSE invalidation + unified `after`, `active`/`idle` authority, `ending` authority + `ended` = `SessionEnded` (Phase 5), cancel/terminal interaction, the 4C migration decision, the 10-scenario concurrency matrix, the API error taxonomy and T4C-1..T4C-34. See `## Phase 4C — …` (§4C.0–§4C.20).
+- new gaps: G-017 (tail/`before`/`idleSince` extend approved D5), G-018 (user-end endpoint missing from the ADR), G-019 (`SessionEnded`/`discarded` = Phase 5), G-020 (SSE delivery not guaranteed ⇒ client polling), G-021 (multi-worker command partitioning)
+
 Includes:
 
-- thread_entries seq≥2 continuation + takeover hooks (4B, NOT implemented)
-- starting → running with a single authority = committed ThreadEventsTakenOver (D-019, 4B, NOT implemented)
+- thread_entries seq≥2 continuation + takeover hooks (4B — **IMPLEMENTED**, D-023/D-024)
+- starting → running with a single authority = committed ThreadEventsTakenOver (D-019 — **IMPLEMENTED**)
 - execution_id registration via RecordDispatch (4A, D-020/D-021 — **IMPLEMENTED**)
-- node_event_receipts event identity (4B, D-022, NOT implemented)
-- Thread command control seam (4C, NOT implemented)
-- API/SSE work (4C, NOT implemented)
+- node_event_receipts event identity (4B, D-022 — **IMPLEMENTED**)
+- Thread command control seam (4C — **DESIGNED**, not implemented)
+- API/SSE work (4C — **DESIGNED**, not implemented)
+- Thread lifecycle `pending/active/idle/ending` (4C — **DESIGNED**, not implemented); `ending → ended` + `discarded` remain Phase 5
 
 ### Phase 5 — Delivery / Releasing / Done
 
@@ -1343,27 +1366,27 @@ registered/unregistered work；Node retry takeover 依 `(execution_id, sequence)
 
 ### 4.14 test matrix
 
-本轮只列 T4-1..T4-16（§26），全部 `DESIGNED / MISSING`（不标 Covered——未实现）；其中 T4-4 claim/dispatch 不
-推进运行在 Phase 3B 的 T3B-10/11/12 已由真实实现证明（可标该单项 Covered，见 specs），其余 T4 待 Phase 4A/4B 实现。
+本轮只列 T4-1..T4-16（§26）。4A 行由 Phase 4A 实现证明，4B 行由 Phase 4B 实现证明，逐行给出证据；T4-14/T4-15
+两条依 4B 范围的明确禁令仍为 DEFERRED（4B 无 cancel 写入路径，见 §4B.13 结尾）。
 
 | ID | 义务 | Phase | 状态 |
 |---|---|---|---|
-| T4-1 | RecordDispatch 登记同一 work → 一个 execution_id | 4A | DESIGNED / MISSING |
-| T4-2 | RecordDispatch 重放（同 id）幂等 | 4A | DESIGNED / MISSING |
-| T4-3 | RecordDispatch 异 id → invariant error | 4A | DESIGNED / MISSING |
-| T4-4 | claim/dispatch 不推进运行（仍是 starting） | 4A | **Covered**（T3B-10/11/12, Phase 3B） |
-| T4-5 | 权威 takeover：starting → running | 4B | DESIGNED / MISSING |
-| T4-6 | takeover 重放：无重复条目、无状态倒退 | 4B | DESIGNED / MISSING |
-| T4-7 | 错误 execution 被拒 | 4B | DESIGNED / MISSING |
-| T4-8 | terminal/stale run 不回到 running | 4B | DESIGNED / MISSING |
-| T4-9 | seq 从 2 续接 | 4B | DESIGNED / MISSING |
-| T4-10 | 并发 event 批次 seq 单调唯一 | 4B | DESIGNED / MISSING |
-| T4-11 | event 重放：同 Node 事件无重复条目 | 4B | DESIGNED / MISSING |
-| T4-12 | takeover 事务回滚（hook 错 → A 收据 + B running 一起回滚） | 4B | DESIGNED / MISSING |
-| T4-13 | commit 后重启重放安全 | 4B | DESIGNED / MISSING |
-| T4-14 | cancel 先提交 + takeover → 不进 running | 4B | DESIGNED / MISSING |
-| T4-15 | takeover 先提交 + 后到 cancel → running 取消语义（不破坏） | 4B | DESIGNED / MISSING |
-| T4-16 | 无 Phase 5 副作用（无 delivery/release 工作项） | 4B | DESIGNED / MISSING |
+| T4-1 | RecordDispatch 登记同一 work → 一个 execution_id | 4A | **Covered**（T4A-1，Phase 4A） |
+| T4-2 | RecordDispatch 重放（同 id）幂等 | 4A | **Covered**（T4A-2，Phase 4A） |
+| T4-3 | RecordDispatch 异 id → invariant error | 4A | **Covered**（T4A-3/4/5/6，Phase 4A） |
+| T4-4 | claim/dispatch 不推进运行（仍是 starting） | 4A | **Covered**（T3B-10/11/12 + T4A-9/10/16） |
+| T4-5 | 权威 takeover：starting → running | 4B | **Covered**（T4B-1/2/10 + `TestAgentRunThreadTakeoverOverGRPC`） |
+| T4-6 | takeover 重放：无重复条目、无状态倒退 | 4B | **Covered**（T4B-4/15） |
+| T4-7 | 错误 execution 被拒 | 4B | **Covered**（T4B-8/19、`...GRPCRejections`） |
+| T4-8 | terminal/stale run 不回到 running | 4B | **Covered**（T4B-9/17） |
+| T4-9 | seq 从 2 续接 | 4B | **Covered**（T4B-1/11） |
+| T4-10 | 并发 event 批次 seq 单调唯一 | 4B | **Covered**（T4B-16） |
+| T4-11 | event 重放：同 Node 事件无重复条目 | 4B | **Covered**（T4B-4/5） |
+| T4-12 | takeover 事务回滚（hook 错 → A 收据 + B running 一起回滚） | 4B | **Covered**（T4B-14） |
+| T4-13 | commit 后重启重放安全 | 4B | **Covered**（T4B-4 + `...OverGRPC` 的 C5 重放段） |
+| T4-14 | cancel 先提交 + takeover → 不进 running | 4B | **DEFERRED**（4B 不实现 cancel 写入路径；先到 cancel 侧的既有语义未变） |
+| T4-15 | takeover 先提交 + 后到 cancel → running 取消语义（不破坏） | 4B | **DEFERRED**（同上；`cancel_requested_at` 参与 CAS 谓词，见 T4B-9/17） |
+| T4-16 | 无 Phase 5 副作用（无 delivery/release 工作项） | 4B | **Covered**（T4B-19） |
 
 ### 4.15 sub-phase split
 
@@ -1398,6 +1421,1165 @@ caller）拆三子阶段：
   分别由 4B / 4A / 4C 关闭）。G-005（cancel 写路径，后续 slice 拥有；Phase 4 只定 race 语义 4.11）。
   G-009（seq 续接）Phase 4B 关闭。G-011（invalid workspace）**不在 Phase 4 顺手解决**，仅 fail-closed 保真
   （钩子重读 workspace 无效 ⇒ 不推进 running、保持 gap，是否终态仍 G-011 后续）。
+
+---
+
+## Phase 4B — Thread Takeover + `starting→running` 架构决议（DESIGN / DECISION ONLY）
+
+Status：**本轮只做架构决议，不实现**（无 migration、无 production 代码、无测试实现、无 OpenAPI/契约改动）。
+本决议解析 **G-013**（会话开始权威形状 / `thread_state` 语义）与 **G-014**（Thread `seq` 分配机制 / D-023），
+给出 Phase 4B（Cloud 侧 Thread 接管 + `starting→running`）的最小实现范围与测试矩阵 T4B-1..T4B-18。
+权威依据**全部取自 `approved` ADR**：IssueRun D3/D6、Thread D1/D2/D3/D4、controller-integration D2/D6、
+Node 协议 D2/D3/D4。**controller-session 根 ADR 仍为 `proposed`** —— 本决议在 4B.14 证明 Cloud 侧 4B
+**不依赖它**，它只承载 Controller 侧中继循环（属 desktop 的 slice）。
+
+### 4B.1 结论摘要（verdict 前置）
+
+- **G-013 → CLOSED**：`starting→running` 的唯一权威 = **首条真实 Node Thread 记录被 `TakeOverThreadEvents`
+  接管、且 `ThreadEventsTakenOver` 钩子在同一事务内成功提交**（IssueRun D3「首条 Thread 事件…被接管」）。
+  **不存在** synthetic「session_started」控制事件：Node 只发 `ThreadEvent{record}`（Node 协议 D2），
+  `record` 是 `ora-history` 定型记录（Thread D2）。这对应 mandate §4 的选项 **B（首条真实 Thread 记录即开始证据）**。
+- **G-013 `thread_state` → CLOSED**：`pending` 的权威语义 = **会话执行已登记、尚无任何 Node 记录被接管**
+  （Thread D4 明示）；首条 Node 记录接管 ⇒ `active`。`pending` **不是**「收到无记录的开始信号」，也**不是**
+  「命令已排队」（命令排队的展示属 4C）。4B 只写 `pending→active`，不写 `idle/ending/ended`（属 4C/4B 终态钩子）。
+- **G-014 → CLOSED；D-023 → ACCEPTED**：Thread `seq` 分配采用 **接管事务内 `MAX(seq)+1`**（从 2 起）。
+  串行化证明不依赖 controller-session：见 4B.5。
+- **G-015 → PARTIAL（给出初值）**：见 4B.10。
+- **G-009 → 由 4B 关闭**（seq 从 2 连续续接）；**G-012 保持 PARTIAL**（4B 部分实现后仍未闭合全部）；
+  **G-001 保持 PARTIAL**（`ThreadEventsTakenOver` caller 由 4B 关闭一部分，`Create/DeleteRunWorkspace`、
+  `EnqueueThreadCommand` 仍未实现）。
+- 已锁定事实（不做二次争论）：(A) running authority 只有已提交的接管；(B) `execution_work→node_executions
+  →execution_id`，一 work 至多一 execution_id；(C) `thread_entries` seq=1（`source=system`,`kind=user_turn`）
+  不可变、永不重建/覆盖/重编号。
+
+### 4B.2 G-013：会话开始权威的事件形状（选项 A–E 的裁决）
+
+mandate §4 列出 A–E 五个候选；逐项对照 approved ADR：
+
+| 选项 | 内容 | 裁决 | 依据 |
+|---|---|---|---|
+| A | Node 显式发 `session_started` 事件 | **否决** | Node 协议 D2 只定义 `ThreadEvent{record}`；`record` 是 Ora 会话记录（Thread D2），无 synthetic 控制事件类型。发明新事件类型会超出现有契约。 |
+| B | **首条真实 Thread 记录即开始证据** | **采纳** | IssueRun D3「首条 Thread 事件…被接管」；controller-integration D6 钩子 `threadEventsTakenOver` 置 `running`；Thread D4 `active`。 |
+| C | `TakeOverThreadEvents` 请求携带 start marker | **否决** | 合约头字段是 `{submission_id, epoch, operation_id, execution_id, events[]}`（controller-integration D2），无 marker；加 marker 需改已发布 `v1` 契约（不变量 1）。 |
+| D | execution 级状态足够，不写 Thread 事件 | **否决** | 与 D3/D4 冲突：`running` 与 `active` 都以「记录被接管」为准，不引入 execution 级旁路状态。 |
+| E | spec 未定义（维持 gap） | **否决** | 本决议证明 approved ADR 已充分定义，无需维持 gap。 |
+
+**事件形状（权威）**：`TakeOverThreadEvents.events[i] = {sequence, record, turn_id?}`（controller-integration
+D2）；`sequence` 是该执行内从 1 起的 Node 序号（Node 协议 D2）；`record` 是 `ora-history` 定型记录 JSON
+（Thread D2，单条 ≤256 KiB，JSON object）。**首个成功接管的批次**（事件非空、序号连续）提交即令
+`starting→running`。
+
+### 4B.3 G-013：`thread_state` 转换表（4B 与 4C 的边界）
+
+以 Thread D4 为准，明确 4B **拥有**的转换与**留给 4C**的转换：
+
+| 事件 | `thread_state` | 归属 | 备注 |
+|---|---|---|---|
+| 会话执行已登记、尚无记录 | `pending` | 未定（见 G-016） | Thread D4；Phase 4A 未写，4B 亦未写（§29 只授权写 `pending→active`），当前实际值为 `NULL` |
+| 接管到**至少一条真实** Node 记录（echo 除外，见 4B.6/§31） | `active` | **4B（已实现）** | 同一接管事务内 |
+| 接管到 `TurnEnded` 且无 `queued` 用户轮次 | `idle` + `idle_since` | 4C | 依赖用户轮次队列（`thread_commands`） |
+| 新用户轮次写入 | `active` | 4C | `POST .../thread/messages` |
+| 用户「结束」/`idle` 超时/运行被取消 | `ending` | 4C（`EndSession` 命令） | |
+| 会话执行终态被接管 | `ended` | 4B/5（`sessionEnded` 钩子） | 终态经 `TakeOverNodeEvent`，非本 4B 范围 |
+
+**4B 只写 `pending→active` 与 `running`**；`idle/ending/ended` 需要 `thread_commands` 与用户轮次队列，
+属 4C / 会话终态钩子。这样 4B 与 4C 的提交边界正交、可独立验收。
+
+> **Phase 4C 更新（2026-10-08，不重写本节）**：表中第一行的归属「未定（见 G-016）」已由 **D-4C-01** 关闭——
+> `pending` 由 **B** 在 Phase 3A `StartSession` 事务内物化（**不是** 4B 的接管事务），并另加幂等回填迁移；
+> `active ⇄ idle`（第三、四行）的权威由 **D-4C-09** 确定为接管事务内的「批次末条记录 + `queued` 检查」；
+> `ending`（第五行）由 **D-4C-10/D-4C-11** 确定；`ended`（第六行）保持 **`SessionEnded` / Phase 5**。
+> 本节其余内容作为 4B 轮设计记录原样保留。
+
+### 4B.4 G-013：`pending` 的必要性、空批次、echo 首 prompt 去重
+
+- **`pending` 是否必要？必要**。它是「执行已登记、尚无记录」的持久状态（Thread D4），是 `starting` 运行
+  的可读表现；写它的时点 = 4B 首批接管前（或会话执行登记时），使「已下发但还没有输出」对前端可见。
+  **实现现状（G-016）**：本轮的 4B mandate §29 只授权写 `pending→active` 这一转换，登记时写初值会落在
+  A 侧（§11 禁止）或在 4B 事务外新增一个转换（§29 未授权），因此两侧都没写；实际前置值为 `NULL`，
+  语义上等同于 `pending`。字面值 `pending` 的写入者仍是待定项，不影响本轮正确性。
+  **（Phase 4C 更新，D-4C-01：该待定项已关闭——写者 = B 的 `StartSession` 事务，随 seq=1 同事务物化并断言
+  1 行受影响，另加幂等回填；`pending` 的语义澄清随 Thread ADR 修订一并落地，见 G-017。）**
+  `pending` **不表示「命令已排队」**（那是 4C 的用户轮次 `queued` 条目状态，落在 `thread_entries` 行上，
+  不是 `thread_state`）。
+- **空批次（`events` 为空）**：**拒绝**（`ABORTED`），不写收据、不推进 `last_event_sequence`、不调钩子、
+  不改变 `phase/thread_state`。理由：运行权威必须来自「接管了一条真实事件」；空调用不构成证据，视为
+  协议误用（controller-integration D2 的 `events` 至少 1 个）。
+- **echo 首 prompt 去重（锁定事实 C 的保护）**：Phase 3A 已把首 prompt 写成 `thread_entries` **seq=1**
+  （`source=system`,`kind=user_turn`,`turn_id` 由 Cloud 生成，Thread D3）。Node 会话以 `initial_turn{turn_id,
+  content}` 为输入（controller-integration D1），其记录若携带**同一** `turn_id`（Node 协议 D2 的
+  `turn_id?`），即为首 prompt 的 echo。规则：
+  - 若被接管事件的 `turn_id == initial_turn.turn_id`：**不分配新 thread `seq`、不插入新条目**（seq=1 已呈现它）；
+    仍写收据（Node 必须收到 `EventAck`），钩子不产生业务条目。seq=1 **内容不变、不重编号**（锁定事实 C）。
+  - 其余事件（真实 Agent 输出 / 后续轮次的新 `turn_id` / 无 `turn_id` 的记录）：按 4B.5 分配 `seq≥2`，
+    `source='node'`，写入 `node_execution_id`/`node_sequence`。
+  - **4B 不引入 `delivered` 列**：Thread D3 的「标 delivered」针对 `SubmitUserTurn` 排队的用户轮次
+    （需 4C 的 `thread_commands` 与列）；首 prompt 不是排队命令，是会话首个输入，4B 无需标记它。
+  该规则同时满足 Thread D1「同一 Node 事件至多一个条目」与锁定事实 C。
+
+### 4B.5 G-014：`seq` 分配机制（D-023 ACCEPTED）与串行化证明
+
+- **裁决**：Thread D1 只定「Cloud 在写入事务中分配、连续」；签名由 D-023 固定为 **接管事务内
+  `MAX(seq)+1`，从 2 起逐条递增**（seq=1 被首 prompt 保留，G-009）。**ACCEPT D-023**，无 superseding 决策。
+- **串行化证明（不依赖 controller-session）**：
+  1. **一个运行同时至多一个会话执行**（controller-integration D1「一个运行同时至多一个会话执行」；
+     D-021 一 work 至多一 execution_id；`execution_work_unregistered_once` 部分唯一）。因此同一运行的
+     会话接管流唯一。
+  2. **所有接管事务经全局 advisory lock 串行**：`TakeOverThreadEvents` 经 `Store.transact`
+     （`pg_advisory_xact_lock(67420911)`，Phase 1 基线）执行，锁内完成收据写入 → `MAX(seq)` 重读 → 逐条
+     +1 → 提交。任意两次接管（即使未来存在同 run 多执行）不可能同时在锁内计算 `MAX(seq)`。
+  3. **PK `(run_id, seq)` 是最终存储层屏障**：任何重复 seq 插入被数据库唯一键拒绝，作为 CAS 兜底。
+  因此 `MAX(seq)+1` 在事务内产出连续、无洞、唯一的 seq；重放不会重复分配（4B.7）。
+- **为什么不需要计数器（counter）**：用户追加消息的条目也在 `Store.transact` 内写入（Thread D3 的 POST
+  事务），与接管共享同一全局锁；`MAX(seq)+1` 对两个来源（Node 记录接管、用户轮次）都成立，二者按时间
+  交错但 seq 连续（对话顺序正确，无洞）。因此**不新增 `issue_runs.next_thread_seq` 计数列 / 独立 sequence
+  状态表**。仅当未来移除全局锁（G-004）时需重新评估——该替换是独立架构任务，本决议不动。
+- **Node `seq` ≠ Thread `seq`（不得混淆）**：`node_event_receipts(execution_id, sequence)` 的 `sequence`
+  是 **Node 在该执行内**从 1 起的序号（Node 协议 D2）；`thread_entries.seq` 是 **运行内** Cloud 维护的
+  连续序号（run-scoped，从 1）。两套序号空间**不同**：批次连续性检查作用于**收据/Node** 序号空间
+  （首事件 = 该执行已接管最大序号 + 1，controller-integration D2），thread `seq` 由 4B.5 独立 `MAX+1`
+  计算；二者的映射是逐事件、由接管钩子完成的（4B.7）。**禁止**用 Node `sequence` 直接当 thread `seq`，
+  也禁止用 `thread_entries(run_id,seq)` 反推重放身份（D-022）。
+- **4C 兼容性**：`seq` 分配集中在 `MAX(seq)+1` 且受全局锁串行，用户轮次（4C 的 `SubmitUserTurn`）插入
+  thread 条目天然并入同一分配器；4C 只需在既有分配器上继续（无新机制），4B 不为其预设假设。
+
+### 4B.6 收据语义与批次连续性（缺口 / 重复 / 乱序 / 重叠）
+
+- **收据身份**：`node_event_receipts(execution_id, sequence)` 主键 + 原事件 `event jsonb`（controller-integration
+  D6/D-022）。非终态 Thread 事件与终态事件**共用**该表与同一序号空间（Node 协议 D2 不变量 2），是
+  `EventAck` 的**唯一依据**（root D4）。
+- **批次连续性（A 判定，不交钩子）**：
+  - 首事件 `sequence` **必须 = 该执行已接管最大序号 + 1**（= `node_executions.last_event_sequence + 1`）。
+  - 批次内 `sequence` 必须**严格连续递增**（`s, s+1, …, s+k-1`）。
+  - **缺口 / 乱序（首事件 ≠ max+1）/ 越界** ⇒ `CONFLICT`（或 `ABORTED`），**整批不写**（收据、
+    `last_event_sequence`、条目、`phase` 全不动），不确认，由 Node 重放（controller-integration D2）。
+  - **重复（同 `(execution_id, sequence)` 且内容相同）** ⇒ 幂等 no-op，跳过（不重复确认语义、不产生第二
+    条目）；**同键不同内容** ⇒ `CONFLICT`，原收据与条目不变（D-022）。
+  - **重叠批次**（与已接管序号相交）⇒ 相交部分按重复处理（内容同 ⇒ 跳过；内容异 ⇒ `CONFLICT`）；未接管
+    的后缀继续，但**首事件必须 = max+1**，否则整体 `CONFLICT`。
+- **终态事件**：经 `TakeOverNodeEvent` 接管，必须在其前面所有序号都已接管之后（controller-integration D2/
+  不变量 3），保证 Thread 最后记录先于「会话已结束」落库。终态接管属 4B/5 的会话终态钩子（`sessionEnded`），
+  不在本 4B 的 `starting→running` 范围内，但**共用** `node_event_receipts`（D-022）。
+
+### 4B.7 批次 → Thread 映射与事务模型（含 C5 重放）
+
+一次接管的提交边界（对应 mandate §14/§15）：
+
+```
+BEGIN                           (Store.transact：全局 advisory lock)
+  A: 校验 execution 已登记、kind=agent_session、execution_id 匹配 work
+  A: 连续性校验：首事件 sequence == last_event_sequence + 1 且批次严格连续
+  A: INSERT node_event_receipts(execution_id, sequence, event)   // 收据 = 确认唯一依据
+  A: UPDATE node_executions SET last_event_sequence = 最大已接管 sequence
+  B: ThreadEventsTakenOver(t, run, execution, events)            // 同事务，不新开事务
+       re-read 权威 issue_runs / node_executions（不接受 caller 业务字段）
+       CAS phase:'starting' AND status:'dispatched' AND cancel_requested_at IS NULL → running/running
+         （affected=0 ⇒ stale/no-op，见 4.10/4B.8）
+       遍历事件：turn_id==initial_turn ⇒ 跳过（echo，见 4B.4）
+                 否则 seq = MAX(seq)+1 (从 2) → INSERT thread_entries(source='node', node_execution_id, node_sequence)
+       thread_state: 若无记录 → 首批接管后置 'active'（Thread D4）
+       把（若有）对应 user_turn 轮次标 delivered（4C 才有列；4B 仅结构预留，不建列）
+       hook error ⇒ panic(databaseFailure) ⇒ 整事务回滚
+COMMIT
+  然后 Controller 对批次内序号发 EventAck
+```
+
+- **与 D6 一致**：收据写入**之后**、同事务调用钩子；钩子只在首次接管（连续、非重放）时被调用；重放**不
+  再次调用**钩子（controller-integration D6）。
+- **C5（提交后、ack 丢失）重放安全**：重放批次的首事件 `sequence` ≤ `last_event_sequence` ⇒ 相交部分已
+  接管（收据存在、内容相同）⇒ no-op；若整批已接管 ⇒ 整体 no-op，返回已接管最大序号；不新增条目、不
+  倒退、不重复跑钩子。**重放不改 `seq` 连续**（`MAX+1` 只在有新事件时执行）。
+- **C4（事务中途崩溃）**：事务未提交 ⇒ 收据、`last_event_sequence`、条目、`phase/thread_state` 全部回滚，
+  Node 重放该批（未 ack）再次接管。**C2/C3**（claim 后/Node 启动后）见 4.12。
+- **`last_event_sequence` 单调**：每次成功接管推进到该批最大序号；只增不减，是恢复重放边界（Node 从
+  `last_event_sequence+1` 重放，C3）。
+
+### 4B.8 cancel race 与 invalid workspace 兼容（4B 语义固化）
+
+- **cancel race（沿用 4.11）**：cancel 写入与 `TakeOverThreadEvents` 都可能决定 `starting→releasing/cancelled`
+  vs `starting→running`；同一全局锁串行 + 钩子内权威 re-read + CAS（`cancel_requested_at IS NULL`）。
+  - cancel **先**提交 ⇒ `cancel_requested_at` 已置 ⇒ 钩子 CAS affected=0 ⇒ 接管视为 **stale/no-op**，运行按
+    IssueRun D6 无会话取消进入 `releasing/cancelled`，**不进 running**。
+  - takeover **先**提交 ⇒ 运行已 `running`；后续 cancel 落入 running 语义（取消是请求，会话收尾后 delivering
+    →releasing），**不破坏已接管 Thread**。
+- **invalid/missing workspace（G-011 保真）**：钩子权威重读 `workspace_id`；无效 ⇒ **fail-closed**（不推进
+  running、保持 `starting`、不写终态），保留 G-011 gap。不因测试方便写 `status=failed`。
+
+### 4B.9 迁移 proposal（Phase 4B）
+
+**Required Migration: YES（Phase 4B 唯一新表）** —— 仅新增 `node_event_receipts`（4A 的 `node_executions`
+已在 0020 落地）：
+
+```sql
+CREATE TABLE node_event_receipts (
+  execution_id text NOT NULL REFERENCES node_executions(execution_id),
+  sequence bigint NOT NULL CHECK (sequence > 0),
+  event jsonb NOT NULL,                 -- 原 ThreadEvent（收据 = 确认唯一依据）
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (execution_id, sequence)
+);
+-- 保留期限/清理与恢复读（4B.10）：按 execution + 时间
+CREATE INDEX node_event_receipts_retention ON node_event_receipts(created_at);
+```
+
+- `FK(execution_id → node_executions)`：收据只对**已登记执行**存在，防「无执行收据」。
+- 不新增 `delivered` 列（4C 的 `thread_commands`/用户轮次投递才需要）。
+- `thread_entries`（0018）已足够：PK `(run_id,seq)`、`thread_entries_node_uniq(node_execution_id, node_sequence)`
+  已存在；`issue_runs.thread_state` 值集已含 `pending/active`。**4B 无需改业务表**。
+
+### 4B.10 G-015：单运行 event 上限与收据保留（初值，PARTIAL）
+
+给出**初值**（可配置，第一版默认；enforcement 点在 4B 接管路由/派发循环）：
+
+- **单运行（单执行）非终态 event 上限**：默认 **200,000** 条（可配置 `thread_event_cap`）。检查点 =
+  `node_executions.last_event_sequence`（连续序号 ⇒ 计数 = 最大序号）；达到上限后新的非终态接管以
+  `ABORTED` 拒绝（不静默丢弃），运行保持终态决策由 IssueRun D5 失败路径承担。**无需新列**。
+- **`node_event_receipts` 保留期限**：默认 **运行终态（`done`）后 30 天**（可配置 `node_event_receipts_retention`），
+  由派发循环按 `created_at` 清理；运行存活期间**不清理**（Node 重放需要收据）。保留期限是默认值，非硬
+  契约。
+- 状态：**PARTIAL**（给出初值即满足 4B 前置；enforcement 与清理循环随 4B 实现落地并补证据）。
+
+### 4B.11 4C 兼容性
+
+4B 不预设与 4C 冲突的假设：
+
+- **seq**：4B 的 `MAX(seq)+1` 分配器对 4C 的用户轮次条目天然适用（4B.5）。
+- **thread_state**：4B 只写 `pending→active`；`idle/ending/ended` 与 `idle_since` 归 4C（4B.3 表）。
+- **命令**：`thread_commands`、`EnqueueThreadCommand`、`POST .../thread/messages`、SSE 均不在 4B；4B 只
+  预留「标 delivered」的结构位（不建列）。`sessionEnded`（终态）由会话终态钩子承担，非本 4B 路由。
+- **公开面**：4B 无 OpenAPI/前端改动（Thread REST/SSE 属 4C）。
+
+### 4B.12 Phase 4B 最小实现范围（minimal scope）
+
+只实现「A 记录 + B 会话开始」的最小闭环，不含 API：
+
+1. **迁移** `node_event_receipts`（4B.9）。
+2. **控制路由** `TakeOverThreadEvents`（internal control 动作，leaseValid 门控，`submitted` 幂等包装）：
+   校验 execution 已登记且 `kind=agent_session` → 连续性/重复/冲突判定（4B.6）→ 写收据 + 更新
+   `last_event_sequence` → 同事务调 `ThreadEventsTakenOver` 钩子（4B.7）→ 提交后返回已接管最大序号。
+   空批次拒绝（4B.4）。G-015 cap 检查（4B.10）。
+3. **业务钩子** `ThreadEventsTakenOver`（真实化，替换 fail-closed）：权威 re-read → CAS `starting→running`
+   → echo 去重 + `seq≥2` 分配 + `thread_entries(node)` 写入 → `thread_state pending→active`。钩子错误
+   panic 回滚整事务。
+4. **不改**：`issue_runs` 业务列的其它转换、`thread_commands`、公开 API、OpenAPI/前端、`deliver_revision`
+   登记分支、Phase 5 释放路径。
+
+### 4B.13 测试矩阵 T4B-1..T4B-19（本轮回填实现证据）
+
+测试文件（全部真实 PostgreSQL）：`internal/core/agent_run_thread_takeover_db_test.go`（T4B-1..T4B-19 主体，
+含 §42 并发场景）、`integration/agent_run_thread_takeover_test.go`（gRPC 生产路径验收）、
+`integration/migration_upgrade_path_test.go::TestMigration0021NodeEventReceiptsAppliesFreshAndUpgrades`（迁移）。
+
+| ID | 义务 | 依据 | 状态 | 证据 |
+|---|---|---|---|---|
+| T4B-1 | 首条真实 Node 记录接管 ⇒ `starting→running`（`status=running`、同事务） | IssueRun D3、D6 | **COVERED** | `TestThreadTakeoverFirstRecordRunsTheRun`、`TestAgentRunThreadTakeoverOverGRPC` |
+| T4B-2 | `thread_state` `pending→active`（同接管事务） | Thread D4 | **COVERED**（前置字面值见 G-016） | `TestThreadTakeoverActivatesPendingThread`、`TestThreadTakeoverFirstRecordRunsTheRun` |
+| T4B-3 | 批次原子 + 顺序：缺口/乱序/首事件≠max+1 ⇒ `CONFLICT`，整批不写 | controller-integration D2 | **COVERED** | `TestThreadTakeoverRejectsGapsAndReordering`、`TestAgentRunThreadTakeoverGRPCRejections` |
+| T4B-4 | 重放（同 exec/seq/内容）⇒ 幂等 no-op，无新条目、无倒退、钩子不二次调用 | D6、D-022 | **COVERED** | `TestThreadTakeoverReplayIsIdempotent`、`TestThreadTakeoverOverlapReplayAndForward` |
+| T4B-5 | 载荷冲突（同 exec/seq 异 record）⇒ `CONFLICT`，原收据/条目不变 | D-022 | **COVERED** | `TestThreadTakeoverReceiptConflictKeepsOriginal` |
+| T4B-6 | thread `seq` 从 2 连续续接（跨多批次 `MAX+1`） | Thread D1、G-009 | **COVERED** | `TestThreadTakeoverContiguousBatch` |
+| T4B-7 | echo 首 prompt 去重：`turn_id==initial` 不分配 seq、不新增条目、seq=1 不变 | Thread D3、锁定事实 C | **COVERED** | `TestThreadTakeoverInitialTurnEchoIsDeduped`、`TestAgentRunThreadTakeoverOverGRPC` |
+| T4B-8 | 空批次拒绝：无收据、不推进、不钩子、不改变 phase/thread_state | 4B.4 | **COVERED** | `TestThreadTakeoverRejectsWrongExecutionAndEmptyBatch`、`TestAgentRunThreadTakeoverGRPCRejections` |
+| T4B-9 | 钩子错误回滚：收据 + `last_event_sequence` + running + 条目同事务整体回滚 | D6、4.7 | **COVERED** | `TestThreadTakeoverHookFailureRollsBackEverything` |
+| T4B-10 | C5 提交后 ack 丢失重放安全（幂等、无重复、不倒退） | 4.12、4B.7 | **COVERED** | `TestThreadTakeoverReplayIsIdempotent`、`TestAgentRunThreadTakeoverOverGRPC`（重放段） |
+| T4B-11 | `last_event_sequence` 随批次单调推进（只增不减） | Node 协议 D2、4B.6 | **COVERED** | `TestThreadTakeoverContiguousBatch`、`TestThreadTakeoverReplayIsIdempotent` |
+| T4B-12 | C2/C3 恢复：Node 从 `last_event_sequence+1` 重放对齐 | 4.12 | **COVERED**（Cloud 侧义务） | `TestThreadTakeoverHookFailureRollsBackEverything`（失败后同批次可重放）、`TestThreadTakeoverRejectsGapsAndReordering` |
+| T4B-13 | cancel 先提交 + takeover 后到 ⇒ CAS affected=0、不进 running | IssueRun D6、4.11 | **COVERED** | `TestThreadTakeoverStaleRunIsNotRerun` |
+| T4B-14 | takeover 先提交 + 后到 cancel ⇒ running 取消语义、不破坏已接管 Thread | IssueRun D6、4.11 | **DEFERRED** | 4B 无 cancel 写路径（§3/§19 禁全量 cancel API）；本轮仅证明 cancel-first 顺序，后到 cancel 由 4C cancel slice 拥有 |
+| T4B-15 | terminal/stale run 不回 running；未登记 execution / 未知 run 被拒（invariant 回滚） | 4.10 | **COVERED** | `TestThreadTakeoverStaleRunIsNotRerun`、`TestThreadTakeoverRejectsWrongExecutionAndEmptyBatch` |
+| T4B-16 | 并发批次 seq 单调唯一（同 run 单执行串行） | 4B.5、4.10 | **COVERED** | `TestThreadTakeoverConcurrentBatches`（barrier + 两种允许顺序） |
+| T4B-17 | invalid/missing workspace ⇒ fail-closed 不推进 running（G-011 保真） | G-011、4B.8 | **COVERED** | `TestThreadTakeoverInvalidWorkspaceFailsClosed` |
+| T4B-18 | G-015 cap：`last_event_sequence ≥ cap` ⇒ 后续非终态接管 `ABORTED` | 4B.10 | **DEFERRED** | 无已批准 ADR 数值；实现 200,000 cap 属未批准行为（§3/§39），G-015 保持 PARTIAL |
+| T4B-19 | 无 Phase 5 / 4C 副作用：无 deliver 工作项、不 releasing/done、不写 `thread_commands` | 4.15 | **COVERED** | `TestThreadTakeoverHasNoLaterPhaseSideEffects` |
+
+（T4B-1..T4B-18 为 mandate §33 的编号基线；上表按义务补足至 T4B-19 的「无副作用」项——与既有 T4-16 对齐。
+既有 T4-5..T4-16 的 4B 义务由本表细化覆盖，T4-4 仍由 Phase 3B 的 T3B-10/11/12 直接证明。
+T4B-14 与 T4B-18 的 DEFERRED 理由都在本轮 mandate §3/§19/§39 的显式禁止清单内，不是遗漏。）
+
+### 4B.14 controller-session `proposed` 依赖说明（未构成 blocker）
+
+- **事实**：`specs/decisions/controller/session/0-controller-relays-agent-sessions.md` 的 frontmatter 为
+  **`status: proposed`**。其 D2 描述 Controller 侧中继循环（≤64 事件 / 100 ms 一批、同一执行至多一个在途
+  批次、`CONFLICT` 时清队列等），D3/D4/D5 描述命令投递、上传授权、释放证据。
+- **G-013 / G-014 是否依赖它**：**不依赖**。G-013 的事件形状（Node 协议 D2）、running 权威（IssueRun D3 +
+  controller-integration D6）、`thread_state`（Thread D4）、批次连续性（controller-integration D2）全部
+  来自 **approved** ADR；G-014 的串行化证明来自 approved 的「单会话执行/运行」+ 全局锁 + `PK(run_id,seq)`
+  （4B.5），**不需要** controller-session D2 的「至多一个在途批次」。Cloud 侧 4B 的正确性对 Controller
+  行为是**防御性**的：即使 Controller 乱序/重叠，Cloud 也以 `CONFLICT` 拒绝并等重放（controller-integration
+  D2），因此正确性不依赖 controller-session 是否 approved。
+- **裁决**：**不**报告 `BLOCKED_ON_CONTROLLER_SESSION_ADR`。controller-session 仍是 **Controller 侧（desktop）
+  的独立待批准决策**（其 D1–D5 的 relay/命令/授权/释放行为），属 desktop 的 slice 与后续轮次；它与 Cloud
+  侧 4B **不冲突**、不是 4B 的实现前置。若未来 Cloud 侧需要引用其 D2 的具体批处理参数（如 100 ms），
+  那些参数应作为 Controller 实现选择，不改 Cloud 契约。
+
+### 4B.15 §36 架构自评清单
+
+> **历史记录（设计轮）**：以下 20 条是 Phase 4B 设计轮的清单，其中第 16–18 条（"未改 production 代码 / 未写
+> migration / 未实现测试"）描述的是**设计轮**的事实。Phase 4B 实现轮已交付 migration `0021`、production 接管核心与
+> T4B-1..T4B-19；实现轮的对应自评见 §16 的 "Round: Phase 4B — ... implementation"。本节保持原样以免改动历史轮次记录。
+
+1. **running 权威未变**：仅已提交的 `ThreadEventsTakenOver` 接管（D-019/4B.2）——是。
+2. `RecordDispatch`/claim/dispatch/物理分配 **≠ running**（D-017/4.3）——是。
+3. `execution_work→node_executions→execution_id`，一 work 至多一 execution_id（D-021）——是，未改。
+4. `thread_entries` seq=1 **不可变**（锁定事实 C）：echo 只写收据、不重编号（4B.4）——是。
+5. 事件身份 `(execution_id, sequence)` 收据 + `(node_execution_id, node_sequence)` 条目（D-022）——是。
+6. `seq` 分配 `MAX(seq)+1`（D-023 ACCEPTED），串行化证明不依赖 proposed ADR——是。
+7. Node `seq` 与 Thread `seq` **不混淆**（4B.5）——是。
+8. `thread_state` 只写 `pending→active`，`idle/ending/ended` 归 4C——是。
+9. 空批次 / 缺口 / 乱序 / 重叠的判别在 A 侧，不交钩子（4B.6）——是。
+10. 钩子错误 ⇒ 整事务回滚（收据 + running + 条目）（4B.7）——是。
+11. C4/C5 重放安全，`last_event_sequence` 单调（4B.7）——是。
+12. cancel race 与 invalid workspace 语义固化（4B.8）——是。
+13. 4B 迁移仅 `node_event_receipts`，不改业务表（4B.9）——是。
+14. G-015 给出初值（cap + retention）（4B.10）——是。
+15. 4C 兼容（seq 分配器 / thread_state / 命令 / 公开面）（4B.11）——是。
+16. 未改 production 代码——是（本轮仅 plan）。
+17. 未写 migration——是。
+18. 未实现测试（T4B-* 全 `DESIGNED / MISSING`）——是。
+19. 未 stage / commit / push / PR——是（见 §16 Git 段）。
+20. 未把 `proposed` ADR 当作 `approved`（controller-session 明确标注，见 4B.14）——是。
+
+---
+
+## Phase 4C — Thread API / SSE / Thread Commands / Lifecycle 详细设计（DESIGN / DECISION ONLY）
+
+> **Round: Phase 4C design / 2026-10-08（纯设计轮）**
+>
+> 本轮**不改** production 代码、**不建** migration、**不写/不修改**测试、**不改** API/proto/generated 代码、
+> **不改** schema；只读代码 / migration / ADR / spec / 已有测试并更新 `plan/plan.md` 与 `plan/plan-zh.md`。
+> 因此本节所有条款都是**设计**，**不是已实现**；specs 的证据状态一律保持 `Missing`（§4C.17）。
+> **未** stage / commit / push / PR；既有未提交修改原样保留。
+
+### 4C.0 结论摘要（verdict 前置）
+
+1. **G-016 CLOSED**（D-4C-01）：字面值 `thread_state='pending'` 由 **B 自己**在 Phase 3A `StartSession` 事务内
+   物化（与 seq=1、`agent_session` 工作项同事务），写谓词 `thread_state IS NULL`；4C migration 附一条幂等回填。
+   **拒绝**「A 侧 `RecordDispatch` 登记时写」（违反 controller-integration D6 不变量 7 / §11）与
+   「读时派生 pending」（把持久列的含义交给另一个 owner 的 `phase`，DB 无法表达该不变量）。
+2. **`ending → ended` 的唯一权威是 `SessionEnded`**（会话终态接管钩子），**属 Phase 5**（D-4C-10）。4C 的
+   lifecycle 只到 `ending`；**不得**为 `ended` 造第二条路径，也不得把 `SessionCommandAccepted` 当成终态事实。
+3. **SSE 只是失效提示**（D-4C-07/08）：durable replay 的唯一来源是 `thread_entries` + `GET ...?after=`；
+   客户端游标**只**由 GET 的响应推进（`nextCursor`/`prevCursor`），SSE 事件只触发 GET。绝不把
+   PG notify / SSE 当持久日志，也绝不承认「SSE 不漏事件」。
+4. **4C 需要一条 migration**（D-4C-12）：新控制面表 `thread_commands`；`thread_entries.status` 列 + 两个部分索引；
+   一条 `thread_state='pending'` 幂等回填。**不动** `issue_runs.thread_state` 的值集（0018 已覆盖五值），
+   **不新增计数器**，**不新建第二张 `starting→running` 权威表**。
+5. **4B 需要 4 处小改**（§4C.13，本轮**不改**，登记为 4C 实现前置）：echo 去重从「仅首 prompt」推广到
+   「任意 Cloud 生成用户轮次」（并置 `queued → delivered`）；补 `idle` 与 `idle → active` 的 `thread_state` 写；
+   `StartSession` 物化 `pending`；`SpaceEvent` 增可选 `issueId/runId/lastSeq`。
+6. **未决（NON-BLOCKING）**：G-017（tail/`before` 分页是对已批准 Thread D5 的**扩展**，需 ADR 修订或架构师确认）、
+   G-018（ADR 缺「用户主动结束」端点）、G-019（Phase 5 依赖：`ended` + `discarded`）、G-020（SSE 不保证送达 ⇒
+   客户端须轮询）、G-021（多 Controller worker 的命令分区，ADR 已列为未决）。逐条见 §4C.18。
+7. **最终裁定**：`PHASE_4C_DESIGN_DONE / PHASE_4C_ARCHITECTURALLY_REVIEWABLE / READY_FOR_PHASE_4C_IMPLEMENTATION`
+   （附上列 NON-BLOCKING OPEN；其中 G-017/G-018 对应的代码落地前需 ADR 修订或架构师确认）。见 §4C.20。
+
+### 4C.1 入口条件与冻结的 Phase 4B 基线
+
+**入口条件（本轮全部满足）**：Phase 4B 已实现且有证据（migration `0021`、A 侧 `agent_thread_takeover`、
+B 侧 `ThreadEventsTakenOver`、gRPC `TakeOverThreadEvents`、`cmd/server` 接线、T4B-1..T4B-19 + 端到端 gRPC 验收）；
+G-009 / G-013 / G-014 **CLOSED**；G-016 OPEN（本轮关闭）。
+
+**冻结的 4B 基线（4C 不得改变，只允许 §4C.13 列出的补充）**：
+
+1. **running 唯一权威** = `ThreadEventsTakenOver` 已提交事务内被接管的**首条真实 Node Thread 记录**
+   （D-019/D-024）。claim / dispatch / 分配 / 登记 / workspace 创建 / synthetic 事件都**不是**权威。
+2. **事务顺序**：`BEGIN → pg_advisory_xact_lock → A 侧读 execution → 收据写入 → B 钩子 → fenced
+   last_event_sequence 推进 → COMMIT → EventAck`。钩子错误 ⇒ 整事务回滚（含收据与 running），Controller 不 ack。
+3. **`seq=1` 不可变**（Phase 3A 的 Cloud 生成首 prompt）；业务条目从 `seq=2` 起；分配 = 接管事务内
+   `MAX(seq)+1`（D-023）；**无** `thread_seq = node_sequence + 常数`；**无** counter 表。
+4. **首 prompt echo = 只写收据**，不产生条目、不消耗 seq。
+5. G-001 / G-011 / G-012 / G-015 / G-016 的状态按本轮结束时的判定（§4C.18）；G-009 / G-013 / G-014 保持 CLOSED。
+6. **不得**因 4C 出现第二个 `starting → running` 权威，也不得把 4C 的 `thread_state` 扩展解释为运行阶段权威。
+
+**4C 的范围（mandate §2 的 4C 定义）**：Thread 读取（GET）、用户消息写入（POST）、`EnqueueThreadCommand` 缝、
+SSE 失效提示、`pending/active/idle/ending` 生命周期、取消与终态的交互、以及**为以上所需的** migration 设计。
+**不在 4C**：`running → delivering → releasing → done`、`SessionEnded`/`DeliverySettled`/`RunWorkspaceDeleted`
+钩子、`deliver_revision` 交付登记、`revision` 上传授权、收据 GC。
+
+### 4C.2 D-4C-01：`thread_state` 的 owner 与 `pending` 的物化（**G-016 RESOLVED**）
+
+**决策：物化（materialize），写者 = B，写点 = Phase 3A `StartSession` 事务。**
+
+| 项 | 结论 |
+|---|---|
+| owner | **B**（`issue_runs.thread_state` 是业务列，thread D1；只有业务转换写它） |
+| 写者与写点 | `AgentRunSessionStart.StartSession`：与 `thread_entries seq=1`、`EnqueueExecutionWork(agent_session)` **同一事务**、同一次「首次声明」分支内 |
+| 前置条件 | 事务已权威重读该 run：`executor_type='agent' AND phase='starting' AND status='dispatched' AND workspace_id IS NOT NULL AND cancel_requested_at IS NULL AND deleted_at IS NULL`，且 `runWorkspaceLive`（G-011）为真 |
+| 写谓词 | `UPDATE issue_runs SET thread_state='pending', version=version+1, updated_at=now() WHERE id=$1 AND executor_type='agent' AND thread_state IS NULL` |
+| 影响行数 | 该语句只在 seq=1 的 `INSERT ... ON CONFLICT DO NOTHING` **确实插入**（影响 1 行）的分支执行；此时 `thread_state` 必为 NULL（没有任何先前的 StartSession 提交过），所以**要求影响行数 = 1**，否则返回错误让整事务回滚（与 4B `moved != 1` 同一种硬化） |
+| 回滚 | A 缝（`EnqueueExecutionWork`）失败 ⇒ `panic(databaseFailure)` ⇒ `pending` 与 seq=1、工作项一起回滚，不留孤立状态 |
+| 重放 | 第二次 `StartSession` 的 seq=1 插入影响 0 行 ⇒ 早退，不写任何东西；`IS NULL` 谓词本身也幂等 |
+| 并发 | `Store.transact` 全局 advisory lock 串行 + `IS NULL` 谓词 + `PRIMARY KEY (run_id, seq)` 三重 |
+| cancel | `cancel_requested_at IS NOT NULL` 的 run 进不了该事务（WHERE 排除）⇒ 被取消的 run **永远不会**出现 `pending` |
+| 终态 | `pending` 只在 `phase='starting'` 可达；`active/idle/ending/ended` 一旦写入后 `IS NULL` 恒假 ⇒ `pending` **不可能**覆盖已推进状态（不构成回退路径） |
+| workspace 无效 | `runWorkspaceLive` 为假时整个分支不执行 ⇒ 不写 `pending`（保持 G-011 fail-closed 语义） |
+| 与 4B 的关系 | 4B 的 CAS 不读 `thread_state`（它无条件写 `active`），因此「先 pending 后 active」与「从未 pending 直接 active」都成立；**不新增转换**，只是给既有转换补上唯一缺失的前置字面值 |
+
+**语义澄清（相对 Thread D4 的行文）**：Thread D4 写「会话执行**已登记**、尚无记录 → `pending`」，其中「登记」是
+A 侧 `RecordDispatch`。本轮把 `pending` 的物化提前到 `StartSession`，即 **`pending` 的精确含义定为
+「Cloud 已声明首 prompt 与会话工作项，尚无任何 Node 记录被接管」**（是 D4 那行的**超集**：`StartSession` 先于
+`RecordDispatch`）。理由：A 侧不能写业务列（D6 不变量 7），而 B 侧在「登记之后、首批接管之前」没有任何自己的
+事务。可观察差异为零：两个时点之间 Thread 仍只有 seq=1、无 Node 记录，前端渲染（输入可用、"等待 Agent 输出"）
+完全相同。**该澄清必须随 ADR 修订一并反映**（与 G-017 同批，见 §4C.18）。
+
+**为什么不是这些替代方案**：
+
+| 方案 | 否决理由 |
+|---|---|
+| A 侧 `RecordDispatch` 登记时写 `pending` | 控制面写业务表，违反 controller-integration D6 不变量 7 / §11；且「跑了 StartSession 但一直没登记」的 run 会永远停在无状态 |
+| 读时派生：`phase='starting'` 且 `thread_state IS NULL` ⇒ 对外显示 `pending` | 把一个 DB 可表达的不变量交给每个读者；POST 接受矩阵与 idle 扫描都要各自复制该派生，规则会漂移；`thread_state` 的五值 CHECK 将有一个值不可被持久表达，与已批准 D1/D4 的持久模型静默偏离 |
+| 4C 首个接管批次里补写 `NULL → pending → active` | 同一事务内的第二次 `thread_state` 写，既没有可观察中间态，又是自造的转换（Thread D4 没有 `NULL → pending` 这一行） |
+| 迁移里给列加 `DEFAULT 'pending'` | 会让 team/workflow run 与「尚未开始」的 agent run 都带上 Thread 状态，破坏 0018 的 `issue_runs_agent_columns` 约束语义 |
+
+### 4C.3 D-4C-02：Thread GET 的快照语义与分页
+
+**路由**：`GET /api/v1/tenants/{tid}/issues/{iid}/runs/{rid}/thread`（Thread D5）。4C 需在 `router.Routes`
+注册（`PublicRequest` 已有 `RunID`/`After`/`Limit`；**需新增** `Before` 字段与 `before` 查询参数解析）。
+
+**响应形状**（`items` 恒按 `seq` 升序）：
+
+```
+{ "items": [ { seq, source, kind, record, turnId?, status?, createdAt } ],
+  "threadState": "pending|active|idle|ending|ended",
+  "idleSince":   "…" | null,
+  "nextCursor":  "<seq>" | "",
+  "prevCursor":  "<seq>" | "" }
+```
+
+- `status` **只**在 `source='user'` 时出现（`queued|delivered|discarded`）；`node`/`system` 条目不带该字段。
+- **不**暴露 `nodeExecutionId`/`nodeSequence`（D-022 的身份是 Cloud 内部身份，不是公开契约）。
+
+**快照语义**：整次读取在**一个** `Store.transact` 内完成（一次查询 + 一次 run 状态读取），因此 `items` 与
+`threadState` 来自同一数据库快照。**必须显式承认一个非对称**：条目 append-only 且 `seq`/`record` 不可变，
+列表内容永不改写；而 `threadState` 与各条 `status` 可以前进。因此客户端**不得**把 `threadState` 读作
+「光标处的状态」——它只表示响应生成时刻的运行状态。
+
+**分页（本轮裁定，含对 D5 的扩展，见 G-017）**：
+
+| 参数 | 语义 | 校验 |
+|---|---|---|
+| `after=N` | 返回 `seq > N`，升序，最多 `limit` 条（D5 的原义） | `N` 为十进制非负整数；`after=0` = 从头读 |
+| `before=N` | 返回 `seq < N` 中**最新**的 `limit` 条，仍按升序呈现 | `N` 为十进制正整数 |
+| 无游标 | **tail 读**：返回最新的 `limit` 条（升序），即 `before` 取「当前 max+1」的语义 | — |
+| 同时给 `after` 与 `before` | 拒绝 | `400 invalid_pagination` |
+| `limit` | 默认 **200**，`1..500`（D5 的上限 500） | 越界 ⇒ `400 invalid_pagination` |
+| 游标非法 | 非十进制整数 | `400 invalid_cursor` |
+
+- `nextCursor` = 传回 `after` 可取下一段（更新）页的 `seq`；`""` 表示已到**当前数据末端**（不表示线程结束）。
+- `prevCursor` = 传回 `before` 可取下一段（更旧）页的 `seq`；`""` 表示已到 `seq=1`。
+- 实现取 `limit+1` 行判断是否还有更多，再裁剪到 `limit`；`seq` 是 `(run_id, seq)` 主键的一部分 ⇒ 全序、无需次序键。
+- **不复用** `page`/`window`：它们的游标是 UUID（`validID` 会拒绝 `seq`）、上限是 100。**也不得**放宽 `window`
+  的 100（那会静默改变其它所有列表的契约）。Thread 用自己的读者，但**沿用既有 fault 名**
+  （`invalid_pagination`/`invalid_cursor`）以保持错误词汇统一。
+- **为什么需要 tail 与 `before`**：主 UI 是对话面板，首屏要最新若干条；只有 `after` 意味着「从 seq=1 向前走」，
+  长 Thread（5000 条 / limit 500）要多轮往返才能显示尾部。`before` 与 `after` 对称、同一套 `seq` 词汇，
+  不再引入第二种游标类型。`nextCursor`/`prevCursor` 都是**不透明字符串**（客户端原样回传、不得解析；
+  编码就是十进制 `seq`，保留可读性以便日志与测试判读）。
+- **并发追加**：任何写入都在同一把 advisory lock 内分配 `seq`，且条目不可变 ⇒ 客户端只用
+  `after=<自身已见最大 seq>` 前进就**永不漏、永不重**；`seq` 的连续性已由 4B 证明（§4B.5 / D-023）。
+- **`idleSince`**：仅在 `thread_state='idle'` 时非空。这是 D5 字面之外的**附加字段**（D5 只点名 `threadState`），
+  理由：面板要解释「为什么会话即将结束」并显示倒计时，而 `idle_since` 正是权威依据；附加字段向后兼容，
+  但**必须**在 OpenAPI 描述与 ADR 修订中写明（与 G-017 同批）。
+- **授权**：与读该 Issue 的评论完全一致（tenant 成员 + 该 Issue 的可读 Space 成员），查询按
+  `tenant_id + issue_id + run_id` 三重限定，跨 tenant / 跨 Issue / 软删 run 一律 `404 not_found`（与 `run()` 同）。
+- **公开面**：`stripAgentRunSkeleton` 继续把 `threadState`/`idleSince` 等 0018 列从 **run 资源**里剥掉；
+  Thread 读者**直接投影**这两列，**不得**顺手把 run 资源的形状改掉（那是一次独立的契约变更）。4C 必须有一条
+  测试断言 run 资源的字段集**未变**。
+- **终态运行的读取**：`ended` 之后 GET 仍返回完整历史（不可变、不隐藏、不分页降级）；这是「Thread history
+  immutability」的直接体现。
+
+### 4C.4 D-4C-03：Thread POST 的条目归属、事务与状态接受矩阵
+
+**路由**：`POST /api/v1/tenants/{tid}/issues/{iid}/runs/{rid}/thread/messages`，**必须**带 `Idempotency-Key`
+（Thread D3）。router 的 body 白名单为 `[]string{"content"}`（沿用既有严格解码：未知字段/多值 JSON/类型错误一律
+400，服务端身份与 scope 字段由路由而非 body 决定）。
+
+**body**：`{content: [{type: "text", text}]}`；v1 **只接受** `type="text"`，未识别的 block 类型 ⇒
+`400 invalid_field_type`（**不静默丢弃**——丢弃等于丢用户内容）。文本合计 ≤ 64 KiB（D3），超限 ⇒
+`400 content_too_large`（4C 新增 fault，需进 `internal/contract` + OpenAPI）。
+
+**归属与事务（一个事务，两个写者类，各写各的表）**：
+
+```
+Store.Public(POST .../thread/messages)          ← 调用方持有的唯一事务
+  ├─ 通用幂等前置（已存在）：require Idempotency-Key；命中且 requestHash 相同 ⇒ 回放原响应并结束
+  ├─ 授权：读该 Issue 的成员资格（与评论一致）
+  ├─ 权威重读 run（tenant+issue+deleted_at IS NULL+executor_type='agent'）→ 决定接受/拒绝（下表）
+  ├─ B 写：seq = MAX(seq)+1；INSERT thread_entries(source='user', kind='user_turn',
+  │         record={content:[…]}, turn_id=<Cloud 生成>, status='queued')
+  ├─ B 写：CAS issue_runs thread_state → 'active' 且 idle_since=NULL（影响行数必须 = 1）
+  ├─ A 缝：EnqueueThreadCommand(t, run, {kind:'SubmitUserTurn', turn_id, content})
+  └─ 通用幂等后置（已存在）：INSERT idempotency_records(…, response, status)
+提交后：B 发布 SSE 失效提示 issue_run.thread_appended{issueId, runId, lastSeq}；
+        A 侧按 D5 发 ThreadCommandAvailable{run_id}（A 自己的提交后义务）
+```
+
+- **`turn_id` 由 Cloud(B) 生成**（Thread D3），它是用户轮次的**业务身份**，会被 Node 记录回带（§4C.5）。
+  `command_id` 由 A 生成（D-4C-06）。两者都必须出现在命令里，但只有 `turn_id` 进条目。
+- **`thread_state` 的写谓词**：`UPDATE issue_runs SET thread_state='active', idle_since=NULL,
+  version=version+1, updated_at=now() WHERE id=$1 AND cancel_requested_at IS NULL AND thread_state IN
+  ('pending','active','idle')`，**要求影响行数 = 1**；0 行 = 与本次事务内的重读结论矛盾 ⇒ 返回错误整体回滚
+  （**不是**伪装成 409 的客户端冲突）。
+- **状态接受矩阵**（POST 时权威重读的组合；`cancel_requested_at` 与 `thread_state` 不会出现竞态窗口，因为
+  取消路径在**一个**事务内同时写 `cancel_requested_at` 与 `ending`，见 D-4C-11）：
+
+| run / thread 状态 | 结果 |
+|---|---|
+| run 不存在 / 软删 / 非本 tenant·issue | `404 not_found`（不泄露存在性） |
+| `executor_type != 'agent'` | `404 not_found`（非 agent 运行没有 Thread 子资源） |
+| `thread_state='pending'`，`cancel IS NULL`，workspace live | **201** 接受 ⇒ thread 变 `active` |
+| `thread_state='active'`，`cancel IS NULL`，workspace live | **201** 接受 |
+| `thread_state='idle'`，`cancel IS NULL`，workspace live | **201** 接受（清 `idle_since`，回 `active`） |
+| `thread_state='pending'\|'active'\|'idle'` 但 workspace 不 live | `409 thread_closed`（G-011：沙盒已不可用，接受命令没有意义，fail closed） |
+| `thread_state IN ('ending','ended')` | `409 thread_closed`（D3） |
+| `cancel_requested_at IS NOT NULL`（无论 thread_state） | `409 thread_closed`（取消是请求，run 正在走向结束；避免了「命令永远送不出去」） |
+| `thread_state IS NULL` 且 `phase='starting'` | **不变量破坏**（D-4C-01 已保证 `pending`）⇒ `500`，**不**当成 409 |
+| `phase='running'` 而 `thread_state` 为 NULL/`pending` | **不变量破坏** ⇒ `500` |
+| 缺 `Idempotency-Key` | `400 idempotency_key_required`（既有） |
+| 同 key 同 body（已提交） | **回放**原响应与状态码（不重算、不看当前 thread 状态） |
+| 同 key 异 body（含同 key 换 run：hash 含 path） | `409 idempotency_conflict`（既有） |
+| `content` 形状非法 / 未知 block 类型 | `400 invalid_json` / `invalid_field_type` |
+| 文本合计 > 64 KiB | `400 content_too_large`（新增） |
+| A 缝未接线（`UnavailableAgentRunControlPlane`） | `503 thread_command_unavailable`（新增；见 D-4C-05） |
+
+- **成功响应**：`201` + `{resource: {seq, source:"user", kind:"user_turn", record, turnId, status:"queued",
+  createdAt}}`（与既有 POST 的 `{resource: …}` 一致）。
+- **不变量**：条目与命令同事务 ⇒ 不存在「命令已可见但条目未提交」或反之；提交前的任何失败（含 A 缝错误）
+  都使**两者一起**回滚，并且**幂等记录也不落**，因此客户端用同一 key 重试就是一次干净的首发（不是冲突）。
+
+### 4C.5 D-4C-04：POST 幂等身份矩阵（7 例）
+
+机制：**复用既有 `idempotency_records(tenant_id, user_id, key, request_hash, response, status)`**
+（`public.go` 的通用前置/后置），**不新增**每条的幂等列。`request_hash = requestHash(Method, Path, Body)`
+——**含 path**，这是下面第 6 例安全的关键。
+
+| # | 场景 | 结果 | 依据/理由 |
+|---|---|---|---|
+| 1 | 首次请求，key 未见，body 合法，状态接受 | **201** 建条目 + 命令 | 正常路径 |
+| 2 | 同 key、同 body，在首次提交**之后**重放 | **同一响应原样回放**（同 `seq`、同 `turnId`） | 通用幂等；不产生第二个条目/命令/事件 |
+| 3 | 同 key、同 body，两个请求**同时在飞** | 全局 advisory lock 使其退化为顺序执行；后到者命中幂等记录 ⇒ 与 #2 相同 | 必须用 start barrier 测（4B 并发测试先例）；结果集只允许「一次建 + 一次回放」 |
+| 4 | 同 key、**异 body** | `409 idempotency_conflict`，其它什么都没发生 | 既有 fault |
+| 5 | **异 key**、同 body（用户确实连发两条一样的话） | **两个**条目、**两个** `turn_id`、两条命令 | 幂等按 key 计，不按内容计；这是正确语义 |
+| 6 | 同 key、**异 run**（path 不同） | `409 idempotency_conflict` | hash 含 path ⇒ 不会跨 run 回放第一条的响应；key 的作用域是 `(tenant, user, key)`，**不**静默跨资源复用 |
+| 7 | 重放**晚于**状态变化（条目已 `delivered`/`discarded`，或 thread 已 `ending`/`ended`） | **仍回放原响应** | 「同一逻辑请求只有一个结果」；让回放结果依赖后续状态会让客户端重试语义不可判定。**新 key** 在 `ending` 后 ⇒ `409 thread_closed`（矩阵行） |
+
+- **作用域说明**：不同用户在同一 tenant 用同一 key 是两条独立记录（各自 key 空间），因此各自产生条目 ——
+  **有意接受**（与本仓所有 POST 一致），并写入 OpenAPI 说明。
+- **绝不**把 DB 不变量失败（seq 主键冲突、命令 FK 失败、影响行数 ≠ 1）伪装成 4xx 冲突：一律 500。
+
+### 4C.6 D-4C-05 / D-4C-06：`EnqueueThreadCommand` 契约与四种身份的分离
+
+**D-4C-05：A 拥有 `thread_commands`，B 在**自己的事务内**调用缝。**
+
+| 项 | 结论 |
+|---|---|
+| 缝签名（已声明） | `EnqueueThreadCommand(t *transaction, run Object, command Object) (string, error)`，返回 `command_id` |
+| 谁构造 | **B** 构造业务内容：`{kind: 'SubmitUserTurn'\|'EndSession', run_id, turn_id?/reason?, content?}`（内容归 B：用户文本、结束原因，`reason ∈ user_ended\|idle_timeout\|cancelled`） |
+| 谁生成 id | **A 生成 `command_id`**（`thread_commands.id`，D6）；B 不生成 A 行的主键。`turn_id` 由 B 生成并**同时**写进条目与命令体，使「条目 ↔ 命令 ↔ Node 记录」可相关 |
+| 事务 | 缝在**调用方事务**内执行，**不**自己开事务、不跨 HTTP/外部 IO；任何 error ⇒ B 的整事务回滚（条目 + 命令 + 幂等记录一起），Controller 侧看不到半成品 |
+| 提交后 | A 在**提交后**发 `ThreadCommandAvailable{run_id}`（D5）。B 在提交后发 SSE 失效提示。两者都不得在提交前发 |
+| fail-closed | 生产缝未接线时返回错误；在 POST 路径上映射为 `503 thread_command_unavailable`（**可重试**，且因为事务回滚、幂等记录未落，同 key 重试是干净首发）；在 idle 扫描路径上则不做状态转换（run 保持 `idle`，下一 tick 再试）——**绝不**出现「`ending` 已提交但 `EndSession` 命令没写」 |
+| 命令不可见窗口 | `StartSession` 已完成但 `RecordDispatch` 未完成时，run 处于 `pending`：POST **仍接受**（矩阵行 3），但命令按 D3 留在 Cloud、`ClaimThreadCommands` **不返回**它。这是 ADR 的既有规则，4C 只负责测试覆盖 |
+| 一张表一个写者类 | `thread_commands` 只由控制面代码写（B 只能经这个缝）；`thread_entries`/`issue_runs.thread_state` 只由业务转换写。D6 不变量 7 不变 |
+
+**D-4C-06：四种身份不得混用。**
+
+| 身份 | 生成者 | 载体 | 作用 | 不是什么 |
+|---|---|---|---|---|
+| `turn_id` | B（Cloud） | `thread_entries.turn_id`；命令体 | **业务身份**：一个用户轮次；Node 记录回带它，Cloud 据此把条目置 `delivered` | 不是命令 id，不是执行 id |
+| `command_id` | A | `thread_commands.id` | **投递身份**：Node 按它去重（同一 `command_id` 至多执行一次，Node 协议 D4） | 不是条目的 `seq`，不写进 `thread_entries` |
+| `execution_id` | Controller（A 栅栏） | `node_executions.execution_id` | **会话身份**：命令投递登记记 `delivered_execution_id`；一条会话执行一个 Thread 来源 | 不是 run id |
+| `seq` | B（Cloud） | `thread_entries.seq` | **顺序身份**（run-scoped，从 1 连续）：分页游标与对话顺序 | 不是 Node 的 `sequence`（执行内，`node_event_receipts`），也**不**下发给 Node |
+
+- 关系：一个用户轮次 ⇒ 恰一个条目（B） + 至多一个命令（A） + 至多一次投递登记（A）。
+  一个命令的 `turn_id` 等于对应条目的 `turn_id`；命令的投递目标是该 run 的**当前**会话执行。
+- **禁止**用 `seq` 与 Node `sequence` 互推（4B 已固化，4C 不得引入 `seq = sequence + k` 的等价物）。
+
+### 4C.7 D-4C-07：SSE 的权威来源、`after` 统一语义与重连
+
+**必须区分的三件事**（mandate §7）：
+
+| 概念 | 本设计中的实体 | 性质 |
+|---|---|---|
+| durable log（唯一重放来源） | `thread_entries`（append-only，`PRIMARY KEY (run_id, seq)`） | 持久、权威、可重放 |
+| notification mechanism | 进程内 Space event hub（`SpaceEvent`）+ `issue_run.thread_appended` | **易失**、进程内、缓冲 8、无持久化/无重放、单实例（api-boundary ADR，已实现） |
+| connection-local delivery | 某条 SSE 连接恰好在连接期间收到的东西 | 可丢、可重、不构成任何承诺 |
+
+**统一 `after` 语义（GET 与 SSE 重连同一个词汇）**：
+
+1. 系统里只有**一个**游标词汇：`seq`。它**只**对 durable log 求值（`after=N` ⇒ `seq > N`）。
+2. **客户端游标只由 GET 推进**：唯一能推进游标的响应是 GET 的 `nextCursor`/`prevCursor`/`items`。
+   **SSE 事件永远不推进游标**——事件的 `lastSeq` 只说「有数据，去取」，不表示客户端已经拥有它。
+3. **SSE 重连 = 客户端重发自己的 GET**：断线期间漏掉的一切由「用自己的游标再 GET 一次」补齐。
+   因此流本身**不需要**可恢复，也不需要 `Last-Event-ID` 语义（api-boundary ADR 也未定义它）。
+4. `after` 在两种入口下含义完全一致：`after=N` ⇒ 「我已持有 `seq ≤ N` 的全部条目，给我 `> N` 的」。
+   `before` 对称（D-4C-02）。**不**给 SSE 引入第二套游标，也**不**让 SSE 承担 `after` 的解释权。
+
+**为什么不把 GET 的语义搬进 SSE（例如 `?after=` 的 Thread 专用流 + 服务端重放）**：那等于让服务端再实现一个
+durable 读者（重复 GET 的分页/上限/游标规则），并且会诱导客户端把流当日志——正是 Thread D5 与 api-boundary
+ADR 明确禁止的用法。若将来要做「可恢复的流式投递」，必须另行定义 `Last-Event-ID == seq` 与有界重放窗口
+（本轮明确**不在** 4C）。
+
+**公开事件形状**：`issue_run.thread_appended{issueId, runId, lastSeq}`，发布在 Space 事件流上（客户端按
+`issueId`/`runId` 过滤）。`lastSeq` = 提交时刻该 run 的 `max(seq)`。**实现注记**：现有 `SpaceEvent` 只有
+`{type, spaceId, projectId?, version?}`，因此 4C 需**新增可选字段** `issueId`/`runId`/`lastSeq`
+（空值省略，既有事件的 JSON 保持逐字节不变——`project.created` 已有 `projectId` 的先例）。
+
+### 4C.8 D-4C-08：SSE 的顺序、重复与丢失
+
+| 维度 | 结论 |
+|---|---|
+| 顺序 | 不承诺。事件在提交**之后**发布，因此并发提交的两次发布可能乱序到达，客户端可能看到 `lastSeq` 从 7 回到 5。**这不是 bug**：客户端只把事件当触发，游标由 GET 推进，GET 读的是严格有序的 durable log。**禁止**从「事件顺序」推断 Thread 顺序 |
+| 重复 | 允许且无害。重复事件 = 再触发一次幂等 GET；服务端不做去重，客户端可自行合并 |
+| 丢失 | **数据不丢**（log 持久 + GET 权威）；**通知可能丢**（缓冲 8、慢订阅者、进程重启、单实例）。因此客户端在「长时间收不到事件」时必须靠**轮询**收敛：本设计规定前端需有重连 + 周期轮询（建议 ≥ 30s，或在窗口重新获得焦点时）作为兜底。**不得**宣称「每次 append 都会送达一次通知」 |
+| 多实例 | 进程内 hub 单实例（api-boundary ADR 已限定 slice 1）：跨实例的订阅者收不到失效提示 ⇒ 只能靠轮询。记为 G-020（依赖，非本轮阻塞） |
+| 状态变化无新条目 | 仅 `status`（`queued → delivered/discarded`）或 `thread_state` 变化、`max(seq)` 未变时，Cloud **仍**发布 `issue_run.thread_appended`（`lastSeq` 与上次相同）。理由：复用 ADR D5 点名的事件类型，payload 恒为「提示」而非事实，客户端无需分支。**替代方案**（改名 `issue_run.thread_updated` 或新增类型）因偏离 ADR 字面被否决，若 ADR 修订可再议 |
+| 客户端刷新已加载区间 | 前进分页（`after`）只能发现**新**条目；更旧条目的 `status` 翻转必须靠**重读已加载区间**（如 `after=<firstSeq-1>&limit=<窗口大小>`）。**禁止**把状态变化做成新条目（会重复内容、破坏「一轮条目」），也**禁止**让事件携带该事实 |
+| 终态之后 | 事件可能停止（会话结束后不再有 append）。客户端靠轮询 + `threadState` 收敛；GET 在 `ended` 后仍返回完整历史 |
+
+### 4C.9 D-4C-09：`active` / `idle` 生命周期的权威
+
+**转换表（写者 / 权威 / 事务）**：
+
+| 转换 | 权威（证据） | 写者与事务 | 幂等 / 重放 | 终态性 |
+|---|---|---|---|---|
+| （无）→ `pending` | Phase 3A 会话声明（seq=1 + `agent_session` 工作项） | B：`StartSession` 事务（D-4C-01） | `IS NULL` 谓词；seq=1 影响 0 行 ⇒ 早退 | 可前进 |
+| `pending` → `active` | 首条**真实** Node 记录被接管（D-019/D-024，**已实现**） | B：`ThreadEventsTakenOver` 的 `starting→running` CAS | 重放 `taken==0` ⇒ 早退 | 可前进 |
+| `active`/`pending`/`idle` → `active` | 新用户轮次写入（D3） | B：POST 事务（D-4C-03） | 幂等由 POST 的 key 保证；CAS 要求 1 行 | 非终态（振荡） |
+| `idle` → `active` | 接管到**非** `turnEnded` 的记录 | B：`ThreadEventsTakenOver` 追加写（§4C.13 第 2 项） | 重放 `taken==0` ⇒ 早退 | 非终态 |
+| `active` → `idle` + `idle_since` | 接管到 `turnEnded` 且**提交时无 `status='queued'` 的用户轮次** | B：同一接管事务 | 同上；`idle_since = now()`（**数据库时间**） | 非终态 |
+| `pending`/`active`/`idle` → `ending` | 用户结束 / `idle` 超窗 / 取消 | B：POST-end、idle 扫描、cancel 三条路径，各自单事务 | CAS `thread_state IN ('pending','active','idle')` ⇒ 恰好一次 | 近终态（不可回 `active`） |
+| `ending` → `ended` | **`SessionEnded`**（会话终态接管钩子） | **Phase 5**，本周不实现 | 终态事件重放幂等 | **终态（吸收态）** |
+
+**`idle` 的判定细节（必须写清，避免实现走偏）**：
+
+- 判定发生在**接管事务内**、条目写入之后；条件是
+  `NOT EXISTS (SELECT 1 FROM thread_entries WHERE run_id=$1 AND source='user' AND status='queued')`。
+  有排队轮次 ⇒ Agent 还会执行它 ⇒ **保持** `active`。
+- **批次末条记录决定**：一批里若 `turnEnded` 之后还有别的记录，最终态是 `active`；只有**该批次最后一条被接管的
+  内容记录是 `turnEnded`**（且无 queued 轮次）才落 `idle`。实现必须记录「最后一条被接管记录的 kind」，
+  不能只判断「批里出现过 `turnEnded`」。
+- 门控：仅当 run 处于活跃会话（`phase='running'` 且 `thread_state ∈ ('pending','active','idle')` 且
+  `cancel_requested_at IS NULL`）才写 `thread_state`；否则**跳过状态转换但仍追加条目**（4B 的
+  「ack 过的记录不得静默丢弃」语义保持）。跳过是**设计允许**的 0 行；若事前重读判定为「可写」而 CAS 影响 0 行，
+  则是**不变量破坏**⇒ 返回错误回滚（与 4B `moved != 1` 同一种硬化）。
+- `idle_since` 只在 `idle` 有意义：进入 `active`（用户轮次或新记录）与进入 `ending` 时都必须置 NULL。
+- Agent 首轮异常结束也走同一条路（接管到 `turnEnded` ⇒ `idle`），**不自动结束**（Thread D4 的理由保持）。
+
+### 4C.10 D-4C-10：`ending` / `ended` 的权威与 `SessionEnded` 依赖
+
+1. **`ending` 的三个触发**（都写 `thread_state='ending'` + 清 `idle_since`，并在**同一事务**里放出
+   **恰好一条** `EndSession{reason}`）：(a) 用户主动结束（`user_ended`）；(b) `idle` 超窗（`idle_timeout`）；
+   (c) run 被取消且 `phase='running'`（`cancelled`）。
+2. **`idle_timeout` 的扫描器归 B**（与 Phase 3A 的 starting 重试循环同族的派发循环任务）：
+   读 `thread_state='idle' AND idle_since IS NOT NULL AND idle_since + <window> < now() AND
+   executor_type='agent' AND cancel_requested_at IS NULL AND deleted_at IS NULL`，逐 run 开**短事务**：
+   重读 → CAS `idle → ending`（影响行数必须 1，0 行 = 别的 tick 赢了 ⇒ 跳过）→ `EnqueueThreadCommand(EndSession{idle_timeout})`。
+   窗口 `issue_runs.thread_idle_timeout` = **进程配置项**（点号命名的配置 key，默认 15 分钟），**不是**列：
+   ADR 称其为「Cloud 配置」，且没有任何按 run 变化的证据；判定与比较**全部用数据库时间**（Thread D4 不变量 5）。
+   扫描节奏必须远小于窗口（与 3A 的 10s 同量级，属实现选择，D-008 的先例）。
+3. **`ended` 的权威 = `SessionEnded`**（会话终态 `TakeOverNodeEvent` → 钩子 `sessionEnded`，
+   controller-integration D6）：Thread → `ended`、仍 `queued` 的用户轮次 → `discarded`、run → `delivering`
+   并放出交付工作项。该钩子**未实现**，属 **Phase 5（delivery 切片）**。
+   **4C 只到 `ending`；不得**以「`EndSession` 命令已被 Node 受理」或「会话执行结果已登记」当成 `ended` 的权威
+   （`SessionCommandAccepted` 是**回复**，不是序列事件，也不是状态，Node 协议 D2）。
+4. **用户主动结束的端点**：ADR D4 有该转换但**没有**定义 API 形状 ⇒ **G-018（OPEN / NON-BLOCKING）**。
+   推荐形状：`POST .../runs/{rid}/thread/end`（`Idempotency-Key` 必填；`ending|ended` ⇒ `409 thread_closed`；
+   成功 202 + `threadState`）。**必须**与「取消 run」区分：结束 Thread 只放 `EndSession{user_ended}`，
+   run 照常进入交付；取消 run 写 `cancel_requested_at`，只影响最终 `status`（D-4C-11）。
+5. **`ending` 是近终态**：不可回 `active`；`ending` 之后 POST 一律 `409 thread_closed`。
+   **`ended` 是吸收态**：没有任何 4C/Phase 5 转换从 `ended` 出发。
+6. **API/SSE 可见性**：`threadState` 在 GET 与每次失效提示的重取里可见；`pending`/`active`/`idle` 时输入可用，
+   `ending`/`ended` 时输入禁用（前端按状态渲染）。
+
+### 4C.11 D-4C-11：取消与终态的交互（与 4B 的 cancel-first 规则一致）
+
+| 场景 | 结果 |
+|---|---|
+| POST 时 `cancel_requested_at` 已置 | `409 thread_closed`（接受矩阵），**不写**条目/命令 |
+| 取消时 `phase='provisioning'\|'starting'` | 按 IssueRun D4/D6 直接进 `releasing`/`cancelled`，`deliveryState=skipped`：**不写 `ending`、不发 `EndSession`**（此时会话输出还不构成 Thread 内容，交付不欠）。**不违反** 4B 的「cancel-first 接管不进入 running」——4B 保持原样：被取消的 run 不因接管而进 `running` |
+| 取消时 `phase='running'` | 一个事务内：写 `cancel_requested_at` + CAS `thread_state → 'ending'`（`IN ('pending','active','idle')`）+ `EndSession{cancelled}`。因此**没有**「已取消但仍是 `active`」的可观察窗口（接受矩阵里那条组合不可能出现） |
+| 取消时 Thread 已是 `ending` | 只写 `cancel_requested_at`：**不**再放第二条 `EndSession`，**不**改写原因。最终 `status` 由 `cancel_requested_at` 在结算（Phase 5）决定——这是 IssueRun 的规则，不是 4C 的 |
+| 未投递的命令（`queued` 条目）在会话结束时 | 在 `SessionEnded` 事务中标 `discarded`（**Phase 5 写**）；4C 提供列与谓词，并保证「`ending` 之后不再产生新的 `queued`」 |
+| 重试（run 已终态后重发同一 POST） | 同 key ⇒ 回放原响应（幂等矩阵 #7）；新 key ⇒ `409 thread_closed` |
+| 接管与 POST 竞争 | 全局 advisory lock ⇒ 全序；两种提交顺序都合法：先 POST ⇒ 接管看到 `queued` ⇒ 保持 `active`；先接管 ⇒ 落 `idle`，随后 POST 置 `active` 并清 `idle_since`。测试必须断言**完整允许结果集**，不是最常见结果 |
+| 接管与取消竞争 | 两种顺序都不得产生第二个 running 权威：取消先 ⇒ 4B 的 `cancel_requested_at IS NULL` 门控使 running CAS 跳过（条目仍追加）；接管先 ⇒ run 已 `running`，取消随后走 `ending` 分支 |
+| 终态运行的 GET / SSE 重放 | GET：返回完整不可变历史；SSE：事件可能已停 ⇒ 轮询兜底 |
+| Thread history 不可变 | 任何 4C 转换都**不写** `record`，**不重编号** `seq`；唯一可变的列是 `status`，且单向 `queued → delivered | discarded`。`thread_state` 除 `active ⇄ idle` 振荡外无回退，`pending` 只前进，`ending`/`ended` 吸收 |
+
+### 4C.12 D-4C-12：schema 决策（**需要 4C migration**，本轮只设计）
+
+**结论：需要一条新 migration（编号 0022，接 0021）。** 逐项理由：
+
+| 需要 | 内容 | 理由 |
+|---|---|---|
+| 新控制面表 `thread_commands` | `id uuid PK`（= `command_id`）、`run_id uuid NOT NULL REFERENCES issue_runs(id)`、`kind text CHECK (kind IN ('SubmitUserTurn','EndSession'))`、`body jsonb NOT NULL CHECK (jsonb_typeof(body)='object')`、`created_at timestamptz NOT NULL DEFAULT now()`、`delivered_at timestamptz`、`delivered_execution_id text`；`CHECK ((delivered_at IS NULL) = (delivered_execution_id IS NULL))`；索引 `(run_id, created_at) WHERE delivered_at IS NULL` | controller-integration D6 点名的表，当前**不存在**；「至少投递一次」需要未投递扫描索引。`run_id` 的 FK 沿用 `execution_work.run_id REFERENCES issue_runs(id)` 的先例（0019） |
+| 新列 `thread_entries.status` | `text CHECK (status IN ('queued','delivered','discarded'))`，**且 `CHECK ((source='user') = (status IS NOT NULL))`**；索引 `(run_id) WHERE source='user' AND status='queued'` | `idle` 判定与「会话结束时清理排队轮次」都需要一个**持久**的轮次状态。`discarded` 无法从任何别的表派生（它是会话结束时 Cloud 的决定）⇒ 必须落列。**替代方案**（由「是否存在带同 `turn_id` 的收据」派生 `delivered`）被否决：那让业务读取控制面表，且派生不出 `discarded` |
+| 一条幂等回填 | `UPDATE issue_runs SET thread_state='pending' WHERE executor_type='agent' AND thread_state IS NULL AND EXISTS (SELECT 1 FROM thread_entries te WHERE te.run_id = issue_runs.id AND te.seq = 1)` | 使 D-4C-01 的物化对**已存在**的 run 也成立，避免 4C 之后仍存在「已声明首 prompt 但 `thread_state` 为 NULL」的 run。谓词与代码路径的判据一致（seq=1 存在 = StartSession 已跑过），可重复执行、安全重试；migration 内 DML 有先例（0010/0016） |
+| 索引 `issue_runs (idle_since) WHERE thread_state='idle'` | 支撑 idle 超窗扫描 | 避免全表扫描；与 A 侧无关 |
+
+**明确「不做」的部分**：
+
+- **不改** `issue_runs.thread_state` 的值集（0018 已含 `pending|active|idle|ending|ended`），**不改** `idle_since`。
+- **不新增** `issue_runs.next_thread_seq` 之类的计数列或独立 sequence 表：`MAX(seq)+1` 在全局锁内已足够（D-023，§4B.5），
+  且用户轮次与 Node 接管共享同一把锁。
+- **不新增** `thread_entries` 的幂等列：POST 幂等交给既有 `idempotency_records`（D-4C-04）。
+- **不改** `node_event_receipts`（收据 GC/cap 仍 G-015，未决）。
+- **不给** `issue_runs.thread_state` 加 `DEFAULT`（见 D-4C-01 的否决表）。
+- **不建**任何 `starting→running` 的等价表/列（4B 的唯一权威不变）。
+- `thread_commands` 的 `delivered_at`/`delivered_execution_id` 是**单行一次写**（`AND delivered_at IS NULL` +
+  影响行数校验），不使用 trigger；重复投递登记幂等由该谓词承担。**取舍**：不保留重复投递的历史（ADR 认可以
+  第一次登记为准；Node 去重使重复投递无副作用）。
+
+### 4C.13 4C 实现所需的 4B 改动（**实现前置**，本轮不改代码）
+
+1. **echo 去重推广**（`internal/core/agent_run_thread.go`）：现谓词是 `turnID == initialTurnID`（只有首 prompt）。
+   4C 起，`turn_id` 命中任意 **Cloud 生成的用户轮次**（`thread_entries` 中 `source='user'` 的行）都必须
+   **不产生新条目、不分配 seq**，并把该行 `status` 从 `queued` 置为 `delivered`（ADR D3：「Node 执行某个用户轮次时
+   写入的用户消息记录携带同一 turn_id；Cloud 接管到它时把对应 user_turn 条目标为 delivered」）。收据照写。
+   否则用户消息会在 Thread 里重复出现两次（Cloud 一份 + Node echo 一份），且那条 echo 记录会被当成 `active` 证据。
+2. **`thread_state` 的 4C 分支**：接管事务内，除既有 `starting→running` CAS（写 `active`）之外，还要
+   (a) 对已 `running` 的 run，`idle → active`（新记录到达）；(b) 批次末条为 `turnEnded` 且无 `queued` 轮次时落
+   `idle` + `idle_since=now()`。二者都在门控内（§4C.9），0 行只有在事前判定为「可写」时才是错误。
+3. **`StartSession` 物化 `pending`**（D-4C-01）：在 seq=1 插入成功后、且同一事务内。
+4. **`SpaceEvent` 扩展**：新增可选 `issueId`/`runId`/`lastSeq`（`omitempty`），既有事件 JSON 不变。
+5. **控制面实现**（A）：`StoreAgentRunControlPlane.EnqueueThreadCommand`（写 `thread_commands` + 返回
+   `command_id`）、`ClaimThreadCommands`（纯读、按 run 分组、组内创建顺序、返回会话 `execution_id` 与目标 Node、
+   要求 lease epoch）、`RecordThreadCommandDelivered`（CAS `delivered_at IS NULL` + 幂等）、`Watch` 的
+   `ThreadCommandAvailable{run_id}`，以及 gRPC `AgentRunService` 的对应方法。
+6. **公开面**：router 注册 `GET .../thread`、`POST .../thread/messages`（+ 若要 G-018 的 `POST .../thread/end`）；
+   `PublicRequest` 增 `Before`；`internal/contract` + `api/openapi.json` + `task frontend:generate`（生成物不得手改）；
+   `content_too_large` / `thread_closed` / `thread_command_unavailable` 三个新 fault 进稳定错误契约。
+7. **派发循环**：idle 超窗扫描（§4C.10 第 2 项）与 `cmd/server` 接线。
+8. **不动**：`node_event_receipts`、`execution_work`、`node_executions`、4B 的批次分类/收据/`last_event_sequence`
+   栅栏、`starting→running` 的唯一权威。
+
+### 4C.14 事务 / 锁 / 并发矩阵（10 场景）
+
+**前提**：所有 Cloud 写入都经 `Store.transact` ⇒ `pg_advisory_xact_lock(67420911)`（Phase 1 基线）。因此 4C 的
+**所有**并发场景都退化为「同一把锁内的全序」，需要证明的不是「不会并发」而是「任意顺序下的结果都在允许集内、
+且每个非法中间态都不可观察」。**本轮不新增任何锁，不改变锁的粒度或顺序**；若将来 G-004 移除全局锁，则
+4C 的这些转换需要 per-run 锁或基于 CAS 的排序——该替换属独立架构任务，记录为依赖。
+
+| # | 场景 | 串行化后的允许结果集 | 必须拒绝/禁止的结果 |
+|---|---|---|---|
+| 1 | POST ‖ POST（同 run，异 key） | 两条条目，`seq` 连续（`MAX+1` 两次）；两条命令；两次 SSE 发布 | `seq` 重复、条目互换顺序、只落一条 |
+| 2 | POST ‖ 接管批次（同 run） | 两种顺序都合法：POST 先 ⇒ 接管看到 `queued` ⇒ 保持 `active`；接管先（末条 `turnEnded`）⇒ `idle`，POST 随后 ⇒ `active` + `idle_since=NULL` | `idle` 与 `queued` 同时成立却停在 `idle`；`seq` 冲突；条目丢一条 |
+| 3 | POST ‖ POST（同 key 同 body） | 恰好一条条目 + 一条命令；两次响应相同（一次建、一次回放） | 两条条目 / 两条命令 / 两次 201 都"新建" |
+| 4 | 接管 ‖ 接管（同 run） | 4B 已证：一批成功、另一批要么补序成功、要么 `CONFLICT`；`seq` 无重复（T4B-16） | 第二个 running 权威、`seq` 重复、`idle` 判定双写 |
+| 5 | idle 扫描 ‖ POST（thread 为 `idle`） | 扫描先 ⇒ `ending` + `EndSession{idle_timeout}`，POST ⇒ `409 thread_closed`；POST 先 ⇒ `active`，扫描 CAS 影响 0 行 ⇒ **不发** `EndSession` | 既 `ending` 又接受了新轮次；两条 `EndSession`；`EndSession` 与转 `active` 同时提交 |
+| 6 | idle 扫描 ‖ idle 扫描（两 tick / 两实例） | 恰好一条 `EndSession`（CAS 只允许一个 tick 从 `idle` 迁出） | 重复 `EndSession`、重复计时 |
+| 7 | cancel ‖ 接管批次 | 取消先 ⇒ running CAS 被 `cancel_requested_at IS NULL` 门控跳过（条目仍追加，4B 语义保持）；接管先 ⇒ 已 `running`，取消随后走 `ending` 分支 | 取消后仍进 `running`（违反 4B）；running 与 `ending` 双权威 |
+| 8 | cancel ‖ POST | 取消先 ⇒ POST `409 thread_closed`；POST 先 ⇒ 条目已建，取消随后 `ending`；该轮次可能已被 Node 执行（`delivered`）或未执行（Phase 5 置 `discarded`），两者都合法 | 取消后仍接受新轮次；已接受轮次凭空消失（条目不可删） |
+| 9 | GET ‖ 任意写 | 同一把锁内的读 ⇒ 一致快照；分页前进永不漏/重 | 撕裂页、缺 `seq`、跳号 |
+| 10 | `SessionEnded`（Phase 5）‖ POST | 依赖：`ending` 提交后 POST 一律被接受谓词拒绝 ⇒ Phase 5 事务里不会再有新的 `queued` 行冒出 | 4C 侧保证：**不得**存在「`ending` 之后仍能建 `queued` 条目」的窗口 |
+
+**不新增全局锁的证明义务**：以上每一条的排序都由**既有**全局锁提供，且每个状态转换各自带 CAS 谓词与影响行数
+校验（「0 行 = 有人先动了」在事前判定为可写时视为不变量破坏）。因此本轮**不引入** per-run 锁、行锁升级或
+`SELECT ... FOR UPDATE`。
+
+### 4C.15 API 错误分类（与 4B 一致，绝不把 DB 不变量失败伪装成冲突）
+
+| HTTP | fault | 出现处 | 语义 |
+|---|---|---|---|
+| 400 | `idempotency_key_required` | POST 缺 key | 既有 |
+| 400 | `invalid_json` / `invalid_field_type` | body 形状/未知 block 类型/未知字段 | 既有（严格解码） |
+| 400 | `content_too_large` | 文本合计 > 64 KiB | **4C 新增** |
+| 400 | `invalid_pagination` | `limit` 越界、`after` 与 `before` 同时给 | 既有 fault 名，Thread 复用 |
+| 400 | `invalid_cursor` | 游标不是十进制整数 | 既有 fault 名，Thread 复用 |
+| 404 | `not_found` | run 缺失/软删/非本 tenant·issue/非 agent | 既有（不泄露存在性） |
+| 409 | `idempotency_conflict` | 同 key 异 hash（含换 run） | 既有 |
+| 409 | `thread_closed` | `thread_state ∈ {ending,ended}`，或 `cancel_requested_at` 已置，或 workspace 不 live | ADR D3 点名 |
+| 503 | `thread_command_unavailable` | A 缝未接线/不可用（事务已回滚，重试安全） | **4C 新增**，可重试 |
+| 500 | 内部错误（`databaseFailure` 家族，稳定 Fault 只给通用 code） | 影响行数 ≠ 1、`seq` 主键冲突、命令 FK 失败、`thread_state` 与 `phase` 组合不可能 | **绝不**映射为 4xx |
+
+- **不沿用** 4B 的内部/控制面 fault（`takeover_conflict`、`sequence_gap`、`receipt_conflict`、`empty_thread_batch`、
+  `invalid_takeover`）：它们是 internal control / gRPC 的错误词汇，不是公开 API 的。
+- 公开响应**不得**出现 SQL、栈、约束名；`thread_closed` 必须能由客户端区分「已结束/已取消/沙盒不可用」之外的
+  处置动作（三者都只需停止发送），因此不为三者各造一个 code。
+
+### 4C.16 测试设计矩阵 T4C-1..T4C-34（**设计**，本轮不写测试；全部 `DESIGNED / MISSING`）
+
+证据预期：`integration`（真实 PostgreSQL + 真实 HTTP）为验收层；`internal/core` 白盒（真实 PostgreSQL + 注入
+A/B seam）为控制核心层；并发项必须用 start barrier 并断言**完整允许结果集**。**本轮不实现任何测试**。
+
+| ID | 义务 | 层 | 依据 |
+|---|---|---|---|
+| T4C-1 | `pending` 在 `StartSession` 事务内物化，且与 seq=1、工作项同生共死 | core 白盒 | D-4C-01 |
+| T4C-2 | `StartSession` 重放（seq=1 影响 0 行）不再写 `thread_state`；`IS NULL` 谓词幂等 | core 白盒 | D-4C-01 |
+| T4C-3 | A 缝失败 ⇒ `pending` 与 seq=1 一起回滚 | core 白盒 | D-4C-01 |
+| T4C-4 | 被取消 / workspace 不 live 的 run 永不出现 `pending` | core 白盒 | D-4C-01 |
+| T4C-5 | migration 0022 全新库 + 从 0021 升级；回填只对「有 seq=1」的 agent run 生效、可重复执行 | 迁移测试 | D-4C-12 |
+| T4C-6 | GET 免游标 = tail 读（最新 `limit` 条、升序）；`prevCursor` 可继续向旧翻页 | 集成 | D-4C-02 |
+| T4C-7 | `after=N` 严格 `> N`；`after=0` = 从头；`nextCursor=""` 表示到达当前末端（非线程结束） | 集成 | D-4C-02 |
+| T4C-8 | `before=N` 取更旧页且恒升序；与 `after` 同时给 ⇒ `400 invalid_pagination` | 集成 | D-4C-02 |
+| T4C-9 | `limit` 默认 200 / 上限 500；越界 ⇒ `400 invalid_pagination`；非整数游标 ⇒ `400 invalid_cursor` | 集成 | D-4C-02 |
+| T4C-10 | `threadState`/`idleSince` 只由 Thread 响应暴露；**run 资源字段集不变**（`stripAgentRunSkeleton` 语义保持） | 集成 | D-4C-02 |
+| T4C-11 | 跨 tenant / 跨 Issue / 软删 run ⇒ `404`；非成员 ⇒ 拒绝，且与评论授权一致 | 集成 | D-4C-02 |
+| T4C-12 | 分页前进在并发追加下不漏不重（写入者与读者交错，`seq` 无洞） | 集成（并发） | D-4C-02 |
+| T4C-13 | POST 接受矩阵逐行（`pending`/`active`/`idle` 接受；`ending`/`ended`/已取消/workspace 不 live ⇒ `409 thread_closed`） | 集成（表驱动） | D-4C-03 |
+| T4C-14 | POST 成功后条目 `queued` + 命令同事务存在；`thread_state='active'`、`idle_since=NULL` | 集成 | D-4C-03 |
+| T4C-15 | A 缝失败 ⇒ 条目、命令、幂等记录**一起**回滚；同 key 重试是干净首发（非冲突） | core 白盒 | D-4C-03/05 |
+| T4C-16 | 幂等矩阵 7 例逐条（含 #5 异 key 同 body ⇒ 两条、#6 同 key 异 run ⇒ `409`、#7 终态后回放原响应） | 集成（表驱动） | D-4C-04 |
+| T4C-17 | 同 key 并发的完整允许结果集（一次建 + 一次回放） | 集成（并发 + barrier） | D-4C-04 |
+| T4C-18 | `turn_id` 由 Cloud 生成并在响应可见；条目与命令携带同一 `turn_id` | 集成 | D-4C-06 |
+| T4C-19 | 接管的 echo（`turn_id` 命中 `source='user'` 行）不新增条目、不分配 seq、把该行置 `delivered` | core 白盒 | D-4C-13-1 |
+| T4C-20 | `queued` 条目在接管 echo 前一直保持 `queued`；`delivered` 不被回退 | core 白盒 | D-4C-06 |
+| T4C-21 | `EnqueueThreadCommand` 在调用方事务内执行；失败整体回滚；`command_id` 由 A 生成并返回 | core 白盒 | D-4C-05 |
+| T4C-22 | 会话执行未登记时 POST 仍成功，但 `ClaimThreadCommands` 不返回该命令；登记后返回 | core 白盒 | D-4C-05 |
+| T4C-23 | `RecordThreadCommandDelivered` 幂等（重复登记不改变行），登记后 `ClaimThreadCommands` 不再返回 | core 白盒 | D-4C-05 |
+| T4C-24 | `ThreadCommandAvailable` 只在提交后发出；回滚不留信号 | core 白盒 | D-4C-05 |
+| T4C-25 | SSE 失效提示只在提交后发布；回滚不发；payload 含 `issueId`/`runId`/`lastSeq` 且 `lastSeq` = 提交时 `max(seq)` | 集成 | D-4C-07/08 |
+| T4C-26 | 只有状态变化（无新条目）时仍发布提示，且 `lastSeq` 与上次相同 | 集成 | D-4C-08 |
+| T4C-27 | 事件重复/乱序到达对客户端收敛无影响（游标只由 GET 推进） | 集成 | D-4C-08 |
+| T4C-28 | 接管末条为 `turnEnded` 且无 `queued` ⇒ `idle` + `idle_since`（数据库时间）；有 `queued` ⇒ 保持 `active` | core 白盒 | D-4C-09 |
+| T4C-29 | 批次末条为 `turnEnded`、其后又有记录 ⇒ 最终 `active`；`idle` 不由「批中出现过 turnEnded」触发 | core 白盒 | D-4C-09 |
+| T4C-30 | `idle` 状态下接管新记录 ⇒ `active` 且 `idle_since=NULL`；stale/取消 run 追加条目不写 `thread_state` | core 白盒 | D-4C-09 |
+| T4C-31 | idle 扫描：超窗只放一条 `EndSession{idle_timeout}`；两 tick 也只一条；窗口内 POST 使之 `active` 且不发命令 | core 白盒 + 集成 | D-4C-10 |
+| T4C-32 | 取消：`starting` 直进 `releasing`（无 `ending`/无 `EndSession`）；`running` ⇒ `ending` + `EndSession{cancelled}`；已 `ending` 不重复发 | core 白盒 | D-4C-11 |
+| T4C-33 | 并发 10 场景（§4C.14）逐条断言完整允许结果集 | core 白盒 / 集成（barrier） | §4C.14 |
+| T4C-34 | 终态运行的 GET 返回完整不可变历史；`record` 永不改写、`seq` 永不重编号 | 集成 | D-4C-11 |
+
+**明确不覆盖（保持 `Missing`，不进本轮矩阵）**：`ending → ended`、`discarded` 的写入、交付/释放/`done`
+（Phase 5）；收据 GC / cap（G-015）；多 Controller worker 的命令分区（G-021）；多实例 SSE（G-020）。
+
+### 4C.17 specs 证据纪律（mandate §13）
+
+- 本轮**不**把 Thread GET / POST / SSE / `EnqueueThreadCommand` / `idle` / `SessionEnded` / 交付 / Phase 5 中的
+  **任何**义务标记为 `Covered`。
+- `specs/test-cases/cloud/thread/durable-thread.md`：既有三组义务（条目连续、用户轮次、空闲结束）保持 `Missing`
+  不变；**新增两组** `Missing` 义务——「Thread Reads Are Snapshots Addressed By Sequence Cursors」
+  （GET 快照/游标/limit/并发追加/状态翻转）与「Thread Invalidation Notices Are Hints And Never The Log」
+  （通知形状与提交序 / 丢通知不丢数据 / 重复乱序无害 / 客户端重连与轮询），并在开头登记本节的设计轮状态。
+- `specs/test-cases/cloud/controller-integration/agent-run-executions-and-thread.md`：既有义务状态不变
+  （「批次原子与顺序」`Covered`、「终态顺序」`Partial`、「命令至少投递一次」「授权不持久化」`Missing`）；
+  **新增两行** `Missing` 义务（条目与命令同事务原子 + `503` 回滚可重试；投递身份与轮次身份分离），并登记 4C 设计轮状态。
+- 依据：`Covered` 需要直接证据，而本轮**没有任何实现**；`Partial` 亦不适用（4C 尚无代码）。已批准的 Thread ADR
+  与本设计共同构成"义务已固定、证据未产生"的状态。写入 specs 的仅是**义务与状态**（文档），不含任何测试代码、
+  实现或 ADR 状态变更；位于 `proposed` 的 controller-session ADR **未被触碰**，其核心测试用例也**未**新增（§0.3）。
+- 4B 已 `Covered` 的行**不因 4C 设计而改变**；`SessionEnded` 相关的「终态顺序」保持 `Partial`（Phase 5 未实现）。
+
+### 4C.18 未决项 / 依赖（不假装 closed）
+
+| ID | 状态 | 内容 | WHY | WHAT IS NEEDED TO CLOSE |
+|---|---|---|---|---|
+| G-016 | **CLOSED（本轮，D-4C-01）** | 字面 `thread_state='pending'` 的写入者 | 已选定 B/`StartSession` + 幂等回填，并给出被否决方案的理由 | 已闭；4C 实现时按 T4C-1..T4C-5 取证 |
+| G-017 | **OPEN / NON-BLOCKING / DEPENDENCY** | tail 读、`before` 游标、响应里的 `idleSince` 都是对已批准 Thread D5 字面的**扩展**；`pending` 的时点澄清（D-4C-01）也改动 D4 的措辞 | D5 只定义了 `after`/`limit`（升序），未定义无游标默认、更旧分页与 `idleSince`；实现若带着未记录的扩展落地，就是「静默偏离已批准 ADR」 | 修订 Thread ADR D4/D5（补：`pending` 的物化时点与含义、无游标 = tail、`before`、`idleSince`、`nextCursor`/`prevCursor`），或架构师显式确认该扩展；**对应代码在修订/确认前不应合并** |
+| G-018 | **OPEN / NON-BLOCKING** | 「用户主动结束」的**端点形状**在 ADR 中缺失（D4 有该转换，无 API） | 没有端点 ⇒ `ending` 的 `user_ended` 触发在 4C 不可达；但 idle 超窗与取消两条触发不依赖它 | 决定 route/verb/状态码/幂等（推荐 `POST .../runs/{rid}/thread/end`，202 + `thread_closed` 冲突），并在 OpenAPI 落地 |
+| G-019 | **OPEN / NON-BLOCKING / DEPENDENCY（Phase 5）** | `ending → ended` 与 `queued → discarded` 的写者是 `SessionEnded`（会话终态钩子），未实现 | 终态事实来自 Node 的终态事件接管；4C 若自造路径将产生第二个终态权威 | Phase 5 实现 `SessionEnded` + `delivery`，并复用本设计的列/谓词；证据补 Thread 的「终态顺序」与「轮次结算」义务 |
+| G-020 | **OPEN / NON-BLOCKING / DEPENDENCY** | SSE 失效提示**不保证送达**（进程内 hub、缓冲 8、单实例、可能乱序/重复） | api-boundary ADR 已把 slice 1 限定为单实例、无重放；把它当可靠投递会诱导客户端把流当日志 | slice 1 由客户端「重连 + 周期轮询」兜底（属前端义务）；多实例需换成 broker 并另行决策 |
+| G-021 | **OPEN / NON-BLOCKING** | 多 Controller worker 时 `thread_commands` 的投递分区 | controller-integration ADR 自己列为未决；4C 的缝与表不改变该问题 | 另行决策（按 run 分区/租约归属），4C 只需保证「至少投递一次 + 登记幂等」在单 worker 下成立 |
+| G-012 | **PARTIAL（不变）** | 生产 Controller 环（真正调用 `TakeOverThreadEvents`/`ClaimThreadCommands`） | 4C 只设计 Cloud 侧 | 生产 Controller 实现 |
+| G-015 | **PARTIAL（不变）** | 收据 cap / retention enforcement | 值仍无 ADR 依据 | 批准的 ADR 值 + 实现与证据 |
+| G-001 / G-004 / G-011 | **不变** | 真实 A 控制面 / 全局锁可扩展性 / starting 无效终态的 choose-path | 与 4C 无交叉 | 各自独立轮次 |
+
+### 4C.19 §17 架构自评清单（26 项）
+
+1. 未修改/新增 production 代码 —— 是（本轮只改 `plan/plan.md`、`plan/plan-zh.md` 与 specs 文档）。
+2. 未新增/修改 migration —— 是（D-4C-12 只是**设计**，未创建文件）。
+3. 未新增/修改测试代码 —— 是（T4C-* 全为设计，标 `DESIGNED / MISSING`）。
+4. 未修改 API/proto/generated 代码 —— 是。
+5. 未修改 schema —— 是。
+6. G-016 已解决且给出理由（含被否决方案）—— 是（D-4C-01，§4C.2）。
+7. `pending` 未被伪造为已实现/已覆盖 —— 是（CLOSED 的是**决策**，不是实现；证据义务列为 T4C-1..T4C-5）。
+8. 未引入第二个 `starting→running` 权威 —— 是（§4C.1 冻结，§4C.13 只做 `thread_state` 补充）。
+9. `seq=1` 不可变未被动摇 —— 是（§4C.1、D-4C-02 的 history immutability）。
+10. Node `sequence` 与 Thread `seq` 未混淆 —— 是（D-4C-06 身份表）。
+11. B 未拥有 A 的执行身份 —— 是（`command_id` 由 A 生成，D-4C-05/06）。
+12. ownership 明确（`thread_state`/`thread_entries`/`thread_commands`/SSE 事件）—— 是（D-4C-01/03/05/07）。
+13. caller-owned transaction 明确（缝不开事务、在调用方事务内）—— 是（D-4C-05）。
+14. POST 幂等矩阵完整（7 例）—— 是（D-4C-04）。
+15. SSE 的 durable replay 有明确来源（`thread_entries` + GET）—— 是（D-4C-07）。
+16. 不会永久丢失事件（数据不丢；通知可丢且有兜底）—— 是（D-4C-08）。
+17. `after` 语义在 GET 与 SSE 重连统一 —— 是（D-4C-07，游标只由 GET 推进）。
+18. `idle`/`ending`/`ended` 的权威明确 —— 是（D-4C-09/10；`ended` = `SessionEnded` = Phase 5）。
+19. 取消/终态与 4B 的 cancel-first 语义一致 —— 是（D-4C-11 表格第 2 行）。
+20. schema 决策明确（需要 migration，逐项列出）—— 是（D-4C-12）。
+21. 测试设计矩阵完整（含真实 PostgreSQL 并发）—— 是（T4C-1..T4C-34，§4C.16）。
+22. 未过早标记 `Covered` —— 是（§4C.17）。
+23. 两个 plan 文件都更新 —— 是（`plan.md` 本节 + §7/§12/§13/§15/§16；`plan-zh.md` §12/§13/§15 镜像）。
+24. 未覆盖既有未提交修改、未删除/还原工作区改动 —— 是（未执行任何 git 破坏性命令）。
+25. 未执行 `git add`/`commit`/`push`/PR/`reset`/`restore`/`checkout .`/`clean`/`stash` —— 是。
+26. 未把 `proposed` ADR 当作已批准 —— 是（controller-session ADR 仍 `proposed`，本设计**不依赖**它：
+    D-023 的串行化证明只用了已批准事实；4C 的串行化同样只用全局锁 + PK，见 §4C.14）。
+
+### 4C.20 最终裁定
+
+**`PHASE_4C_DESIGN_DONE / PHASE_4C_ARCHITECTURALLY_REVIEWABLE / READY_FOR_PHASE_4C_IMPLEMENTATION`**
+
+- 附 **NON-BLOCKING OPEN**：G-017（D5 的 tail/`before`/`idleSince` 扩展与 D4 的 `pending` 时点澄清 —— 需 ADR 修订
+  或架构师确认，**对应代码在修订/确认前不应合并**）、G-018（用户结束端点形状）、G-019（Phase 5 的
+  `SessionEnded`/`discarded`）、G-020（SSE 通知不保证送达 ⇒ 客户端轮询）、G-021（多 worker 命令分区）。
+- **无 BLOCKER**：G-016 已 CLOSED；4C 不依赖 `proposed` 的 controller-session ADR；4B 的冻结基线未被改动。
+- 本轮**未**进入实现：没有 production 代码、migration、测试或 API 变更，也没有任何 git 写操作。
+
+---
+
+## Phase 4C Readiness — Architecture Review & Implementation Slice Plan（REVIEW / DESIGN ONLY，2026-10-08）
+
+> 本轮是 **Architecture Review + Implementation Readiness**：只核验、只登记、只切分。**未改** production 代码、
+> migration、proto、generated 或测试实现；**未改**任何 ADR 文件或其 `status`。§4C.0–§4C.20 的设计记录保持原样。
+
+### 4R.0 结论摘要
+
+**`READY_FOR_PHASE_4C_IMPLEMENTATION_SLICE_1`** —— Slice 1（migration 0022 + `pending` 物化）**不依赖**任何未决项，
+可直接开工。其余切片按 §4R.5 的依赖序推进；**S2b 需要先关闭 G-017**，**S7 需要先关闭 G-018**，**S6 的「仅状态变化也发布」
+需要 G-023**，**S1 的 `thread_entries.status` 需要 G-022**（S1 可先按 §4R.4 的迁移安全要求落地，但 ADR 修订须同批）。
+
+### 4R.1 核验（只读）
+
+**事实来源**：`plan/plan.md`、`plan/plan-zh.md`；`specs/decisions/cloud/thread/0-durable-agent-thread-with-user-turns.md`
+（`status: approved`）；`specs/decisions/cloud/controller-integration/20260928-agent-run-executions-thread-and-upload-grants.md`
+（`status: approved`）；4B production（`internal/core/agent_run_thread.go`、`agent_run_thread_takeover.go`、
+`agent_run_session_start.go`、`internal/controlgrpc/agentruns.go`）；migration 0018–0021；
+`proto/ora/cloud/internal/v1/agent_runs.proto`、`signals.proto`。
+
+**只读 git**：`cloud` 有 4B 轮的未提交修改（6 modified：`cmd/server/main.go`、`integration/migration_upgrade_path_test.go`、
+`internal/controlgrpc/server.go`、`internal/core/agent_run_settle.go`、`internal/core/control.go`、
+`internal/core/node_executions_db_test.go`；6 untracked：`integration/agent_run_thread_takeover_test.go`、
+`internal/controlgrpc/agentruns.go`、`internal/core/agent_run_thread.go`、`agent_run_thread_takeover.go`、
+`agent_run_thread_takeover_db_test.go`、`migrations/0021_node_event_receipts.sql`）。`specs` 有 3 modified。
+`cluster` 根与 `desktop` 干净。**本轮未触碰上述任何文件的历史，未执行任何 git 写操作。**
+
+**本轮新确认的事实**（首次核验，直接决定切片计划）：
+
+1. **proto 已完成**：`agent_runs.proto` 已声明 `ClaimThreadCommands` / `RecordThreadCommandDelivered`，
+   以及 `ThreadCommand{command_id, run_id, execution_id, target, oneof SubmitUserTurn|EndSession}`、
+   `SubmitUserTurn{turn}`、`EndSession{reason}`；`signals.proto` 已有 `ThreadCommandAvailable{run_id}`。
+   ⇒ **Phase 4C 不需要任何 proto 改动**（与 controller-integration D3「proto 已合并」一致）。
+2. **`thread_entries`（0018）没有 `status` 列**；`issue_runs.thread_state` / `idle_since` 已存在（值集
+   `pending|active|idle|ending|ended`）；`thread_commands` 表**不存在**。
+3. `SpaceEvent` 只有 `{type, spaceId, projectId?, version?}`（`internal/core/hub.go`）；`PublicRequest` 有
+   `After`/`Limit` 但**没有 `Before`**（`internal/core/public.go`）；router 无任何 thread 路由
+   （`internal/api/router/router.go`，runs 路由在 :70–:72）。
+4. `Store.transact` 的 `pg_advisory_xact_lock(67420911)` 覆盖全部读写（`internal/core/store.go:267`）。
+5. `runWorkspaceLive(t, wid, runID)` 存在（`internal/core/agent_run_session_start.go:69`），语义为
+   「workspace 属于该 run 且 `deleted_at IS NULL`」——D-4C-03 的接受谓词可直接复用它。
+
+### 4R.2 G-017 决议：已批准 / 扩展 的逐条切分
+
+对照 Thread **D5/D4 的字面文本**（不读设计意图）：
+
+| 设计条款 | ADR 字面依据 | 判定 |
+|---|---|---|
+| `GET .../runs/{rid}/thread` 路由 | D5 点名 | **已批准** |
+| `after={seq}` | D5 点名 | **已批准** |
+| `limit`，上限 500 | D5 点名（上限 500） | **已批准** |
+| 响应含条目 + `threadState` | D5 点名 | **已批准** |
+| 按 `seq` 升序 | D5 点名 | **已批准** |
+| 事件 `issue_run.thread_appended{issueId, runId, lastSeq}` | D5 **逐字点名这三个字段** | **已批准**（设计轮的「给 `SpaceEvent` 加三个可选字段」是实现缺口，不是新决策） |
+| 事件只是失效提示、权威经 REST 重取 | D5 + api-boundary | **已批准** |
+| 输入框在 `pending|active|idle` 可用 | D5 点名 | **已批准** |
+| `pending` 由 `StartSession` 物化 | D4 表格行 1 | **语义已批准；写入时点是澄清**（见下） |
+| 无游标 = **tail 读** | D5 未定义无游标行为 | **扩展 ⇒ 需 ADR 修订** |
+| `before=N` | D5 只定义 `after` | **扩展 ⇒ 需 ADR 修订** |
+| 响应字段 `idleSince` | D5 只说「条目与 `threadState`」 | **扩展 ⇒ 需 ADR 修订** |
+| `nextCursor`/`prevCursor` | D5 未定义响应游标字段 | **扩展 ⇒ 需 ADR 修订** |
+| 仅 `status`/`thread_state` 变化也发 `thread_appended` | D5 说「**条目写入**事务提交后…发布」 | **扩展 ⇒ 需 ADR 修订（G-023）** |
+| POST 在 `cancel_requested_at` 已置时拒绝 | D3 说「`pending|active|idle` 时接受」 | **扩展 ⇒ 需 ADR 修订（G-024）** |
+| `thread_entries.status` 列 | D1 **逐项列举 `thread_entries` 的列，无 `status`** | **扩展 ⇒ 需 ADR 修订（G-022）** |
+
+**`pending` 的写入时点（澄清，非扩展）**：D4 行 1 的「会话执行已登记」有两种读法——(a) Cloud 在 `StartSession`
+声明 `agent_session` 工作项（Phase 3A）；(b) Controller 经 `RecordDispatch` 登记 `execution_id`（Phase 4A）。
+设计轮选 (a)。**可观察差异仅在于 `pending` 何时可见**：(a) 在 `phase='starting'` 一开始即可见；(b) 会留下一段
+`NULL` 窗口。两者都不改变任何转换集合，也不产生第二个写者。**判定：澄清**，但**必须**随 G-017 的 ADR 修订一并
+写明，否则 D4 的措辞与实现长期不一致。
+
+**结论**：G-017 不是一个事项，而是 **4 项响应形状扩展 + 1 项措辞澄清 + 2 项本轮新发现（G-023/G-024）**。
+在修订落地前，**只有「已批准子集」可直接实施** ⇒ 切片 S2 拆成 S2a / S2b。
+
+### 4R.3 G-018 决议：用户主动结束 Thread 的 API 契约
+
+Thread D4 **已批准**该转换与命令（「用户点击『结束』… ⇒ `ending`，放出 `EndSession{reason}`」，
+`reason ∈ user_ended|idle_timeout|cancelled`）；controller-integration D3 已批准 `EndSession{command_id, run_id, reason}`
+的线上形状。**缺的只是公开端点形状**。以下契约作为**待批准的 ADR 补充**（本轮不改 ADR 文件）：
+
+| 项 | 契约 |
+|---|---|
+| Endpoint / method | `POST /api/v1/tenants/{tid}/issues/{iid}/runs/{rid}/thread/end` |
+| 请求体 | **无**（空 body）。**不**接受 `reason`（服务端固定 `user_ended`）；未知字段沿用严格解码 ⇒ `400` |
+| 幂等 | **必须** `Idempotency-Key`，与 POST messages 同一机制、同一 `idempotency_records` 表；同 key 重放 ⇒ 回放原响应（即使 thread 已 `ending`） |
+| 权限 | 与该 Issue 的读/评论权限一致（活动 Space 成员）；跨 tenant / 跨 Issue / 软删 run ⇒ `404 not_found` |
+| 接受条件 | `thread_state ∈ {pending, active, idle}` ∧ `cancel_requested_at IS NULL` ∧ workspace live |
+| 成功 | **`202 Accepted`** + `{threadState: "ending"}`（不返回 201：没有创建用户可见资源） |
+| `EndSession` 命令 | **同一事务**内 `enqueueThreadCommand(t, run, EndSession{reason: 'user_ended'})`，**恰好一条** |
+| 与 cancel 的竞态 | 结束 ≠ 取消。结束只放 `EndSession{user_ended}`，run 照常交付；取消写 `cancel_requested_at`（D-4C-11）。全局锁 ⇒ 全序：取消先 ⇒ 结束得 `409 thread_closed`；结束先 ⇒ 取消时已是 `ending` ⇒ **不**再放第二条 `EndSession`，只写 `cancel_requested_at` |
+| 与 idle 超窗的竞态 | 两条路径都 CAS `thread_state IN ('pending','active','idle') → 'ending'`，**影响行数必须 = 1**；0 行 = 别方先赢 ⇒ 本路径**不发** `EndSession`：对用户返回 `409 thread_closed`，对扫描器静默跳过 |
+| 错误 | 缺 key `400 idempotency_key_required`；形状非法 `400 invalid_json`；`ending|ended` / 已取消 / workspace 不 live ⇒ `409 thread_closed`；不存在 ⇒ `404 not_found`；缝未接线 ⇒ `503 thread_command_unavailable`；不变量破坏（影响行数 ≠ 1 而事前判定可写）⇒ `500` |
+| `ending → ended` | **仍归 Phase 5**（`SessionEnded`）；本轮与整个 4C 都**不实现** |
+| 测试义务 | T4C-32（三分支）、T4C-33（场景 5/6/7/8）+ **新增 T4C-35**（202 / 409 / 幂等回放 / 与 cancel 及 idle 的两种提交顺序） |
+
+**`user_ended` 触发在 S7 之前不可达**；S1–S6 不依赖它。
+
+### 4R.4 D-4C-01..D-4C-12 复核
+
+| 决策 | 复核结论 |
+|---|---|
+| **D-4C-01** `pending` 物化 | **一致**；写入时点属澄清（§4R.2）。**新增实现要求**：migration 0022 在加 `thread_entries.status` 的 `CHECK ((source='user') = (status IS NOT NULL))` 之前，必须显式处理既有 `source='user'` 行——当前**不可能存在**（4B 无用户条目写者，seq=1 是 `source='system'`），但迁移**不得**依赖「碰巧没有数据」：要么先 `UPDATE ... SET status='queued' WHERE source='user'` 再校验，要么把该前提写成迁移注释并附一条断言查询 |
+| **D-4C-02** GET | **部分已批准**；扩展部分见 G-017 |
+| **D-4C-03** POST | **一致**，但「`cancel_requested_at` 已置 ⇒ 拒绝」与 D3 字面「`pending|active|idle` 时接受」冲突 ⇒ **G-024**。该冲突是**真实可达**的：取消发生在 `provisioning|starting` 时 run 直进 `releasing` 而**不**写 `ending`（IssueRun D4/D6、D-4C-11），此时 `thread_state` 可能仍是 `pending` 而 `cancel_requested_at` 已置 |
+| **D-4C-04** 幂等 | **一致**（根 D3「重传返回原结果」）；不新增列 |
+| **D-4C-05** 缝 | **逐字符合** controller-integration D6 的 `enqueueThreadCommand(t, run, command) → command_id` 与「函数都在调用方的事务内执行」 |
+| **D-4C-06** 身份 | **一致**（proto 已把 `command_id` 与 `turn_id` 分开；`execution_id` 由 Controller 生成） |
+| **D-4C-07** SSE 来源 | **一致**（D5 逐字给出事件三字段）；「只有 GET 推进游标」与 D5「事件只是失效提示」一致 |
+| **D-4C-08** 序/重/丢 | 「仅状态变化也发布」与 D5 字面冲突 ⇒ **G-023**；其余（不承诺顺序、重复无害、数据不丢通知可丢、客户端轮询兜底）与 D5/api-boundary 一致 |
+| **D-4C-09** active/idle | **一致**；「批次末条记录决定」是对 D4「接管到 `TurnEnded`」在批量下的**实现级澄清**，不改变转换集合 |
+| **D-4C-10** ending/ended | **一致**；端点形状缺 ⇒ G-018；`ended` = `SessionEnded` = **Phase 5 保持** |
+| **D-4C-11** cancel/terminal | **一致**（IssueRun D4/D6）；`starting` 取消直进 `releasing` 且无 `ending` 是 IssueRun 已批准规则，**不违反** 4B 的 cancel-first |
+| **D-4C-12** 迁移 | `thread_commands` **逐列符合** D6（`id uuid`/`run_id`/`kind`/`body jsonb`/`created_at`/`delivered_at`/`delivered_execution_id`）；`thread_entries.status` 是 D1 列清单之外的**扩展** ⇒ **G-022**；`pending` 回填与 `idle_since` 索引为实现级 |
+
+**未发现**：第二个 `starting→running` 权威、A/B ownership 越界、caller-owned transaction 违背、advisory lock 变更、
+`seq` 连续性破坏、4B 冻结基线漂移。**已发现 3 项须先登记再改设计的事项（G-022/G-023/G-024）**，按 mandate §4
+登记为 Gap，**不静默修改设计**。
+
+### 4R.5 Implementation Slice Plan（7 切片，各自可独立验收）
+
+依赖：`S1 → {S2a, S3}`；`S3 → S4`；`S1 → S5`；`S5 → S6`；`S3 → S7`。S2b 需 G-017，S7 需 G-018。
+
+**S1 — Migration 0022 + `pending` 物化**
+
+- **Scope**：迁移 0022（`thread_commands` 表 + FK/CHECK/部分索引；`thread_entries.status` 列 + CHECK + 部分索引；
+  `pending` 幂等回填；`issue_runs (idle_since) WHERE thread_state='idle'` 部分索引）；`StartSession` 在同一事务内物化 `pending`。
+- **Files**：`internal/core/migrations/0022_thread_api_and_commands.sql`（新）、`internal/core/agent_run_session_start.go`（改）、
+  `integration/migration_upgrade_path_test.go`（加 0022 fresh+upgrade）、`internal/core/agent_run_session_start_db_test.go`（T4C-1..4）。
+- **Migration 影响**：**是**，0022。必须「全新库 + 从 0021 升级」双绿、可重复执行、回填幂等；`status` 的 CHECK 按 §4R.4 的
+  安全要求处理既有行。
+- **Transaction contract**：`StartSession` 既有事务；`UPDATE issue_runs SET thread_state='pending' WHERE id=$1 AND thread_state IS NULL`，
+  **断言影响行数 = 1**；seq=1 影响 0 行 ⇒ 早退（**不**写 `thread_state`）；A 缝错误 ⇒ 整体回滚。
+- **Ownership contract**：B 写业务表 `issue_runs`；`thread_commands` 在本切片只创建、不写入（A 拥有）。
+- **T4C**：T4C-1、2、3、4、5。
+- **Regression**：全部 T4B-*；`TestThreadTakeoverActivatesPendingThread`（以字面 `'pending'` 预置）；`TestMigration0021*`；
+  `stripAgentRunSkeleton` 的 run 资源形状不变。
+- **Exit criteria**：双迁移路径绿；`StartSession` 提交后 `thread_state='pending'`；running 权威与 `seq` 分配**零变化**。
+
+**S2a — Thread GET（仅已批准子集）**
+
+- **Scope**：`GET .../runs/{rid}/thread?after={seq}&limit={n}`，返回 `{items, threadState}`，按 `seq` 升序，`limit` 上限 500。
+- **Files**：`internal/api/router/router.go`、`internal/core/public.go`（dispatch + `readPublic` 分支）、
+  `internal/core/thread_read.go`（新）、`internal/contract/*`、`api/openapi.json` + `frontend/src/api`（生成物，不得手改）。
+- **Migration 影响**：无。**Transaction contract**：单次 `Store.transact` 只读，无写。
+- **Ownership contract**：只读 B 表（`thread_entries` + `issue_runs`）。
+- **T4C**：T4C-7、T4C-9（`after`/`limit` 部分）、T4C-10、T4C-11、T4C-12。
+- **Regression**：run 资源字段集不变；既有 `page`/`window` 语义不变（**不得**复用或放宽）。
+- **Exit criteria**：`after`/`limit` 契约与错误码正确；授权与评论一致；run 资源逐字节不变。
+- **依赖**：无（G-017 未决不影响该子集）。
+
+**S2b — GET 扩展（tail / `before` / `idleSince` / 游标）**
+
+- **Scope**：无游标 = tail 读；`before={seq}`；响应 `idleSince`；`nextCursor`/`prevCursor`；`PublicRequest.Before` 与
+  `before` 查询参数解析；`400 invalid_pagination`（`after`+`before` 并存、`limit` 越界）/`400 invalid_cursor`。
+- **前置**：**G-017 的 ADR 修订或架构师确认已落地**；未落地**不实现**。
+- **Files**：`internal/core/public.go`、`internal/core/thread_read.go`、`internal/api/router/router.go`、OpenAPI + 生成物。
+- **T4C**：T4C-6、T4C-8、T4C-9（游标部分）。
+- **Exit criteria**：双向翻页可用；游标不透明；扩展已记入 ADR。
+
+**S3 — `thread_commands` 控制面 + A 缝（无公开 API）**
+
+- **Scope**：`EnqueueThreadCommand` 真实实现（写 `thread_commands`、返回 `command_id`）；`ClaimThreadCommands`
+  （纯读、按 run 分组、组内创建序、要求 lease epoch、返回会话 `execution_id` 与目标 Node）；`RecordThreadCommandDelivered`
+  （CAS `delivered_at IS NULL` + 影响行数校验 + 重复登记幂等）；`Watch` 的 `ThreadCommandAvailable{run_id}`；
+  gRPC 三个方法的映射与接线。
+- **Files**：`internal/core/agent_run_control_plane*.go`（新/改）、`internal/controlgrpc/agentruns.go`（改）、
+  `internal/controlgrpc/server.go`、`cmd/server/main.go`。
+- **Migration 影响**：无（表在 S1）。**Proto**：**无需改动**（§4R.1 事实 1）。
+- **Transaction contract**：缝在**调用方事务**内执行、不自开事务、不做外部 IO；claim 纯读；登记为单行一次写 + 影响行数校验。
+- **Ownership contract**：A 拥有 `thread_commands`；B 只能经缝写入。
+- **T4C**：T4C-21、22、23、24。
+- **Regression**：`execution_work`/`node_executions`/收据路径不变；4B 的 `agent_work_*` 不变。
+- **Exit criteria**：「至少投递一次 + 登记幂等」成立；会话执行未登记时命令不返回；`ThreadCommandAvailable` 只在提交后发出。
+
+**S4 — Thread POST**
+
+- **Scope**：`POST .../thread/messages`（body 白名单与严格解码、64 KiB、接受矩阵、条目 + `thread_state` CAS + A 缝同事务、幂等）。
+- **前置**：S3。
+- **Files**：`internal/api/router/router.go`、`internal/core/public.go`、`internal/core/thread_post.go`（新）、
+  `internal/contract/*`（`content_too_large`、`thread_closed`、`thread_command_unavailable`）、OpenAPI + 前端生成物。
+- **Migration 影响**：无。**Transaction contract**：单一 `Store.transact`；条目与命令同生共死；幂等记录同事务。
+- **Ownership contract**：B 写 `thread_entries` 与 `issue_runs.thread_state`；A 经缝写 `thread_commands`。
+- **T4C**：T4C-13..18（G-024 落地后同步接受矩阵行）。
+- **Regression**：run 资源不变；通用幂等前置/后置行为不变。
+- **Exit criteria**：201/404/409/503 分类正确；缝失败整体回滚且同 key 重试是干净首发；`turn_id` 由 Cloud 生成并可见。
+
+**S5 — 接管 echo→`delivered` + `active`/`idle` 生命周期**
+
+- **Scope**：echo 谓词从「仅首 prompt」推广到**任意** Cloud 生成的用户轮次（不新增条目、不分配 seq、把该行置 `delivered`）；
+  `idle` 判定（批次**末条**被接管记录为 `turnEnded` 且无 `status='queued'` 用户轮次 ⇒ `idle` + `idle_since=now()`）；
+  `idle → active`（新记录到达，清 `idle_since`）。
+- **Files**：`internal/core/agent_run_thread.go`。
+- **Migration 影响**：无。**Transaction contract**：既有接管事务；CAS 影响行数硬化（事前判定可写而 0 行 ⇒ 回滚）。
+- **Ownership contract**：B 写 `thread_entries`（仅 `status` 单向）与 `issue_runs.thread_state`。
+- **T4C**：T4C-19、20、28、29、30。
+- **Regression**：全部 T4B-*（尤其 echo-only 批次**不**进 running；stale/cancel/无效 workspace 仍写条目但跳过 CAS）。
+- **Exit criteria**：4B 冻结基线**零变化**；`delivered` 不回退；`idle_since` 用数据库时间；门控不满足时仍追加条目。
+
+**S6 — SSE 失效提示**
+
+- **Scope**：`SpaceEvent` 新增可选 `issueId`/`runId`/`lastSeq`（`omitempty`，既有事件 JSON 逐字节不变）；
+  提交后发布 `issue_run.thread_appended`。
+- **前置**：S5（发布点存在）；「仅状态变化也发布」需 **G-023** 落地，未落地时**只对「有新条目」的提交发布**。
+- **Files**：`internal/core/hub.go`、发布点（`internal/core/public.go`、`internal/core/agent_run_thread.go`）、
+  `internal/api`（SSE 序列化）。
+- **Migration 影响**：无。**Transaction contract**：发布**只在提交后**；回滚零事件。
+- **Ownership contract**：B 的提交后副作用；不写任何表。
+- **T4C**：T4C-25、T4C-26（受 G-023 约束）、T4C-27。
+- **Regression**：`space-api-and-events.md` 的 `Covered` 用例不回归；`project.created` 等既有事件负载不变。
+- **Exit criteria**：事件形状与提交序正确；被拒绝的写入零事件。
+
+**S7 — `ending`：用户结束端点 + idle 超窗扫描**
+
+- **Scope**：`POST .../thread/end`（§4R.3 契约）；idle 超窗派发循环 + 配置项 `issue_runs.thread_idle_timeout`（默认 15 分钟，
+  按**数据库时间**判定）；三条 `ending` 路径各自单事务且**恰好一条** `EndSession`。
+- **前置**：S3（缝）、S5（`idle`/`idle_since` 存在）、**G-018 批准**。
+- **Files**：`internal/api/router/router.go`、`internal/core/thread_end.go`（新）、`internal/core/agent_run_dispatch.go`
+  或同级（扫描循环）、`cmd/server/main.go`。
+- **Migration 影响**：无（`idle_since` 索引在 S1）。
+- **Transaction contract**：每条路径单事务；CAS `thread_state IN ('pending','active','idle') → 'ending'` + 影响行数 = 1 +
+  同事务 `enqueueThreadCommand(EndSession{reason})`。
+- **Ownership contract**：B 写 `thread_state`；A 经缝写命令。
+- **T4C**：T4C-31、32、33、34 + **T4C-35**（新增，结束端点）。
+- **Regression**：POST 的接受矩阵（`ending` 后一律 409）；4B cancel-first 语义。
+- **Exit criteria**：三触发各自恰好一条 `EndSession`；两 tick 不重复；`ending` 后 POST 一律 `409 thread_closed`；
+  **`ending → ended` 仍未实现**（Phase 5）。
+
+### 4R.6 依赖与风险
+
+| # | 依赖 / 风险 | 影响切片 | 处置 |
+|---|---|---|---|
+| 1 | **G-017**（GET 扩展需 ADR 修订） | S2b | 先取修订或架构师确认；S2a 不受阻 |
+| 2 | **G-018**（用户结束端点形状） | S7 | 本轮的 §4R.3 契约即提案；批准后落地 |
+| 3 | **G-022**（`thread_entries.status` 不在 D1 列清单） | S1 | 迁移可先落地，但 ADR 修订须同批，否则为静默偏离 |
+| 4 | **G-023**（无新条目也发事件，与 D5 字面冲突） | S6 | 未落地前只对「有新条目」的提交发布 |
+| 5 | **G-024**（POST 在 `cancel_requested_at` 已置时拒绝，与 D3 字面冲突） | S4 | 修订 D3 的接受谓词；矩阵行同步 |
+| 6 | **G-019**（`ended`/`discarded` = Phase 5） | S5、S7 | 4C 只到 `ending`；**不得**自造第二条终态路径 |
+| 7 | **G-020**（SSE 通知不保证送达） | S6 | 客户端重连 + ≥30s 轮询（前端义务） |
+| 8 | **G-021**（多 worker 命令分区） | S3 | 只保证单 worker 下「至少一次 + 登记幂等」 |
+| 9 | 迁移 CHECK 与既有行 | S1 | 按 §4R.4 的安全要求处理；不得依赖「碰巧没有数据」 |
+| 10 | S2 分两次改响应形状 | S2a/S2b | 若 G-017 快速确认，可直接做完整 S2 |
+| 11 | idle 扫描与全局锁 | S7 | 逐 run **短事务**，扫描节奏远小于窗口；不在扫描里做外部 IO |
+| 12 | 4B 未提交修改与 4C 改动同文件 | S1、S5 | `agent_run_thread.go`/`agent_run_session_start.go` 等文件已有未提交内容；实现轮必须在**当前工作区**上增量修改，不得覆盖 |
+| 13 | `thread_commands` 无重复投递历史 | S3 | ADR 已认可「以第一次登记为准」（Node 去重使重复投递无副作用） |
+| 14 | **controller-session ADR 仍 `proposed`** | 全部 | **不是**依赖：4C 的串行化只用全局锁 + PK（§4C.14） |
+
+### 4R.7 待批准的 ADR 修订（本轮不修改任何 ADR 文件）
+
+| # | 目标 | 修订内容 |
+|---|---|---|
+| A1 | Thread **D1** 列清单 | 增加 `thread_entries.status`（`queued|delivered|discarded`，仅 `source='user'` 非空）——对应 G-022 |
+| A2 | Thread **D3** 接受谓词 | 把「`pending|active|idle` 时接受」改为「且 `cancel_requested_at IS NULL`、且运行 Workspace 可用」——对应 G-024 |
+| A3 | Thread **D4** 措辞 | 写明 `pending` 的物化时点 = Cloud 声明会话执行（`StartSession`）时——对应 G-017 的澄清项 |
+| A4 | Thread **D5** 读取与事件 | 补：无游标 = tail 读、`before`、响应 `idleSince`、`nextCursor`/`prevCursor`；并把事件发布条件从「条目写入事务提交后」改为「任何改变该运行 Thread 可见状态的提交之后（含条目 `status` 与 `thread_state`）」——对应 G-017 的扩展项与 G-023 |
+
+**批准方式**：由架构师在 `specs` 仓库提交 Thread ADR 的后续决策文件（`YYYYMMDD-*.md`，按 specs 的连续 ADR 规则），
+或在评审中显式确认；**本轮不创建该文件、不改 `status`**。
+
+### 4R.8 Git（本轮）
+
+- `git add` / `commit` / `push` / PR：**未执行**。
+- `reset` / `restore` / `checkout .` / `clean` / `stash`：**未执行**。
+- 既有未提交修改（cloud 6 modified + 6 untracked；specs 3 modified）：**原样保留，未被覆盖**。
+- 本轮唯一写入：`plan/plan.md`、`plan/plan-zh.md`（设计/计划文档，plan §14 允许）。
+
+---
 
 ## 12. Decision Log
 
@@ -1621,18 +2803,264 @@ content, same key); the same key with different content is `CONFLICT` and the or
 This is **not** derived by guessing from `thread_entries(run_id, seq)`; both receipt and entry must be migrated
 (`node_event_receipts`) before Phase 4B can guarantee Node-restart replay alignment.
 
-### D-023 — Thread `seq` allocation is `MAX(seq)+1` inside the takeover transaction（Phase 4 decision proposal, unapproved）
+### D-023 — Thread `seq` allocation is `MAX(seq)+1` inside the takeover transaction（Phase 4B decision, **ACCEPTED**）
 
-Status: Proposed for approval; not implemented
+Status: **Accepted** (architecture resolution round, 2026-09-30); implementation deferred to Phase 4B.
 
-Thread D1 fixes「Cloud 在写入事务中分配、seq 连续」but does not prescribe the mechanism. Proposal: in the
-`ThreadEventsTakenOver` takeover transaction, allocate `seq` from 2 upward as `MAX(seq)+1` per inserted entry. Safety
-rests on (a) the control plane serializing per execution with at most one in-flight batch (controller-session D2, so
-sequences always arrive in order) and (b) cross-run/cross-batch serialization by the existing global advisory lock
-(`transact` baseline, Phase 1), so `MAX(seq)` re-reads inside the lock race no other Writer. Chosen over a counter
-column / separate sequence state because it adds no table and reuses the established serialization; a
-deterministic-from-Node-order allocation is rejected because (seq=1 is a Cloud system turn) it cannot stay gapless
-under replay. Approve before Phase 4B implementation.
+Thread D1 fixes「Cloud 在写入事务中分配、seq 连续」but does not prescribe the mechanism. **Accepted**: in the
+`ThreadEventsTakenOver` takeover transaction, allocate `seq` from 2 upward as `MAX(seq)+1` per inserted entry
+(seq=1 is the reserved first prompt; G-009). **Serialization proof — no dependency on the `proposed`
+controller-session ADR** (superseding the earlier rationale): (1) a run has at most one session execution
+(controller-integration D1「一个运行同时至多一个会话执行」, D-021, `execution_work_unregistered_once`), so a run
+has one takeover stream; (2) every takeover runs inside `Store.transact` under the global advisory lock
+(`pg_advisory_xact_lock`, Phase 1 baseline), so no two takeovers can compute `MAX(seq)` concurrently; (3)
+`PRIMARY KEY (run_id, seq)` is the final storage-level barrier rejecting any duplicate. Chosen over a counter
+column / separate sequence state because it adds no table and reuses the established serialization (user-turn
+entries written via the same `transact` share the allocator, so interleaving stays gapless); a
+deterministic-from-Node-order allocation is rejected because seq=1 is a Cloud system turn and it cannot stay
+gapless under replay. Node `sequence` (per-execution, `node_event_receipts`) and Thread `seq` (run-scoped) are
+**different sequence spaces** and must not be conflated (see §4B.5). See §4B.5/§4B.11.
+
+### D-024 — Phase 4B session-start authority, `thread_state` mapping, echo dedup, empty batch（Phase 4B decision）
+
+Status: Accepted (architecture resolution round, 2026-09-30); implementation deferred to Phase 4B.
+
+- **running authority** = the first **real Node Thread record** taken over by `TakeOverThreadEvents`, with the
+  `ThreadEventsTakenOver` hook committing in the same transaction (IssueRun D3「首条 Thread 事件…被接管」;
+  controller-integration D6). **No synthetic `session_started` control event exists**: the Node emits only
+  `ThreadEvent{record}` (Node protocol D2), whose `record` is an `ora-history` line (Thread D2). Mandate §4 option B.
+- **`thread_state`**: `pending` = "session execution registered, no record taken over yet" (Thread D4); the first
+  Node record takeover ⇒ `active`. 4B writes only `pending→active`; `idle/ending/ended`/`idle_since` belong to 4C
+  (user-turn queue) and the session-terminal hook.
+- **echoed first prompt dedup** (locked fact C): an event with `turn_id == initial_turn.turn_id` writes a receipt
+  but allocates **no** thread `seq` and inserts **no** entry (seq=1 already presents it); seq=1 content stays
+  immutable. 4B adds no `delivered` column (that is 4C's `SubmitUserTurn` concern).
+- **empty batch** (`events == []`) is rejected `ABORTED`: no receipt, no `last_event_sequence` advance, no hook, no
+  `phase/thread_state` change.
+
+### D-025 — Phase 4B Thread event ceiling and `node_event_receipts` retention initial values（Phase 4B decision, G-015）
+
+Status: Accepted as initial configurable defaults (Phase 4B); G-015 stays PARTIAL until enforcement + evidence land.
+**Not implemented in this round**: the values have no approved ADR/spec basis, so enforcing them would be
+unapproved behavior; the migration ships the `created_at` index the future sweep needs and nothing else.
+
+Per-run (per-execution) non-terminal event ceiling default **200,000** (config `thread_event_cap`); the check point
+is `node_executions.last_event_sequence` (contiguous ⇒ count = max sequence); a non-terminal takeover at the cap is
+rejected `ABORTED` (no silent drop). `node_event_receipts` retention default **30 days after the run reaches `done`**
+(config `node_event_receipts_retention`), pruned by the dispatch loop; receipts are never pruned while the run is
+live (Node replay needs them). Both are versioned defaults, not hard contracts. See §4B.10.
+
+### D-026 — Phase 4B implementation details: record `kind` source, batch bound, fail-closed surfaces, `pending` representation（Phase 4B implementation round, 2026-09-30）
+
+Status: Accepted (implementation round). These are the concrete choices the implementation had to make where the
+approved ADRs fix the obligation but not the mechanism.
+
+- **Thread entry `kind`** is the record's own `type` tag, validated against the closed set
+  `{meta, update, turnEnded, agentSwitched, handoffDelivered, gap}`. Authority: Thread D2 ("`kind` 取其类型标签";
+  Cloud does not parse business fields) and the record format's owner, desktop `crates/history/src/record.rs`,
+  whose `HistoryRecord` is `#[serde(tag = "type", rename_all = "camelCase")]` — those six tags are therefore the
+  "known set" D2 requires. Cloud must not derive a finer kind: that would mean reading `update`'s payload, which
+  D2 forbids. An unrecognized tag fails closed (rolls the batch back; the Node replays).
+- **Batch bound** is the approved wire contract's `1..64` (controller-integration D2). This is explicitly **not**
+  the deferred per-run `thread_event_cap` of D-025.
+- **Fail-closed surfaces** (§13/§17/§20): an unknown run, an execution that is not this run's `agent_session` work,
+  a missing seq=1, an unregistered execution and an unknown record `kind` are **invariant errors** — the hook
+  returns an error, A panics `databaseFailure`, the transaction rolls back and the Controller receives
+  `UNAVAILABLE` ("retry later", so the Node replays). Client-class faults (empty batch, sequence gap, receipt
+  payload conflict, wrong execution, unknown execution) are raised by A as `400/409/404` before any write. The two
+  classes differ deliberately: a `CONFLICT` tells the Controller to drop the batch, so it must never be used for a
+  condition the Node must retry.
+- **Stale/cancel/workspace-invalid runs still take the records over**: the Thread entries are appended and the
+  receipts commit (the batch was delivered and will be acked), but the `starting→running` CAS is skipped, so the
+  run stays `starting` (`thread_state` unchanged). Rationale: Thread D1 records every taken-over Node record, and
+  silently dropping a receipted event would lose user-visible conversation the Controller already acknowledged.
+  The consequence — a G-011 invalid-workspace run can hold Node entries while `thread_state` is still `pending` —
+  is recorded in G-016 and is G-011's, not a new lifecycle rule.
+- **`pending` has no writer** (see G-016): 4B writes only `thread_state='active'`; the pre-state is whatever the
+  run held, which today is `NULL`. §29's "write only the `pending→active` transition" is honored literally.
+- **Supersession**: §4B.3's table row "接管到任意 Node 记录（含 echo） ⇒ `active`" is superseded by mandate §31 —
+  an **echo-only** batch leaves `thread_state` untouched (`pending`), because the echo of the Cloud-authored first
+  prompt is not session-start evidence. Implemented and covered by `TestThreadTakeoverEchoOnlyBatchDoesNotRun`.
+
+### D-4C-01 — `issue_runs.thread_state` is B-owned and `pending` is materialized by `StartSession`（Phase 4C design, **closes G-016**）
+
+Status: **Accepted (design round, 2026-10-08)**; not implemented. Detail: §4C.2.
+
+**`thread_state` stays a business column written only by business transitions** (Thread D1 + controller-integration
+D6 invariant 7). The literal `pending` ("Cloud has declared the first prompt and the session work item; no Node
+record taken over yet") is materialized **by B**, inside the Phase 3A `StartSession` transaction that writes
+`thread_entries seq=1` and declares the `agent_session` work item, under the predicate `thread_state IS NULL`, with
+the affected-rows count asserted to be exactly 1 (the assertion is sound because the write runs only on the branch
+where seq=1's `ON CONFLICT DO NOTHING` inserted a row, so no earlier `StartSession` can have committed). The 4C
+migration carries a matching idempotent backfill for agent runs that already have seq=1. Rejected: writing it in
+A-side `RecordDispatch` (control plane writing a business table) and deriving it at read time from
+`phase='starting' AND thread_state IS NULL` (hands a DB-expressible invariant to every reader, and makes one of the
+five CHECK values unrepresentable in the table). **Supersedes** D-026's "`pending` has no writer" bullet and the
+G-016 note in D-024; it does **not** add a transition — 4B's `pending → active` and its `starting → running`
+authority are unchanged. The semantic refinement of Thread D4's wording must ship with the ADR amendment (G-017).
+
+### D-4C-02 — Thread GET: one-snapshot page, `after`/`before`/tail cursors, `limit` 1..500（Phase 4C design）
+
+Status: Accepted (design round); the `before`/tail/`idleSince` parts are an **extension of approved Thread D5**
+(G-017). Detail: §4C.3.
+
+`GET .../runs/{rid}/thread` returns `{items (ascending by seq), threadState, idleSince, nextCursor, prevCursor}`
+from one transaction ⇒ one snapshot; `threadState`/`status` may be newer than the page frontier, so clients must not
+read `threadState` as "the state at my cursor". `after=N` = `seq > N` ascending (D5's original meaning; `after=0` =
+from the start); `before=N` = the newest `limit` entries with `seq < N`, still presented ascending; no cursor = tail
+read (newest `limit`); `after` + `before` together ⇒ `400 invalid_pagination`; `limit` default 200, max 500 (D5),
+out of range ⇒ `400 invalid_pagination`; a non-decimal cursor ⇒ `400 invalid_cursor`. `nextCursor`/`prevCursor` are
+opaque decimal-`seq` strings (clients pass them back verbatim); `""` means "end of the data now", not "thread
+ended". The reader must **not** reuse `page`/`window` (UUID cursor via `validID`, max 100) and must **not** widen
+`window`. Authorization and scoping mirror the comment read (tenant member + readable Issue, `tenant_id`/
+`issue_id`/`run_id` triple, soft-deleted ⇒ 404). `stripAgentRunSkeleton` keeps the run resource's shape unchanged;
+the Thread reader projects `threadState`/`idleSince` itself.
+
+### D-4C-03 — Thread POST: B writes the entry, A's seam writes the command, one transaction（Phase 4C design）
+
+Status: Accepted (design round); not implemented. Detail: §4C.4 (acceptance matrix) and §4C.5.
+
+`POST .../runs/{rid}/thread/messages` with a mandatory `Idempotency-Key` and body
+`{content:[{type:"text",text}]}` (text total ≤ 64 KiB; v1 accepts only `type="text"`). In one
+`Store.transact`: authoritative run re-read → acceptance decision → `seq = MAX(seq)+1` → insert the
+`source='user'`, `kind='user_turn'`, `status='queued'` entry with a Cloud-generated `turn_id` → CAS
+`thread_state='active'` + `idle_since=NULL` (affected rows must be 1) → call `EnqueueThreadCommand`. Accepted iff
+`thread_state ∈ {pending,active,idle}` **and** `cancel_requested_at IS NULL` **and** the run Workspace is live;
+otherwise `409 thread_closed` (a workspace-invalid `pending` run is rejected fail-closed); missing/soft-deleted/
+foreign/non-agent run ⇒ `404 not_found`; an impossible `phase`/`thread_state` combination ⇒ `500`, never a 4xx
+conflict. Response `201 {resource: {... status:"queued"}}`. After commit: B publishes the SSE invalidation and A
+publishes `ThreadCommandAvailable`. A seam failure rolls the entry, the command and the idempotency record back
+together, so a same-key retry is a clean first attempt (§4C.6).
+
+### D-4C-04 — POST idempotency reuses `idempotency_records`; 7-case matrix（Phase 4C design）
+
+Status: Accepted (design round). Detail: §4C.5.
+
+No per-entry idempotency column: the existing generic `idempotency_records(tenant_id,user_id,key,request_hash,
+response,status)` is the authority, and `request_hash` includes the path. Cases: (1) first request ⇒ 201; (2)
+same key + same body after commit ⇒ the stored response replayed verbatim (same `seq`/`turn_id`, no second entry,
+command or event); (3) same key + same body concurrently ⇒ the global advisory lock serializes, the loser replays;
+(4) same key + different body ⇒ `409 idempotency_conflict`; (5) **different key** + same body ⇒ two entries and two
+turns (idempotency is per key, not per content); (6) same key against a **different run** ⇒ `409
+idempotency_conflict` (the path is in the hash, so a key can never replay across runs); (7) replay after the entry
+became `delivered`/`discarded` or the thread closed ⇒ **still the original response** (a replay's outcome must not
+depend on later state), while a **new** key after closing ⇒ `409 thread_closed`. DB invariant failures are never
+disguised as conflicts.
+
+### D-4C-05 — `EnqueueThreadCommand`: A owns `thread_commands`, B supplies business facts, one caller-owned transaction（Phase 4C design）
+
+Status: Accepted (design round); the seam is declared but unimplemented (`UnavailableAgentRunControlPlane`).
+Detail: §4C.6.
+
+`EnqueueThreadCommand(t, run, command) (command_id string, err error)` runs inside the caller's transaction, opens
+none, and never spans external IO; any error rolls the caller's transaction back. **B** builds the business content
+(`SubmitUserTurn{turn_id, content}` / `EndSession{reason}`, `reason ∈ user_ended|idle_timeout|cancelled`) and
+generates `turn_id`; **A** generates `command_id`, owns the row and `created_at` (DB time), and emits
+`ThreadCommandAvailable{run_id}` only after commit. Unwired seam: on the POST path `503
+thread_command_unavailable` (retryable, and because the rollback leaves no idempotency record the retry is a clean
+first attempt); on the idle-scan path the state transition is skipped so no run can commit `ending` without its
+`EndSession` command. Commands written while no session execution is registered stay in Cloud and are invisible to
+`ClaimThreadCommands` (ADR D3).
+
+### D-4C-06 — Four distinct identities: `turn_id`, `command_id`, `execution_id`, `seq`（Phase 4C design）
+
+Status: Accepted (design round). Detail: §4C.6.
+
+`turn_id` (B-generated) is the business identity of a user turn, persisted on the entry and echoed by Node records;
+`command_id` (A-generated) is the delivery identity Node dedupes on; `execution_id` (Controller-generated, A-fenced)
+is the session identity recorded by delivery registration; `seq` (B-generated, run-scoped, from 1) is the ordering
+identity and the pagination cursor and is **never** sent to Node. One user turn ⇒ one entry + at most one command +
+at most one delivery registration. `seq` and Node `sequence` (per-execution) remain different spaces; no
+`seq = sequence + constant` (or equivalent) may be introduced.
+
+### D-4C-07 — SSE is invalidation only; the `after` vocabulary belongs to the durable log（Phase 4C design）
+
+Status: Accepted (design round). Detail: §4C.7.
+
+Three things stay distinct: the durable log (`thread_entries`, the only replay source), the notification mechanism
+(the in-process `SpaceEvent` hub — volatile, buffered, single-instance, no replay), and connection-local delivery
+(no guarantee). There is one cursor vocabulary (`seq`) and it is only ever evaluated against the durable log; **only
+a GET advances the client's cursor** (`nextCursor`/`prevCursor`), an SSE event merely triggers a GET, and `lastSeq`
+never advances a cursor. `after=N` therefore means the same thing on first load and on reconnect: "I hold every
+entry with `seq <= N`, give me the rest" — so a reconnect is just the client re-issuing its own GET and the stream
+needs no resumability or `Last-Event-ID` semantics. Public event:
+`issue_run.thread_appended{issueId, runId, lastSeq}` on the Space stream (requires three new optional `SpaceEvent`
+fields; existing event JSON is unchanged). Rejected: a per-Thread `?after=` SSE endpoint with server-side replay —
+it duplicates the GET contract and invites clients to treat the stream as the log.
+
+### D-4C-08 — SSE ordering, duplicates and loss are tolerated by construction（Phase 4C design）
+
+Status: Accepted (design round). Detail: §4C.8.
+
+Ordering is **not** promised (events are published after commit, so `lastSeq` can appear to regress); duplicates are
+allowed and harmless; **data is never lost** (durable log + authoritative GET) but **notifications may be lost**,
+so the frontend must reconnect and poll (≥ 30 s, or on focus). When only `status`/`thread_state` changed, Cloud
+still publishes `issue_run.thread_appended` with an unchanged `lastSeq` (one ADR-named event type whose payload is
+always a hint; a rename to `thread_updated` is rejected for ADR fidelity). Because forward paging only reveals new
+entries, an older entry's `status` flip is observed by re-reading the loaded window; the state change is never a
+new entry and never carried as an event fact. After `ended` the events may stop; GET keeps serving the immutable
+history.
+
+### D-4C-09 — `active`/`idle` authority: the taken-over records, evaluated in the takeover transaction（Phase 4C design）
+
+Status: Accepted (design round). Detail: §4C.9.
+
+`pending → active` stays 4B's (D-019/D-024, implemented). `active ⇄ idle` is decided **inside the
+`ThreadEventsTakenOver` transaction**: the batch's **last taken content record** determines the outcome — a
+`turnEnded` with no `source='user' AND status='queued'` entry at commit ⇒ `idle` + `idle_since = now()` (DB time);
+any other record ⇒ `active` (and `idle_since` cleared). A queued turn keeps the thread `active`; `idle` is not
+triggered by "the batch contained a `turnEnded`" but by the batch **ending** on one. Gated to a live session
+(`phase='running'`, non-terminal `thread_state`, `cancel_requested_at IS NULL`); outside the gate the records are
+appended and `thread_state` is left alone. A 0-row CAS is an error when the in-transaction re-read said the run was
+eligible (the 4B `moved != 1` hardening).
+
+### D-4C-10 — `ending` authority is B with three triggers; `ending → ended` is `SessionEnded` and belongs to Phase 5（Phase 4C design）
+
+Status: Accepted (design round). Detail: §4C.10.
+
+`ending` (with `idle_since` cleared and **exactly one** `EndSession{reason}` committed in the same transaction) is
+triggered by: the user ending the thread (`user_ended`), the idle window elapsing (`idle_timeout`, judged by a
+B-owned dispatch-loop scan comparing `idle_since + <window>` against **database** time; window = process config
+`issue_runs.thread_idle_timeout`, default 15 min, not a column), or a cancel while `phase='running'`
+(`cancelled`). `ending` is near-terminal and rejects POST. **`ending → ended` is exclusively `SessionEnded`** (the
+session terminal `TakeOverNodeEvent` → the `sessionEnded` hook, controller-integration D6) — Thread → `ended`,
+queued turns → `discarded`, run → `delivering` — and that hook is **not implemented: it is Phase 5**. 4C must not
+accept a `SessionCommandAccepted` reply, a registered execution result, or anything else as an `ended` authority.
+The explicit "user ends the thread" endpoint shape is missing from the ADR ⇒ G-018.
+
+### D-4C-11 — Cancel/terminal interaction keeps 4B's cancel-first semantics and never rewrites Thread history（Phase 4C design）
+
+Status: Accepted (design round). Detail: §4C.11.
+
+POST with `cancel_requested_at` set ⇒ `409 thread_closed`. Cancel at `provisioning`/`starting` ⇒ straight to
+`releasing`/`cancelled` with no `ending` and no `EndSession` (inherited from IssueRun D4/D6; it does not contradict
+4B's "cancel-first takeover does not enter running", which is unchanged). Cancel at `phase='running'` ⇒ one
+transaction writing `cancel_requested_at` + `thread_state='ending'` + `EndSession{cancelled}`, so the combination
+"cancelled but still `active`" is unobservable. A cancel arriving after `ending` only writes
+`cancel_requested_at`, adds no second `EndSession`, and does not rewrite the reason; the final `status` follows
+`cancel_requested_at` at settlement (Phase 5's rule). Undispatched (`queued`) turns are marked `discarded` by the
+Phase 5 `SessionEnded` transaction; 4C only guarantees the column and that no new `queued` entry can appear after
+`ending`. Replays of an already-accepted POST return the original response even after the run is terminal. No 4C
+transition writes `record` or renumbers `seq`; the only mutable column is `status`, one-way
+`queued → delivered|discarded`.
+
+### D-4C-12 — Phase 4C requires a migration（Phase 4C design, **not created this round**）
+
+Status: Accepted (design round). Detail: §4C.12.
+
+Migration 0022 (after 0021) adds: (a) the control-plane table `thread_commands` (`id uuid PK` = `command_id`,
+`run_id uuid NOT NULL REFERENCES issue_runs(id)`, `kind CHECK IN ('SubmitUserTurn','EndSession')`, `body jsonb`
+object CHECK, `created_at` DB-time default, `delivered_at`, `delivered_execution_id`,
+`CHECK ((delivered_at IS NULL) = (delivered_execution_id IS NULL))`, partial index
+`(run_id, created_at) WHERE delivered_at IS NULL`); (b) `thread_entries.status text CHECK IN
+('queued','delivered','discarded')` with `CHECK ((source='user') = (status IS NOT NULL))` and a partial index
+`(run_id) WHERE source='user' AND status='queued'`; (c) an idempotent backfill setting `thread_state='pending'` for
+agent runs that already have seq=1; (d) a partial index `issue_runs (idle_since) WHERE thread_state='idle'`.
+Explicitly **not** done: no change to the `thread_state` value set or `idle_since` (0018 suffices), no counter
+column/sequence table, no per-entry idempotency column (the generic `idempotency_records` is reused), no change to
+`node_event_receipts`, no `DEFAULT` on `thread_state`, and no second `starting→running` authority table/column.
+`status` is required because `discarded` is a Cloud-side decision at session end that cannot be derived from any
+existing row.
 
 ---
 
@@ -1732,8 +3160,10 @@ updated after the Phase 3A implementation round:
   stays Controller/RecordDispatch-owned). `node_executions` remains un-migrated and is a **Phase 4A** obligation
   (D-020/D-021), no longer part of G-008 per se.
 - **G-009** (`thread_entries` seq=1 reserved by the first prompt; Phase 4 must continue gapless from seq=2) —
-  **OPEN → Phase 4B**: seq=1 is preserved (Phase 3A writes only seq=1); Phase 4 allocates seq≥2 in the takeover
-  transaction (D-023 proposal, 4.8).
+  **architecture RESOLVED → closes at Phase 4B implementation**: seq=1 is preserved (Phase 3A writes only seq=1);
+  the allocation mechanism is now fixed and accepted (D-023: `MAX(seq)+1` from 2 inside the takeover transaction,
+  §4B.5), with the echoed-first-prompt dedup rule (D-024, §4B.4) guaranteeing seq=1 is never renumbered. The gap
+  closes once the Phase 4B takeover path lands and T4B-6/T4B-7 evidence exists.
 - **G-010** (derive the D6 `EnqueueExecutionWork` `target` from `sandbox_instances`/`node_instances`) —
   **CLOSED with the minimal deterministic `sessionStartTarget`** (`{workspace_id, sandbox_instance_id, node_id}`
   when a live sandbox/connected Node exists).
@@ -1743,21 +3173,149 @@ updated after the Phase 3A implementation round:
   later approval (this round chose fail-closed per §6/§11, never `status=failed` for convenience). **Phase 4 does
   not solve this** — the takeover hook re-checks the workspace and fails closed (no `running`), preserving the gap.
 
-### G-012..G-015 — Phase 4 thread/running gaps (added this design round)
+### G-012..G-015 — Phase 4 thread/running gaps（status updated by the Phase 4B architecture resolution round）
 
-- **G-012 — PARTIAL（Phase 4A 已闭合 A 侧登记部分，4B 仍 Missing）** — `node_executions` migrated
-  (0020) + production `RecordDispatch` (`agent_work_dispatch`) + `execution_work.execution_id` fence implemented and
-  evidence-backed (D-020/D-021, T4A-1..T4A-14, `TestMigration0020NodeExecutionsAppliesFreshAndUpgrades`). Still
-  Missing: `node_event_receipts` un-migrated, `TakeOverThreadEvents` route absent, `ThreadEventsTakenOver` caller /
-  `EnqueueThreadCommand` fail-closed — all owned by Phase 4B (D-022). (D-020/D-021/D-022.)
-- **G-013** — the "session-start event" shape for `starting→running` is unspecified by the approved ADRs: Node
-  protocol D2 only defines `ThreadEvent{record}`; the controller-session ADR (which would pin the first-takeover
-  semantics and whether `thread_state` may be `pending` on a non-record start signal) is `proposed`. This design
-  round does **not** invent a synthetic event and does not guess the alternative semantics (4.3/4.6/4.16).
-- **G-014** — Thread `seq` allocation mechanism is not fixed by Thread D1 (only「Cloud 分配、连续」). Proposed
-  `MAX(seq)+1` in the takeover transaction (D-023); needs approval before Phase 4B implementation.
-- **G-015** — per-run Thread event-count ceilings and `node_event_receipts` retention are unresolved
-  (controller-integration「未决」). Phase 4B needs either an initial bound or an explicit defer.
+- **G-012 — PARTIAL（Phase 4A 闭合 A 侧登记；4B 本轮闭合接管路径，仍余生产 Controller 环）** — `node_executions`
+  migrated (0020) + production `RecordDispatch` (`agent_work_dispatch`) + `execution_work.execution_id` fence
+  implemented and evidence-backed (D-020/D-021, T4A-1..T4A-14,
+  `TestMigration0020NodeExecutionsAppliesFreshAndUpgrades`). Phase 4B (this round) delivered the other half of the
+  B-visible path: `node_event_receipts` migrated (0021), `agent_thread_takeover` routed, the real
+  `ThreadEventsTakenOver` hook wired, and the gRPC `AgentRunService.TakeOverThreadEvents` registered — all covered
+  by T4B-1..T4B-19 plus the gRPC acceptance test. Still Missing: the production Controller actually calling
+  `TakeOverThreadEvents` (the Node/Controller relay loop), and `EnqueueThreadCommand`/`GrantRevisionUpload`
+  (`EnqueueThreadCommand` is Phase 4C, §4B.12). Settlement of the workspace hook (`RunWorkspaceDeleted`) also stays
+  fail-closed, but no production code inserts `workspaces.issue_run_id` yet, so that path is unreachable rather than
+  wrong. The gap therefore shrinks but stays PARTIAL; it was **not** split into G-012a/G-012b because the remaining
+  half is one coherent item (the Controller-side production loop) rather than two independently closable ones.
+- **G-013 — CLOSED（Phase 4B architecture resolution 2026-09-30; implementation 2026-09-30）** — resolved without a
+  synthetic event: the `starting→running` authority is the first **real Node Thread record** takeover
+  (`ThreadEvent{record}` per Node protocol D2; IssueRun D3 + controller-integration D6 + Thread D4).
+  `thread_state` →`active` on the first real record; an echo-only batch writes receipts but activates nothing.
+  Echoed first prompt (`turn_id == initial_turn.turn_id`) is deduped (receipt only, no new entry), preserving seq=1
+  immutability. Empty batch rejected. Implemented and covered by T4B-1/T4B-2/T4B-7/T4B-8 and the gRPC acceptance
+  test. See D-024, D-026, §4B.2–§4B.4. **No dependency on the `proposed` controller-session ADR** (§4B.14).
+- **G-014 — CLOSED（Phase 4B architecture resolution 2026-09-30; implementation 2026-09-30）** — Thread `seq`
+  allocation mechanism fixed and **D-023 ACCEPTED**: `MAX(seq)+1` inside the takeover transaction, from 2 upward.
+  Serialization proven from approved facts (one session execution per run + global advisory lock +
+  `PRIMARY KEY (run_id, seq)`), **not** the proposed controller-session D2. Node `sequence` ≠ Thread `seq`. No
+  counter table. Implemented and covered by T4B-6/T4B-11/T4B-16 (`TestThreadTakeoverContiguousBatch`,
+  `TestThreadTakeoverConcurrentBatches`). See D-023, §4B.5.
+- **G-009 — CLOSED（Phase 4B implementation 2026-09-30）** — the seq-continuation obligation the plan already
+  assigned to 4B is now proven end to end: seq=1 stays the immutable Cloud-authored first prompt
+  (`TestThreadTakeoverFirstRecordRunsTheRun`, `TestThreadTakeoverInitialTurnEchoIsDeduped`), seq≥2 is continuous
+  across batches and replays allocate nothing (`TestThreadTakeoverContiguousBatch`,
+  `TestThreadTakeoverReplayIsIdempotent`), and concurrent callers never duplicate a seq
+  (`TestThreadTakeoverConcurrentBatches`). The gap is closed by evidence, not by the design.
+- **G-015 — PARTIAL（Phase 4B 初值已给；enforcement 未实现）** — per-run non-terminal event ceiling default
+  200,000 (`thread_event_cap`) and `node_event_receipts` retention default 30 days post-`done`
+  (`node_event_receipts_retention`) pinned as versioned config defaults (D-025, §4B.10). **Enforcement is
+  deliberately not implemented**: the values have no approved ADR/spec basis, so shipping them would be unapproved
+  behavior (mandate §3/§39); T4B-18 is recorded DEFERRED for the same reason. The migration ships only the
+  `created_at` index the future prune loop needs. The gap stays PARTIAL and **NON-BLOCKING**; it becomes CLOSED when
+  an approved ADR fixes the values and the cap rejection + prune loop land with evidence.
+- **G-016 — CLOSED（Phase 4C design round 2026-10-08, D-4C-01）** — the literal `issue_runs.thread_state='pending'`
+  now has a designated writer: **B**, in the Phase 3A `StartSession` transaction (same transaction as seq=1 and the
+  `agent_session` work item), under `thread_state IS NULL`, with the affected-rows count asserted to be 1, plus an
+  idempotent backfill in the 4C migration for agent runs that already have seq=1. Rejected alternatives (recorded
+  with reasons in D-4C-01/§4C.2): writing it from A-side `RecordDispatch` (control plane writing a business column
+  — controller-integration D6 invariant 7 / §11) and deriving it at read time from `phase='starting' AND
+  thread_state IS NULL` (hands a DB-expressible invariant to every reader and leaves one of the five CHECK values
+  unrepresentable). Closing the **decision** does not close the **implementation**: T4C-1..T4C-5 record the evidence
+  obligations and stay `MISSING`. The gap is not "resolved by evidence" — it is resolved by an accepted design with
+  a named writer, which is what a design round can and must close. See §4C.2.
+
+- **G-017 — OPEN / NON-BLOCKING / DEPENDENCY（Phase 4C design round, 2026-10-08）** — the 4C Thread read contract
+  extends approved Thread D5 beyond its literal text: a no-cursor **tail** read, the `before` cursor, the
+  `idleSince` response field, and the `pending` timing/meaning clarification of D4 (D-4C-01/§4C.2, D-4C-02/§4C.3).
+  **Why it is a gap and not a silent decision**: D5 fixes only `after={seq}&limit={n}` ascending, so a client cannot
+  reach the tail of a long thread without walking from seq=1, and the panel's "why is this session about to end"
+  display needs `idle_since`; but shipping unrecorded extensions of an approved ADR is exactly the "silent
+  divergence" the plan forbids. **What is needed to close**: amend Thread D4/D5 (pending materialization point and
+  meaning, tail default, `before`, `idleSince`, `nextCursor`/`prevCursor` semantics) or obtain explicit architect
+  confirmation of the extension. **Not a blocker** for the rest of 4C, but the corresponding code should not be
+  merged before the amendment/confirmation.
+
+- **G-018 — OPEN / NON-BLOCKING（Phase 4C design round, 2026-10-08）** — the ADR's lifecycle table names
+  "用户点击『结束』 ⇒ `ending`" but **no endpoint exists** in any decision. The authority is settled (B's lifecycle
+  transition, D-4C-10); only the API shape is missing, so the `user_ended` trigger is unreachable in 4C while
+  `idle_timeout` and `cancelled` are not. **Why non-blocking**: the idle window and cancellation already exercise the
+  same transition and the same `EndSession` seam. **What is needed to close**: decide route/verb/status/idempotency
+  (recommended `POST .../runs/{rid}/thread/end`, 202 + `thread_closed` on conflict, mandatory `Idempotency-Key`) and
+  land it in the OpenAPI contract. Must stay distinct from "cancel the run" (D-4C-11).
+
+- **G-019 — OPEN / NON-BLOCKING / DEPENDENCY（Phase 5）** — `ending → ended` and `queued → discarded` are written
+  **only** by `SessionEnded` (the session terminal `TakeOverNodeEvent` → `sessionEnded` hook,
+  controller-integration D6), which is not implemented. 4C designs the column, the predicates and the transition but
+  must not implement a second path to `ended`. **What is needed to close**: Phase 5 implements the hook + delivery,
+  reusing `thread_entries.status` and the `ending` predicate; the Thread core-test obligations 「终态顺序」 and
+  「轮次结算」 stay `Partial`/`Missing` until then.
+
+- **G-020 — OPEN / NON-BLOCKING / DEPENDENCY（Phase 4C design round, 2026-10-08）** — SSE invalidation delivery is
+  **not guaranteed**: the hub is in-process, buffered (8), single-instance, and may drop, duplicate or reorder; it
+  has no persistence and no replay (api-boundary ADR, implemented). **Why recorded instead of ignored**: a design
+  that assumes reliable notification would invite clients to treat the stream as the log. **What is needed**:
+  slice 1 relies on the client reconnecting and polling (a frontend obligation); multi-instance delivery needs a
+  broker behind the same Publish/Subscribe boundary and a separate decision.
+
+- **G-021 — OPEN / NON-BLOCKING（Phase 4C design round, 2026-10-08）** — partitioning of `thread_commands`
+  delivery across multiple Controller workers is listed as unsolved by the controller-integration ADR itself. 4C's
+  seam and table do not change the problem and only guarantee "at least once + idempotent registration" for a single
+  worker. **What is needed to close**: a separate decision on per-run partitioning / lease ownership.
+
+### G-022..G-024 — conflicts found by the Phase 4C readiness round（2026-10-08）
+
+> Registered under mandate §4（"如发现决策冲突，先登记 Decision/Gap，不得静默修改设计"）。These are **not** applied to any
+> ADR; §4R.7 lists the proposed amendments as **待批准**.
+
+- **G-022 — OPEN / NON-BLOCKING / NEEDS ADR AMENDMENT** — `thread_entries.status`
+  (`queued | delivered | discarded`) is required by D-4C-01/04/05/09, but Thread **D1 enumerates the columns of
+  `thread_entries` and does not include `status`** (`source`, `kind`, `record jsonb`, `turn_id`, `node_execution_id`,
+  `node_sequence`, `created_at`). Thread D3 *names* the states (`queued`/`delivered`/`discarded`) but never places the
+  column in D1's schema. Migration 0018 already shipped the table without it. **Why it matters**: adding a column to an
+  enumerated schema is a persistence-schema change, which §14 classifies as architectural. **Why non-blocking**: the
+  semantics are already approved (D3 + invariant 4); only the column's existence in D1 is unstated, and no writer of
+  `source='user'` rows exists today, so the migration's CHECK validates trivially. **What is needed to close**: the
+  Thread ADR amendment A1 in §4R.7; migration 0022 must additionally not *rely* on "there happen to be no rows"
+  (backfill `status='queued'` for any `source='user'` row before adding the CHECK, or assert the premise explicitly).
+  **Update (Phase 4C Slice 1 implementation round, 2026-10-08)**: the *migration* half of that condition is now satisfied —
+  `0022_thread_api_and_commands.sql` adds the column, backfills `status='queued'` for any pre-existing `source='user'` row
+  **before** adding the CHECKs, and T4C-5 proves the upgrade path on a database that already has such a row. The gap itself
+  **stays OPEN**: it is about D1's enumeration, and amendment A1 is still 待批准. No ADR file was modified and no `status` was changed.
+
+- **G-023 — OPEN / NON-BLOCKING / NEEDS ADR AMENDMENT** — D-4C-07/08 publish `issue_run.thread_appended` after **any**
+  commit that changes the run's visible Thread state, including a commit that only flips a `thread_entries.status` or
+  `thread_state` and appends no entry. Thread **D5 says the event is published after the "条目写入事务" commits**
+  ("条目写入事务提交后…发布"), which reads as entry-append-only. **Why it matters**: the event name says "appended";
+  publishing it for a status-only change is a contract statement clients will rely on. **Why non-blocking**: the payload
+  (`issueId`, `runId`, `lastSeq`) is unchanged and the event is only a hint, so the change is additive for clients.
+  **What is needed to close**: amendment A4 in §4R.7. Until it lands, S6 publishes only for commits that append an entry.
+
+- **G-024 — OPEN / NON-BLOCKING / NEEDS ADR AMENDMENT** — D-4C-03 rejects `POST .../thread/messages` when
+  `cancel_requested_at IS NOT NULL` even while `thread_state = 'pending'`. Thread **D3 says the POST is accepted when
+  the state is `pending | active | idle`** and names only `ending | ended` as the rejection case. **Why it matters**:
+  the conflict is reachable — a cancel issued while the run is `provisioning`/`starting` goes straight to `releasing`
+  without ever writing `ending` (IssueRun D4/D6, D-4C-11), so a run can be simultaneously `thread_state='pending'` and
+  cancelled. Accepting the message there would persist a user turn that no session will ever execute. **Why
+  non-blocking**: the stricter predicate is the correct behavior; only D3's enumeration is incomplete. **What is needed
+  to close**: amendment A2 in §4R.7 (extend D3's accept predicate with `cancel_requested_at IS NULL` and the live
+  workspace condition), then sync the accept-matrix rows in S4 and the Thread core-test obligation.
+  **Batch 1 status (2026-10-08)**: A2 is **still unapproved**, so the two rows are deliberately **not implemented** —
+  `requireThreadAccepting` and the `thread_state` CAS in `agent_run_thread_message.go` are narrower than D-4C-03, and
+  `TestThreadMessageCancelRowIsDeferred` pins the deferral (a cancelled run with a non-live workspace is still accepted
+  today, so landing A2 turns that test red). The rest of the S4 accept matrix is implemented. **This gap stays OPEN.**
+  Closing it must not be done by editing the ADR `status` from this round.
+
+### G-025 — migration-list documentation debt（found by the Phase 4C Slice 1 implementation round, 2026-10-08）
+
+- **G-025 — OPEN / NON-BLOCKING / DOCUMENTATION ONLY** — `internal/core/migrations/README.md` and `README.en.md` enumerate
+  migrations only through `0017_tenant_membership_and_join.sql`. `0018`–`0021` (Phase 3A/3B and Phase 4B) and `0022`
+  (Phase 4C Slice 1) are all missing from that list, so the "what landed in which migration" narrative is stale by six
+  files. **Why it matters**: the README is the entry point a reviewer uses to reason about schema history, and §14 treats
+  persistence-schema changes as architectural. **Why non-blocking**: the authoritative record is the ordered SQL files
+  plus `schema_migrations` checksums, both of which are complete and verified by `CheckSchema`; no behavior depends on the
+  README. **Why not fixed in Slice 1**: the debt predates this round by six migrations, and S1's scope is 0022 only;
+  documenting `0022` alone would make the list *look* current while still omitting `0018`–`0021`. **What is needed to
+  close**: one round that writes `0018`–`0022` into both README files together.
 
 ---
 
@@ -1842,6 +3400,305 @@ At the end of each Agent round, append or update this section.
 
 - nothing staged?
 - commit performed? must always be `NO` unless architect explicitly changed the rule
+
+---
+
+### Round: Phase 4C Readiness — Architecture Review & Implementation Slice Plan / 2026-10-08
+
+**Plan section executed:**
+
+- Readiness round: `## Phase 4C Readiness — Architecture Review & Implementation Slice Plan`（§4R.0–§4R.8）、
+  §13（新增 G-022/G-023/G-024）、§16 marker。**不是**实施轮。
+
+**Status:**
+
+- **Complete**（评审结论：`READY_FOR_PHASE_4C_IMPLEMENTATION_SLICE_1`）
+
+**Files changed:**
+
+- `plan/plan.md`（§4R.0–§4R.8、§13 G-022..G-024、§15 本条、§16 marker）
+- `plan/plan-zh.md`（镜像）
+- **未改**：production 代码、migration、proto、generated、测试实现、任何 ADR 文件或其 `status`。
+
+**Decisions added/changed:**
+
+- None added；D-4C-01..D-4C-12 全部复核通过（**未静默修改**任何决策）。§4R.7 的 A1–A4 是**待批准**的 ADR 修订提案，
+  **未**写入 ADR 文件。
+
+**New gaps:**
+
+- **G-022**（`thread_entries.status` 不在 Thread D1 的列清单中；需 ADR 修订 A1）
+- **G-023**（无新条目、仅 `status`/`thread_state` 变化也发 `thread_appended`，与 D5 字面「条目写入事务提交后」冲突；需 A4）
+- **G-024**（POST 在 `cancel_requested_at` 已置时拒绝，与 D3 字面「`pending|active|idle` 时接受」冲突；需 A2）
+- G-017 由「单一扩展」**重新切分**为「已批准子集 + 4 项响应形状扩展 + 1 项措辞澄清」；G-018 给出端点契约提案。
+  三项新缺口均按 mandate §4 **先登记为 Gap**，未静默改设计。
+
+**Tests added/changed:**
+
+- None（本轮禁止改测试实现；T4C-1..T4C-34 仍全部 `DESIGNED / MISSING`，另提议新增 **T4C-35** 供 S7 使用）。
+
+**Gate results:**
+
+- 未运行构建/测试门（本轮为只读评审，无代码改动）。只执行只读 git 检查（`git status --short` × 4 仓库）与文件读取。
+
+**Scope deviations:**
+
+- None。遵守 §6：未 `git add`/`commit`/`push`/PR，未 `reset`/`restore`/`checkout .`/`clean`/`stash`，未覆盖既有未提交修改，
+  未改任何 approved ADR 的 `status`。
+
+**Next planned step:**
+
+- **Slice 1** — Migration 0022 + `pending` 物化（指令见 §4R.5 的 S1）。**不依赖** G-017/G-018。
+
+**Git:**
+
+- nothing staged? **YES（无 stage）**
+- commit performed? **NO**
+- push / PR? **NO**
+
+---
+
+### Round: Phase 4C Implementation Slice 1 — migration 0022 + `pending` materialization / 2026-10-08
+
+**Plan section executed:**
+
+- 实施轮：§4R.5 的 **S1**、§4C.16 的 **T4C-1..T4C-5**、§4C.0 的 D-4C-01（`pending` 物化）、D-4C-12（4C migration 决策）。
+  **仅 S1**：S2a–S7 未动。
+
+**Status:**
+
+- **Complete**（S1 交付项全部落地；`task build` / `task test` / `task test:race` 全绿）
+
+**Files changed:**
+
+- 新增 `internal/core/migrations/0022_thread_api_and_commands.sql`（`thread_commands` 表 + `thread_entries.status` +
+  两条 CHECK + 两个部分索引 + `pending` 回填 + `issue_runs_idle_threads`）
+- `internal/core/agent_run_session_start.go`（`StartSession` 在 seq=1 同一事务内物化 `thread_state='pending'`，CAS 断言恰 1 行；文档注释同步）
+- `internal/core/agent_run_session_start_db_test.go`（新增 T4C-1..T4C-4 与 `runVersion` 助手）
+- `integration/migration_upgrade_path_test.go`（新增 T4C-5 与 `seedDeclaredAgentRun` 助手）
+- `integration/agent_issue_run_skeleton_test.go`（与 0022 的 `thread_entries_user_status` 兼容：既有 user 条目补 `status`，并新增两条约束反例）
+- `internal/core/agent_run_thread_takeover_db_test.go`（两处过期注释订正；T4B-19 由「表不存在」改为「接管事务不写入 4C 表」——0022 合法建表，断言必须落在**写入**而非**存在**上）
+- `plan/plan.md`、`plan/plan-zh.md`（§15 本条、§16 marker）
+- **未改**：Phase 4B 的 running authority、Node/Thread `seq` 分配、receipt、takeover 事务；proto；OpenAPI/generated；任何 ADR 文件或其 `status`。
+
+**Decisions added/changed:**
+
+- None added。D-4C-01 与 D-4C-12 按**已批准**语义落地；**未**静默修改任何决策。
+
+**New gaps:**
+
+- **G-022 仍 OPEN（未关闭）**：Thread D1 的列清单仍无 `status`。本轮实现的 `thread_entries.status` 只依据**已批准**的
+  D3 状态集（`queued|delivered|discarded`）与不变量 4；**A1 修订提案未获批准，未写入任何 ADR 文件，未改任何 `status`**。
+  升级正确性不依赖 A1：列的语义来自 D3，A1 只是把该列补进 D1 的枚举。
+- **G-025（新）**：`internal/core/migrations/README.md` / `README.en.md` 的迁移清单停在 `0017`，`0018`–`0022` 均未登记
+  （`0018`–`0021` 为 Phase 4B 遗留，`0022` 属本轮）。纯文档债，不阻塞 S1，未在本轮扩大范围修复。
+
+**Tests added/changed:**
+
+- **T4C-1** `TestAgentSessionStartMaterializesPendingThread` → 声明前 `thread_state IS NULL`、声明后恰为 `pending`，
+  且运行仍 `starting`/`dispatched`、恰一条 seq=1、恰一件 `agent_session` 工作。
+- **T4C-2** `TestAgentSessionStartPendingIsNotRewrittenOnReplay` → 重放不重写状态、不增条目、不重复放出工作
+  （以 `version` 不变为判别证据——状态值本身不变，无法自证「未写」）。
+- **T4C-3** `TestAgentSessionStartPendingRollsBackWithSeq1` → A 缝失败时 seq=1 与 `pending` 一起回滚（真实 `Unavailable` 缝）。
+- **T4C-4** `TestAgentSessionStartNeverMaterializesPendingForIneligibleRuns` → 已取消 / Workspace 不活的运行零写入。
+- **T4C-5** `TestMigration0022ThreadCommandsAndPendingAppliesFreshAndUpgrades` → `0021`→`0022` 升级路径 + 二次 `Migrate`
+  幂等 + `CheckSchema`；回填只命中「有 seq=1 真实声明」的运行并排除取消/终态/无声明；`thread_commands` 的主键、FK、
+  两条 CHECK 与三个部分索引形状；既有 `source='user'` 条目被安全回填为 `queued`。
+- 回归：`TestAgentIssueRunSkeletonSchemaConstraints`（既有 user 条目补 `status`，新增 2 条约束反例）、
+  `TestThreadTakeoverHasNoLaterPhaseSideEffects`（改为断言接管事务零写入）。
+- **变异验证（非提交内容，仅用于证明 T4C-5 非空转）**：把回填谓词换成 `phase IS NOT NULL` 式阶段代理 → 用例失败
+  （`run without a declaration stays NULL`）；删去 `cancel_requested_at IS NULL` → 用例失败；删去 CHECK 前的
+  `status='queued'` 回填 → 升级以 `23514` 失败。三条变异均被捕获，随后逐字还原。
+
+**Gate results:**
+
+- `go vet ./internal/core/ ./integration/`：PASS
+- `task build`：PASS
+- `task test`（真实 PostgreSQL，`REQUIRE_POSTGRES=1`）：PASS（全部包 `ok`，`integration` 47.4s）
+- `task test:race`：PASS（`integration` 118.5s，无 `DATA RACE`）
+- `task format:check`：**FAIL（既有，与本轮无关）**——5 个 **HEAD 未修改**文件在当前 gofumpt 下不合规
+  （`agent_run_control.go`、`agent_run_control_test.go`、`agent_run_settle_db_test.go`、`agent_run_terminal_db_test.go`、
+  `agent_target.go`）。本轮触碰的 6 个 Go 文件全部 gofumpt-clean。
+- `task lint`：**FAIL（既有，与本轮无关）**——余下 7 项全部落在 HEAD 未修改文件（gocritic×3、gofumpt×3、unused×1）；
+  本轮引入的 `sqlclosecheck` 1 项已修复。
+- `git diff --check`：本轮文件无新增空白错误（`plan-zh.md:873` 的尾随空格为上一轮遗留，本轮顺手订正）。
+
+**Scope deviations:**
+
+- **1) 前置检查 1 无法满足**：G-022 对应的 Thread ADR D1 修订**未获批准**。按 mandate「先输出最小 ADR 修订提案，
+  不得自行将 ADR 标记为 approved」，本轮在最终报告给出 **A1 提案**并**未改任何 ADR**；实施依据是**已批准**的 D3、
+  不变量 4 与 D-4C-12。
+- **2) 修改了 3 个既有测试文件**（`integration/agent_issue_run_skeleton_test.go`、`internal/core/agent_run_thread_takeover_db_test.go`、
+  本轮的会话启动测试）。原因：0022 新增的约束与 4B 时期「表不存在 / 条目无 status」的断言直接冲突。改动为**约束兼容与
+  注释订正**，**未**放宽任何 CHECK、**未**跳过任何断言、**未**改动 4B 语义。
+
+**Next planned step:**
+
+- **S2a** — Thread GET 的**已批准子集**（`after` / `limit ≤ 500` / 升序 / `threadState`）。S2b（无游标 tail、`before`、
+  `idleSince`、`nextCursor`/`prevCursor`）需先完成 ADR 修订 **A3**。
+
+**Git:**
+
+- nothing staged? **YES（无 stage）**
+- commit performed? **NO**
+- push / PR? **NO**
+
+---
+
+### Round: Phase 4C Accelerated Implementation Batch 1 — S3 (Thread Command Control Plane) + S4 (Thread POST) / 2026-10-08
+
+**Plan section executed:**
+
+- 加速实施轮（单 Coding Agent，连续推进，**不**在 S3 与 S4 之间结束本轮）：§4R.5 的 **S3** 与 **S4**、§4C.3/§4C.4/§4C.5/§4C.6
+  的契约、§4C.14/§4C.15 的错误与鉴权、§4C.16 的 **T4C-13..T4C-18**（S4）与 **T4C-21..T4C-24**（S3）。
+- **不在本轮**（mandate §30 明列）：S2a/S2b（Thread GET）、S5（echo→`delivered`、`active⇄idle`）、S6（SSE
+  `issue_run.thread_appended`）、S7（`/thread/end`、idle 扫描、`ending→ended`、`SessionEnded`、`queued→discarded`）、
+  `DeliverRevision`、Phase 5。S3 的 `ThreadCommandAvailable` 是**内部 Controller 信号**，与 S6 的公开 Space SSE 无关。
+
+**Status:**
+
+- **Complete（S3 完整；S4 core 完整）**。授权标记：`PHASE_4C_ACCEL_BATCH_1_CORE_DONE_WITH_ADR_DEFERRED`——
+  S4 接受矩阵中由 **D-4C-03 新增、A2 修订仍未批准**的两行（`cancel_requested_at IS NOT NULL`、运行 Workspace 不活）
+  **未实现**，以 G-024 保持 OPEN + 钉住该行的测试与注释交付（下文 Scope deviations）。
+
+**Files changed:**
+
+- **S3（控制面 + A 缝）**：
+  - `internal/core/agent_run_thread_command.go`（新）：`EnqueueThreadCommand`（调用方事务内 `INSERT thread_commands`，
+    A 生成 `command_id`，`created_at` 用数据库时钟，`delivered_at`/`delivered_execution_id` 初值 NULL）、
+    `agentThreadClaim`（纯读 `AgentRunControlPlane` 的 `agent_thread_claim` action）、`agentThreadDelivered`
+    （`agent_thread_delivered`）、`SubmitUserTurnCommand`、`contentObjects`。
+  - `internal/controlgrpc/agentruns.go`、`internal/controlgrpc/agentruns_test.go`（新）：`ClaimThreadCommands` /
+    `RecordThreadCommandDelivered` 的 proto 转换与错误码映射（复用既有 Fault/gRPC 码，**未新增 proto 枚举**）。
+  - `internal/controlgrpc/server.go`、`internal/controlgrpc/signals.go`、`internal/core/signals.go`、`internal/core/store.go`、
+    `cmd/server/main.go`：`ThreadCommandAvailable` 的**提交后**发布接线（`transact` 成功分支）。
+  - `internal/core/agent_run_thread_command_db_test.go`（新）：T4C-21..T4C-24 白盒 DB 测试。
+  - `integration/agent_run_thread_command_grpc_test.go`（新）：端到端 gRPC 投递回路。
+- **S4（公开 Thread POST）**：
+  - `internal/core/agent_run_thread_message.go`（新）：`appendThreadMessage`、`threadMessageContent`、
+    `requireThreadAccepting`。
+  - `internal/api/router/router.go`：路由 `POST /api/v1/tenants/{tid}/issues/{iid}/runs/{rid}/thread/messages`
+    （`threadMessageBodyLimit = 256 KiB` 传输上限；未知字段/类型/JSON 由既有严格解码管线拒绝）。
+  - `internal/core/public.go`：公开分派 + `Idempotency-Key` 前置校验（`400 idempotency_key_required`）与同事务
+    幂等记录读写。
+  - `internal/contract/openapi.go`、`api/openapi.json`、`frontend/src/api/generated.schemas.ts`、
+    `frontend/src/api/tenants/tenants.ts`：契约源 + `task frontend:generate` 产物（**未手工编辑**）。
+  - `integration/agent_run_thread_message_test.go`（新，约 600 行）：T4C-13..T4C-18 真实 HTTP + PostgreSQL 验收。
+- `plan/plan.md`、`plan/plan-zh.md`（§15 本条、§16 marker）。
+- `specs/test-cases/cloud/controller-integration/agent-run-executions-and-thread.md`（仅把**已被真实测试直接证明**的
+  三条义务由 `Missing` 改为 `Covered`；`授权不持久化` 保持 `Missing`）。
+- **未改**：Phase 4B 的 running authority / `seq` 分配 / receipt / takeover 事务；proto；任何 ADR 文件或其 `status`；
+  `specs/test-cases/cloud/thread/durable-thread.md`（其 S2/S6 义务仍全 `Missing`）。
+
+**Decisions added/changed:**
+
+- None added。S3/S4 均按**已批准**的 Thread D3、controller-integration D3/D5/D6、D-4C-04/D-4C-05/D-4C-06 落地；
+  **未**静默修改任何决策。D-4C-03 的两行因 A2 **未获批准**而**未实现**（见 Scope deviations）。
+
+**New gaps:**
+
+- **G-024 仍 OPEN（未关闭）**：D-4C-03 的接受谓词还拒绝 `cancel_requested_at IS NOT NULL` 与运行 Workspace 不活，
+  且其 CAS 带 `cancel_requested_at IS NULL`；**已批准**的 Thread D3 只把 `ending | ended` 列为拒绝情形。ADR 修订
+  **A2 未获批准**，故这两行**未实现**，`requireThreadAccepting` 有意窄于 D-4C-03，并以
+  `TestThreadMessageCancelRowIsDeferred` 钉住（A2 一旦落地，该测试转红，后续实现不可能静默通过）。
+- **G-021 仍未解决（有意）**：`ClaimThreadCommands` 是**单 worker** 保证，命令空间未跨 worker 分区；本轮不解决。
+- **G-022 仍 OPEN**：与 S1 相同，**未**改任何 ADR `status`。
+
+**Tests added/changed:**
+
+- **S3 — T4C-21** `TestThreadCommandEnqueueIsCallerTransactionScoped` → `EnqueueThreadCommand` 只写调用方事务；
+  调用方回滚则命令一并消失（同事务原子）。
+- **S3 — T4C-21** `TestThreadCommandEnqueueRejectsInvalidCommands` → 非法 `kind` / 缺 `body` / 缺 `turn_id` /
+  空 content / 非批准 end 原因一律返回错误，不落行。
+- **S3 — T4C-22** `TestThreadCommandClaimWaitsForRegisteredExecution` → 会话执行未登记时命令留在 Cloud、不被领取
+  （`JOIN LATERAL ... kind='agent_session'` 门控）；`TestThreadCommandClaimGroupsByRunInCreationOrder` → 按 run 分组、
+  组内创建序。
+- **S3 — T4C-23** `TestThreadCommandDeliveryIsIdempotentAndFenced` → 首次登记生效；同执行重放收敛幂等（返回原成功）；
+  异执行 `CONFLICT`、**绝不**复写。
+- **S3 — T4C-24** `TestThreadCommandSignalOnlyAfterCommit` → 提交后恰一次 `ThreadCommandAvailable`；回滚零信号
+  （确定性注入 observer，**无 sleep**）。
+- **S3 端到端** `TestControlGRPCThreadCommandDeliveryLoop` → 经真实 gRPC 领取 → 不登记 → 再领取得到**同一**
+  `command_id`；登记后不再返回；`turn_id` 只在命令体内、与 `command_id` 各自稳定互不代偿。
+  `TestControlGRPCThreadCommandRejectsUnknownDelivery` → 未知命令 / 非本 run 执行一律拒绝。
+- **S3 单元** `TestThreadCommandRendersDurableBody` → 持久化的 `body` 是规范形（`{kind, body}`，命令体只带
+  `turn_id`/`content`、不带 `command_id`），proto 转换由该层完成；`TestWatchResponseCarriesThreadCommandAvailable`
+  → `WatchResponse` 的 `thread_command_available` 变体携带 `run_id`。
+- **S4 — T4C-13** `TestThreadMessagePostAcceptsPendingActiveAndIdle`（3 子测试）→ `pending|active|idle` 均 201；
+  写 `source='user'`/`kind='user_turn'`/`status='queued'` 条目、`thread_state='active'`、`idle_since NULL`、
+  一条未投递 `submit_user_turn` 命令、响应 `turnId` == 条目 `turn_id` == 命令体 `turn_id`。
+- **S4 — T4C-14** `TestThreadMessagePostReplaysUnderTheSameKey` → 逐字节相同响应；条目/命令/幂等记录 **+0**。
+- **S4 — T4C-15** `TestThreadMessageConcurrentSameKeyCreatesOneTurn` → 显式 barrier + WaitGroup（**无 sleep**）：
+  两请求均 201 且响应逻辑相同，恰 1 条目 + 1 命令。
+- **S4 — T4C-16** `TestThreadMessagePostRejectsIdempotencyConflicts` → 同 key 异 body → `409 idempotency_conflict`；
+  同 key 用于另一 run → 409，且第二个 run 零条目。
+- **S4 — T4C-17** `TestThreadMessageDistinctKeysCreateIndependentTurns` → 两个独立 `turn_id`、seq 1 与 2、2 条目 2 命令。
+- **S4 — T4C-18** `TestThreadMessageSeamFailureRollsBackEverything` → 缝未接线 ⇒ `503 thread_command_unavailable`，
+  条目/命令/`thread_state`/`version`/幂等记录**全部回滚**；换真实控制面后用**同一 key** 重试 → 201（干净首发）。
+  `TestThreadMessageRejectsMalformedAndOversizedRequests` → 缺 key / 坏 JSON / 多余 JSON 值 / 未知字段 / 类型错 /
+  非 text 块 / 64 KiB+1 → 对应稳定 Fault；恰 64 KiB → 201 且完整落库。
+  `TestThreadMessagePostRejectsClosedAndUnknownRuns` → `ending|ended` ⇒ 409 `thread_closed`；跨 tenant / 跨 Issue /
+  未知 / 软删 / team run ⇒ 404 `not_found`；非成员 ⇒ 403 `membership_required`（D3「与评论授权一致」）。
+  `TestThreadMessagePostInvariantBreakIsInternal` → 运行中却 `thread_state=pending`、或已启动却无 Thread 状态 ⇒
+  500 `internal_error`，Thread 不被推动（**不**伪装成 409）。
+  `TestThreadMessageCancelRowIsDeferred` → **G-024 钉**：`cancel_requested_at` 已置 + Workspace 非活仍 201 且
+  `thread_state='active'`（A2 落地即转红）。
+- **回归**：Phase 3B/4A/4B/S1 既有测试全绿（`task test` / `task test:race`）。
+- **测试编号对齐**：mandate 对 S4 的 T4C-13..18 有自己的逐条编号（首发成功 / 同 key 重放 / 同 key 并发 / 同 key 异
+  body-run 冲突 / 异 key 同 body / 缝失败回滚），而 §4C.16 设计矩阵把 T4C-13..18 编为另外六条义务（接受矩阵 / 条目+命令
+  同事务 / 缝失败整体回滚 / 幂等 7 例 / 同 key 并发 / `turn_id` 三处一致）。两套编号**指向同一组测试**，逐条对应为：
+  §4C.16 **T4C-13** ← `TestThreadMessagePostAcceptsPendingActiveAndIdle` + `TestThreadMessagePostRejectsClosedAndUnknownRuns`
+  + `TestThreadMessagePostInvariantBreakIsInternal`（mandate 的「首发成功」= 其中 201 臂）；§4C.16 **T4C-14** ←
+  `TestThreadMessagePostAcceptsPendingActiveAndIdle`（mandate 的「同 key 重放」另由 `TestThreadMessagePostReplaysUnderTheSameKey`）；
+  §4C.16 **T4C-15** ← `TestThreadMessageSeamFailureRollsBackEverything`（= mandate T4C-18）；§4C.16 **T4C-16** ←
+  `TestThreadMessagePostReplaysUnderTheSameKey` + `TestThreadMessagePostRejectsIdempotencyConflicts` +
+  `TestThreadMessageDistinctKeysCreateIndependentTurns`（= mandate T4C-14/16/17）；§4C.16 **T4C-17** ←
+  `TestThreadMessageConcurrentSameKeyCreatesOneTurn`（= mandate T4C-15）；§4C.16 **T4C-18** ←
+  `TestThreadMessagePostAcceptsPendingActiveAndIdle`（mandate T4C-13 的 `turnId` 断言）。**两套编号的六条义务均已覆盖。**
+
+**Gate results:**
+
+- `go build ./...`：PASS
+- `task build`：PASS
+- `task test`（真实 PostgreSQL，`REQUIRE_POSTGRES=1`）：PASS（exit 0，全部包 `ok`）
+- `task test:race`：PASS（无 `DATA RACE`）
+- `task format:check`：**FAIL（既有基线，与本轮无关）**——5 个 **HEAD 未修改**文件（`agent_run_control.go`、
+  `agent_run_control_test.go`、`agent_run_settle_db_test.go`、`agent_run_terminal_db_test.go`、`agent_target.go`）。
+  本轮**新增**的 1 项（`agent_run_thread_command.go` 的参数合并）已修复，门禁回到与基线**完全相同**的 5 文件。
+- `task lint`：**FAIL（既有基线，与本轮无关）**——余下 7 项全部落在 HEAD 未修改文件（gocritic×3、gofumpt×3、
+  unused×1 `activeSpaceAgentRoster`）。本轮引入的 2 项（`behaviour`、`unrecognised` misspell）已修复。
+- `task frontend:generate`：PASS（`api/openapi.json` + `frontend/src/api` 仅**增量**变化；md5sum 复跑证明生成**幂等**，
+  第二次运行零变化）。**无任何手工编辑**。
+- `task frontend:check`：漂移步骤（`git status --porcelain -- frontend/src/api`）**预期失败**——重新生成的客户端处于
+  未提交状态，而本轮禁止 commit。已用 md5sum 前后对比证明生成稳定后，直接运行 `npm --prefix frontend run check`：
+  **EXIT=0**（53 测试文件 / 299 测试通过，行覆盖 90.93%）。**未**跳过生成、**未**手工编辑产物。
+- `git diff --check`：本轮文件无新增空白错误。
+
+**Scope deviations:**
+
+- **1) G-024 的两行未实现（按 mandate 显式延后，非静默）**：指令要求「若 A2 仍未批准，则**不要**静默实现它——
+  在 plan 中保持 G-024 OPEN，实现 S4 其余契约，并为该冲突矩阵行保留显式测试/注释或延后证据」。本轮即如此执行：
+  `requireThreadAccepting` 与 `AppendThreadMessage` 的 CAS 均**有意**窄于 D-4C-03（不带 `cancel_requested_at IS NULL`），
+  注释中显式标注 A2 未批准，`TestThreadMessageCancelRowIsDeferred` 钉住该行。
+- **2) `phase='running' + thread_state='pending'` 归为 500 而非 409**：§4C.4 的接受矩阵中含该行，但它不是客户端可
+  作用的状态——`phase='running'` 的唯一写者（首条记录接管）在**同一条语句**里写 `active`，故该组合是不可达的
+  自身不变量破坏。按 §4C.15「内部错误不得伪装成客户端可解释的冲突」返回 500。`thread_state` 缺失同理。
+- **3) 非成员返回 403 而非 404**：`membership()` 既有语义（`store.go`）与 plan §4C.15/T4C-11 的切分一致
+  （跨 tenant / 跨 Issue / 软删 run ⇒ 404；**非成员 ⇒ 拒绝**，与评论授权一致）。**未**改动既有授权语义。
+- **4) 传输上限取 256 KiB**：Thread D3 的 64 KiB 是**解码后文本**上限（在 core 校验，`400 content_too_large`），
+  JSON 信封不计入；故路由层 `MaxBytesReader` 取 `threadMessageBodyLimit = 256 KiB`，超传输上限降级为
+  `400 invalid_json`。**未**放宽 D3 的文本上限。
+
+**Next planned step:**
+
+- **S5** — echo→`delivered` + `active⇄idle` 生命周期。**S2a**（Thread GET 已批准子集）可在 S5 前并行；
+  **S2b/S6/S7** 仍需先完成 ADR 修订 **A2**（G-024）/ **A3**（G-017）/ **A4**（G-023）。
+
+**Git:**
+
+- nothing staged? **YES（无 stage）**
+- commit performed? **NO**
+- push / PR? **NO**
+- destructive git（`reset`/`restore`/`checkout .`/`clean`/`stash`）? **NO**
 
 ---
 
@@ -2005,19 +3862,306 @@ At the end of each Agent round, append or update this section.
 
 ---
 
+### Round: Phase 4B — Thread Takeover + `starting→running` architecture resolution / 2026-09-30
+
+**Plan section executed:**
+
+- Design/decision round: the new `## Phase 4B — Thread Takeover + starting→running 架构决议` chapter (§4B.1–§4B.15), §7 Phase 4 status, §12 D-023 (→ Accepted) + D-024 + D-025, §13 G-009/G-012..G-015, §16 marker.
+
+**Status:** Complete (architecture resolved). **Verdict: PHASE_4B_ARCHITECTURE_RESOLVED / READY_FOR_PHASE_4B_IMPLEMENTATION.**
+
+**Files changed:**
+
+- `plan/plan.md` (the Phase 4B chapter; D-023 status; D-024; D-025; G-009/G-012..G-015; §7 Phase 4; §16 marker).
+- `plan/plan-zh.md` (mirror: §7 Phase 4, §12 D-016..D-025, §13 G-009/G-012..G-015, §15 marker).
+
+**Decisions added/changed:**
+
+- D-023 → **Accepted** (refined serialization proof that does not depend on the `proposed` controller-session ADR).
+- D-024 (new) — session-start authority, `thread_state` mapping, echo dedup, empty batch.
+- D-025 (new) — G-015 event ceiling + receipt retention initial values.
+
+**New gaps:** none new; G-013/G-014 **CLOSED**; G-015 **PARTIAL** (initial values given); G-009 architecture resolved (closes at 4B implementation); G-012/G-001 stay PARTIAL.
+
+**Tests added/changed:**
+
+- None implemented. Test matrix **T4B-1..T4B-19** recorded as `DESIGNED / MISSING` (§4B.13); no test code, no evidence marked `Covered`.
+
+**Gate results:**
+
+- Not applicable: no production code, no migration, no tests changed. (No `task check` run for this design-only round; `git diff --check` clean.)
+
+**Scope deviations:**
+
+- None. Modified only `plan/plan.md` and `plan/plan-zh.md`. No production code, no migration, no test implementation, no OpenAPI/contract change, no specs evidence changed to `Covered`.
+
+**Next planned step:**
+
+- Phase 4B **implementation** (only after architect authorization): migration `node_event_receipts` + `TakeOverThreadEvents` control route + real `ThreadEventsTakenOver` hook + T4B-1..T4B-19 evidence. Do not begin implementation in this round.
+
+**Git:**
+
+- nothing staged? YES (nothing staged by the Agent).
+- commit performed? **NO**.
+
+---
+
+### Round: Phase 4B — Thread Takeover + `starting→running` implementation / 2026-09-30
+
+**Plan section executed:**
+
+- The Phase 4B implementation round authorized by the architecture resolution: §4B.6/§4B.7 (A takeover + B hook), §4B.9 (migration), §4B.13 (test matrix), §7 Phase 4 status, §12 D-026, §13 G-009/G-012..G-016, §16 marker.
+
+**Status:** Complete. **Verdict: PHASE_4B_DONE / PHASE_4B_ARCHITECTURALLY_REVIEWABLE / READY_FOR_PHASE_4C_DESIGN.**
+
+**Files changed:**
+
+- `internal/core/migrations/0021_node_event_receipts.sql` (new) — the only new table.
+- `internal/core/agent_run_thread_takeover.go` (new) — A-side `agent_thread_takeover` control core.
+- `internal/core/agent_run_thread.go` (new) — B-side `Store.threadEventsTakenOver` hook core.
+- `internal/controlgrpc/agentruns.go` (new) — `AgentRunService.TakeOverThreadEvents`.
+- `internal/core/control.go` — route the action through `submitted`.
+- `internal/core/agent_run_settle.go` — `businessAgentRunHooks.ThreadEventsTakenOver` + `NewBusinessAgentRunHooks`.
+- `internal/controlgrpc/server.go` — register `AgentRunService`.
+- `cmd/server/main.go` — wire `store.AgentRunHooks` (G-003 seam).
+- `internal/core/agent_run_thread_takeover_db_test.go` (new), `integration/agent_run_thread_takeover_test.go` (new), `integration/migration_upgrade_path_test.go` (0021 test), `internal/core/node_executions_db_test.go` (T4A-16 assertion updated: the table now exists, so the obligation is asserted on rows).
+- `plan/plan.md`, `plan/plan-zh.md`.
+- specs: `test-cases/cloud/controller-integration/agent-run-executions-and-thread.md`, `test-cases/cloud/issue-run/agent-run-orchestration.md` (evidence statuses).
+
+**Decisions added/changed:**
+
+- D-026 (new) — record `kind` source (the `ora-history` type tag; authority desktop `crates/history/src/record.rs`), batch bound (approved 1..64, not D-025's cap), the two fail-closed error classes (`UNAVAILABLE` = retry for invariant failures vs `CONFLICT` = drop for client faults), take-over-but-don't-run for stale/cancel/invalid-workspace runs, the `pending`-has-no-writer note, and the §31 supersession of §4B.3's echo row.
+- D-025 annotated: the values exist but are deliberately **not** enforced this round (no approved ADR basis).
+
+**New gaps:** G-016 (new, OPEN / NON-BLOCKING) — no writer materializes the literal `thread_state='pending'`. G-009 **CLOSED** (evidence-backed). G-013/G-014 CLOSED and now implemented. G-012 stays PARTIAL (not split). G-015 stays PARTIAL / NON-BLOCKING. G-001 stays PARTIAL.
+
+**Tests added/changed:**
+
+- `internal/core/agent_run_thread_takeover_db_test.go`: T4B-1..T4B-19 over real PostgreSQL, including the §42 concurrency case (`TestThreadTakeoverConcurrentBatches`, barrier-synchronized, both permitted lock orders accepted and asserted as the complete outcome set).
+- `integration/agent_run_thread_takeover_test.go`: `TestAgentRunThreadTakeoverOverGRPC` (production chain: Phase 3A recovery pass → Phase 4A claim/dispatch → gRPC takeover → running, plus the C5 replay) and `TestAgentRunThreadTakeoverGRPCRejections`.
+- `integration/migration_upgrade_path_test.go::TestMigration0021NodeEventReceiptsAppliesFreshAndUpgrades`.
+- `internal/core/node_executions_db_test.go`: T4A-16 now asserts zero receipts and `last_event_sequence = 0` after registration.
+
+**Gate results:**
+
+- `gofmt` on every changed file: clean. `go build ./...`: clean. `go vet ./internal/... ./integration`: clean.
+- `REQUIRE_POSTGRES=1 go test ./internal/core -count=1`: ok. Same for `./integration`: ok. `go test ./... -count=1`: ok.
+- `go test -race -count=1 ./internal/core/... ./integration`: ok.
+- `git diff --check` (both repos): clean.
+- `go run ./cmd/checkformat`: reports the **pre-existing** baseline only — `agent_run_control.go`, `agent_run_control_test.go`, `agent_run_settle_db_test.go`, `agent_run_terminal_db_test.go`, `agent_target.go`. None is touched this round; not fixed (unrelated files).
+- `golangci-lint`: 7 pre-existing issues only (3 gocritic paramTypeCombine, 3 gofumpt, 1 unused), all in files this round does not modify. The three issues this round did introduce (gosec G115, ineffassign, sqlclosecheck) were fixed, not suppressed — except the G115 cast, which carries an inline justification next to the `math.MaxInt64` guard that makes it safe.
+
+**Scope deviations:**
+
+- None. T4B-14 and T4B-18 are recorded **DEFERRED**, not skipped: both would require implementing behavior the round's mandate explicitly forbids (a cancel write path in 4B; the unapproved 200,000 cap).
+
+**Next planned step:**
+
+- **Phase 4C design** (Thread API / SSE / `EnqueueThreadCommand` / delivery lifecycle) — a separate design round; not started here.
+
+**Git:**
+
+- nothing staged? YES (nothing staged by the Agent).
+- commit performed? **NO**. push? **NO**. PR? **NO**.
+
+---
+
+### Round: Phase 4C — Thread API / SSE / Thread Commands / Lifecycle 详细设计 / 2026-10-08
+
+**Plan section executed:**
+
+- Design round: `## Phase 4C — Thread API / SSE / Thread Commands / Lifecycle 详细设计`（§4C.0–§4C.20）、§7 Phase 4 status、
+  §12 D-4C-01..D-4C-12、§13 G-016 CLOSED + G-017..G-021、§16 marker、`plan/plan-zh.md` 镜像；
+  specs 证据文档（`test-cases/cloud/thread/durable-thread.md`、
+  `test-cases/cloud/controller-integration/agent-run-executions-and-thread.md`）只补 **Missing** 状态义务。
+
+**Status:** Complete. **Verdict: PHASE_4C_DESIGN_DONE / PHASE_4C_ARCHITECTURALLY_REVIEWABLE / READY_FOR_PHASE_4C_IMPLEMENTATION**（附 NON-BLOCKING OPEN G-017..G-021）。
+
+**Files changed:**
+
+- `plan/plan.md`（本轮唯一权威设计记录：新增 Phase 4C 章节 + D-4C-* + §7/§13/§15/§16 更新）
+- `plan/plan-zh.md`（镜像：§12/§13/§15 与头部状态）
+- specs 仓库：`test-cases/cloud/thread/durable-thread.md`、`test-cases/cloud/controller-integration/agent-run-executions-and-thread.md`（证据义务，全部保持 `Missing`）
+
+**Decisions added/changed:**
+
+- **D-4C-01**（新）`thread_state` 归 B；`pending` 由 `StartSession` 事务物化 + 幂等回填（**G-016 CLOSED**，并 supersede D-026 的「`pending` 无写者」段）
+- **D-4C-02**（新）Thread GET：单快照、`after`/`before`/tail、`limit 1..500`、不透明十进制游标、不复用 `page`/`window`
+- **D-4C-03**（新）Thread POST：B 写条目 + A 缝写命令、同一事务、状态接受矩阵、`thread_closed` 语义
+- **D-4C-04**（新）POST 幂等复用 `idempotency_records`；7 例矩阵（含同 key 异 run ⇒ 冲突、终态后回放原响应）
+- **D-4C-05**（新）`EnqueueThreadCommand`：A 拥有表、A 生成 `command_id`、调用方事务、未接线 ⇒ `503`
+- **D-4C-06**（新）四类身份 `turn_id` / `command_id` / `execution_id` / `seq` 的分离
+- **D-4C-07**（新）SSE = 纯失效提示；唯一游标词汇归 durable log；`after` 在 GET 与重连统一；`SpaceEvent` 扩字段
+- **D-4C-08**（新）SSE 顺序/重复/丢失的容忍；无新条目时仍发提示；客户端重读已加载区间
+- **D-4C-09**（新）`active`/`idle` 权威 = 接管事务内「批次末条记录」+ `queued` 检查；`idle_since` 用数据库时间
+- **D-4C-10**（新）`ending` 三个触发（用户/超窗/取消）；**`ending → ended` 唯属 `SessionEnded`，属 Phase 5**
+- **D-4C-11**（新）取消/终态交互与 4B cancel-first 一致；Thread history 不可变（只有 `status` 单向变化）
+- **D-4C-12**（新）4C **需要** migration 0022（`thread_commands` + `thread_entries.status` + 回填 + 两个部分索引），**本轮未创建**
+
+**New gaps:** **G-016 CLOSED**（D-4C-01，决策层关闭；证据义务 T4C-1..T4C-5 仍 `MISSING`）。新增 **G-017**（tail/`before`/`idleSince` 与 `pending` 时点澄清是对已批准 D4/D5 的扩展，需 ADR 修订或架构师确认）、**G-018**（「用户结束」端点缺失）、**G-019**（Phase 5 的 `SessionEnded`/`discarded`）、**G-020**（SSE 不保证送达 ⇒ 客户端轮询）、**G-021**（多 worker 命令分区）。G-012/G-015 保持 PARTIAL，G-001/G-004/G-011 不变。
+
+**Tests added/changed:**
+
+- 无。T4C-1..T4C-34 全部为**设计**（`DESIGNED / MISSING`）；本轮不写测试代码。
+
+**Gate results:**
+
+- 不适用（无 production/migration/test 变更）。本轮未运行 lint/test/build；`plan/plan.md`、`plan/plan-zh.md` 与
+  specs 文档为纯 Markdown 变更。
+
+**Scope deviations:**
+
+- None。§4C.13 列出的 4B 改动是**登记的实现前置**，本轮按 mandate 明确**不改代码**。
+
+**Next planned step:**
+
+- **Phase 4C implementation**（先取 G-017/G-018 的 ADR 修订或架构师确认，再落地 migration 0022 与 Thread API/SSE/commands/lifecycle）。
+
+**Git:**
+
+- nothing staged? YES（本轮未执行任何 git 写操作）。
+- commit performed? **NO**。push? **NO**。PR? **NO**。
+
+---
+
 ## 16. Current Execution Marker
 
 Current phase:
 
-**Phase 4A DONE — A-side dispatch registration（实现完成，架构可评审；未进入 4B running）**
+**Phase 4C ACCELERATED IMPLEMENTATION BATCH 1 — S3（Thread Command Control Plane）+ S4（Thread POST）**
 
-Current status: **PHASE_4A_DONE / PHASE_4A_ARCHITECTURALLY_REVIEWABLE / NOT_READY_FOR_PHASE_4B_IMPLEMENTATION**
+Current status: **PHASE_4C_ACCEL_BATCH_1_CORE_DONE_WITH_ADR_DEFERRED**
+（本轮为 **ACCELERATED IMPLEMENTATION ROUND**（单 Agent，连续推进 S3 → S4，中途不结束本轮）：§4R.5 的 **S3** 与 **S4**
+一次交付。**S3 完整**：`EnqueueThreadCommand` 在**调用方事务**内写 `thread_commands`、A 生成 `command_id`、`created_at`
+用数据库时钟、`delivered_at`/`delivered_execution_id` 初值 NULL；`ClaimThreadCommands{epoch,limit}` 纯读、按 run 分组、
+组内创建序、仅返回**已登记 agent_session 执行**的 run 及其 `execution_id` 与目标 Node；`RecordThreadCommandDelivered`
+首次登记生效、同执行重放收敛幂等、异执行 `CONFLICT` **绝不**复写；`ThreadCommandAvailable{run_id}` **只在提交后**发布
+（D-4C-05/D-4C-06）；错误经既有内部 Fault/gRPC 码映射，**未新增 proto 枚举**。**S4 core 完整**：
+`POST /api/v1/tenants/{tid}/issues/{iid}/runs/{rid}/thread/messages`（强制 `Idempotency-Key`、`{content:[{type:"text",text}]}`、
+文本总量 ≤ 64 KiB、v1 仅 text）在**同一事务**内按序完成：幂等预检 → 鉴权 → 权威重读 run → 生命周期前置 → 分配 Thread
+`seq` → 生成 Cloud `turn_id` → 写 `source='user'`/`kind='user_turn'`/`status='queued'` 条目 → `thread_state='active'` 并清
+`idle_since` → 经 **A 缝** `EnqueueThreadCommand` 放出 `SubmitUserTurn` → 写幂等记录 → COMMIT → 提交后
+`ThreadCommandAvailable`。业务层**不**直接写 `thread_commands`。测试 T4C-13..T4C-18 与 T4C-21..T4C-24 全部落地并通过；
+`task build` / `task test` / `task test:race` 全绿；OpenAPI 与前端客户端经 `task frontend:generate` 仅**增量**更新且生成**幂等**，
+`npm --prefix frontend run check` EXIT=0（53 文件 / 299 测试）。
+**A2 未获批准 ⇒ G-024 仍 OPEN**：D-4C-03 的 `cancel_requested_at IS NOT NULL` 与「Workspace 不活」两行**未实现**，
+`requireThreadAccepting`/CAS 有意窄于 D-4C-03，并以 `TestThreadMessageCancelRowIsDeferred` 钉住；故标记为
+**CORE_DONE_WITH_ADR_DEFERRED** 而非 DONE。**G-021 仍有意未解决**（`ClaimThreadCommands` 仅为单 worker 保证）。
+**未改**：Phase 4B 的 running authority / `seq` 分配 / receipt / takeover 事务、proto、任何 ADR 文件或其 `status`、
+`specs/test-cases/cloud/thread/durable-thread.md`。**既有门禁失败与本轮无关**：`task format:check`（5 文件）与
+`task lint`（7 项）全部落在 **HEAD 未修改**文件（见 §15 本条）。**未提交**：无 stage / commit / push / PR，
+既有未提交修改原样保留。）
+
+**Phase 4C Accelerated Batch 1 record (this round — IMPLEMENTATION):** 见 §15
+"Round: Phase 4C Accelerated Implementation Batch 1 — S3 (Thread Command Control Plane) + S4 (Thread POST) / 2026-10-08"。
+
+**Phase 4C Slice 1 marker (previous round — IMPLEMENTATION), preserved:**
+
+Current phase at that round:
+
+**Phase 4C IMPLEMENTATION SLICE 1 DONE — Migration 0022 + `pending` materialization（实施轮；仅 S1）**
+
+Current status at that round: **PHASE_4C_SLICE_1_DONE / PHASE_4C_IMPLEMENTATION_IN_PROGRESS**
+（本轮为 **IMPLEMENTATION ROUND**，严格限于 §4R.5 的 **S1**：新增 migration `0022_thread_api_and_commands.sql`
+（`thread_commands` 控制面表 + `thread_entries.status` 与其两条 CHECK + `thread_entries_queued` /
+`thread_commands_undelivered` / `issue_runs_idle_threads` 三个部分索引 + 对「有 seq=1 真实声明」的 agent run 回填
+`thread_state='pending'`），并让 B-owned `StartSession` 在 seq=1 的**同一事务**内物化 `thread_state='pending'`
+（D-4C-01 / D-4C-12，关闭 G-016 的实现侧）。测试 T4C-1..T4C-5 全部落地并通过；`task build` / `task test` /
+`task test:race` 全绿。**回填按业务事实而非阶段代理**：谓词是 `EXISTS(thread_entries seq=1, source='system',
+kind='user_turn')`，并排除取消、终态、无 Workspace、软删除与非 agent 运行；CHECK 前先安全回填 `source='user'`
+条目的 `status='queued'`，升级不会失败（三条变异均被 T4C-5 捕获）。
+**G-022 仍 OPEN**：A1 修订提案**未获批准**，**未**改任何 ADR 文件或其 `status`，实现依据是已批准的 D3 + 不变量 4 + D-4C-12。
+**新登记 G-025**（migration README 停在 0017 的文档债）。**未改**：Phase 4B 的 running authority / `seq` 分配 /
+receipt / takeover 事务、proto、OpenAPI/generated。**既有门禁失败与本轮无关**：`task format:check` 与 `task lint`
+只在 **HEAD 未修改**文件上报错（见 §15 本条）。**未提交**：无 stage / commit / push / PR，既有未提交修改原样保留。）
+
+**Phase 4C Slice 1 record (this round — IMPLEMENTATION):** 见 §15
+"Round: Phase 4C Implementation Slice 1 — migration 0022 + `pending` materialization / 2026-10-08"。
+
+**Phase 4C readiness marker (previous round — REVIEW ONLY), preserved:**
+
+Current phase at that round:
+
+**Phase 4C READINESS REVIEWED — Architecture Review & Implementation Slice Plan（评审轮；未实现）**
+
+Current status at that round: **PHASE_4C_DESIGN_DONE / PHASE_4C_ARCHITECTURALLY_REVIEWABLE / READY_FOR_PHASE_4C_IMPLEMENTATION_SLICE_1**
+（该轮为 **Architecture Review + Implementation Readiness**：只核验、只登记、只切分。交付 §4R.0–§4R.8：
+G-017 的**逐条切分**（`after`/`limit ≤ 500`/升序/`threadState`/`{issueId,runId,lastSeq}` = 已有批准依据；
+无游标 tail 读、`before`、`idleSince`、`nextCursor`/`prevCursor` = 新扩展，需 ADR 修订）、G-018 的用户结束端点契约
+（`POST .../thread/end`，202，强制幂等键，`EndSession{user_ended}` 同事务；`ending → ended` **仍归 Phase 5**）、
+D-4C-01..D-4C-12 逐条复核、**新登记 G-022/G-023/G-024**、7 个可独立验收的实施切片 S1–S7（每片含 Scope / 预计修改文件 /
+Migration 影响 / Transaction contract / Ownership contract / 对应 T4C 测试 / Regression tests / Exit criteria）、
+依赖与风险表、**待批准的 ADR 修订 A1–A4**（未落地到任何 ADR 文件）。**关键核验**：proto 已完整（4C **无需改 proto**）；
+`thread_entries` 无 `status` 列；`thread_commands` 表不存在；`SpaceEvent` 缺三字段；`PublicRequest` 无 `Before`。
+**未实现**：production 代码、migration、测试、proto、API/OpenAPI 变更一律未做。**未提交**：无 stage / commit /
+push / PR，既有未提交修改原样保留。）
+
+**Phase 4C readiness record (previous round — REVIEW ONLY):** 见 §15
+"Round: Phase 4C Readiness — Architecture Review & Implementation Slice Plan / 2026-10-08"
+与 `## Phase 4C Readiness — Architecture Review & Implementation Slice Plan`（§4R.0–§4R.8）。
+
+**Phase 4C design marker (previous round — DESIGN ONLY), preserved:**
+
+Current status at that round:
+
+**Phase 4C DESIGN DONE — Thread API / SSE / Thread Commands / Lifecycle（纯设计轮；未实现）**
+
+Current status: **PHASE_4C_DESIGN_DONE / PHASE_4C_ARCHITECTURALLY_REVIEWABLE / READY_FOR_PHASE_4C_IMPLEMENTATION**
+（本轮只更新 `plan/plan.md`、`plan/plan-zh.md` 与 specs 证据文档。交付 D-4C-01..D-4C-12、§4C.0–§4C.20：
+`thread_state` 归属与 `pending` 物化（**G-016 CLOSED**）、Thread GET/POST 契约、`EnqueueThreadCommand` 缝与
+四类身份、SSE 失效提示与统一 `after` 语义、`active/idle/ending` 生命周期、取消/终态交互、4C migration 决策
+（**未创建**）、10 场景并发矩阵、API 错误分类、T4C-1..T4C-34 测试设计矩阵。**NON-BLOCKING OPEN**：
+G-017（tail/`before`/`idleSince` 扩展已批准 D5）、G-018（用户结束端点缺失）、G-019（`SessionEnded`/`discarded` 属
+Phase 5）、G-020（SSE 不保证送达）、G-021（多 worker 命令分区）。**未实现**：production 代码、migration、测试、
+API/OpenAPI 变更一律未做。**未提交**：无 stage / commit / push / PR，既有未提交修改原样保留。）
+
+**Phase 4C design record (this round — DESIGN ONLY):** 见 §15
+"Round: Phase 4C — Thread API / SSE / Thread Commands / Lifecycle 详细设计 / 2026-10-08"
+与 `## Phase 4C — Thread API / SSE / Thread Commands / Lifecycle 详细设计`（§4C.0–§4C.20）。
+
+**Phase 4B implementation marker (previous round — IMPLEMENTATION), preserved:**
+
+Current status at that round: **PHASE_4B_DONE / PHASE_4B_ARCHITECTURALLY_REVIEWABLE / READY_FOR_PHASE_4C_DESIGN**
+（交付 migration `0021_node_event_receipts.sql`、production 接管核心 `agent_thread_takeover` +
+`ThreadEventsTakenOver` 钩子 + gRPC `TakeOverThreadEvents` + `cmd/server` 接线，以及真实 PostgreSQL 的
+T4B-1..T4B-19 与端到端 gRPC 验收。**G-009 CLOSED**，G-013/G-014 CLOSED 且已实现，G-012/G-015 仍 PARTIAL，
+G-016 当时 OPEN —— 已由本轮 4C 设计关闭。**未提交**：无 stage / commit / push / PR。）
+
+**Phase 4B architecture resolution record (prior round — DESIGN / DECISION ONLY), preserved:**
+
+1. **G-013 CLOSED（D-024）** — `starting→running` 唯一权威 = 首条**真实 Node Thread 记录**被 `TakeOverThreadEvents`
+   接管且 `ThreadEventsTakenOver` 钩子同事务提交（IssueRun D3 + controller-integration D6 + Thread D4）；
+   **无** synthetic `session_started` 事件（Node 协议 D2 只发 `ThreadEvent{record}`）。`thread_state`：
+   `pending`（执行已登记、无记录；Thread D4）→ 首条记录接管 → `active`；4B 只写 `pending→active`。echo 首 prompt
+   （`turn_id == initial_turn.turn_id`）只写收据、不分配 seq、不新增条目（seq=1 不可变）；空批次 `ABORTED` 拒绝。
+   §4B.2–§4B.4。
+2. **G-014 CLOSED / D-023 ACCEPTED** — Thread `seq` = 接管事务内 `MAX(seq)+1`（从 2 起）。串行化证明来自
+   **approved** 事实：(1) 一运行至多一个会话执行（controller-integration D1 / D-021）；(2) 所有接管经
+   `Store.transact` 全局 advisory lock；(3) `PRIMARY KEY (run_id, seq)` 兜底。**不依赖 `proposed` 的
+   controller-session ADR**。Node `sequence`（`node_event_receipts`，执行内）≠ Thread `seq`（run-scoped），不混淆。
+   不新增计数器。§4B.5。
+3. **G-015 PARTIAL** — 初值：单运行非终态 event 上限 `thread_event_cap` 默认 200,000（检查点
+   `last_event_sequence`）；`node_event_receipts` 保留 `node_event_receipts_retention` 默认 `done` 后 30 天。
+   enforcement 与清理循环随 4B 实现（D-025，§4B.10）。
+4. **迁移 proposal**：Phase 4B **唯一**新表 `node_event_receipts(execution_id, sequence)` + `event jsonb`
+   （FK→`node_executions`）；**不改业务表**（`thread_entries` 0018、`issue_runs.thread_state` 值集已足够）。
+   §4B.9。
+5. **测试矩阵 T4B-1..T4B-19** 全部 `DESIGNED / MISSING`（§4B.13）；4B 最小范围 = 迁移 + `TakeOverThreadEvents`
+   路由 + 真实化 `ThreadEventsTakenOver` 钩子，**不含** API/`thread_commands`/`deliver_revision`/Phase 5（§4B.12）。
+6. **controller-session ADR 仍 `proposed`**：本决议证明 Cloud 侧 4B **不依赖**它（§4B.14），**不报告**
+   `BLOCKED_ON_CONTROLLER_SESSION_ADR`；其 D1–D5 是 desktop 侧独立待批准决策。
+7. **未改 production / migration / 测试**；仅 `plan/plan.md`（本章 + D-023 状态 + D-024/D-025 + G-009/G-012..G-015 +
+   §7 Phase 4 + 本 marker）与 `plan/plan-zh.md`（镜像）。git：未 stage/commit/push/PR。
+
+**Previous round marker (Phase 4A — A-side dispatch registration, D-020/D-021), preserved:**
+
+Current status at that round: **PHASE_4A_DONE / PHASE_4A_ARCHITECTURALLY_REVIEWABLE / NOT_READY_FOR_PHASE_4B_IMPLEMENTATION**
 （4A 只落地 A 侧 `RecordDispatch` 执行登记：`execution_work(agent_session) → Controller claim → Controller 分配
 execution_id → agent_work_dispatch → node_executions 行 + execution_work.execution_id 栅栏`。`IssueRun.phase` 全程保持
 `starting`/`dispatched`，**绝不进入 running**；4B（Thread takeover、starting→running、thread seq≥2、node_event_receipts、
-D-023 MAX(seq)+1）本轮**禁止实现/禁止固化**，其取值与本 marker 判断无关，`PHASE_4B = NOT READY`。）
+D-023 MAX(seq)+1）当时**禁止实现**，`PHASE_4B = NOT READY`——该结论已由本轮架构决议取代：`PHASE_4B = READY`。）
 
-**Phase 4A implementation record (this round — A-side dispatch registration, D-020/D-021):**
+**Phase 4A implementation record (previous round — A-side dispatch registration, D-020/D-021):**
 
 1. **migration** `internal/core/migrations/0020_node_executions.sql` (new): A-owned `node_executions` table
    (execution_id text PK, kind('agent_session'|'deliver_revision'), operation_id uuid 语义引用, work_id uuid UNIQUE

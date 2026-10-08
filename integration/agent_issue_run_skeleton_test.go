@@ -167,7 +167,9 @@ func TestAgentIssueRunSkeletonSchemaConstraints(t *testing.T) {
 	turnID := uuid.NewString()
 	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record) VALUES($1, 1, 'system', 'user_turn', '{"role":"system"}'::jsonb)`, s.runID)
 	must(t, e)
-	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record, turn_id) VALUES($1, 2, 'user', 'user_turn', '{"role":"user","content":"hi"}'::jsonb, $2)`, s.runID, turnID)
+	// 0022 gives a user turn its D3 lifecycle, and makes it mandatory: a persisted user turn is
+	// 'queued' until the Node echoes it or the session ends (see thread_entries_user_status).
+	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record, turn_id, status) VALUES($1, 2, 'user', 'user_turn', '{"role":"user","content":"hi"}'::jsonb, $2, 'queued')`, s.runID, turnID)
 	must(t, e)
 	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record, node_execution_id, node_sequence) VALUES($1, 3, 'node', 'message', '{"role":"assistant"}'::jsonb, 'exec-1', 1)`, s.runID)
 	must(t, e)
@@ -186,6 +188,10 @@ func TestAgentIssueRunSkeletonSchemaConstraints(t *testing.T) {
 	big := `{"data":"` + strings.Repeat("x", 262200) + `"}`
 	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record) VALUES($1, 8, 'system', 'user_turn', $2::jsonb)`, s.runID, big)
 	wantPGError(t, e, "23514") // single entry at most 256 KiB (Thread D2)
+	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record, turn_id) VALUES($1, 9, 'user', 'user_turn', '{}'::jsonb, $2)`, s.runID, uuid.NewString())
+	wantPGError(t, e, "23514") // a user turn without its D3 lifecycle (0022)
+	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record, status) VALUES($1, 10, 'system', 'user_turn', '{}'::jsonb, 'queued')`, s.runID)
+	wantPGError(t, e, "23514") // a node/system entry can never carry one
 	_, e = pool.Exec(`INSERT INTO thread_entries(run_id, seq, source, kind, record) VALUES($1, 1, 'system', 'user_turn', '{}'::jsonb)`, uuid.NewString())
 	wantPGError(t, e, "23503") // run must exist
 }

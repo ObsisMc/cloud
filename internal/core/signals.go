@@ -9,6 +9,9 @@ type ControlSignal struct {
 	Kind        ControlSignalKind
 	OperationID string
 	NodeID      string
+	// RunID names the IssueRun a ThreadCommandAvailable signal belongs to. It is empty for every
+	// other kind.
+	RunID string
 }
 
 // ControlSignalKind enumerates the signals the Watch stream can carry.
@@ -24,6 +27,11 @@ const (
 	// SignalDrain precedes this instance's shutdown: the holder stops claiming from it until a new
 	// Watch is established, keeps its lease, and leaves in-flight coordination and user work alone.
 	SignalDrain ControlSignalKind = "drain"
+	// SignalThreadCommandAvailable follows a committed transaction that persisted Thread commands;
+	// RunID names the run whose commands became claimable. Like every signal it is an at-most-once
+	// hint: durability is the thread_commands row, and the holder's periodic ClaimThreadCommands
+	// covers a dropped hint (controller-integration D5).
+	SignalThreadCommandAvailable ControlSignalKind = "thread_command_available"
 )
 
 // ControlHub fans control signals out to live Watch streams. Like SpaceHub it is an in-memory,

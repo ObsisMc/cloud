@@ -515,8 +515,10 @@ func TestAgentRunDispatchNonAgentRegression(t *testing.T) {
 }
 
 // T4A-16 — no Phase 4B side effects: registering an execution leaves exactly the Phase 3 thread
-// entries (seq=1), no running transition, and no node_event_receipts table (Phase 4B migration is not
-// over-applied by 0020).
+// entries (seq=1), no running transition, and no receipts. Since the Phase 4B migration (0021) does
+// create node_event_receipts, the obligation "dispatch alone registers nothing a Node event could
+// have produced" is asserted on the rows instead of on the table's absence: dispatching writes no
+// receipt for the execution it registered.
 func TestAgentRunDispatchNoPhase4BSideEffects(t *testing.T) {
 	store := dispatcherDB(t)
 	scene, claims := seedDispatchableWork(t, store)
@@ -534,11 +536,18 @@ func TestAgentRunDispatchNoPhase4BSideEffects(t *testing.T) {
 	if !phase.Valid || phase.String != "starting" || status != "dispatched" {
 		t.Fatalf("no running transition, got phase=%v status=%q", phase, status)
 	}
-	var hasReceipts bool
-	if err := store.Pool.QueryRow(`SELECT to_regclass('node_event_receipts') IS NOT NULL`).Scan(&hasReceipts); err != nil {
-		t.Fatalf("check node_event_receipts: %v", err)
+	var receipts int
+	if err := store.Pool.QueryRow(`SELECT count(*) FROM node_event_receipts WHERE execution_id=$1`, execOf(scene.work, "a")).Scan(&receipts); err != nil {
+		t.Fatalf("count node_event_receipts: %v", err)
 	}
-	if hasReceipts {
-		t.Fatalf("0020 must not create the Phase 4B node_event_receipts table")
+	if receipts != 0 {
+		t.Fatalf("registration must not receipt any Node event, got %d", receipts)
+	}
+	var lastEventSequence int64
+	if err := store.Pool.QueryRow(`SELECT last_event_sequence FROM node_executions WHERE execution_id=$1`, execOf(scene.work, "a")).Scan(&lastEventSequence); err != nil {
+		t.Fatalf("read last_event_sequence: %v", err)
+	}
+	if lastEventSequence != 0 {
+		t.Fatalf("registration must leave last_event_sequence at 0, got %d", lastEventSequence)
 	}
 }

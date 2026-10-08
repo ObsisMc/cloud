@@ -175,19 +175,33 @@ func (s *Store) declareDelete(t *transaction, o Object) error {
 }
 
 // businessAgentRunHooks is the B-side AgentRunHooks implementation. RunWorkspaceSettled
-// delegates to the Phase 2A settlement core; the remaining hooks fail closed (they belong
-// to later phases). It is the concrete seam the control plane wires as its AgentRunHooks
-// value once the A caller exists (G-003 → Phase 2B); production callers stay unwired this
-// phase, so it is not yet bound on the Store.
+// delegates to the Phase 2A settlement core and ThreadEventsTakenOver to the Phase 4B Thread
+// takeover core; the remaining hooks (SessionEnded/DeliverySettled/RunWorkspaceDeleted) fail
+// closed because they belong to the session-terminal/delivery/release phases that are not
+// implemented yet. NewBusinessAgentRunHooks binds it on the Store in production, so the same
+// control-plane transactions that persist A-side evidence drive the B-side transitions.
 type businessAgentRunHooks struct {
 	store                    *Store
-	UnavailableAgentRunHooks // ThreadEventsTakenOver/SessionEnded/DeliverySettled/RunWorkspaceDeleted keep failing closed.
+	UnavailableAgentRunHooks // SessionEnded/DeliverySettled/RunWorkspaceDeleted keep failing closed.
+}
+
+// NewBusinessAgentRunHooks returns the production B-side hook set for store, the value
+// cmd/server assigns to Store.AgentRunHooks. Every hook runs inside the caller's transaction;
+// the returned value holds no state beyond the store it delegates to.
+func NewBusinessAgentRunHooks(store *Store) AgentRunHooks {
+	return businessAgentRunHooks{store: store}
 }
 
 // RunWorkspaceSettled fulfills the A→B hook: it runs the B settlement core in the
 // caller-owned transaction.
 func (h businessAgentRunHooks) RunWorkspaceSettled(t *transaction, run Object, ready bool) error {
 	return h.store.settleRunWorkspace(t, run, ready)
+}
+
+// ThreadEventsTakenOver fulfills the A→B hook: it runs the Thread takeover core in the
+// caller-owned takeover transaction.
+func (h businessAgentRunHooks) ThreadEventsTakenOver(t *transaction, run, execution Object, events []Object) error {
+	return h.store.threadEventsTakenOver(t, run, execution, events)
 }
 
 // compile-time guard: businessAgentRunHooks satisfies the AgentRunHooks seam, with the

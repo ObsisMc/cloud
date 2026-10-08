@@ -54,6 +54,7 @@ func New(store *core.Store) *grpc.Server {
 	controlpb.RegisterControlSignalServiceServer(server, &signalService{store: store})
 	controlpb.RegisterWorkspaceOperationServiceServer(server, &operationService{store: store})
 	controlpb.RegisterNodeReportServiceServer(server, &nodeService{store: store})
+	controlpb.RegisterAgentRunServiceServer(server, &agentRunService{store: store})
 	return server
 }
 

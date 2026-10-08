@@ -85,6 +85,12 @@ func run() (runErr error) {
 	// transaction (G-001 execution portion, G-008). The workspace/thread seams still fail closed at
 	// this slice, so G-001 stays PARTIAL; only the execution seam is wired real here.
 	store.AgentRunControlPlane = core.NewStoreAgentRunControlPlane()
+	// Production B-side transition seam: bind the real hook set so a control-plane transaction that
+	// persists Node evidence drives the matching IssueRun/Thread transition in the same transaction
+	// — the Phase 4B Thread takeover (starting→running, thread_entries, thread_state) and the Phase
+	// 2A workspace settlement. Without it, Store.Control falls back to UnavailableAgentRunHooks and
+	// every takeover would roll back fail-closed.
+	store.AgentRunHooks = core.NewBusinessAgentRunHooks(store)
 	if e := store.CheckSchema(ctx); e != nil {
 		return e
 	}

@@ -103,6 +103,8 @@ import type {
   PostApiV1TenantsTidIssuesIidMoveBody,
   PostApiV1TenantsTidIssuesIidRuns200,
   PostApiV1TenantsTidIssuesIidRunsBody,
+  PostApiV1TenantsTidIssuesIidRunsRidThreadMessages201,
+  PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody,
   PostApiV1TenantsTidIssuesIidSubscribers200,
   PostApiV1TenantsTidIssuesIidSubscribersBody,
   PostApiV1TenantsTidJoinLinksBody,
@@ -3361,6 +3363,77 @@ export function useGetApiV1TenantsTidIssuesIidRunsRid<TData = Awaited<ReturnType
 
 
 /**
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Appends one user turn to an agent run's Thread and returns the entry that was created, with the Cloud-generated turnId the Node will echo back. Authorized like a comment: any active tenant member who can read the Issue. content accepts text blocks only and their total text must not exceed 64 KiB, otherwise 400 content_too_large; an unrecognized block type is 400 invalid_field_type, never a silent drop. Accepted while the Thread is pending, active or idle; a Thread that is ending or ended answers 409 thread_closed. The entry and the delivery command for it commit together with the idempotency record, so a 503 thread_command_unavailable — the control plane is not wired in this deployment — leaves nothing behind and the same key may be retried as a first request. A missing or mismatched tenant, Issue or run is 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary POST /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages
+ */
+export const postApiV1TenantsTidIssuesIidRunsRidThreadMessages = (
+    tid: string,
+    iid: string,
+    rid: string,
+    postApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody: PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody,
+ options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
+) => {
+
+
+      return customInstance<PostApiV1TenantsTidIssuesIidRunsRidThreadMessages201>(
+      {url: `/api/v1/tenants/${tid}/issues/${iid}/runs/${rid}/thread/messages`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: postApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody, signal
+    },
+      options);
+    }
+
+
+
+
+export const getPostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationKey = () => ['postApiV1TenantsTidIssuesIidRunsRidThreadMessages'] as const;
+
+export const getPostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>, TError,PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>, TError,PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables, TContext> => {
+
+const mutationKey = getPostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>, PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables> = (props) => {
+          const {tid,iid,rid,data} = props ?? {};
+
+          return  postApiV1TenantsTidIssuesIidRunsRidThreadMessages(tid,iid,rid,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationResult = NonNullable<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>>
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationBody = PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationError = ErrorType<Error>
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables = {tid: string;iid: string;rid: string;data: PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody}
+
+    /**
+ * @summary POST /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages
+ */
+export const usePostApiV1TenantsTidIssuesIidRunsRidThreadMessages = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>, TError,PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>,
+        TError,
+        PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationOptions(options), queryClient);
+    }
+    /**
  * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup; project and runtime access is shared within that tenant. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/issues/:iid/subscribers
  */

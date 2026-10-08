@@ -328,3 +328,146 @@ func stringVal(v interface{}) string {
 	}
 	return ""
 }
+
+// runVersion reads the run's optimistic version, which every issue_runs write in this codebase bumps
+// (issue_run_lifecycle, the settle CASes, the Phase 4B takeover). It is the discriminating witness
+// for "this transaction wrote the row" when the written value would otherwise be unchanged.
+func runVersion(t *testing.T, store *Store, runID string) int64 {
+	t.Helper()
+	var v int64
+	if err := store.Pool.QueryRow(`SELECT version FROM issue_runs WHERE id=$1`, runID).Scan(&v); err != nil {
+		t.Fatalf("read run version: %v", err)
+	}
+	return v
+}
+
+// TestAgentSessionStartMaterializesPendingThread (T4C-1, D-4C-01, G-016): declaring the session
+// materializes the Thread's `pending` state — D4's "session execution registered, no records yet" —
+// in the same transaction that writes seq=1 and declares the work item. Before the declaration the
+// column is NULL; after it the run reads as `pending` without ever having been `active`.
+func TestAgentSessionStartMaterializesPendingThread(t *testing.T) {
+	store := dispatcherDB(t)
+	stub := &stubAgentRunControlPlane{workID: "w1"}
+	store.AgentRunControlPlane = stub
+	scene := seedStartingRun(t, store, sessionStartInput())
+	if state := runThreadState(t, store, scene.seed.run); state.Valid {
+		t.Fatalf("a run with no declared session must have a NULL thread_state, got %q", state.String)
+	}
+
+	runSessionStartPass(t, store)
+
+	if state := runThreadState(t, store, scene.seed.run); !state.Valid || state.String != "pending" {
+		t.Fatalf("declaring the session must materialize thread_state='pending', got %v", state)
+	}
+	if n := countThreadEntries(t, store, scene.seed.run); n != 1 {
+		t.Fatalf("exactly one seq=1 expected, got %d entries", n)
+	}
+	if stub.workN != 1 {
+		t.Fatalf("exactly one enqueue expected, got %d", stub.workN)
+	}
+	// The materialization is not the activation: `active` stays owned by the Phase 4B takeover hook
+	// and the run must still be 'starting'/'dispatched' for that evidence to arrive (§16, D-014).
+	phase, status, _, _, _, _ := runFields(t, store, scene.seed.run)
+	if !phase.Valid || phase.String != "starting" || status != "dispatched" {
+		t.Fatalf("the run must stay starting/dispatched, got phase=%v status=%q", phase, status)
+	}
+}
+
+// TestAgentSessionStartPendingIsNotRewrittenOnReplay (T4C-2, D-4C-01): the `thread_state IS NULL`
+// predicate makes the materialization idempotent, and the seq=1 once-guard returns before the write
+// is even reached. A replay must not touch the row at all — an unconditional write would bump the
+// version and could drag an already-advanced Thread back to `pending`.
+func TestAgentSessionStartPendingIsNotRewrittenOnReplay(t *testing.T) {
+	store := dispatcherDB(t)
+	stub := &stubAgentRunControlPlane{workID: "w1"}
+	store.AgentRunControlPlane = stub
+	scene := seedStartingRun(t, store, sessionStartInput())
+
+	runSessionStartPass(t, store)
+	before := runVersion(t, store, scene.seed.run)
+
+	runSessionStartPass(t, store)
+	if err := store.agentRunSessionStart().StartSession(context.Background(), scene.seed.run); err != nil {
+		t.Fatalf("direct replay: %v", err)
+	}
+
+	if state := runThreadState(t, store, scene.seed.run); !state.Valid || state.String != "pending" {
+		t.Fatalf("replay must keep thread_state='pending', got %v", state)
+	}
+	if after := runVersion(t, store, scene.seed.run); after != before {
+		t.Fatalf("replay must not rewrite the run at all (version %d → %d)", before, after)
+	}
+	if n := countThreadEntries(t, store, scene.seed.run); n != 1 {
+		t.Fatalf("replay must keep exactly one seq=1, got %d entries", n)
+	}
+	if stub.workN != 1 {
+		t.Fatalf("replay must not re-enqueue, got %d", stub.workN)
+	}
+}
+
+// TestAgentSessionStartPendingRollsBackWithSeq1 (T4C-3, D-4C-01): the materialization shares the
+// declaration transaction, so an A-seam failure leaves no `pending` behind — the run keeps a NULL
+// Thread state and no first prompt, exactly as before the attempt. This is what makes the state a
+// fact about a committed declaration rather than about an attempted one.
+func TestAgentSessionStartPendingRollsBackWithSeq1(t *testing.T) {
+	store := dispatcherDB(t)
+	store.AgentRunControlPlane = nil // real Unavailable fail-closed seam
+	scene := seedStartingRun(t, store, sessionStartInput())
+	before := runVersion(t, store, scene.seed.run)
+
+	if err := store.agentRunSessionStart().StartSession(context.Background(), scene.seed.run); err == nil {
+		t.Fatalf("unavailable seam must surface an error")
+	}
+	if state := runThreadState(t, store, scene.seed.run); state.Valid {
+		t.Fatalf("a rolled-back declaration must leave thread_state NULL, got %q", state.String)
+	}
+	if n := countThreadEntries(t, store, scene.seed.run); n != 0 {
+		t.Fatalf("seam error must roll back the seq=1 write, got %d entries", n)
+	}
+	if after := runVersion(t, store, scene.seed.run); after != before {
+		t.Fatalf("seam error must roll back the whole run write (version %d → %d)", before, after)
+	}
+}
+
+// TestAgentSessionStartNeverMaterializesPendingForIneligibleRuns (T4C-4, D-4C-01): a cancelled run
+// and a run whose Workspace is gone both skip the declaration entirely, so neither can ever observe
+// `pending`. The state is written only by the path that really hands the session to the Agent —
+// never fabricated for a run that is already past, or barred from, its session.
+func TestAgentSessionStartNeverMaterializesPendingForIneligibleRuns(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(t *testing.T, store *Store, scene sessionScene)
+	}{
+		{"cancelled", func(t *testing.T, store *Store, scene sessionScene) {
+			if _, err := store.Pool.Exec(`UPDATE issue_runs SET cancel_requested_at=now(),version=version+1,updated_at=now() WHERE id=$1`, scene.seed.run); err != nil {
+				t.Fatalf("cancel run: %v", err)
+			}
+		}},
+		{"workspace-not-live", func(t *testing.T, store *Store, scene sessionScene) {
+			if _, err := store.Pool.Exec(`UPDATE workspaces SET deleted_at=now() WHERE id=$1`, scene.ws); err != nil {
+				t.Fatalf("soft-delete workspace: %v", err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := dispatcherDB(t)
+			stub := &stubAgentRunControlPlane{workID: "w1"}
+			store.AgentRunControlPlane = stub
+			scene := seedStartingRun(t, store, sessionStartInput())
+			tc.mutate(t, store, scene)
+
+			runSessionStartPass(t, store)
+
+			if state := runThreadState(t, store, scene.seed.run); state.Valid {
+				t.Fatalf("an ineligible run must never materialize a Thread state, got %q", state.String)
+			}
+			if stub.workN != 0 {
+				t.Fatalf("an ineligible run must declare no work, got %d", stub.workN)
+			}
+			if n := countThreadEntries(t, store, scene.seed.run); n != 0 {
+				t.Fatalf("an ineligible run must write no first prompt, got %d entries", n)
+			}
+		})
+	}
+}

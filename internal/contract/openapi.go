@@ -126,6 +126,21 @@ func Document() map[string]any {
 	runProps["externalExecutionId"] = str()
 	runProps["executionContextRef"] = optional(uuid())
 	runProps["workflowInvocationRef"] = optional(uuid())
+	// ThreadEntry is one ordered record of an Agent run's Thread (Thread D1/D2/D3). `seq` is the
+	// run-scoped conversation order, starting at 1 and gapless; `record` is the verbatim ora-history
+	// line, which Cloud stores and returns without ever rewriting it. `turnId` and `status` describe
+	// the per-turn lifecycle and exist only for a user turn — a `queued` entry becomes `delivered`
+	// when the Node echoes that turn_id — so Node and system entries carry neither. The Node's own
+	// execution id and sequence are deliberately not part of this resource.
+	s["ThreadEntry"] = object(obj{
+		"seq":       obj{"type": "integer", "format": "int64", "minimum": 1},
+		"source":    enumeration("node", "user", "system"),
+		"kind":      str(),
+		"record":    obj{"type": "object", "additionalProperties": true},
+		"turnId":    optional(uuid()),
+		"status":    optional(obj{"type": "string", "enum": []string{"queued", "delivered", "discarded"}, "nullable": true, "description": "User-turn lifecycle. Null for node and system entries."}),
+		"createdAt": timestamp(),
+	}, "seq", "source", "kind", "record", "createdAt")
 	s["ContextRef"] = resource("id tenantId issueId refType refId createdAt", "")
 	contextRefProps := properties(s, "ContextRef")
 	contextRefProps["refType"] = contextRefTypeEnum()
@@ -502,6 +517,10 @@ func responseSchema(r router.Route) (schema obj, status string) {
 			return object(obj{"resource": ref("Label")}, "resource"), "200"
 		}
 		return ref("Label"), "200"
+	case strings.HasSuffix(r.Path, "/thread/messages"):
+		// Appending a user turn returns the entry it created, not the run: the caller already has
+		// the run and the message is the new resource.
+		return object(obj{"resource": ref("ThreadEntry")}, "resource"), "201"
 	case strings.Contains(r.Path, "/runs"):
 		if r.Method == "GET" && strings.HasSuffix(r.Path, "/runs") {
 			return object(obj{"items": array(ref("IssueRun")), "nextCursor": str()}, "items", "nextCursor"), "200"
@@ -674,6 +693,11 @@ func inputSchema(name string, r router.Route) obj {
 		return uuid()
 	case "targets":
 		return array(object(obj{"type": enumeration("user", "agent", "team", "workflow"), "id": uuid(), "task": str()}, "type", "id"))
+	case "content":
+		// Thread D3 message content. v1 defines exactly one block type, so the enum is the whole
+		// vocabulary rather than an open string, and the 64 KiB bound is on the total text — a
+		// property of the whole array, which OpenAPI cannot express per-property.
+		return array(object(obj{"type": enumeration("text"), "text": str()}, "type", "text"))
 	}
 	return str()
 }
@@ -739,6 +763,11 @@ func description(r router.Route) string {
 	}
 	if strings.Contains(r.Path, "/clones") {
 		base += "Clone requests are independent accepted work items outside the project/workspace operation model: Cloud accepts them in its own transaction, a Controller claims and dispatches them over the internal control contract, and only the submitting user can read them. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. "
+	}
+	if strings.HasSuffix(r.Path, "/thread/messages") {
+		// The Thread POST's own fault vocabulary. It is stated here rather than added to the shared
+		// per-status descriptions, which every unrelated route also carries.
+		base += "Appends one user turn to an agent run's Thread and returns the entry that was created, with the Cloud-generated turnId the Node will echo back. Authorized like a comment: any active tenant member who can read the Issue. content accepts text blocks only and their total text must not exceed 64 KiB, otherwise 400 content_too_large; an unrecognized block type is 400 invalid_field_type, never a silent drop. Accepted while the Thread is pending, active or idle; a Thread that is ending or ended answers 409 thread_closed. The entry and the delivery command for it commit together with the idempotency record, so a 503 thread_command_unavailable — the control plane is not wired in this deployment — leaves nothing behind and the same key may be retried as a first request. A missing or mismatched tenant, Issue or run is 404 not_found. "
 	}
 	if strings.Contains(r.Path, "members") && !strings.Contains(r.Path, "/spaces") {
 		if r.Method == "GET" {

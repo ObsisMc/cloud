@@ -163,6 +163,10 @@ type transaction struct {
 	hooks AgentRunHooks
 	// queued names operations this transaction made claimable; they are published only after commit.
 	queued []string
+	// threadRuns names the runs whose Thread commands this transaction persisted. Like queued it is
+	// published only after a successful commit, so a rolled-back command can never produce a
+	// ThreadCommandAvailable signal for a command that does not exist (controller-integration D5).
+	threadRuns []string
 }
 
 func (t *transaction) exec(q string, args ...any) {
@@ -268,6 +272,7 @@ func (s *Store) transact(ctx context.Context, fn func(*transaction) Object) (out
 	out = fn(t)
 	if err = tx.Commit(); err == nil {
 		s.signalOperations(t.queued)
+		s.signalThreadCommands(t.threadRuns)
 	}
 	return out, err
 }

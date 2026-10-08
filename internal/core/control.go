@@ -60,6 +60,23 @@ func (s *Store) Control(ctx context.Context, r *ControlRequest) (Object, error) 
 		if strings.HasPrefix(r.Action, "agent_work_") {
 			return agentWorkCommand(t, r)
 		}
+		if r.Action == "agent_thread_takeover" {
+			// State change, so it carries the submission identity like every other takeover: a
+			// Controller that retries after a lost reply replays the recorded response instead of
+			// re-running the batch (which the receipt identity would turn into a no-op anyway).
+			return submitted(t, r, func() Object { return agentThreadTakeover(t, r) })
+		}
+		if r.Action == "agent_thread_claim" {
+			// Pure read of the deliverable Thread command backlog; the lease was already checked, so
+			// the answer is only ever given to the current holder.
+			return agentThreadClaim(t, r)
+		}
+		if r.Action == "agent_thread_delivered" {
+			// State change, so it carries the submission identity: a Controller that retries after a
+			// lost reply replays the recorded response instead of re-registering the delivery (which
+			// the first-registration-wins rule would turn into a no-op anyway).
+			return submitted(t, r, func() Object { return agentThreadDelivered(t, r) })
+		}
 		if strings.HasPrefix(r.Action, "report_node_") {
 			return submitted(t, r, func() Object { return nodeReport(t, r) })
 		}
