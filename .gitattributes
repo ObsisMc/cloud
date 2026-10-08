@@ -3,6 +3,7 @@ api/openapi.json text eol=lf
 *.go text eol=lf
 internal/core/migrations/0025_agent_control_integrity.sql text eol=lf
 internal/core/migrations/0026_run_runtime_control.sql text eol=lf
+internal/core/migrations/0027_verified_revisions.sql text eol=lf
 # A migration's SHA256 is taken over the embedded bytes and recorded in schema_migrations, so its
 # newline has to be the same on every platform. Same reason as the two above.
 internal/core/migrations/0027_workflows.sql text eol=lf

@@ -10,7 +10,7 @@
 - `Routes()` declares the explicit allowlist of supported endpoints:
   - **Public API (`/api/v1/...`)**: 82 endpoints for users, tenants, memberships, collaboration spaces and their members, projects, workspaces, operations, status queries, Issue collaboration (issues, statuses, labels, views, comments, subscribers, runs, context refs, interactions and collaboration targets), workspace plugins (`/tenants/:tid/spaces/:spaceId/plugins`: catalog snapshot, selection list, install, remove), and clone requests as independent work items (`/tenants/:tid/clones`, `/clones/:cloneId`: submit, list, read one; unrelated to the project/workspace operation model).
   - **Internal Control API (`/internal/v1/...`)**: 15 endpoints for controller leasing, operation claiming/advancing, node registration, and ticket admissions.
-  - **Health check (`/healthz`)**: Verifies database reachability via `store.Pool.PingContext`.
+  - **Health check (`/healthz`)**: Verifies database reachability via `store.Pool.PingContext`; adds configured/unconfigured in `dependencies.objectStore` without probing S3 or exposing endpoints/credentials.
 - Any unregistered endpoint is caught by `r.NoRoute` and returns `404 not_found`.
 
 ### Two-tier authentication

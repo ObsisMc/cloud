@@ -218,6 +218,7 @@ func TestThreadCommandsAndUploadGrantsAreNotLostOrStored(t *testing.T) {
 	ended := &controlpb.ExecutionResult{Node: &controlpb.NodeIdentity{NodeId: node, NodeIncarnationId: incarnation}, Outcome: &controlpb.ExecutionResult_AgentSessionEnded{AgentSessionEnded: &controlpb.AgentSessionEnded{Reason: controlpb.AgentSessionEndReason_AGENT_SESSION_END_REASON_USER_ENDED}}}
 	_, e = f.executions.TakeOverNodeEvent(ctx, &controlpb.TakeOverNodeEventRequest{SubmissionId: "end-session", Epoch: f.controller.Epoch, OperationId: run, ExecutionId: "session-1", Sequence: 1, Result: ended, Event: []byte("end")})
 	must(t, e)
+	f.store.ObjectStore = &objectstore.Config{Endpoint: "http://127.0.0.1:9000", Region: "us-east-1", Bucket: "revisions", PathStyle: true, AccessKeyID: "test-access", SecretAccessKey: "test-secret"}
 	delivery := core.Object{"kind": "deliver_revision", "sessionExecutionId": "session-1", "checkoutExecutionId": "checkout-1", "baseCommit": f.commit, "revisionRef": "refs/ora/revisions/1", "bundleKey": "revisions/t/r/w/revision.bundle", "historyKey": "revisions/t/r/w/session.jsonl"}
 	_, e = f.store.EnqueueExecutionWork(t.Context(), run, "deliver_revision", delivery, core.Object{"workspaceId": wid, "sandboxInstanceId": sandbox, "nodeId": node}, time.Time{})
 	must(t, e)
@@ -225,7 +226,6 @@ func TestThreadCommandsAndUploadGrantsAreNotLostOrStored(t *testing.T) {
 	must(t, e)
 	_, e = f.executions.RecordDispatch(ctx, &controlpb.RecordDispatchRequest{SubmissionId: "delivery-dispatch", Epoch: f.controller.Epoch, OperationId: run, ExecutionId: "delivery-1", NodeId: node, Input: claimed.GetItem().GetInput()})
 	must(t, e)
-	f.store.ObjectStore = &objectstore.Config{Endpoint: "http://127.0.0.1:9000", Region: "us-east-1", Bucket: "revisions", PathStyle: true, AccessKeyID: "test-access", SecretAccessKey: "test-secret"}
 	granted, e := runs.GrantRevisionUpload(ctx, &controlpb.GrantRevisionUploadRequest{Epoch: f.controller.Epoch, ExecutionId: "delivery-1"})
 	must(t, e)
 	if len(granted.GetGrants()) != 2 || !strings.Contains(granted.GetGrants()[0].GetUrl(), "X-Amz-Signature=") {
@@ -277,6 +277,10 @@ func TestRunWorkspaceAndPluginStep(t *testing.T) {
 	if code := f.call("GET", f.path("/workspaces/"+hidden), nil, "", 404).S("code"); code != "not_found" {
 		t.Fatalf("hidden workspace code = %s", code)
 	}
+	for _, action := range []string{"start", "stop"} {
+		f.call("POST", f.path("/workspaces/"+hidden+"/"+action), core.Object{"version": first.O("workspace").N("version")}, "hidden-"+action, 404)
+	}
+	f.call("DELETE", f.path("/workspaces/"+hidden), core.Object{"version": first.O("workspace").N("version")}, "hidden-delete", 404)
 	listed := f.call("GET", f.path("/projects/"+pid+"/workspaces"), nil, "", 200)
 	for _, item := range listed["items"].([]any) {
 		if core.Object(item.(map[string]any)).S("id") == hidden {

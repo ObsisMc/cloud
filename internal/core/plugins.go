@@ -253,9 +253,11 @@ func pluginInstanceWriteback(t *transaction, op Object, pluginID, state, version
 	if installError != nil {
 		err = *installError
 	}
-	terminal := state == "installed" || state == "removed"
+	terminal := state == "installed" || state == "removed" || state == "failed"
 	if terminal && row.N("desiredRevision") != revision {
 		state = "pending"
+		// A late failure settles its original attempt without poisoning the newer selection.
+		err = nil
 	}
 	t.exec(`UPDATE workspace_plugin_instances SET observed_state=$4,observed_version=$5,install_error=$6,version=version+1,updated_at=now() WHERE workspace_id=$1 AND source_namespace=$2 AND identifier=$3`,
 		op.S("workspaceId"), namespace, identifier, state, nullable(version), err)

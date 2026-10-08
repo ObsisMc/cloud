@@ -14,12 +14,24 @@ type ControlRequest struct {
 	Body                                                 Object
 	Service                                              *Claims
 	Identity                                             *Claims
+	verification                                         *revisionVerification
 }
 
 // Control is the finite internal command API. Controllers have no table-write or SQL interface.
 // Committed plugin instance writebacks broadcast space invalidation notices exactly like public
 // mutations, so live subscribers see fan-out progress without polling.
 func (s *Store) Control(ctx context.Context, r *ControlRequest) (Object, error) {
+	// Object storage is contacted between two short transactions. A committed replay never
+	// requires the objects or endpoint to still be reachable.
+	if r.Action == "clone_takeover" && revisionSuccess(r.Body.O("result")) {
+		prepared, err := s.prepareRevision(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		copyRequest := *r
+		copyRequest.verification = prepared
+		r = &copyRequest
+	}
 	out, err := s.transact(ctx, func(t *transaction) Object {
 		if r.Action == "access" || r.Action == "admit" {
 			require(r.Service.Role == "controller", 403, "service_forbidden")

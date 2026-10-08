@@ -63,7 +63,11 @@ func (s *agentRunService) RecordThreadCommandDelivered(ctx context.Context, req 
 }
 
 func (s *agentRunService) GrantRevisionUpload(ctx context.Context, req *controlpb.GrantRevisionUploadRequest) (*controlpb.GrantRevisionUploadResponse, error) {
-	out, e := control(ctx, s.store, "grant_revision_upload", "", "", core.Object{"epoch": req.GetEpoch(), "executionId": req.GetExecutionId()})
+	checksums := core.Object{}
+	for key, digest := range req.GetChecksums() {
+		checksums[key] = digest
+	}
+	out, e := control(ctx, s.store, "grant_revision_upload", "", "", core.Object{"epoch": req.GetEpoch(), "executionId": req.GetExecutionId(), "checksums": checksums})
 	if e != nil {
 		return nil, e
 	}

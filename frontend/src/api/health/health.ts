@@ -49,7 +49,7 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
 };
 
 /**
- * @summary PostgreSQL readiness
+ * @summary PostgreSQL readiness and optional dependency configuration
  */
 export const health = (
 
@@ -120,7 +120,7 @@ export function useHealth<TData = Awaited<ReturnType<typeof health>>, TError = E
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary PostgreSQL readiness
+ * @summary PostgreSQL readiness and optional dependency configuration
  */
 
 export function useHealth<TData = Awaited<ReturnType<typeof health>>, TError = ErrorType<Error>>(

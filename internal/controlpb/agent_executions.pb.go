@@ -847,8 +847,10 @@ type UploadGrant struct {
 	Url       string                 `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
 	// Always PUT in the first version.
 	Method string `protobuf:"bytes,3,opt,name=method,proto3" json:"method,omitempty"`
-	// Headers the upload must carry unchanged. The Node adds `x-amz-checksum-sha256` with the digest
-	// it computed, so the store rejects content that differs from what the Node will report.
+	// Headers the upload must carry unchanged, including signed `If-None-Match: *` (create only).
+	// A checksum-bound grant includes `x-amz-checksum-sha256`; legacy uploaders add that digest.
+	// On 412, preserve the existing object and submit the declaration for Cloud verification;
+	// neither the uploader nor Controller may treat 412 alone as proof that its bytes match.
 	Headers       map[string]string      `protobuf:"bytes,4,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields

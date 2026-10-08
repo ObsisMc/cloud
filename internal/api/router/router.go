@@ -184,7 +184,11 @@ func newRouter(store *core.Store, auth *core.Authenticator, log *zap.Logger, leg
 			failure(c, &core.Fault{Code: "database_unavailable", Status: 503, Params: core.Object{}})
 			return
 		}
-		c.JSON(200, gin.H{"status": "ok"})
+		storage := "unconfigured"
+		if store.ObjectStore != nil {
+			storage = "configured"
+		}
+		c.JSON(200, gin.H{"status": "ok", "dependencies": gin.H{"objectStore": storage}})
 	})
 	for _, route := range Routes() {
 		r.Handle(route.Method, route.Path, func(c *gin.Context) {

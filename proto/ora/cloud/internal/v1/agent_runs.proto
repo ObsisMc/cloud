@@ -108,9 +108,13 @@ message GrantRevisionUploadRequest {
   int64 epoch = 1;
   // A delivery execution registered through RecordDispatch.
   string execution_id = 2;
+  // Optional object key -> lowercase hexadecimal SHA-256. Keys must belong to the frozen
+  // delivery input. Cloud binds each checksum into its ephemeral PUT signature; refreshing
+  // this capability never changes the execution input. Omit for legacy v1 grants.
+  map<string, string> checksums = 3;
 }
 
 message GrantRevisionUploadResponse {
-  // One grant per object key in the delivery's input.
+  // One grant per requested checksum key, or both input keys for legacy requests.
   repeated UploadGrant grants = 1;
 }

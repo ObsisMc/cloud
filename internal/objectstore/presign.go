@@ -1,14 +1,16 @@
-// Package objectstore signs short-lived upload URLs for the object store Cloud is configured with.
-// Signing is local cryptography: it does not call the store. The resulting URL is a bearer
-// credential and must not be written to the database or to logs.
+// Package objectstore signs short-lived uploads and verifies stored metadata through private S3.
+// Signing is local cryptography; verification performs HEAD outside database transactions.
+// Grants are bearer credentials and must not be written to the database or to logs.
 package objectstore
 
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -26,8 +28,8 @@ type Config struct {
 	UploadGrantTTL  time.Duration
 }
 
-// Grant is one presigned PUT. Headers must be sent unchanged, apart from the checksum header the
-// uploader adds itself.
+// Grant is one presigned PUT. Headers must be sent unchanged; legacy uploaders also add their
+// computed checksum. The signed creation condition keeps still-live grants from replacing objects.
 type Grant struct {
 	URL     string
 	Method  string
@@ -38,11 +40,31 @@ type Grant struct {
 // PresignPUT signs a single-object PUT that expires after the configured grant TTL.
 // The key must be the object key Cloud already fixed for this delivery attempt.
 func PresignPUT(cfg *Config, key string, now time.Time) (Grant, error) {
+	return presign(cfg, key, "PUT", map[string]string{"x-amz-sdk-checksum-algorithm": "SHA256"}, now)
+}
+
+// PresignPUTChecksum binds the Node-computed SHA-256 to the upload capability. S3 must validate
+// the bytes against this signed header before recording a checksum Cloud can verify with HEAD.
+func PresignPUTChecksum(cfg *Config, key, digest string, now time.Time) (Grant, error) {
+	checksum, err := hex.DecodeString(digest)
+	if err != nil || len(checksum) != sha256.Size || hex.EncodeToString(checksum) != digest {
+		return Grant{}, fmt.Errorf("invalid object checksum")
+	}
+	return presign(cfg, key, "PUT", map[string]string{"x-amz-sdk-checksum-algorithm": "SHA256", "x-amz-checksum-sha256": base64.StdEncoding.EncodeToString(checksum)}, now)
+}
+
+// presign shares canonicalization between the Node-facing PUT and Cloud's private HEAD.
+func presign(cfg *Config, key, method string, headers map[string]string, now time.Time) (Grant, error) {
 	if cfg == nil || cfg.Endpoint == "" || cfg.Region == "" || cfg.Bucket == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
 		return Grant{}, fmt.Errorf("object store is not configured")
 	}
 	if !validKey(key) {
 		return Grant{}, fmt.Errorf("invalid object key")
+	}
+	// A grant can outlive settlement. Bind create-only semantics into every PUT, including legacy
+	// grants, so a second capability cannot change an object after Cloud's external verification.
+	if method == "PUT" {
+		headers["if-none-match"] = "*"
 	}
 	ttl := cfg.UploadGrantTTL
 	if ttl <= 0 {
@@ -59,7 +81,10 @@ func PresignPUT(cfg *Config, key string, now time.Time) (Grant, error) {
 	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || (endpoint.Path != "" && endpoint.Path != "/") {
 		return Grant{}, fmt.Errorf("invalid object store endpoint")
 	}
-	now = now.UTC()
+	// SigV4 timestamps and lifetimes have second precision. Report exactly the expiry the
+	// server enforces, so Node cannot mistake a fractional second for a usable grant.
+	now = now.UTC().Truncate(time.Second)
+	ttl = ttl.Truncate(time.Second)
 	amzDate := now.Format("20060102T150405Z")
 	scopeDate := now.Format("20060102")
 	credential := cfg.AccessKeyID + "/" + scopeDate + "/" + cfg.Region + "/s3/aws4_request"
@@ -68,8 +93,6 @@ func PresignPUT(cfg *Config, key string, now time.Time) (Grant, error) {
 	query.Set("X-Amz-Credential", credential)
 	query.Set("X-Amz-Date", amzDate)
 	query.Set("X-Amz-Expires", fmt.Sprintf("%d", int(ttl.Seconds())))
-	query.Set("X-Amz-SignedHeaders", "host")
-	canonicalQuery := query.Encode()
 	escaped := escapeKey(key)
 	canonicalURI := "/" + escaped
 	if cfg.PathStyle {
@@ -79,12 +102,25 @@ func PresignPUT(cfg *Config, key string, now time.Time) (Grant, error) {
 	if !cfg.PathStyle {
 		host = cfg.Bucket + "." + host
 	}
+	headers["host"] = host
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	signedHeaders := strings.Join(names, ";")
+	canonicalHeaders := ""
+	for _, name := range names {
+		canonicalHeaders += name + ":" + headers[name] + "\n"
+	}
+	query.Set("X-Amz-SignedHeaders", signedHeaders)
+	canonicalQuery := query.Encode()
 	canonical := strings.Join([]string{
-		"PUT",
+		method,
 		canonicalURI,
 		canonicalQuery,
-		"host:" + host + "\n",
-		"host",
+		canonicalHeaders,
+		signedHeaders,
 		"UNSIGNED-PAYLOAD",
 	}, "\n")
 	scope := scopeDate + "/" + cfg.Region + "/s3/aws4_request"
@@ -101,8 +137,8 @@ func PresignPUT(cfg *Config, key string, now time.Time) (Grant, error) {
 	signed.RawQuery = query.Encode()
 	return Grant{
 		URL:     signed.String(),
-		Method:  "PUT",
-		Headers: map[string]string{"host": host},
+		Method:  method,
+		Headers: headers,
 		Expires: now.Add(ttl),
 	}, nil
 }

@@ -20653,6 +20653,22 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "dependencies": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "objectStore": {
+                          "enum": [
+                            "configured",
+                            "unconfigured"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "objectStore"
+                      ],
+                      "type": "object"
+                    },
                     "status": {
                       "enum": [
                         "ok"
@@ -20680,7 +20696,7 @@
             "description": "Database unavailable"
           }
         },
-        "summary": "PostgreSQL readiness",
+        "summary": "PostgreSQL readiness and optional dependency configuration",
         "tags": [
           "health"
         ]
