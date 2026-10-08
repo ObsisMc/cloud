@@ -383,8 +383,11 @@ func TestPhase2ASettleInvariantErrors(t *testing.T) {
 	}
 }
 
-// businessAgentRunHooks must satisfy the seam and delegate RunWorkspaceSettled to the core
-// while the not-yet-implemented hooks keep failing closed (later phases).
+// businessAgentRunHooks must satisfy the seam and delegate RunWorkspaceSettled to the core. Since
+// Phase 5 Batch 2 every hook of the approved lifecycle is real, so the fail-closed half of this test
+// is now about the seam's own input contract rather than about a placeholder: a hook handed a caller
+// Object with no usable identity refuses it instead of projecting the settlement onto some run, and
+// UnavailableAgentRunHooks still fails closed for a deployment that wired no hooks at all.
 func TestPhase2ABusinessHooksDelegateAndFailClosed(t *testing.T) {
 	store := dispatcherDB(t)
 	stub := &stubAgentRunControlPlane{accepted: true}
@@ -405,9 +408,10 @@ func TestPhase2ABusinessHooksDelegateAndFailClosed(t *testing.T) {
 	if phase, _, _, _, _, _ := runFields(t, store, seed.run); !phase.Valid || phase.String != "starting" {
 		t.Fatalf("business hooks must settle to starting, got phase=%v", phase)
 	}
-	// The embedded UnavailableAgentRunHooks keeps the other hooks fail-closed.
-	if e := hooks.ThreadEventsTakenOver(nil, nil, nil, nil); e == nil {
-		t.Fatalf("threadEventsTakenOver must still fail closed under businessAgentRunHooks")
+	// A real hook refuses a caller Object that names no run, so a mis-addressed takeover can never be
+	// settled onto an arbitrary run.
+	if e := hooks.ThreadEventsTakenOver(nil, Object{}, Object{}, nil); e == nil {
+		t.Fatalf("threadEventsTakenOver must fail closed on a caller Object with no run identity")
 	}
 	unavailable := UnavailableAgentRunHooks{}
 	if e := unavailable.RunWorkspaceSettled(nil, Object{}, true); e == nil {

@@ -33,9 +33,11 @@ type AgentRunHooks interface {
 	SessionEnded(t *transaction, run, execution, ended Object) error
 
 	// DeliverySettled runs in the takeover transaction of a revision-delivery
-	// execution's terminal event, after the revisions row is written: a saved or
-	// unchanged revision moves the run to `releasing`; a failed delivery keeps it
-	// `delivering` and releases a backoff retry (IssueRun D4/D5).
+	// execution's terminal event, after the Revision row is written: a saved or
+	// unchanged revision moves the run to `releasing` with that Revision id; a failed
+	// delivery keeps it `delivering` and releases a backoff retry, unless IssueRun D5's
+	// give-up limits are exceeded, in which case it releases the run (IssueRun D4/D5;
+	// Cloud Revision D4).
 	DeliverySettled(t *transaction, run, execution Object, result DeliverySettledResult) error
 
 	// RunWorkspaceDeleted runs in the transaction where the run Workspace's
@@ -47,13 +49,20 @@ type AgentRunHooks interface {
 // (controller-integration D6 deliverySettled). Exactly one variant is set: Kind is
 // "saved" or "unchanged" and carries the registered RevisionID, or Kind is "failed"
 // and carries the failure Reason (IssueRun D5).
+//
+// The kinds are D4's `deliveryState` values spelled once, and the Reason of a failed
+// outcome is either a value a Node reported or Cloud's own `verification_failed`
+// verdict, which the caller substitutes when the declared objects could not be
+// confirmed (Cloud Revision D4 step 4) — a Node never reports that one.
 type DeliverySettledResult struct {
 	Kind       string
 	RevisionID string
 	Reason     string
 }
 
-// Delivery outcome kinds for DeliverySettledResult.
+// Delivery outcome kinds for DeliverySettledResult. They are also the run result's
+// `deliveryState` values (IssueRun D4): one outcome, one spelling, so the hook result
+// can be stored on the run without a translation.
 const (
 	DeliverySaved     = "saved"
 	DeliveryUnchanged = "unchanged"

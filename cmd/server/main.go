@@ -24,6 +24,7 @@ import (
 	"github.com/wanglongan587/cloud/internal/controlgrpc"
 	"github.com/wanglongan587/cloud/internal/core"
 	"github.com/wanglongan587/cloud/internal/logger"
+	"github.com/wanglongan587/cloud/internal/objectstore"
 	"github.com/wanglongan587/cloud/internal/pluginmarket"
 	"github.com/wanglongan587/cloud/internal/repository"
 )
@@ -91,6 +92,34 @@ func run() (runErr error) {
 	// 2A workspace settlement. Without it, Store.Control falls back to UnavailableAgentRunHooks and
 	// every takeover would roll back fail-closed.
 	store.AgentRunHooks = core.NewBusinessAgentRunHooks(store)
+	// Cloud Revision D1: object storage is Cloud's own capability, and it is optional. A deployment
+	// that leaves `object_store` out still runs — every upload grant is then refused as UNAVAILABLE,
+	// the delivery fails deterministically, and IssueRun D5's give-up window closes the run out — so
+	// the missing capability is reported here and never substituted for a working one.
+	//
+	// A section that IS configured must produce a client: a malformed endpoint, a bad bucket name or
+	// unreadable credential files fail startup before any run is left waiting on a capability this
+	// process can never provide. An endpoint that is merely unreachable, or a bucket that does not
+	// exist yet, is not a startup error (D1) — it surfaces as a failed object verification, which D5
+	// already retries.
+	if cfg.ObjectStore.Configured() {
+		objects, e := objectstore.New(objectstore.Config{
+			Endpoint:            cfg.ObjectStore.Endpoint,
+			PublicEndpoint:      cfg.ObjectStore.PublicEndpoint,
+			Region:              cfg.ObjectStore.Region,
+			Bucket:              cfg.ObjectStore.Bucket,
+			PathStyle:           cfg.ObjectStore.PathStyle,
+			AccessKeyIDFile:     cfg.ObjectStore.AccessKeyIDFile,
+			SecretAccessKeyFile: cfg.ObjectStore.SecretAccessKeyFile,
+		})
+		if e != nil {
+			return e
+		}
+		store.RevisionObjects = objects
+		store.RevisionUploadTTL = cfg.ObjectStore.UploadGrantTTL
+	} else {
+		log.Warn("object_store is not configured: Revision upload grants will be refused and every delivery will fail until IssueRun D5 gives up")
+	}
 	if e := store.CheckSchema(ctx); e != nil {
 		return e
 	}
@@ -175,6 +204,31 @@ func run() (runErr error) {
 		go func() {
 			defer syncGroup.Done()
 			pluginmarket.RunSyncLoop(ctx, store.ReactToCancelledAgentRunsOnce, agentThreadEndInterval, pluginmarket.ContextSleep, log)
+		}()
+	}
+	// Phase 5 Batch 2 delivery/release loops. The first applies IssueRun D5's give-up limits to runs
+	// still `delivering`: once delivery has failed for cfg.IssueRuns.DeliveryGiveUpAfter, or the run
+	// Workspace's Node has been unreachable for cfg.IssueRuns.DeliveryUnreachableAfter, the run is
+	// released with deliveryState=failed and its Workspace delete declared. The second reconciles the
+	// release half: a `releasing` run whose delete_workspace operation has no operation in flight gets
+	// its delete re-declared, which is the Cloud-side retry operation D4 requires after a Node refuses
+	// to quiesce (the run Workspace has no public API and no user to retry it). Both are bounded passes
+	// of one short transaction per run, so a repeated tick produces no second release, no second
+	// delete operation, and no second phase transition. Cadence is the same repository-preferred 10s
+	// as the loops above (an implementation choice; plan §3 fixes no seconds).
+	{
+		const agentDeliveryInterval = 10 * time.Second
+		store.DeliveryGiveUpAfter = cfg.IssueRuns.DeliveryGiveUpAfter
+		store.DeliveryUnreachableAfter = cfg.IssueRuns.DeliveryUnreachableAfter
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.GiveUpStaleDeliveriesOnce, agentDeliveryInterval, pluginmarket.ContextSleep, log)
+		}()
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.RedeclareRunWorkspaceDeletesOnce, agentDeliveryInterval, pluginmarket.ContextSleep, log)
 		}()
 	}
 	gin.SetMode(cfg.Server.Mode)

@@ -16,6 +16,7 @@
   - [devlogin](gateway/devlogin/README.en.md) is the development-only provider: a local form where any typed identity signs in, registered solely on loopback development origins.
 - [contract](contract/README.en.md) defines OpenAPI 3.0 schema models, DTO structures, and contract coverage tests.
 - [repository](repository/README.en.md) manages PostgreSQL database connection pools and startup health checks via GORM.
+- [objectstore](objectstore/README.en.md) is cloud's own S3-compatible object-store client (SigV4-presigned upload grants, HEAD verification of an object's size and SHA-256), serving the Revision path alone.
 - [config](config/README.en.md) loads and validates application configuration files and environment overrides.
 - [logger](logger/README.en.md) provides structured, non-blocking JSON logging via Zap and Lumberjack.
 - [simulator](simulator/README.en.md) implements in-process doubles for the Substrate execution engine, Controller, and Workspace Node.
@@ -25,12 +26,13 @@
 ## Layering and architectural rules
 
 1. **Unidirectional dependencies**:
-   - `cmd/*` $\rightarrow$ `internal/api/router`, `internal/gateway`, `internal/core`, `internal/config`, `internal/logger`, `internal/repository`.
+   - `cmd/*` $\rightarrow$ `internal/api/router`, `internal/gateway`, `internal/core`, `internal/config`, `internal/logger`, `internal/repository`, `internal/objectstore`.
    - `internal/gateway` $\rightarrow$ `internal/core` (the `Claims` type only), `internal/config`, `internal/logger`; `internal/gateway/idaas`, `internal/gateway/github` and `internal/gateway/devlogin` $\rightarrow$ `internal/gateway`. The Gateway never queries Cloud business tables.
    - `internal/api/router` $\rightarrow$ `internal/core`, `internal/contract`; `internal/controlgrpc` $\rightarrow$ `internal/core`, `internal/controlpb`.
    - `internal/core` $\rightarrow$ standard library, `gorm.io/gorm`, `internal/core/migrations`.
    - `internal/repository` $\rightarrow$ `internal/config`, `gorm.io/gorm`.
-   - Lower layers (`core`, `repository`) never import upper presentation layers (`api`, `router`).
+   - `internal/objectstore` $\rightarrow$ `internal/core` (the `UploadGrant` value type only); `internal/core` reaches it through the `RevisionObjects` interface it declares for itself and never imports this package back.
+   - Lower layers (`core`, `repository`, `objectstore`) never import upper presentation layers (`api`, `router`).
 2. **PostgreSQL is authoritative**:
    - All shared state is persisted in PostgreSQL. In-memory caching of authoritative domain state across requests is strictly prohibited.
 3. **Transaction boundary**:

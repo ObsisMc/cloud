@@ -33,38 +33,44 @@ import (
 	"github.com/wanglongan587/cloud/internal/core"
 )
 
+// seedRunWorkspaceCommit is the 40-hex commit the seeded run Workspace's clone produced, i.e. the
+// baseline every Revision bundle is relative to. It is the shape commitID validates, so a scene that
+// seeds it can never be the reason a delivery input is rejected.
+const seedRunWorkspaceCommit = "0123456789abcdef0123456789abcdef01234567"
+
 // seededAgentSession is one `starting` agent run whose session execution is registered and whose
 // Thread is one takeover away from `running`.
 type seededAgentSession struct {
 	runID         string
 	executionID   string
 	initialTurnID string
+	nodeID        string
 }
 
 // seedAgentSessionScene loads the scene and drives the real production path up to (and excluding)
 // the takeover: StartQueuedAgentSessionsOnce writes the immutable seq=1 first prompt and declares
 // the agent_session execution_work, then a Controller claims and registers it, which is exactly the
 // state the Node must be running in before it can send the first Thread event.
-func seedAgentSessionScene(t *testing.T, h *controlHarness) seededAgentSession {
+func seedAgentSessionScene(t *testing.T, store *core.Store) seededAgentSession {
 	t.Helper()
 	ctx := context.Background()
 	// The production seams, wired exactly as cmd/server/main.go wires them. Without both of these the
 	// takeover below would roll back fail-closed (G-003) rather than prove the real path.
-	h.store.AgentRunControlPlane = core.NewStoreAgentRunControlPlane()
-	h.store.AgentRunHooks = core.NewBusinessAgentRunHooks(h.store)
+	store.AgentRunControlPlane = core.NewStoreAgentRunControlPlane()
+	store.AgentRunHooks = core.NewBusinessAgentRunHooks(store)
 
-	runID, _, nodeID := seedStartingAgentRun(t, h.store)
-	must(t, h.store.StartQueuedAgentSessionsOnce(ctx))
+	runID, _, nodeID := seedStartingAgentRun(t, store)
+	must(t, store.StartQueuedAgentSessionsOnce(ctx))
 
 	claims := &core.Claims{Kind: "service", Role: "controller", RegisteredClaims: jwt.RegisteredClaims{Subject: "ctrl-a"}}
-	picked, e := h.store.Control(ctx, &core.ControlRequest{Action: "agent_work_claim", Body: core.Object{"epoch": 1}, Service: claims})
+	picked, e := store.Control(ctx, &core.ControlRequest{Action: "agent_work_claim", Body: core.Object{"epoch": 1}, Service: claims})
 	must(t, e)
 	work := picked.O("work")
 	if work == nil {
 		t.Fatal("the started run must have declared exactly one agent_session work item")
 	}
 	executionID := "exec-grpc-" + work.S("id")[:8]
-	_, e = h.store.Control(ctx, &core.ControlRequest{
+	_, e = store.Control(ctx, &core.ControlRequest{
 		Action:  "agent_work_dispatch",
 		Body:    core.Object{"workId": work.S("id"), "executionId": executionID, "nodeId": nodeID, "input": work.O("input"), "epoch": 1},
 		Service: claims,
@@ -72,8 +78,8 @@ func seedAgentSessionScene(t *testing.T, h *controlHarness) seededAgentSession {
 	must(t, e)
 
 	var turnID string
-	must(t, h.store.Pool.QueryRow(`SELECT turn_id FROM thread_entries WHERE run_id=$1 AND seq=1`, runID).Scan(&turnID))
-	return seededAgentSession{runID: runID, executionID: executionID, initialTurnID: turnID}
+	must(t, store.Pool.QueryRow(`SELECT turn_id FROM thread_entries WHERE run_id=$1 AND seq=1`, runID).Scan(&turnID))
+	return seededAgentSession{runID: runID, executionID: executionID, initialTurnID: turnID, nodeID: nodeID}
 }
 
 // seedStartingAgentRun seeds the minimal schema-valid scene (tenant, admin member, collaboration
@@ -85,6 +91,9 @@ func seedStartingAgentRun(t *testing.T, store *core.Store) (runID, workspaceID, 
 	user, tenant, space, project, agent, issue := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	runID, workspaceID, nodeID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	sandboxID := uuid.NewString()
+	// The run Workspace's baseline identities. Deterministic per workspace so a test can name them
+	// without re-deriving the schema's own linkage.
+	baselineOperationID, baselineExecutionID := uuid.NewString(), "exec-baseline-"+workspaceID[:8]
 	// The frozen run-create snapshot: renderAgentInitialTurn and the AgentSession spec both read it.
 	input := core.Object{
 		"task":               "Fix the auth flow",
@@ -114,10 +123,25 @@ func seedStartingAgentRun(t *testing.T, store *core.Store) (runID, workspaceID, 
 	exec("run", `INSERT INTO issue_runs(id,tenant_id,issue_id,executor_type,executor_id,status,phase,input) VALUES($1,$2,$3,'agent',$4,'dispatched','starting',$5)`, runID, tenant, issue, agent, mustJSON(t, input))
 	// The run Workspace: isolated, bound to this exact run, live — the G-011 predicate the session
 	// start and the takeover both re-read. A live isolated workspace needs exactly one task identity,
-	// and the workspace/task inserts must share the transaction for that deferred trigger.
-	exec("run-workspace", `INSERT INTO workspaces(id,tenant_id,owner_user_id,project_id,kind,desired_state,observed_state,runtime_generation,requested_ref,issue_run_id) VALUES($1,$2,$3,$4,'isolated','running','ready',1,'HEAD',$5)`, workspaceID, tenant, user, project, runID)
+	// and the workspace/task inserts must share the transaction for that deferred trigger. Admission
+	// is open because that is what `ready` means here: the create_workspace path's last step is
+	// openWorkspace, which commits observed_state='ready' and admission_open=true together, so a
+	// `ready` Workspace with admission closed is a state the production path never produces.
+	exec("run-workspace", `INSERT INTO workspaces(id,tenant_id,owner_user_id,project_id,kind,desired_state,observed_state,admission_open,runtime_generation,requested_ref,issue_run_id) VALUES($1,$2,$3,$4,'isolated','running','ready',true,1,'HEAD',$5)`, workspaceID, tenant, user, project, runID)
 	exec("task", `INSERT INTO tasks(id,workspace_id,title) VALUES($1,$2,'takeover task')`, uuid.NewString(), workspaceID)
 	exec("run-workspace-bind", `UPDATE issue_runs SET workspace_id=$2, version=version+1, updated_at=now() WHERE id=$1`, runID, workspaceID)
+	// The run Workspace's baseline. A Workspace observed `ready` reached that state through its
+	// create_workspace operation, whose clone step recorded the successful clone execution and its
+	// commit; the schema holds both, and the session-terminal path reads them to build the delivery
+	// input (base_commit plus the checkout execution it came from). Seeding them keeps the scene a
+	// state the production path can actually reach.
+	exec("run-workspace-operation", `INSERT INTO operations(id,tenant_id,actor_user_id,project_id,workspace_id,kind,state,step,request,idempotency_key,request_hash,controller_epoch) VALUES($1,$2,$3,$4,$5,'create_workspace','succeeded','done','{}',$6,'baseline-hash',1)`,
+		baselineOperationID, tenant, user, project, workspaceID, "run-workspace-"+workspaceID[:8])
+	exec("run-workspace-clone", `INSERT INTO clone_executions(execution_id,operation_id,workspace_id,node_id,input,result,dispatched_epoch) VALUES($1,$2,$3,$4,$5,$6,1)`,
+		baselineExecutionID, baselineOperationID, workspaceID, nodeID,
+		mustJSON(t, core.Object{"kind": "clone", "repositoryUrl": "https://example.invalid/takeover.git", "branch": "main"}),
+		mustJSON(t, core.Object{"node": core.Object{"nodeId": nodeID, "nodeIncarnationId": "inc-" + nodeID[:8]}, "outcome": "clone_ready", "path": "/work", "commit": seedRunWorkspaceCommit}))
+	exec("run-workspace-baseline", `UPDATE workspaces SET base_commit_id=$2, version=version+1 WHERE id=$1`, workspaceID, seedRunWorkspaceCommit)
 	exec("sandbox", `INSERT INTO sandbox_instances(id,workspace_id,generation,observed_state) VALUES($1,$2,1,'running')`, sandboxID, workspaceID)
 	exec("node", `INSERT INTO node_instances(id,workspace_id,sandbox_instance_id,service_subject,connection_state,protocol_version,initialized) VALUES($1,$2,$3,'node','connected',1,true)`, nodeID, workspaceID, sandboxID)
 	// The global Controller lease. On a fresh schema this seeds it; in a fixture schema that already
@@ -161,7 +185,7 @@ func threadLine(tag, text string) string {
 // idempotent no-op on the wire.
 func TestAgentRunThreadTakeoverOverGRPC(t *testing.T) {
 	h := newControlHarness(t)
-	scene := seedAgentSessionScene(t, h)
+	scene := seedAgentSessionScene(t, h.store)
 	client := controlpb.NewAgentRunServiceClient(h.conn)
 
 	batch := []*controlpb.ThreadEvent{
@@ -238,7 +262,7 @@ func TestAgentRunThreadTakeoverOverGRPC(t *testing.T) {
 // leaves the run `starting` with no receipt, so nothing is ever acked on a rejected batch.
 func TestAgentRunThreadTakeoverGRPCRejections(t *testing.T) {
 	h := newControlHarness(t)
-	scene := seedAgentSessionScene(t, h)
+	scene := seedAgentSessionScene(t, h.store)
 	client := controlpb.NewAgentRunServiceClient(h.conn)
 	call := func(execution string, events ...*controlpb.ThreadEvent) error {
 		t.Helper()

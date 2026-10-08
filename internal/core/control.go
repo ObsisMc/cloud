@@ -21,6 +21,17 @@ type ControlRequest struct {
 // mutations, so live subscribers see fan-out progress without polling.
 func (s *Store) Control(ctx context.Context, r *ControlRequest) (Object, error) {
 	var events []SpaceEvent
+	// Cloud Revision D4 steps 1–2 — the local input-consistency and shape comparison, and the
+	// object-store HEAD for every declared object — run here, deliberately outside the transaction:
+	// this repository forbids holding a transaction across HTTP, and the verdict is a pure function of
+	// the request and the registered execution, so it can be computed before the transaction opens and
+	// consumed inside it. The work is idempotent and writes nothing, which is what makes the
+	// on-commit replay path (a retry that only replays a recorded response) no more than a repeated
+	// read of the same objects.
+	verdict := revisionNotVerified
+	if r.Action == "agent_delivery_takeover" && r.Service != nil && r.Service.Role == "controller" {
+		verdict = s.verifyDeliveryObjects(ctx, r)
+	}
 	out, err := s.transact(ctx, func(t *transaction) Object {
 		if r.Action == "access" || r.Action == "admit" {
 			require(r.Service.Role == "controller", 403, "service_forbidden")
@@ -65,6 +76,25 @@ func (s *Store) Control(ctx context.Context, r *ControlRequest) (Object, error) 
 			// Controller that retries after a lost reply replays the recorded response instead of
 			// re-running the batch (which the receipt identity would turn into a no-op anyway).
 			return submitted(t, r, func() Object { return agentThreadTakeover(t, r) })
+		}
+		if r.Action == "agent_session_takeover" {
+			// State change, so it carries the submission identity like every other takeover: a
+			// Controller that retries after a lost reply replays the recorded response instead of
+			// re-running the terminal takeover (whose receipt identity would make it a no-op anyway).
+			return submitted(t, r, func() Object { return agentSessionTakeover(t, r) })
+		}
+		if r.Action == "agent_delivery_takeover" {
+			// State change, like the two takeovers above: a Controller that retries after a lost reply
+			// replays the recorded response instead of re-running the terminal takeover (whose receipt
+			// identity would make a second attempt a no-op anyway).
+			return submitted(t, r, func() Object { return s.agentDeliveryTakeover(t, r, verdict) })
+		}
+		if r.Action == "agent_revision_grant" {
+			// A pure read, and deliberately not submission-wrapped: a recorded response would answer a
+			// Controller with a capability that has since expired, which is worse than asking again.
+			// The lease below still gates it — a grant is a bearer capability, so it is only ever
+			// handed to the Controller that currently holds the control plane.
+			return s.revisionUploadGrant(t, r)
 		}
 		if r.Action == "agent_thread_claim" {
 			// Pure read of the deliverable Thread command backlog; the lease was already checked, so
@@ -489,6 +519,13 @@ func advance(t *transaction, r *ControlRequest, o Object, spaceEvents *[]SpaceEv
 		// is untouched here.
 		if agentRunWorkspaceOp(t, o) {
 			settleRunWorkspaceOnDone(t, o)
+		}
+		// The release half of the same wiring: a run Workspace's delete_workspace operation reaching
+		// `succeeded` is what moves the run `releasing → done` (IssueRun D3). It is a separate
+		// predicate from the create path because the two operations settle different phases and a
+		// delete must never be classified as a create.
+		if agentRunWorkspaceDeleteOp(t, o) {
+			settleRunWorkspaceDeleted(t, o)
 		}
 	} else {
 		t.exec("UPDATE operations SET step=$2,version=version+1,updated_at=now() WHERE id=$1", o.S("id"), next)

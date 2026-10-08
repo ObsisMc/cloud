@@ -12,11 +12,13 @@ import (
 // durably declared exactly once (G-001 execution portion, G-008, D-012) and a Thread command is
 // durable from the moment the business transaction that produced it commits (D6, D-4C-05).
 //
-// The workspace seams (CreateRunWorkspace/DeleteRunWorkspace) remain fail-closed "not implemented"
-// at this slice: Phase 3B deliberately closed the *execution* seam (queued → claimable) while the
-// run-Workspace paths stay outstanding (G-001 is only partially closed here, per the plan's PARTIAL
-// marking). B never writes execution_work or thread_commands directly; the business side reaches
-// them only through these seams inside its own transaction, exactly as D6 requires.
+// The delete half of the workspace seam (DeleteRunWorkspace, agent_run_workspace_release.go) is real
+// as of Phase 5 Batch 2: entering `releasing` declares the run Workspace's delete_workspace operation
+// here, in the caller's transaction (IssueRun D3/D5, operation D4). CreateRunWorkspace remains
+// fail-closed: the run-Workspace create path belongs to Phase 3A and is not part of this slice, so
+// G-001 keeps its PARTIAL marking. B never writes execution_work or thread_commands directly; the
+// business side reaches them only through these seams inside its own transaction, exactly as D6
+// requires.
 type StoreAgentRunControlPlane struct{}
 
 // NewStoreAgentRunControlPlane returns the production A-side execution seam bound to the caller's
@@ -30,12 +32,6 @@ func NewStoreAgentRunControlPlane() *StoreAgentRunControlPlane {
 // operation the Controller is not wired to execute.
 func (StoreAgentRunControlPlane) CreateRunWorkspace(*transaction, Object) (RunWorkspaceOutcome, error) {
 	return RunWorkspaceOutcome{}, fmt.Errorf("control-plane seam createRunWorkspace not implemented: A side (execution seam only in Phase 3B)")
-}
-
-// DeleteRunWorkspace declares the run Workspace delete intent. Not implemented in Phase 3B (fails
-// closed like CreateRunWorkspace).
-func (StoreAgentRunControlPlane) DeleteRunWorkspace(*transaction, Object) error {
-	return fmt.Errorf("control-plane seam deleteRunWorkspace not implemented: A side (execution seam only in Phase 3B)")
 }
 
 // EnqueueExecutionWork persists one AgentSession/delivery work item in the caller's transaction and
@@ -100,12 +96,18 @@ func (StoreAgentRunControlPlane) EnqueueExecutionWork(t *transaction, run Object
 func agentWorkCommand(t *transaction, r *ControlRequest) Object {
 	switch r.Action {
 	case "agent_work_claim":
-		// Pure read of the oldest eligible (available_at reached, not yet registered) agent_session
-		// work. Pickup never advances issue_runs phase/status (§18, T3B-10/T3B-11/T3B-12): declaring
-		// work is not starting the session — starting arrives only on Phase 4 takeover evidence.
+		// Pure read of the oldest eligible (available_at reached, not yet registered) work item, over
+		// both kinds the IssueRun lifecycle declares: `agent_session` (IssueRun D3 provisioning →
+		// starting) and `deliver_revision` (the Revision delivery D5 releases). The kind is returned
+		// with the row and picked up by the dispatch input, so the Controller needs no second claim
+		// surface — the ADR names one RPC. Pickup never advances issue_runs phase/status (§18,
+		// T3B-10/T3B-11/T3B-12): declaring work is not starting the session or delivering anything —
+		// starting arrives only on Phase 4 takeover evidence, and the run leaves `delivering` only on
+		// a taken-over delivery result. `available_at` is what defers a delivery retry (D5 backoff),
+		// so the ordering is the eligibility order.
 		w := t.one(`
 			SELECT * FROM execution_work
-			WHERE kind='agent_session' AND execution_id IS NULL AND available_at <= clock_timestamp()
+			WHERE kind IN ('agent_session','deliver_revision') AND execution_id IS NULL AND available_at <= clock_timestamp()
 			ORDER BY available_at, created_at, id LIMIT 1`)
 		if w == nil {
 			return Object{"work": nil}
@@ -165,7 +167,10 @@ func agentWorkDispatch(t *transaction, r *ControlRequest) Object {
 
 	work := t.one("SELECT * FROM execution_work WHERE id=$1", workID)
 	require(work != nil, 404, "not_found")
-	require(work.S("kind") == "agent_session", 409, "dispatch_conflict")
+	// Both declared kinds are dispatchable. The kind is copied onto node_executions and is what the
+	// Node's dispatch input already carries (controlgrpc input(kind,o)), so widening it here is what
+	// makes a deliver_revision execution registrable at all.
+	require(work.S("kind") == "agent_session" || work.S("kind") == "deliver_revision", 409, "dispatch_conflict")
 	// The Node must be exactly the one the work item was declared for (D6 WorkTarget), and the
 	// dispatch input must match the immutable snapshot the B side declared — never re-resolved.
 	require(work.O("target").S("node_id") == node, 409, "dispatch_conflict")

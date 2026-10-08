@@ -2,7 +2,7 @@
 
 > 状态：**持续维护的设计 / 执行记录**  
 > 范围负责人：**B — Cloud 业务 / 编排**  
-> 当前目标：**Phase 5 — Revision ADR Decision & Amendment Round**（把审计出的 B-1..B-4 与 P-1..P-3 各自收敛为**唯一**方案并写入两个 `proposed` ADR 正文，另为 G-031 / G-032 输出**精确的 amendment proposal**；**不实现任何 Revision 生产路径**）；当前指标 **`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`**（B-1 Revision 行身份/幂等 ⇒ 控制面在交付终态接管事务内生成 `id` + `PRIMARY KEY (id)` + `UNIQUE (run_id)` + `ON CONFLICT (run_id) DO NOTHING` 读回比较负载；B-2 Object key 第三段改为 **Cloud 生成的尝试 ID**（工作项 ID 在冻结输入时尚不可得），并写清「逻辑交付 / 交付尝试 / Revision」三种身份；B-3 `revision_ref` 由 Cloud 生成为 `refs/ora/revisions/<runId>`、Node 只回显，内容身份是行内 `final_commit` + 对象摘要；B-4 **删除**「缺 `object_store` ⇒ `skipped` 直接释放」路径，改为照常 `delivering` + 照常放出交付工作项 + 拒发授权 ⇒ 交付确定失败 ⇒ **完全由 approved D5 收口**（`failed`、`revisionId = null`），因此**不新增第四条删除触发条件**、不新增 `deliveryState` 取值、**不需要**改 IssueRun ADR；P-1 校验范围（做的两件事 + **不**校验的五项）、P-2 同授权内重复 `PUT` 是覆盖写、P-3 `unchanged` 仍登记且不复用既有 Revision）。**G-031** 输出 Option B 的精确三句 amendment（2 个 approved ADR + 1 个核心用例）；**G-032** 输出 IssueRun **D8** 的精确 amendment（上限只取不可达窗口、终态 `done` + `status` 不变 + `failure_reason = workspace_unavailable`、残留按「活的 Workspace 行 + 终结失败态 operation」登记、**不发明后台清理机制**、绝不谎报删除成功）；新增 **G-033**（IssueRun D5 需澄清「连续失败」自首个交付工作项起算 —— B-4 的收口依赖它）与 **G-034**（放弃后未登记的 `deliver_revision` 工作项仍可被认领）。**两个 Revision ADR 的 `status` 仍为 `proposed`**：本轮只把待审批的最小修订文本写入正文并明确标识，**未**自行批准、**未**改任何 approved ADR 的已批准决策、**未**改生产代码 / proto / migration / OpenAPI / frontend / 测试。上一轮目标：**Revision ADR Approval Round — 解除 G-030 并冻结 Phase 5 最终契约**（对 `status: proposed` 的 Cloud Revision ADR 做 approval-readiness 审计）；上一轮指标 `REVISION_ADR_APPROVAL_BLOCKED`（审计结论 **`REVISION_ADR_NOT_READY_FOR_APPROVAL`**：4 个阻塞项 + 3 条精度补充；**G-029 = `DEFERRED / NON-BLOCKING`**；**G-031 推荐 Option B**；**G-032 提出 IssueRun D8**；**本轮未改 ADR 文件、未改 `status`**）。更早轮次：**Phase 5 Batch 2 — Delivery → Releasing → Done**（交付/释放/终态半边**已交付**；Revision 登记半边由 G-030 受阻，指标 `PHASE_5_BATCH_2_BLOCKED`；实现并验证：`deliver_revision` 工作项经**共享派发谓词**认领与派发；交付终态经既有 `TakeOverNodeEvent` → `agent_delivery_takeover` 在单个调用方事务内提交收据 / 结果 / `DeliverySettled` 钩子 / `last_event_sequence` 推进；D5 的失败重试退避 30s × 2^(n-1) 封顶 10min 且**不产生新的逻辑交付**；D5 放弃后同事务 CAS `delivering → releasing` + D4 派生 `status` + **恰好一个** `delete_workspace` 意图；`RunWorkspaceDeleted` 把 `releasing → done`；**G-019 = CLOSED**；新增 G-029、G-030、G-031、G-032）；再上一轮：Phase 5 Batch 1 — `SessionEnded` 终态接管（`PHASE_5_BATCH_1_DONE`）；再上一轮：Phase 4C 实现完成——Thread API / SSE / Thread Commands / Lifecycle（`PHASE_4C_COMPLETE`）；再上一轮：Phase 4B 实现完成——迁移 `0021` + production 接管 + `ThreadEventsTakenOver` 钩子 + gRPC `TakeOverThreadEvents`）。
+> 当前目标：**Revision Completion Slice — 对象存储 + 亲自校验后的 Revision 登记 + 全项目 Final Acceptance**（`object_store` 配置 / 对象存储客户端 / `0023_revisions.sql` / `GrantRevisionUpload` 与授权约束 / D4 的两步校验 / 登记与释放同事务 / 重放与冲突 / G-031・G-032・G-033 已批准文本同步 / Revision 核心用例证据 / 全项目 Final Acceptance）；当前状态 **`REVISION_COMPLETION_SLICE_DONE` + `PROJECT_FINAL_ACCEPTANCE_PASSED`**（G-030 = `CLOSED`；两个 Revision ADR 的已批准契约在 Cloud 侧落地；`format:check` / `lint`（仅剩 G-028 的既有基线）/ `test` 420 PASS・0 FAIL・0 SKIP / `test:race` 0 DATA RACE / `build` 全部通过；新增 G-035 / G-036 / G-037 三项**已披露、未修**的缺口：公开读未投影 D5 的 Revision 元数据、健康检查不报告对象存储、真实 MinIO 上的三项验收义务仍 `Missing`；**未** stage、**未** commit、**未** push、**未**开 PR）。上一轮目标：**Phase 5 — Revision ADR Decision & Amendment Round**（把审计出的 B-1..B-4 与 P-1..P-3 各自收敛为**唯一**方案并写入两个 `proposed` ADR 正文，另为 G-031 / G-032 输出**精确的 amendment proposal**；**不实现任何 Revision 生产路径**）；上一轮指标 **`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`**（B-1 Revision 行身份/幂等 ⇒ 控制面在交付终态接管事务内生成 `id` + `PRIMARY KEY (id)` + `UNIQUE (run_id)` + `ON CONFLICT (run_id) DO NOTHING` 读回比较负载；B-2 Object key 第三段改为 **Cloud 生成的尝试 ID**（工作项 ID 在冻结输入时尚不可得），并写清「逻辑交付 / 交付尝试 / Revision」三种身份；B-3 `revision_ref` 由 Cloud 生成为 `refs/ora/revisions/<runId>`、Node 只回显，内容身份是行内 `final_commit` + 对象摘要；B-4 **删除**「缺 `object_store` ⇒ `skipped` 直接释放」路径，改为照常 `delivering` + 照常放出交付工作项 + 拒发授权 ⇒ 交付确定失败 ⇒ **完全由 approved D5 收口**（`failed`、`revisionId = null`），因此**不新增第四条删除触发条件**、不新增 `deliveryState` 取值、**不需要**改 IssueRun ADR；P-1 校验范围（做的两件事 + **不**校验的五项）、P-2 同授权内重复 `PUT` 是覆盖写、P-3 `unchanged` 仍登记且不复用既有 Revision）。**G-031** 输出 Option B 的精确三句 amendment（2 个 approved ADR + 1 个核心用例）；**G-032** 输出 IssueRun **D8** 的精确 amendment（上限只取不可达窗口、终态 `done` + `status` 不变 + `failure_reason = workspace_unavailable`、残留按「活的 Workspace 行 + 终结失败态 operation」登记、**不发明后台清理机制**、绝不谎报删除成功）；新增 **G-033**（IssueRun D5 需澄清「连续失败」自首个交付工作项起算 —— B-4 的收口依赖它）与 **G-034**（放弃后未登记的 `deliver_revision` 工作项仍可被认领）。**两个 Revision ADR 的 `status` 当时仍为 `proposed`**：该轮只把待审批的最小修订文本写入正文并明确标识，**未**自行批准、**未**改任何 approved ADR 的已批准决策、**未**改生产代码 / proto / migration / OpenAPI / frontend / 测试（**已由本轮的逐项人工批准取代**）。再上一轮目标：**Revision ADR Approval Round — 解除 G-030 并冻结 Phase 5 最终契约**（对 `status: proposed` 的 Cloud Revision ADR 做 approval-readiness 审计）；再上一轮指标 `REVISION_ADR_APPROVAL_BLOCKED`（审计结论 **`REVISION_ADR_NOT_READY_FOR_APPROVAL`**：4 个阻塞项 + 3 条精度补充；**G-029 = `DEFERRED / NON-BLOCKING`**；**G-031 推荐 Option B**；**G-032 提出 IssueRun D8**；**本轮未改 ADR 文件、未改 `status`**）。更早轮次：**Phase 5 Batch 2 — Delivery → Releasing → Done**（交付/释放/终态半边**已交付**；Revision 登记半边由 G-030 受阻，指标 `PHASE_5_BATCH_2_BLOCKED`；实现并验证：`deliver_revision` 工作项经**共享派发谓词**认领与派发；交付终态经既有 `TakeOverNodeEvent` → `agent_delivery_takeover` 在单个调用方事务内提交收据 / 结果 / `DeliverySettled` 钩子 / `last_event_sequence` 推进；D5 的失败重试退避 30s × 2^(n-1) 封顶 10min 且**不产生新的逻辑交付**；D5 放弃后同事务 CAS `delivering → releasing` + D4 派生 `status` + **恰好一个** `delete_workspace` 意图；`RunWorkspaceDeleted` 把 `releasing → done`；**G-019 = CLOSED**；新增 G-029、G-030、G-031、G-032）；再更早：Phase 5 Batch 1 — `SessionEnded` 终态接管（`PHASE_5_BATCH_1_DONE`）；再更早：Phase 4C 实现完成——Thread API / SSE / Thread Commands / Lifecycle（`PHASE_4C_COMPLETE`）；再更早：Phase 4B 实现完成——迁移 `0021` + production 接管 + `ThreadEventsTakenOver` 钩子 + gRPC `TakeOverThreadEvents`）。
 > 更新规则：**每一轮实现开始前必须阅读本文件，结束前必须更新本文件。** 本文件是 `plan.md` 的中文对照；Phase 2
 > 详细设计的权威版本在 `plan.md` 的 `## Phase 2 — Workspace Settlement 详细设计`（§2.1–§2.15），Phase 3
 > 详细设计的权威版本在 `plan.md` 的 `## Phase 3 — Session Start 详细设计`（§3.1–§3.17），Phase 4C
@@ -439,7 +439,11 @@ Phase 4B 已交付（本轮，IMPLEMENTATION）：
 
 > **已被后续轮次取代：** 上面四条 4C 条目在 `PHASE_4C_COMPLETE` 时**已实现**（迁移 `0022` + Thread API / SSE /
 > commands / lifecycle），其「仅设计」措辞是 4C 设计轮的记录。`ending → ended` 与 `queued → discarded` 在
-> `PHASE_5_BATCH_1_DONE` 时**已实现**；delivery / releasing / `done` 仍属 Phase 5 Batch 2。
+> `PHASE_5_BATCH_1_DONE` 时**已实现**；delivery / releasing / `done` 在 Phase 5 Batch 2 轮**已实现**
+> （`PHASE_5_BATCH_2_BLOCKED`），而当时唯一的受阻面 —— G-030 名下 `proposed` ADR 之后的 Revision 登记 ——
+> **已不再受阻**：两个 Revision 根决策于 2026-10-08 获批，Revision Completion Slice 实现了 Cloud 侧，
+> `PHASE_5_BATCH_2_BLOCKED` 因此被 `REVISION_COMPLETION_SLICE_DONE` + `PROJECT_FINAL_ACCEPTANCE_PASSED` 取代
+> （G-030 = `CLOSED`；其名下衍生的缺口是 G-035 / G-036 / G-037）。
 
 核心原则（mandate §4）：`execution_work created ≠ running`、`claim ≠ running`、`dispatch ≠ running`；只有
 权威接管/会话开始证据经 `ThreadEventsTakenOver` 钩子成功提交才 `starting → running`。
@@ -450,7 +454,8 @@ Covered，T4-14/T4-15 为 DEFERRED，**T4C-1..T4C-34 为 DESIGNED / MISSING（�
 
 ### Phase 5 — Delivery / Releasing / Done
 
-状态：**IN PROGRESS — Batch 1 DONE，Batch 2 除 Revision 登记半边外已交付（受阻面 = G-030）**
+状态：**COMPLETE — Batch 1 DONE，Batch 2 DONE，Revision 半边 DONE（`REVISION_COMPLETION_SLICE_DONE` +
+`PROJECT_FINAL_ACCEPTANCE_PASSED`；G-030 = `CLOSED`）**
 
 **Batch 1 — `SessionEnded` 终态接管（DONE，2026-10-08）**：会话执行的终态 Node 事件走既有 `TakeOverNodeEvent`
 权威（control action `agent_session_takeover`），在单个调用方事务内一并提交：收据、持久终态结果、Thread
@@ -470,11 +475,19 @@ D4 派生的 `status` 与**恰好一个** `delete_workspace` 意图；`RunWorksp
 `completed`。两条周期补偿（`GiveUpStaleDeliveriesOnce`、`RedeclareRunWorkspaceDeletesOnce`，间隔 10s）只读 PostgreSQL
 并复用既有事务路径，**不是**内存队列权威。测试：`integration/agent_run_delivery_test.go`（P5-7…P5-16）与
 `internal/core/agent_run_release_db_test.go`（5 个白盒）。
-**受阻半边**：Cloud Revision ADR 仍为 `status: proposed`，故 Revision 登记、对象校验与 `GrantRevisionUpload` **未实现**，
-`revision_delivered`/`revision_unchanged` 一律回 `UNAVAILABLE` 且**零写入**（**G-030**）；交付成功路径因此只能经 D5 放弃或
-D6 无会话取消到达 `releasing`。
+**Revision 半边 — 对象存储 + 亲自校验后的 Revision 登记（DELIVERED, Revision Completion Slice, 2026-10-08）**：
+两个 Revision 根决策于 2026-10-08 经人类批准（Cloud 与 Node **各自独立**批准），Cloud 侧现已端到端实现该获批契约 ——
+可选 `object_store` 配置、签发单键 `PUT` 授权并用 `HEAD` 读回对象的对象存储客户端、迁移
+`0023_revisions.sql`（`PRIMARY KEY (id)` + `UNIQUE (run_id)` + 形状 CHECK）、`GrantRevisionUpload`，以及 D4 的
+「先校验后登记」：**先于任何 I/O** 的本地输入一致性检查 → `HEAD` 三项校验 → 与释放**同一事务**内登记。
+Cloud 无法确认的声明成为 `failed{verification_failed}` —— **Cloud 自己的判定，绝不从线上接受** —— 不写 `revisions` 行、
+走 D5 重试；同一负载重放为 no-op，不同负载则整条事务回滚。测试：
+`integration/agent_run_delivery_test.go`、`internal/core/agent_run_revision_test.go`、
+`internal/controlgrpc/executions_test.go`、`internal/objectstore/*_test.go`、`integration/migration_upgrade_path_test.go`。
+需要**真实**对象存储的三项义务保持 `Missing`（本轮无可达端点；**G-037**）；另有两处展示/运维面仍偏离批准文本
+（**G-035** 公开读未投影 D5 的 Revision 元数据、**G-036** 健康检查无法报告对象存储）——三者**登记在案，未被静默吸收**。
 
-**Revision ADR Approval Round（规范轮，2026-10-08，`REVISION_ADR_APPROVAL_BLOCKED`）**：对
+**（历史）Revision ADR Approval Round（规范轮，2026-10-08，`REVISION_ADR_APPROVAL_BLOCKED`）**：对
 `specs/decisions/cloud/revision/0-cloud-owned-object-store-and-verified-revisions.md`（仍 `status: proposed`）做
 approval-readiness 审计，结论 **`REVISION_ADR_NOT_READY_FOR_APPROVAL`** —— 存在 4 个**会导致两种合理实现**的
 阻塞项（见 §13 G-030 的 B-1..B-4）与 3 条精度补充（P-1..P-3）。本轮**未改 ADR 正文、未改 `status`、未改任何生产代码 /
@@ -482,7 +495,7 @@ proto / migration / OpenAPI / frontend**：只登记阻塞项与**最小文本�
 同轮裁定：G-029 = `DEFERRED / NON-BLOCKING`（**不**为其扩 schema）；G-031 推荐 **Option B**；G-032 提出 IssueRun
 **D8** 最小 amendment（**未实现**）。下一实现切片仅在 ADR 获批（且 B-1..B-4 按提案收敛）后开始。
 
-**Revision ADR Decision & Amendment Round（决策与修订轮，2026-10-08，`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`）**：把上一轮的
+**（历史）Revision ADR Decision & Amendment Round（决策与修订轮，2026-10-08，`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`）**：把上一轮的
 B-1..B-4 与 P-1..P-3 各自收敛为**唯一**方案，并写入两个 `proposed` ADR 的正文（文首与文末「修订记录」**明确标识为待审批**）——
 B-1 ⇒ D4 的控制面身份 + `PRIMARY KEY (id)` + `UNIQUE (run_id)` + `ON CONFLICT … DO NOTHING` 读回比较负载；
 B-2 ⇒ D2 的「逻辑交付 / 交付尝试 / Revision」三种身份表 + 键模板第三段改为 **Cloud 生成的尝试 ID**；
@@ -497,10 +510,11 @@ B-3 ⇒ D4 的 `revision_ref`（Cloud 生成 `refs/ora/revisions/<runId>`，Node
 包含：
 
 - session end — **Batch 1 DONE**
-- delivery settlement — **Batch 2 DONE（除 Revision 登记半边，G-030）**
+- delivery settlement — **Batch 2 DONE**
 - cleanup — **Batch 2 DONE**
 - workspace deletion — **Batch 2 DONE**
 - terminal states — **Batch 2 DONE**
+- Revision 登记 / 对象校验 / 上传授权 — **Revision Completion Slice DONE（G-030 = `CLOSED`）**
 
 ---
 
@@ -1088,9 +1102,17 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   ⇒ **结论**：本项**明确排除**在 Revision ADR 的批准范围之外；Phase 5 不为它扩 schema、不改 `issue_runs.result`、不加列。
   若产品确需该注释，另开一轮由 ADR 决定承载面。
 
-- **G-030 — 新增 / OPEN / NON-BLOCKING FOR THIS ROUND, BUT THE APPROVED MANDATORY BLOCKER FOR THE REVISION HALF
+- **G-030 — `CLOSED`（Revision Completion Slice，2026-10-08）**。关闭依据：人类于 2026-10-08 逐项批准 Cloud 与 Node
+  两个 Revision 根决策（`status: approved`，含 B-1..B-4 与 P-1..P-3 的收敛文本），本轮据批准文本实现了 Cloud 侧
+  全部行为并逐条取得直接证据：`0023_revisions.sql`（`PRIMARY KEY (id)` + `UNIQUE (run_id)` + 六条 CHECK）、
+  `internal/objectstore`（预签名 PUT 签发 + `HEAD` 校验）、可选 `object_store` 配置、`GrantRevisionUpload`、
+  D4 的两步校验（本地输入一致性 → `HEAD` 存在/大小/小写 hex SHA-256）、登记与 `releasing` 同事务、重放幂等与
+  冲突整体回滚、`verification_failed` 只由 Cloud 记录。**关闭的是「未批准 ADR 阻塞实现」这条**，不是它名下
+  衍生的新缺口：真实 MinIO 上无法验收 ⇒ **G-037**；公开读与健康检查两处偏离批准契约 ⇒ **G-035 / G-036**。
+  以下保留该缺口的历史登记（三轮：Phase 5 Batch 2 登记 → Approval Round 细化解除条件 → Decision & Amendment Round 收敛文本）。
+  **（历史）新增 / OPEN / NON-BLOCKING FOR THIS ROUND, BUT THE APPROVED MANDATORY BLOCKER FOR THE REVISION HALF
   （Phase 5 Batch 2，2026-10-08）**：`specs/decisions/cloud/revision/0-cloud-owned-object-store-and-verified-revisions.md`
-  仍为 **`status: proposed`**，而它定义的正是 Revision 的对象键、`revision_ref`、Cloud 侧对象校验与 `GrantRevisionUpload`
+  曾为 **`status: proposed`**，而它定义的正是 Revision 的对象键、`revision_ref`、Cloud 侧对象校验与 `GrantRevisionUpload`
   的授权形状。依 authority order（approved ADR > AGENTS.md > plan > implementation）与 `specs/AGENTS.md`（`proposed` 阶段
   不得据其编写契约与核心测试用例），**不得**据此实现。现状：无 `revisions` 表、0022 仍为最新 migration。
   **本轮的处理是受阻且不静默降级**：`DeliverySettled` 收到 `revision_delivered`/`revision_unchanged` 一律回 `UNAVAILABLE`
@@ -1151,7 +1173,12 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   **`status` 仍为 `proposed`** —— 本轮只收敛文本，**未**自行批准。Node revision ADR 另补一句最小回显条款，
   也**需单独批准**（「Cloud Revision ADR 获批不代表 Node Revision ADR 自动获批」）。
 
-- **G-031 — 新增 / OPEN / NON-BLOCKING / IDENTITY SPELLING DEVIATION（Phase 5 Batch 2，2026-10-08）**：IssueRun D6 把
+- **G-031 — `CLOSED`（Revision Completion Slice，2026-10-08）**。关闭依据：人类批准了 Option B，且**明确「本项不批准任何
+  额外 schema 修改」**；approved 修订文本（`(workspace_id, kind)` + 只对未完成的操作成立）已落入 operation D4、
+  controller-integration D6 与 `test-cases/cloud/operation/plugin-step-and-run-workspace.md`，实现与批准文本**逐字一致**
+  ⇒ 「ADR 与实现择一对齐」这件事已经完成，不再是偏差。**未**新增 migration、**未**改写已应用约束。
+  以下保留该缺口的历史登记：
+  **（历史）新增 / OPEN / NON-BLOCKING / IDENTITY SPELLING DEVIATION（Phase 5 Batch 2，2026-10-08）**：IssueRun D6 把
   运行 Workspace 的幂等身份写作 `(issue_run_id, kind)`，而既有实现的唯一约束是 `(workspace_id, kind)`。在本轮全部路径上
   两者等价（运行 Workspace 与 run 一一对应、`kind` 固定），因此本轮**沿用既有 schema**，**未**新增 migration、
   **未**改写已应用约束（AGENTS.md 的兼容边界）。**WHAT IS NEEDED TO CLOSE**：ADR 与实现择一对齐（若确需 `issue_run_id`，
@@ -1183,7 +1210,13 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   （既有实现已是该语义：`(workspace_id, kind)` 的未完成检查由 `agent_run_workspace_release.go` 表达，
   数据库侧由既有 `one_project_operation` 传递性串行）。**是否再补一个数据库部分唯一索引是独立问题，不在本 amendment 内。**
 
-- **G-032 — 新增 / OPEN / NON-BLOCKING / MISSING LIMIT（Phase 5 Batch 2，2026-10-08）**：D5 只给**交付**侧放弃窗口
+- **G-032 — `OPEN / APPROVED TEXT LANDED / IMPLEMENTATION PENDING`（更新：Revision Completion Slice，2026-10-08）** ——
+  人类已批准 **IssueRun D8**（含 `done` 条件、残留如实保留、绝不谎报删除成功、**不新增后台清理机制**四句），
+  批准文本已同步进 approved IssueRun 根决策、D3 阶段表的 `done` 行与
+  `test-cases/cloud/issue-run/agent-run-orchestration.md`（该文件的四条义务因此**仍然**是 `Missing`：ADR 已批准，
+  但**实现待做**，且人类**未**批准任何具体修复方式、**未**把它纳入 Revision Completion Slice）。
+  ⇒ **本轮未实现 D8**，也**未**为它发明清理机制。以下保留该缺口的历史登记：
+  **（历史）新增 / OPEN / NON-BLOCKING / MISSING LIMIT（Phase 5 Batch 2，2026-10-08）**：D5 只给**交付**侧放弃窗口
   （连续失败 >2h、Node 未知 >30m）；**Workspace 删除**侧的持续失败没有上限，删除意图由
   `RedeclareRunWorkspaceDeletesOnce` 无限重新声明，运行会一直停在 `releasing`。这**不是**本轮引入的回归（本轮之前该路径
   根本不存在），但属同一生命周期的空缺。**WHAT IS NEEDED TO CLOSE**：后续 ADR 明确删除侧的重试上限与终态。
@@ -1214,7 +1247,12 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   `failure_reason = workspace_unavailable` 是唯一可见信号。**不谎报删除成功**：`done` 只表示「不再重试」，
   删除是否真的发生由 Workspace 行与 operation 的终态如实体现。
 
-- **G-033 — 新增 / OPEN / 跨 ADR 澄清（Revision ADR Decision & Amendment Round，2026-10-08）**：approved 的 IssueRun D5 写的是
+- **G-033 — `CLOSED`（Revision Completion Slice，2026-10-08）**。关闭依据：人类批准了该 D5 澄清，澄清句已写入 approved
+  IssueRun 根决策的 D5，且实现与之一致（`deliveryGivenUp` 的窗口 1 以首个 `deliver_revision` 工作项的 `created_at`
+  起算，数据库时钟比较）。**仍存的证据缺口**：起算点本身没有会失败的测试（各放弃测试把配置窗口压到纳秒级），
+  已如实登记在 `test-cases/cloud/issue-run/agent-run-orchestration.md` 的对应行（`Partial`）。
+  以下保留该缺口的历史登记：
+  **（历史）新增 / OPEN / 跨 ADR 澄清（Revision ADR Decision & Amendment Round，2026-10-08）**：approved 的 IssueRun D5 写的是
   「交付连续失败超过 2 小时」，而**缺 `object_store`** 的交付**永远不会产生任何失败结果**（Cloud 拒发授权，Node 连授权都没收到）。
   本轮 B-4 的收口依赖对 D5 的一处读法：**放弃窗口自该运行的首个 `deliver_revision` 工作项被放出起算**，即「连续失败」包含
   「从未产生任何结果」。该读法已在 Phase 5 Batch 2 的实现中固化（`deliveryGivenUp` 窗口 1 以首个交付工作项的 `created_at` 起算），
@@ -1231,6 +1269,47 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   确定性 no-op、零写入），但① 白白消耗一次执行，② 该执行可能对着正在被删除的 Workspace 跑，③ 会留下一条永不完结的执行记录。
   **本轮不修**：属实现行为，且修复形状取决于 B-4 与 G-032 的最终批准结果（在认领侧加运行阶段谓词，或在放弃/终态时终结未登记的工作项）。
   **不阻塞**任何批准项。
+  **更新（Revision Completion Slice，2026-10-08）**：人类明确 **G-034 暂不批准任何修复方式、也不纳入本切片**，
+  因此本轮**未**为它做任何改动——既没有加认领侧谓词、也没有新增 `execution_work` 的终结者、**未**发明后台清理机制；
+  状态仍是 `OPEN / NON-BLOCKING`。（本轮新增的证据只加固了它的「无害」半边：`TestLateDeliveredRevisionRegistersNothingOnAReleasedRun`
+  证明已释放运行收到交付结果时零写入。）
+
+- **G-035 — 新增 / OPEN / NON-BLOCKING / 偏离已批准 ADR 的实现缺口（Revision Completion Slice 发现，2026-10-08）** ——
+  Cloud Revision **D5 要求 `GET .../runs/{rid}` 的结果中包含 Revision 元数据**（最终 commit、是否有改动、对象大小、
+  `deliveryState`），而实现只把 `{revisionId, deliveryState}` 写进 `issue_runs.result`，该列在契约里是
+  `{type: object, additionalProperties: true}` 的自由袋（`internal/contract/openapi.go` 的 `IssueRun`），
+  **没有任何 Revision 投影**：`final_commit`、是否改动（`bundle` 三列是否为 NULL）与两个对象的大小都不出现在公开读上。
+  **为什么登记而不是就地修**：这是契约变更——`internal/contract` + `api/openapi.json` 的 schema 要新增字段，按
+  `cloud/AGENTS.md` 必须同批 `task frontend:generate` 并提交两个生成物（含前端客户端），而本轮授权范围是
+  `object_store` / `0023` / 授权 / 校验 / 登记 / 重放 / 冲突，**不含**公开读 schema 变更；也不得为让它变绿而改写
+  approved D5 的措辞。**需要什么**：一轮把 D5 的四项元数据加进 `GET .../runs/{rid}` 的契约（新增类型化字段而非
+  继续依赖 `result` 的自由袋），同时 `task frontend:generate` 并补契约/集成测试。**不阻塞**本轮完成；目前公开读
+  **事实上**不泄露对象键或 URL，所以 D5 的「只暴露元数据」这一半是成立的，缺的是元数据本身。
+  核心用例证据状态见 `specs/test-cases/cloud/revision/object-store-and-revision-registration.md`（该行 `Missing`，
+  并已写明这是实现缺口而不只是测试缺口）。
+
+- **G-036 — 新增 / OPEN / NON-BLOCKING / 需一次契约决策（Revision Completion Slice 发现，2026-10-08）** ——
+  Cloud Revision **D1 要求「健康检查的依赖列表报告对象存储未配置」**（运维可见性，明确**不是**运行语义分支），
+  而已发布的 `/healthz` 是严格契约 `{status: ok}` / 503 `Error`（`internal/contract/openapi.go`），既没有「依赖列表」
+  这个概念，也**不得**泄露配置。**为什么登记而不是自行扩展**：扩大健康检查的响应形状是路径级契约变更（会触动
+  OpenAPI 校验器、前端生成物与既有的健康检查测试），且 D1 的这句话本身就是一个尚未定稿的形状选择——把它做成
+  `{status, dependencies:{...}}` 还是新增 `/readyz` 需要一次明确的决策。**需要什么**：与 D1 一并重新评审健康检查契约，
+  并在同一变更里更新 OpenAPI / 前端生成物 / 测试。**不阻塞**本轮完成：未配置对象存储的运行语义**已**如实体现在
+  `UNAVAILABLE` 与 D5 的收敛上，缺的只是运维可见性这一半。
+
+- **G-037 — 新增 / OPEN / 仅阻塞三项 MinIO 义务的证据状态 / TEST EVIDENCE（Revision Completion Slice，2026-10-08）** ——
+  approved Cloud Revision ADR 的三项义务**没有直接证据**，因为本轮**没有可达的对象存储端点**：
+  ① 授权只作用于声明的键与方法（用签发的 URL `PUT` 声明键成功、其他键/其他方法/过期 URL 被拒）；② 摘要头被强制
+  （内容与 `x-amz-checksum-sha256` 不符的 `PUT` 被对象存储拒绝）；③ 存在性与摘要校验（对象缺失、大小不符、摘要不符
+  三面各被拒）。`specs/AGENTS.md` 明确「只有测试失败会直接说明该验证义务不成立时，才把测试列为证据」，因此本轮的
+  本地 HTTP 替身**不充数**——那三项在
+  `specs/test-cases/cloud/revision/object-store-and-revision-registration.md` 里保持 `Missing`，其余义务按实际断言逐条
+  标为 `Covered` / `Partial` 并写明理由。**ADR 落地顺序第 3 步（cluster Compose 增加 MinIO + Cloud 的 `object_store`
+  配置）本轮未完成**：MinIO 镜像拉取失败（`docker.io` 连接被重置），因此连「配置能被真实端点消费」都未验收。
+  另有一项**随该验收一并裁定的实现风险**：预签名 PUT 无法把 `x-amz-checksum-sha256` 纳入签名，而真实 AWS S3 要求
+  所有 `x-amz-*` 头参与签名——即义务 ② 在 MinIO 上成立、在真实 S3 上可能需要改形状（例如改用 `x-amz-checksum-*`
+  以外的机制或在 `HEAD` 侧兜底）。**需要什么**：可拉取镜像的环境 + 一轮以真实 MinIO 补三项直接证据，并在同一轮
+  裁定 S3 侧的摘要强制方式。**不阻塞**本轮其余全部完成面；它阻塞的是「三项义务标 `Covered`」这件事。
 
 - **G-027 — 新增 / OPEN / NON-BLOCKING / ADR PRECISION（Phase 5 Batch 1，2026-10-08）**：Thread D4 的末行只写「会话执行终态被
   接管 ⇒ `ended`」，**未**写明该转换的**活状态集合**，也**未**写明终态事件落在已 `ended` 或非会话阶段时的行为。本轮依据
@@ -1246,6 +1325,9 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   **WHY 本轮不清理**：删除他人已文档化的读取助手属 Batch 1 范围外的行为变更；加 `//nolint` 等于弱化门禁（AGENTS.md 禁止）；
   接线为公开读取面则是新 API。**WHAT IS NEEDED TO CLOSE**：由拥有 Space Agent roster 读取面的轮次决定接线或删除。
   **不阻塞**本轮完成，但**是本仓 `task lint` 全绿的唯一剩余项**。
+  **更新（Revision Completion Slice，2026-10-08）**：`task lint` 仍只剩这一条（本轮另有一处新引入的 `sqlclosecheck`
+  已按**修复根因**处理——`integration/migration_upgrade_path_test.go` 的 `rows.Close()` 改为 `defer rows.Close()`，非
+  `nolint`、非删除断言）；在 `git archive HEAD` 的未改动树上运行同一 `golangci-lint` 配置仍得到**逐字相同**的 1 条。
 - **G-020 — 新增 / OPEN / NON-BLOCKING / DEPENDENCY（Phase 4C 设计轮，2026-10-08）**：SSE 失效提示**不保证送达**——
   hub 为进程内、缓冲 8、单实例，可能丢/重/乱序，无持久化、无 replay（api-boundary ADR，已实现）。**WHY 必须登记**：
   假定「可靠通知」的设计会诱导客户端把流当日志。**WHAT IS NEEDED TO CLOSE**：slice 1 依赖客户端重连 + 周期轮询
@@ -1303,6 +1385,9 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   `CheckSchema` 严格校验；没有任何行为依赖该 README。**WHY 未在 Slice 1 修复**：该债比本轮早六个迁移，而 S1 范围只有
   `0022`；只补 `0022` 会让清单**看起来**是最新的、却仍漏 `0018`–`0021`。**WHAT IS NEEDED TO CLOSE**：用一轮把
   `0018`–`0022` 一起写进两个 README。
+  **更新（Revision Completion Slice，2026-10-08）**：本轮落地的 `0023_revisions.sql` 使漂移扩到 **`0018`–`0023`（7 个文件）**。
+  同样**未**在本轮修复，理由不变：只补 `0023` 会让清单**看起来**是最新的、却仍漏 `0018`–`0022`。
+  （两个 README 在各自 checksum/integrity 段落之后还各有一条重复的 `0015_plugins.sql` 残留条目——同一轮、同一处修。）
 
 ---
 
@@ -1366,13 +1451,67 @@ Agent 必须更新：
 
 ### 当前 Phase
 
-`Phase 5 — Revision ADR Decision & Amendment Round`
+`Phase 5 — Revision Completion Slice（对象存储 + 亲自校验后的 Revision 登记）+ Project Final Acceptance`
 
 ### 当前 Slice
 
-`把 B-1..B-4 与 P-1..P-3 各自收敛为唯一方案并写入两个 proposed Revision ADR 的正文（明确标识为待审批），为 G-031 / G-032 输出精确的 amendment 提案，登记 G-033 / G-034，并更新 plan/plan.md 与 plan/plan-zh.md。决策与修订轮：不改生产代码、不改任何 ADR 的 status、不改任何 approved ADR 的已批准决策。`
+`按人类已逐项批准的契约实现 Cloud 侧 Revision 半边：object_store 配置 + 对象存储客户端（限定单键 PUT 的预签名 URL 与 HEAD 三项校验）+ migration 0023_revisions.sql + GrantRevisionUpload + D4 的两步校验与同事务登记 + 重放幂等与冲突回滚 + 同步 specs 中获批文本与被推翻的旧行为描述 + Revision 核心用例证据；随后跑全项目 Final Acceptance（format:check / lint / test / test:race / build）。`
 
 ### 当前状态
+
+`REVISION_COMPLETION_SLICE_DONE` + `PROJECT_FINAL_ACCEPTANCE_PASSED`
+（本轮为 **IMPLEMENTATION ROUND（Revision Completion Slice）+ 全项目 Final Acceptance**。
+**前置**：人类于 2026-10-08 逐项批准 ① Cloud Revision ADR → `approved`（含 B-1..B-4 与 P-1..P-3、`UNIQUE (run_id)`、
+重放返回既有 Revision、同一运行不同负载 ⇒ 整条事务回滚、登记与阶段推进同事务）；② Node Revision ADR → `approved`
+（含 D2.4 回显、D4 约束、不变量 7、测试义务），且**两者独立批准、不视为一方自动批准另一方**；③ G-033 的 D5 澄清；
+④ G-031 的 Option B（`(workspace_id, kind)` + 限定未完成操作，**不批准任何额外 schema 修改**）；⑤ G-032 的 IssueRun D8
+（含 `done` 条件与残留/不谎报/不新增清理机制三句）。并明确：**G-029 保持 `DEFERRED / NON-BLOCKING`**、
+**G-034 不批准任何修复方式、不纳入本切片**、**不借此扩大 G-020 / G-021 / G-025 / G-026 / G-027 / G-028 的范围**。
+**权威重读**：`cloud/AGENTS.md`、`specs/AGENTS.md`、`plan/plan.md`、`plan/plan-zh.md`、**两个已批准的 Revision 根决策**、
+IssueRun ADR（D3/D4/D5/D6/D8）、controller-integration ADR（D2/D4/D6）、Thread ADR、operation ADR D4、
+既有 Phase 5 Batch 1/2 实现与测试、proto 与既有 migration；权威顺序 **approved ADR > AGENTS.md > plan > implementation**。
+**实现**：可选 `object_store` 配置（endpoint/region/bucket/**凭据文件路径**/`upload_grant_ttl`，缺省即未配置，TTL 默认批准的 15 分钟）；
+`internal/objectstore`（签发限定到**单键 + `PUT`** 的预签名 URL；`HEAD` 读回存在性/大小/摘要）；
+`0023_revisions.sql`（`PRIMARY KEY (id)` + `run_id UNIQUE REFERENCES issue_runs(id)` + 六类 CHECK + `expires_at` 恒 NULL，
+**未**触碰任何已应用迁移）；`GrantRevisionUpload`（只对已登记且尚无结果的交付执行签发，未知/会话/已有结果/已释放/未配置
+五路拒绝，**零写入**——授权是能力不是记录）；D4 第 1 步本地输入一致性（零 I/O，**先于**第 2 步）→ 第 2 步 `HEAD` 三项 →
+第 3 步**同一事务**内收据 → 结果 → `revisions` 行 → 释放钩子；不成立即 `failed{verification_failed}` 且**不写**行、
+运行留 `delivering` 走 D5 退避；`verification_failed` 只由 Cloud 记录（线上送来 `InvalidArgument`）；
+同一负载重放幂等复用同一行、不同负载 ⇒ 整条接管事务回滚。
+**两个实现要点**：（a）proto 的 `StoredObject.size` 是 `uint64`，而 `core.Object.N` 只认识 `float64/int64/int/json.Number`
+⇒ 落库前必须转成能读回的形态，否则「Node 声明的大小」会读回 0 并被当成真值去校验（本轮发现并修复，测试反证）；
+（b）本地输入一致性必须在对象存储之前，否则一个已被判定不会登记的载荷仍会花掉两次 `HEAD`。
+**specs 同步**：新建 `test-cases/cloud/revision/object-store-and-revision-registration.md` 与
+`test-cases/node/revision/internal-snapshot-and-bundle-upload.md`（后者全部 `Missing`，desktop 侧未开始）；
+`controller-integration/agent-run-executions-and-thread.md`、`issue-run/agent-run-orchestration.md`、`thread/durable-thread.md`
+中**被批准契约推翻的旧行为描述**（「Node 报告已上传 ⇒ Cloud 拒绝、不登记、不释放」）已改写为批准后的行为，被删除测试的引用一并更新。
+**缺口**：**G-030 = `CLOSED`**（关的是「未批准 ADR 阻塞实现」）；**G-031 / G-033 = `CLOSED`**（批准文本已落地/已写入 ADR）；
+**G-032** 批准文本已落地、**实现待做**（未批准任何修复方式）；**新登记 G-035 / G-036 / G-037**：
+公开读未投影 D5 的 Revision 元数据（实现缺口，需契约变更 + 前端生成物）、健康检查不报告对象存储（需与 D1 一同重新评审）、
+真实 MinIO 上的三项义务仍 `Missing`（本轮无可达端点；且预签名 PUT 无法签 `x-amz-checksum-sha256` 而真实 S3 要求
+`x-amz-*` 头参与签名，需随验收一并裁定）；三者**均不在本轮授权范围**，如实登记而不就地修改。
+**ADR 落地顺序第 3 步**（cluster Compose 增加 MinIO + `object_store` 配置）因 MinIO 镜像拉取失败（`docker.io` 连接被重置）**未完成**，归入 G-037。
+**门禁**：`format:check` exit 0；`lint` exit 201 且**仅剩 1 条 PRE-EXISTING BASELINE**（G-028，在 `git archive HEAD` 的未改动树上
+逐字相同 ⇒ 本切片 0 条 lint 回归；本轮自身那条 `sqlclosecheck` 已按修复根因改为 `defer`，非 `nolint`、非删断言）；
+`build` exit 0；`test` exit 0（**420 PASS / 0 FAIL / 0 SKIP**）；`test:race` exit 0（**0 DATA RACE**）；
+两仓 `git diff --check` 干净。
+**未改**：proto、任何已应用迁移、`api/openapi.json` 与 frontend 生成物、`.golangci.yml` 或任何抑制、任何 approved ADR 的既有决策文本。
+**交付面清单**：`Production code changed: YES`；`proto changed: NO`；`migration changed: YES`（**新增** `0023`）；
+`OpenAPI/frontend changed: NO`；`ADR status changed: YES`（两个 Revision 根决策 `proposed → approved`，依人类批准）；
+`tests changed: YES`；`self-approved: NO`；`staged: NO`；`committed: NO`；`pushed: NO`；`PR: NO`；`destructive git: NO`。
+工作树中 `.gitignore` 的 4 行新增**不属本轮**：**未改、未回滚、不纳入归属判断，仅披露**。）
+
+**上一轮（Revision ADR Decision & Amendment Round，保留记录）：**
+
+### 上一轮 Phase
+
+`Phase 5 — Revision ADR Decision & Amendment Round`
+
+### 上一轮 Slice
+
+`把 B-1..B-4 与 P-1..P-3 各自收敛为唯一方案并写入两个 proposed Revision ADR 的正文（明确标识为待审批），为 G-031 / G-032 输出精确的 amendment 提案，登记 G-033 / G-034，并更新 plan/plan.md 与 plan/plan-zh.md。决策与修订轮：不改生产代码、不改任何 ADR 的 status、不改任何 approved ADR 的已批准决策。`
+
+### 上一轮状态
 
 `REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`
 （本轮为 **DECISION & AMENDMENT ROUND（mandate §1–§11）**。**判定：`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`——B-1..B-4 与 P-1..P-3 各自只剩**一个**明确推荐方案；所有跨 ADR 变更已逐项独立列出；两个 `proposed` ADR 的 `status` **未**改动。**
@@ -1413,17 +1552,17 @@ proto `agent_executions.proto`、migration `0019_execution_work.sql` 与 `0001_c
 **供人类定稿的审批文本**：见本轮报告的「人类审批清单」——逐项给出文件、决策与**精确批准文本**（5 项：Cloud Revision ADR、Node Revision ADR、G-033、G-031、G-032）。
 **下一步**：人类逐项裁决；全部获批后才进入 **Revision Completion Slice**（`object_store` 配置 + 对象存储客户端 + `revisions` 迁移 + `GrantRevisionUpload` + 交付成功/校验失败分支 + 两个 ADR 的核心用例）。）
 
-**上一轮（Revision ADR Approval Round — G-030 approval-readiness audit，保留记录）：**
+**再上一轮（Revision ADR Approval Round — G-030 approval-readiness audit，保留记录）：**
 
-### 上一轮 Phase
+### 再上一轮 Phase
 
 `Revision ADR Approval Round — 解除 G-030 并冻结 Phase 5 最终契约`
 
-### 上一轮 Slice
+### 再上一轮 Slice
 
 `对 status: proposed 的 Cloud Revision ADR 做 approval-readiness 审计（按 Revision identity / Object identity / Upload grant / Verification / Registration / revision_unchanged / revision_delivered 逐项 YES/NO），输出最小、明确、可批准的 Revision contract 与精确的人类审批文本，并裁定 G-029 / G-031 / G-032。规范轮：只改 plan/plan.md 与 plan/plan-zh.md。`
 
-### 上一轮状态
+### 再上一轮状态
 
 `REVISION_ADR_APPROVAL_BLOCKED`
 （本轮为 **NORMATIVE / APPROVAL-READINESS ROUND（mandate §1–§14）**。**判定：`REVISION_ADR_APPROVAL_BLOCKED`——审计结论 `REVISION_ADR_NOT_READY_FOR_APPROVAL`。**
@@ -1470,17 +1609,17 @@ Node 明确拒绝 quiesce **不**触发放弃；终态 = `done` + 业务 `status
 不得含糊。**本轮未写入任何 ADR 文件、未改 `status`**。
 **下一步**：人类按本轮给出的审批文本裁决；获批（且 B-1..B-4 按提案收敛）后才进入 Revision 实现切片。）
 
-**再上一轮（Phase 5 Batch 2 — Delivery → Releasing → Done，保留记录）：**
+**更早轮次（Phase 5 Batch 2 — Delivery → Releasing → Done，保留记录）：**
 
-### 再上一轮 Phase
+### 更早轮次 Phase
 
 `Phase 5 Batch 2 — Delivery → Releasing → Done`
 
-### 再上一轮 Slice
+### 更早轮次 Slice
 
 `实现 deliver_revision 工作项的认领与派发、交付终态经 agent_delivery_takeover 的权威接管与结算、D5 的失败重试/退避/放弃、delivering → releasing 与同事务的删除意图声明、RunWorkspaceDeleted 的 releasing → done、两条周期补偿路径，并执行 Phase 5 Final Gate。`
 
-### 再上一轮状态
+### 更早轮次状态
 
 `PHASE_5_BATCH_2_BLOCKED`
 （本轮为 **IMPLEMENTATION ROUND（Phase 5 Batch 2，mandate §1–§40）**。**判定：`PHASE_5_BATCH_2_BLOCKED`——存在 1 项已批准的 mandatory blocker（G-030）。**
@@ -2110,12 +2249,16 @@ SSE 的客户端重连/轮询兜底（无 Thread 面板）、多实例投递（G
 > **更新（Phase 5 Batch 1 + Batch 2，2026-10-08）**：上述 roster 的**大部分已实现**，逐项取代如下 ——
 > `ending → ended` / `SessionEnded` / `queued → discarded` = **已实现**（Batch 1；G-019 = `CLOSED`）；
 > `running → delivering` = **已实现**（Batch 1）；`delivering → releasing → done`、`DeliverySettled`、
-> `RunWorkspaceDeleted`、`DeliverRevision` 的派发与执行 = **已实现**（Batch 2）；
-> **仍未实现**：`GrantRevisionUpload` 与 Revision 登记/对象校验（**G-030**，Cloud Revision ADR 仍为 `proposed`，
-> 故 `revision_delivered`/`revision_unchanged` 回 `UNAVAILABLE` + 零写入）、完整 cancel API（**G-026**，未变）、
+> `RunWorkspaceDeleted`、`DeliverRevision` 的派发与执行 = **已实现**（Batch 2）。
+> **更新（Revision Completion Slice，2026-10-08）**：`GrantRevisionUpload` 与 Revision 登记/对象校验 = **已实现**
+> （**G-030 = `CLOSED`**：`0023_revisions.sql`、`internal/objectstore`、可选 `object_store` 配置、上传授权、
+> D4 的两步校验、登记与释放同事务、重放与冲突）。**仍未实现**：真实对象存储上的三项义务证据（**G-037**，
+> 需可达端点）、公开读的 Revision 元数据投影（**G-035**，需契约变更）、健康检查的依赖报告（**G-036**，需契约决策）、
+> D8 的删除侧上限（**G-032**，批准文本已落地、实现待做）、完整 cancel API（**G-026**，未变）、
 > SSE 客户端兜底与多实例投递（**G-020**，未变）、多 worker 命令分区（**G-021**，未变）、收据 GC / event 保留清理
-> （**G-015 PARTIAL**，未变）、migration README 债务（**G-025**，未变）。
-> 本轮**未**触碰上述任何一项（mandate §0 只记录不修）。
+> （**G-015 PARTIAL**，未变）、migration README 债务（**G-025**，已扩为 `0018`–`0023`，未变）。
+> 本轮（Revision Completion Slice）**只**关闭了 `GrantRevisionUpload` 与 Revision 登记/对象校验这一项；
+> 其余各项**未**触碰（mandate §0 只记录不修）。
 **无会话取消的判别键是 `thread_state IS NULL`**（IssueRun D6 的「（尚无会话）」限定语），与 plan §4C.11 按 `phase` 的措辞不同：
 ADR 优先于 plan，偏离已登记在 `plan.md` §15 与本文件。
 
@@ -2169,9 +2312,9 @@ P-3 `unchanged` 不复用既有 Revision。
 **其他缺口状态全部未变**：G-020 / G-021 / G-025 / G-026 / G-027 / G-028 与本轮前一致；**G-019 保持 `CLOSED`**。
 **生产面**：**未改** Go / proto / migration / OpenAPI / frontend / 任何 ADR 文件或其 `status`；**未**实现任何 Revision behavior。
 
-### 当前 Blockers（Revision ADR Decision & Amendment Round，2026-10-08）
+### 上一轮 Blockers（Revision ADR Decision & Amendment Round，2026-10-08，保留）
 
-**判定 `REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL` ⇒ 本轮的阻塞不再是「未定义的决策」，而是「待人类批准」。
+**判定 `REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL` ⇒ 该轮的阻塞不再是「未定义的决策」，而是「待人类批准」。
 没有任何未收敛的歧义残留。**
 **仍存在的 approved mandatory blocker**：**G-030** —— Cloud Revision ADR 仍为 `status: proposed`（本轮**未**改其 `status`、
 **未**自行批准）。它的解除条件已从「文本不可批准」变为**明确的 5 项审批清单**（见当前状态与报告）。
@@ -2187,6 +2330,33 @@ P-3 `unchanged` 不复用既有 Revision。
 **G-019 保持 `CLOSED`**；G-020 / G-021 / G-025 / G-026 / G-027 / G-028 / G-012 / G-015 / G-001 / G-009 / G-011 状态全部未变。
 **生产面**：**未改** Go / proto / migration / OpenAPI / frontend / 测试；**未改**任何 approved ADR 的已批准决策
 （G-031 / G-032 只输出提案）；两个 `proposed` ADR 的 `status` **未改**；**未**实现任何 Revision 生产路径。
+
+### 当前 Blockers（Revision Completion Slice，2026-10-08）
+
+**判定 `REVISION_COMPLETION_SLICE_DONE` + `PROJECT_FINAL_ACCEPTANCE_PASSED` ⇒ 无 blocker。**
+**CLOSED**：**G-030**（关闭的是「未批准 ADR 阻塞实现」这条 —— 人类于 2026-10-08 逐项批准 Cloud 与 Node 两个 Revision 根决策，
+本轮据此实现 Cloud 侧全部行为并逐条取得直接证据）、**G-031**（批准的 Option B 已写入两个 approved ADR 与核心用例，
+实现与批准文本逐字一致，**未**改 schema）、**G-033**（D5 澄清已批准并落地）。
+**OPEN / APPROVED TEXT LANDED / IMPLEMENTATION PENDING**：**G-032** —— IssueRun D8 的批准文本已同步进 approved ADR、
+D3 阶段表与核心用例，**实现待做**；人类**未**批准任何具体修复方式、**未**纳入本切片 ⇒ 核心用例的四条义务保持 `Missing`。
+**新登记（均已披露、未修，且不在本轮授权范围）**：
+- **G-035** `OPEN / NON-BLOCKING` —— 公开读未投影 D5 的 Revision 元数据（`issue_runs.result` 是自由袋，
+  `internal/contract/openapi.go`）；需一轮契约变更 + `task frontend:generate`。**不得**改写 approved D5 的措辞来消除它。
+- **G-036** `OPEN / NON-BLOCKING` —— `/healthz` 是严格 `{status: ok}` / 503 `Error` 契约，无法按 D1 报告「对象存储未配置」；
+  需一次明确的健康检查契约决策（扩展 `/healthz` 形状或新增 `/readyz`）。
+- **G-037** `OPEN / 仅阻塞三项 MinIO 义务的证据状态` —— 无真实端点 ⇒ 三项义务在核心用例里保持 `Missing`；
+  ADR 落地顺序第 3 步（cluster Compose 增加 MinIO + `object_store` 配置）**未完成**（MinIO 镜像拉取失败）；
+  预签名 PUT 无法签 `x-amz-checksum-sha256`，而真实 S3 要求 `x-amz-*` 头参与签名 ⇒ 义务 ② 的形状需随验收裁定。
+**状态未变**：**G-020 / G-021 / G-026 / G-027 / G-028** 与本轮前一致；**G-025** 的文档债因 `0023` 落地扩为
+`0018`–`0023`（7 个文件 + 两个 README 各有 1 条重复的 `0015_plugins.sql` 残留条目），**未**在本轮修复；
+**G-029 保持 `DEFERRED / NON-BLOCKING`**；**G-034** 人类明确**暂不批准任何修复方式、也不纳入本切片** ⇒ 本轮零改动、保持 `OPEN`。
+**门禁**：`format:check` exit 0；`lint` exit 201 且**仅剩 1 条 PRE-EXISTING BASELINE**（G-028，在 `git archive HEAD` 的未改动树上
+逐字相同 ⇒ 0 条 lint 回归）；`build` exit 0；`test` exit 0（**420 PASS / 0 FAIL / 0 SKIP**）；`test:race` exit 0（**0 DATA RACE**）；
+两仓 `git diff --check` 干净。
+**生产面**：**改**了 Go（`object_store` 配置、对象存储客户端、上传授权、D4 校验与登记、释放链）与**新增** migration `0023`；
+**未改** proto、任何已应用迁移、`api/openapi.json` 与 frontend 生成物、`.golangci.yml` 或任何抑制；
+两个 Revision 根决策的 `status` 由 `proposed` → `approved`（**依人类批准**，非自行批准）。
+**未** stage、**未** commit、**未** push、**未**开 PR。
 
 ---
 

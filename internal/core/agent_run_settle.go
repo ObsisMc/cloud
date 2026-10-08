@@ -175,14 +175,15 @@ func (s *Store) declareDelete(t *transaction, o Object) error {
 }
 
 // businessAgentRunHooks is the B-side AgentRunHooks implementation. RunWorkspaceSettled
-// delegates to the Phase 2A settlement core and ThreadEventsTakenOver to the Phase 4B Thread
-// takeover core; the remaining hooks (SessionEnded/DeliverySettled/RunWorkspaceDeleted) fail
-// closed because they belong to the session-terminal/delivery/release phases that are not
-// implemented yet. NewBusinessAgentRunHooks binds it on the Store in production, so the same
-// control-plane transactions that persist A-side evidence drive the B-side transitions.
+// delegates to the Phase 2A settlement core, ThreadEventsTakenOver to the Phase 4B Thread
+// takeover core, SessionEnded to the Phase 5 session-terminal core, DeliverySettled to the
+// Phase 5 Batch 2 delivery-settlement core and RunWorkspaceDeleted to the Phase 5 Batch 2
+// release core. All five hooks are real, so every phase transition the approved IssueRun
+// decision defines now has exactly one implementation. NewBusinessAgentRunHooks binds it on the
+// Store in production, so the same control-plane transactions that persist A-side evidence drive
+// the B-side transitions.
 type businessAgentRunHooks struct {
-	store                    *Store
-	UnavailableAgentRunHooks // SessionEnded/DeliverySettled/RunWorkspaceDeleted keep failing closed.
+	store *Store
 }
 
 // NewBusinessAgentRunHooks returns the production B-side hook set for store, the value
@@ -204,6 +205,27 @@ func (h businessAgentRunHooks) ThreadEventsTakenOver(t *transaction, run, execut
 	return h.store.threadEventsTakenOver(t, run, execution, events)
 }
 
-// compile-time guard: businessAgentRunHooks satisfies the AgentRunHooks seam, with the
-// embedded UnavailableAgentRunHooks keeping every not-yet-phase hook fail-closed.
+// SessionEnded fulfills the A→B hook: it runs the session-terminal core in the caller-owned
+// terminal-takeover transaction (Thread `ended`, queued turns `discarded`, run `delivering` and
+// the released delivery work item — all one commit).
+func (h businessAgentRunHooks) SessionEnded(t *transaction, run, execution, ended Object) error {
+	return h.store.sessionEnded(t, run, execution, ended)
+}
+
+// DeliverySettled fulfills the A→B hook: it runs the delivery-settlement core in the caller-owned
+// terminal-takeover transaction. A failure keeps the run `delivering` and releases D5's backoff
+// retry; the two give-up limits release it instead; a `saved`/`unchanged` outcome is refused because
+// registering a Revision needs the still-unapproved Cloud Revision decision.
+func (h businessAgentRunHooks) DeliverySettled(t *transaction, run, execution Object, result DeliverySettledResult) error {
+	return h.store.deliverySettled(t, run, execution, result)
+}
+
+// RunWorkspaceDeleted fulfills the A→B hook: it runs the release core in the caller-owned
+// delete_workspace terminal transaction, moving the run `releasing → done`.
+func (h businessAgentRunHooks) RunWorkspaceDeleted(t *transaction, run Object) error {
+	return h.store.runWorkspaceDeleted(t, run)
+}
+
+// compile-time guard: businessAgentRunHooks satisfies the AgentRunHooks seam, with every hook of the
+// approved lifecycle implemented.
 var _ AgentRunHooks = businessAgentRunHooks{}

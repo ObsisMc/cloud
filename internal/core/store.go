@@ -108,6 +108,31 @@ type Store struct {
 	// zero-length window that would end every Thread the moment it went idle.
 	ThreadIdleTimeout time.Duration
 
+	// DeliveryGiveUpAfter and DeliveryUnreachableAfter are IssueRun D5's two first-version give-up
+	// limits for a Revision delivery: how long delivery may fail continuously before Cloud abandons
+	// it, and how long the run Workspace's Node may be unreachable before Cloud does the same. They
+	// are deployment configuration values, not columns — the ADR calls them "Cloud 配置项" — and both
+	// are judged entirely on the database clock. Zero (the zero-value Store) means that condition
+	// never gives up, so the scan is a no-op rather than a zero-length window that would abandon every
+	// delivery the moment it was declared.
+	DeliveryGiveUpAfter      time.Duration
+	DeliveryUnreachableAfter time.Duration
+
+	// RevisionObjects is the object-store boundary the Revision delivery path uses: it signs the
+	// single-key upload grants a Controller hands to a Node, and verifies an uploaded object by HEAD
+	// before Cloud registers a Revision (Cloud Revision D1/D2/D4). nil means object storage is not
+	// configured — a legal deployment (D1): the session still ends into `delivering` and still
+	// declares its delivery work, every grant is refused as UNAVAILABLE, and the delivery fails
+	// deterministically until IssueRun D5's give-up window releases the run. It is never consulted
+	// for anything but a Revision upload or a Revision verification.
+	RevisionObjects RevisionObjects
+
+	// RevisionUploadTTL is how long one upload grant stays usable (`object_store.upload_grant_ttl`;
+	// D1's first-version default 15 minutes, DefaultRevisionUploadTTL). Zero (the zero-value Store)
+	// means the default, never a zero-length grant: a grant that expires as it is issued is not a
+	// configuration this contract has a meaning for.
+	RevisionUploadTTL time.Duration
+
 	// AgentRunDispatcher owns Claim + Busy for queued real Space Agent IssueRuns (dispatch claim
 	// loop). It is populated in NewStore; agentRunDispatcher is the nil-safe accessor for Stores
 	// built or zero-valued without the constructor.

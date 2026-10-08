@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/wanglongan587/cloud/internal/controlpb"
 	"github.com/wanglongan587/cloud/internal/core"
@@ -18,9 +20,7 @@ import (
 // (controller-integration D2..D5). TakeOverThreadEvents is the sole path that persists Node Thread
 // events and the sole authority for a run entering `running` (IssueRun D3, plan §4B);
 // ClaimThreadCommands and RecordThreadCommandDelivered are the Thread command delivery path (D3,
-// plan §4C S3). The upload-grant method belongs to the delivery slice and stays fail-closed through
-// the embedded UnimplementedAgentRunServiceServer rather than returning a half-answer no Controller
-// could act on.
+// plan §4C S3); GrantRevisionUpload is the Revision upload path (Cloud Revision D2/D3).
 type agentRunService struct {
 	controlpb.UnimplementedAgentRunServiceServer
 	store *core.Store
@@ -125,6 +125,54 @@ func (s *agentRunService) RecordThreadCommandDelivered(ctx context.Context, req 
 		return nil, e
 	}
 	return &controlpb.RecordThreadCommandDeliveredResponse{}, nil
+}
+
+// GrantRevisionUpload answers a Controller's request for the upload grants of one delivery
+// execution (Cloud Revision D2/D3). It is a read of the control plane with a cryptographic answer:
+// Cloud signs one presigned PUT per object key of the execution's frozen input, and the caller
+// forwards the grants to the Node without ever persisting them. Which requests are refused, and with
+// which code, is the control core's decision (see revisionUploadGrant); this layer only converts.
+func (s *agentRunService) GrantRevisionUpload(ctx context.Context, req *controlpb.GrantRevisionUploadRequest) (*controlpb.GrantRevisionUploadResponse, error) {
+	body := core.Object{"epoch": req.GetEpoch(), "executionId": req.GetExecutionId()}
+	out, e := s.control(ctx, "agent_revision_grant", "", body)
+	if e != nil {
+		return nil, e
+	}
+	rows, _ := out["grants"].([]core.Object)
+	grants := make([]*controlpb.UploadGrant, 0, len(rows))
+	for _, row := range rows {
+		grant, e := uploadGrant(row)
+		if e != nil {
+			return nil, e
+		}
+		grants = append(grants, grant)
+	}
+	return &controlpb.GrantRevisionUploadResponse{Grants: grants}, nil
+}
+
+// uploadGrant renders one stored grant as the wire message. Every field is written by Cloud's own
+// signer, so a missing or mistyped one is Cloud's corrupted state and is reported as Internal rather
+// than sent as an empty capability a Node would fail to use for an unexplained reason.
+func uploadGrant(row core.Object) (*controlpb.UploadGrant, error) {
+	expires, ok := row["expiresAt"].(time.Time)
+	if !ok {
+		return nil, status.Error(codes.Internal, "invalid_upload_grant")
+	}
+	headers := make(map[string]string, len(row.O("headers")))
+	for name, value := range row.O("headers") {
+		text, ok := value.(string)
+		if !ok {
+			return nil, status.Error(codes.Internal, "invalid_upload_grant")
+		}
+		headers[name] = text
+	}
+	return &controlpb.UploadGrant{
+		ObjectKey: row.S("objectKey"),
+		Url:       row.S("url"),
+		Method:    row.S("method"),
+		Headers:   headers,
+		ExpiresAt: timestamppb.New(expires),
+	}, nil
 }
 
 // threadCommand renders one stored command row as the wire message. The durable body is the

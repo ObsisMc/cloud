@@ -683,3 +683,213 @@ func TestMigration0022ThreadCommandsAndPendingAppliesFreshAndUpgrades(t *testing
 		}
 	}
 }
+
+// revisionRowSeed is one `revisions` row in the shape its columns demand, held as a value so each
+// constraint below can be violated by rewriting exactly one field of an otherwise valid row.
+type revisionRowSeed struct {
+	id, tenantID, runID, workspaceID, projectID, repositoryURL string
+	baseCommit, finalCommit, revisionRef                       string
+	bundleKey                                                  *string
+	bundleSize                                                 *int64
+	bundleSHA256                                               *string
+	historyKey                                                 string
+	historySize                                                int64
+	historySHA256                                              string
+}
+
+// validRevisionRow is the row Cloud writes for a run whose checkout did not change: no bundle (the
+// three columns NULL together) and a history that always exists (Cloud Revision invariant 5).
+func validRevisionRow(s skeletonSeed) revisionRowSeed {
+	return revisionRowSeed{
+		id: uuid.NewString(), tenantID: s.tenantID, runID: s.runID,
+		workspaceID: s.runWorkspaceID, projectID: s.projectID,
+		repositoryURL: "https://example.invalid/skeleton.git",
+		baseCommit:    strings.Repeat("a", 40), finalCommit: strings.Repeat("b", 40),
+		revisionRef: "refs/ora/revisions/" + s.runID,
+		historyKey:  "revisions/" + s.tenantID + "/" + s.runID + "/attempt/session.jsonl",
+		historySize: 512, historySHA256: strings.Repeat("c", 64),
+	}
+}
+
+// insertRevision inserts one seeded row and returns the error, so a case states the violation it
+// expects rather than asserting on a boolean the insert either way cannot explain.
+func insertRevision(t *testing.T, pool *sql.DB, row revisionRowSeed) error {
+	t.Helper()
+	_, e := pool.Exec(`
+		INSERT INTO revisions(id, tenant_id, run_id, workspace_id, project_id, repository_url,
+		                      base_commit, final_commit, revision_ref,
+		                      bundle_key, bundle_size, bundle_sha256,
+		                      history_key, history_size, history_sha256)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		row.id, row.tenantID, row.runID, row.workspaceID, row.projectID, row.repositoryURL,
+		row.baseCommit, row.finalCommit, row.revisionRef,
+		row.bundleKey, row.bundleSize, row.bundleSHA256,
+		row.historyKey, row.historySize, row.historySHA256)
+	return e
+}
+
+// assertRevisionSchema checks the constraints 0023 is the authority for, on a database that has
+// already applied it. The seed supplies the run the row must reference, because the FKs are checked
+// against real rows: a schema check that inserted invented ids would pass on a table with no FKs at
+// all.
+//
+// The uniqueness is asserted by violating it rather than by reading `pg_indexes`, because "a unique
+// index exists" and "two rows for one run are refused" are different claims and only the second is
+// the one the registration rule relies on (Cloud Revision D4, invariant 7).
+func assertRevisionSchema(t *testing.T, pool *sql.DB, s skeletonSeed) {
+	t.Helper()
+	if !tableExists(t, pool, "revisions") {
+		t.Fatal("revisions table must exist after 0023")
+	}
+
+	var pkColumns []string
+	rows, e := pool.Query(`
+		SELECT kcu.column_name FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		  ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema = current_schema() AND tc.table_name = 'revisions' AND tc.constraint_type = 'PRIMARY KEY'
+		ORDER BY kcu.ordinal_position`)
+	must(t, e)
+	defer rows.Close()
+	for rows.Next() {
+		var col string
+		must(t, rows.Scan(&col))
+		pkColumns = append(pkColumns, col)
+	}
+	must(t, rows.Err())
+	if len(pkColumns) != 1 || pkColumns[0] != "id" {
+		t.Fatalf("revisions PRIMARY KEY must be (id) — Cloud's own generated identity, got %v", pkColumns)
+	}
+
+	// Two spare runs of the same issue, because every constraint below is proven by an insert that
+	// must fail for ONE reason: a row aimed at an already-taken run would be refused by `run_id`
+	// before its own CHECK was ever reached, and would prove nothing about that CHECK. Each spare run
+	// stays unused — every insert that targets it is expected to fail.
+	//
+	// Each carries its own executor, because `issue_run_pending_uniq` allows one queued run per
+	// (issue, executor) and the seeded run already holds the seeded Agent's slot.
+	spareRun := func() string {
+		var id string
+		must(t, pool.QueryRow(`INSERT INTO issue_runs(id, tenant_id, issue_id, executor_type, executor_id)
+			VALUES($1,$2,$3,'agent',$4) RETURNING id::text`, uuid.NewString(), s.tenantID, s.issueID, uuid.NewString()).Scan(&id))
+		return id
+	}
+	freeRun, changedRun := spareRun(), spareRun()
+
+	// A well-formed row is accepted, and it names no expiry: retention is an explicit non-goal of the
+	// approved decision, so a defaulted window here would promise a rule nothing enforces.
+	first := validRevisionRow(s)
+	must(t, insertRevision(t, pool, first))
+	var expires sql.NullTime
+	must(t, pool.QueryRow(`SELECT expires_at FROM revisions WHERE id=$1`, first.id).Scan(&expires))
+	if expires.Valid {
+		t.Fatalf("expires_at must default to NULL in the first version, got %v", expires.Time)
+	}
+
+	// One Revision per logical delivery, and one logical delivery per run (invariant 7).
+	second := validRevisionRow(s)
+	wantPGError(t, insertRevision(t, pool, second), "23505")
+	// The id is an identity in its own right, not a surrogate made redundant by the run's uniqueness:
+	// the same id under a different run is refused too.
+	other := validRevisionRow(s)
+	other.runID, other.id = freeRun, first.id
+	wantPGError(t, insertRevision(t, pool, other), "23505")
+
+	// The run must exist: the reference is what keeps a Revision from outliving the run it describes.
+	orphan := validRevisionRow(s)
+	orphan.runID = uuid.NewString()
+	wantPGError(t, insertRevision(t, pool, orphan), "23503")
+
+	// An absent bundle is a fact of the row, so the three columns move together or not at all, and a
+	// bundle that exists carries a real object: a non-negative size and a lowercase digest.
+	key := "revisions/" + s.tenantID + "/" + s.runID + "/attempt/revision.bundle"
+	size := int64(4096)
+	sha := strings.Repeat("d", 64)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*revisionRowSeed)
+	}{
+		{"a bundle size without its key", func(r *revisionRowSeed) { r.bundleSize = &size }},
+		{"a bundle digest without its key", func(r *revisionRowSeed) { r.bundleSHA256 = &sha }},
+		{"a bundle key without its size", func(r *revisionRowSeed) { r.bundleKey = &key }},
+		{"a negative bundle size", func(r *revisionRowSeed) { r.bundleKey, r.bundleSize, r.bundleSHA256 = &key, ptrInt64(-1), &sha }},
+		{"an uppercase bundle digest", func(r *revisionRowSeed) {
+			upper := strings.ToUpper(sha)
+			r.bundleKey, r.bundleSize, r.bundleSHA256 = &key, &size, &upper
+		}},
+		{"an uppercase history digest", func(r *revisionRowSeed) { r.historySHA256 = strings.ToUpper(r.historySHA256) }},
+		{"a history digest that is not a digest", func(r *revisionRowSeed) { r.historySHA256 = "nope" }},
+		{"an empty history key", func(r *revisionRowSeed) { r.historyKey = "" }},
+		{"a negative history size", func(r *revisionRowSeed) { r.historySize = -1 }},
+		{"a final commit that is not a commit", func(r *revisionRowSeed) { r.finalCommit = "not-a-commit" }},
+		{"a base commit that is not a commit", func(r *revisionRowSeed) { r.baseCommit = strings.Repeat("A", 40) }},
+		{"a Revision ref outside the approved namespace", func(r *revisionRowSeed) { r.revisionRef = "refs/heads/main" }},
+	} {
+		row := validRevisionRow(s)
+		row.runID = freeRun
+		tc.mutate(&row)
+		wantPGError(t, insertRevision(t, pool, row), "23514")
+	}
+
+	// A changed checkout is the other legal shape: the constraint refuses drift between the columns,
+	// not the bundle itself, so a row carrying all three is accepted.
+	changed := validRevisionRow(s)
+	changed.runID = changedRun
+	changed.bundleKey, changed.bundleSize, changed.bundleSHA256 = &key, &size, &sha
+	must(t, insertRevision(t, pool, changed))
+}
+
+// ptrInt64 is the address of a fresh int64, for the seeded rows whose bundle columns are pointers
+// because NULL and zero are different facts about them.
+func ptrInt64(v int64) *int64 { return &v }
+
+// TestMigration0023RevisionsAppliesFreshAndUpgrades verifies the Revisions schema on both paths a
+// deployment can arrive by: a fresh database that runs the whole sequence, and a database already at
+// 0022 that receives 0023 alone.
+//
+// 0023 is purely additive — no existing table is altered and no existing row is rewritten — so the
+// upgrade path's own obligation is that it applies on top of live data and that the data is still
+// there afterwards. The constraints asserted below are the ones Cloud Revision D4 and invariant 7
+// rest on, and each is asserted by violating it: an index that exists but does not refuse is not the
+// backstop the registration rule needs.
+func TestMigration0023RevisionsAppliesFreshAndUpgrades(t *testing.T) {
+	// Fresh: the whole sequence, applied twice (idempotent), with the schema check green.
+	freshPool, _ := testSchema(t, "test_tc23f_")
+	fresh := newStoreOnSchema(t, freshPool)
+	must(t, fresh.Migrate(context.Background()))
+	must(t, fresh.Migrate(context.Background()))
+	must(t, fresh.CheckSchema(context.Background()))
+	assertRevisionSchema(t, freshPool, seedAgentIssueRunSkeleton(t, freshPool))
+
+	// Upgrade: everything before 0023 applied as the runner would, live data seeded, then 0023.
+	pool, _ := testSchema(t, "test_tc23_")
+	entries, e := os.ReadDir(filepath.Join("..", "internal", "core", "migrations"))
+	must(t, e)
+	var previous []string
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".sql" && entry.Name() < "0023_revisions.sql" {
+			previous = append(previous, entry.Name())
+		}
+	}
+	applyMigrationsUpTo(t, pool, previous)
+	if tableExists(t, pool, "revisions") {
+		t.Fatal("the upgrade path must start from a database without the revisions table")
+	}
+	seed := seedAgentIssueRunSkeleton(t, pool)
+	// The live row this migration is applied on top of, whole: 0023 is purely additive, so the
+	// strongest form of its own promise is that not one column of it changed.
+	var before string
+	must(t, pool.QueryRow(`SELECT to_jsonb(r)::text FROM issue_runs r WHERE id=$1`, seed.runID).Scan(&before))
+
+	store := newStoreOnSchema(t, pool)
+	must(t, store.Migrate(context.Background()))
+	must(t, store.Migrate(context.Background()))
+	must(t, store.CheckSchema(context.Background()))
+	assertRevisionSchema(t, pool, seed)
+
+	var after string
+	must(t, pool.QueryRow(`SELECT to_jsonb(r)::text FROM issue_runs r WHERE id=$1`, seed.runID).Scan(&after))
+	if after != before {
+		t.Fatalf("0023 must not rewrite the rows it was applied on top of:\n before %s\n after  %s", before, after)
+	}
+}

@@ -57,6 +57,38 @@ issue_runs:
   # time. The approved first-version default is 15m; omitting the key (or setting it non-positive)
   # selects that default. Override: CLOUD_ISSUE_RUNS_THREAD_IDLE_TIMEOUT.
   thread_idle_timeout: 15m
+  # IssueRun D5's two give-up limits for a Revision delivery, both deployment durations judged on
+  # database time and both not per-run columns. `delivery_give_up_after` is the continuous-failure
+  # window: once a run has been failing to deliver for longer than this, Cloud abandons the delivery
+  # (`deliveryState = failed`) and releases the run's Workspace. `delivery_unreachable_after` is the
+  # unreachability window: once the run Workspace's Node has been in an unknown state this long, the
+  # delivery cannot succeed and Cloud gives up without waiting out the full failure window. The
+  # approved first-version defaults are 2h and 30m; omitting a key (or setting it non-positive)
+  # selects its default. Overrides: CLOUD_ISSUE_RUNS_DELIVERY_GIVE_UP_AFTER /
+  # CLOUD_ISSUE_RUNS_DELIVERY_UNREACHABLE_AFTER.
+  delivery_give_up_after: 2h
+  delivery_unreachable_after: 30m
+
+object_store:
+  # Cloud's own S3-compatible object storage for Revision objects (Cloud Revision D1). The whole
+  # section is optional: leaving it out runs the server without object storage, in which case every
+  # Revision upload grant is refused as UNAVAILABLE and each delivery fails until IssueRun D5's
+  # give-up window releases the run — the server logs the missing capability at startup.
+  #
+  # Credentials are references, never values: `access_key_id_file` and `secret_access_key_file` name
+  # files that are read at startup and then live only in the Cloud process. Never put a key or secret
+  # in this file, an environment variable or a log. `public_endpoint` is only for deployments whose
+  # Nodes reach the store at a different address than Cloud does; `path_style` is what MinIO needs.
+  # Overrides: CLOUD_OBJECT_STORE_ENDPOINT / _PUBLIC_ENDPOINT / _REGION / _BUCKET / _PATH_STYLE /
+  # _ACCESS_KEY_ID_FILE / _SECRET_ACCESS_KEY_FILE / _UPLOAD_GRANT_TTL.
+  #
+  # endpoint: "http://127.0.0.1:9000"
+  # region: "us-east-1"
+  # bucket: "ora-revisions"
+  # path_style: true
+  # access_key_id_file: "/run/ora-secrets/object-store-access-key-id"
+  # secret_access_key_file: "/run/ora-secrets/object-store-secret-access-key"
+  # upload_grant_ttl: 15m  # Cloud Revision D1's default; omitting the key selects it
 
 plugins:
   # Plugin marketplace the cloud server syncs into its own catalog snapshot (git fetch + scan of
