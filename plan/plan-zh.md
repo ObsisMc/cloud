@@ -2,7 +2,7 @@
 
 > 状态：**持续维护的设计 / 执行记录**  
 > 范围负责人：**B — Cloud 业务 / 编排**  
-> 当前目标：**Phase 4C DESIGN DONE — Thread API / SSE / Thread Commands / Lifecycle（纯设计轮；未实现）**；当前指标 `PHASE_4C_DESIGN_DONE / PHASE_4C_ARCHITECTURALLY_REVIEWABLE / READY_FOR_PHASE_4C_IMPLEMENTATION`（交付 D-4C-01..D-4C-12 与 §4C.0–§4C.20 设计；**G-016 CLOSED**；NON-BLOCKING OPEN：G-017..G-021。上一轮：Phase 4B 实现完成——迁移 `0021` + production 接管 + `ThreadEventsTakenOver` 钩子 + gRPC `TakeOverThreadEvents`，T4B-1..T4B-19 通过。4C 的 production 代码 / migration / 测试 / API 一律**未实现**）。
+> 当前目标：**Phase 5 — Revision ADR Decision & Amendment Round**（把审计出的 B-1..B-4 与 P-1..P-3 各自收敛为**唯一**方案并写入两个 `proposed` ADR 正文，另为 G-031 / G-032 输出**精确的 amendment proposal**；**不实现任何 Revision 生产路径**）；当前指标 **`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`**（B-1 Revision 行身份/幂等 ⇒ 控制面在交付终态接管事务内生成 `id` + `PRIMARY KEY (id)` + `UNIQUE (run_id)` + `ON CONFLICT (run_id) DO NOTHING` 读回比较负载；B-2 Object key 第三段改为 **Cloud 生成的尝试 ID**（工作项 ID 在冻结输入时尚不可得），并写清「逻辑交付 / 交付尝试 / Revision」三种身份；B-3 `revision_ref` 由 Cloud 生成为 `refs/ora/revisions/<runId>`、Node 只回显，内容身份是行内 `final_commit` + 对象摘要；B-4 **删除**「缺 `object_store` ⇒ `skipped` 直接释放」路径，改为照常 `delivering` + 照常放出交付工作项 + 拒发授权 ⇒ 交付确定失败 ⇒ **完全由 approved D5 收口**（`failed`、`revisionId = null`），因此**不新增第四条删除触发条件**、不新增 `deliveryState` 取值、**不需要**改 IssueRun ADR；P-1 校验范围（做的两件事 + **不**校验的五项）、P-2 同授权内重复 `PUT` 是覆盖写、P-3 `unchanged` 仍登记且不复用既有 Revision）。**G-031** 输出 Option B 的精确三句 amendment（2 个 approved ADR + 1 个核心用例）；**G-032** 输出 IssueRun **D8** 的精确 amendment（上限只取不可达窗口、终态 `done` + `status` 不变 + `failure_reason = workspace_unavailable`、残留按「活的 Workspace 行 + 终结失败态 operation」登记、**不发明后台清理机制**、绝不谎报删除成功）；新增 **G-033**（IssueRun D5 需澄清「连续失败」自首个交付工作项起算 —— B-4 的收口依赖它）与 **G-034**（放弃后未登记的 `deliver_revision` 工作项仍可被认领）。**两个 Revision ADR 的 `status` 仍为 `proposed`**：本轮只把待审批的最小修订文本写入正文并明确标识，**未**自行批准、**未**改任何 approved ADR 的已批准决策、**未**改生产代码 / proto / migration / OpenAPI / frontend / 测试。上一轮目标：**Revision ADR Approval Round — 解除 G-030 并冻结 Phase 5 最终契约**（对 `status: proposed` 的 Cloud Revision ADR 做 approval-readiness 审计）；上一轮指标 `REVISION_ADR_APPROVAL_BLOCKED`（审计结论 **`REVISION_ADR_NOT_READY_FOR_APPROVAL`**：4 个阻塞项 + 3 条精度补充；**G-029 = `DEFERRED / NON-BLOCKING`**；**G-031 推荐 Option B**；**G-032 提出 IssueRun D8**；**本轮未改 ADR 文件、未改 `status`**）。更早轮次：**Phase 5 Batch 2 — Delivery → Releasing → Done**（交付/释放/终态半边**已交付**；Revision 登记半边由 G-030 受阻，指标 `PHASE_5_BATCH_2_BLOCKED`；实现并验证：`deliver_revision` 工作项经**共享派发谓词**认领与派发；交付终态经既有 `TakeOverNodeEvent` → `agent_delivery_takeover` 在单个调用方事务内提交收据 / 结果 / `DeliverySettled` 钩子 / `last_event_sequence` 推进；D5 的失败重试退避 30s × 2^(n-1) 封顶 10min 且**不产生新的逻辑交付**；D5 放弃后同事务 CAS `delivering → releasing` + D4 派生 `status` + **恰好一个** `delete_workspace` 意图；`RunWorkspaceDeleted` 把 `releasing → done`；**G-019 = CLOSED**；新增 G-029、G-030、G-031、G-032）；再上一轮：Phase 5 Batch 1 — `SessionEnded` 终态接管（`PHASE_5_BATCH_1_DONE`）；再上一轮：Phase 4C 实现完成——Thread API / SSE / Thread Commands / Lifecycle（`PHASE_4C_COMPLETE`）；再上一轮：Phase 4B 实现完成——迁移 `0021` + production 接管 + `ThreadEventsTakenOver` 钩子 + gRPC `TakeOverThreadEvents`）。
 > 更新规则：**每一轮实现开始前必须阅读本文件，结束前必须更新本文件。** 本文件是 `plan.md` 的中文对照；Phase 2
 > 详细设计的权威版本在 `plan.md` 的 `## Phase 2 — Workspace Settlement 详细设计`（§2.1–§2.15），Phase 3
 > 详细设计的权威版本在 `plan.md` 的 `## Phase 3 — Session Start 详细设计`（§3.1–§3.17），Phase 4C
@@ -389,7 +389,7 @@ D-012..D-015、§13 G-007..G-011、§16 执行标记。核心结论：
 
 ### Phase 4 — Thread / Running Lifecycle
 
-状态：**Phase 4A IMPLEMENTED（A-side dispatch registration）→ Phase 4B IMPLEMENTED（Thread takeover + `starting→running`）→ Phase 4C DESIGN DONE（Thread API / SSE / commands / lifecycle；设计轮，未实现）**。权威详见 plan.md 的 §4B.1–§4B.15、`## Phase 4C — …`（§4C.0–§4C.20）与 §15 的两轮记录。
+状态：**Phase 4A IMPLEMENTED（A-side dispatch registration）→ Phase 4B IMPLEMENTED（Thread takeover + `starting→running`）→ Phase 4C IMPLEMENTED（`PHASE_4C_COMPLETE`：Thread API / SSE / commands / lifecycle，迁移 `0022`）→ Phase 5 Batch 1 IMPLEMENTED（`PHASE_5_BATCH_1_DONE`：`SessionEnded` 终态接管）**。权威详见 plan.md 的 §4B.1–§4B.15、`## Phase 4C — …`（§4C.0–§4C.20）与 §15 的各轮记录。
 
 Phase 4A 已交付（D-020/D-021，G-012 PARTIAL）：
 
@@ -437,6 +437,10 @@ Phase 4B 已交付（本轮，IMPLEMENTATION）：
 - cancel/terminal 交互（4C — **仅设计**，D-4C-11；`SessionEnded` 属 Phase 5）
 - migration 0022（4C — **仅设计、未创建**，D-4C-12）
 
+> **已被后续轮次取代：** 上面四条 4C 条目在 `PHASE_4C_COMPLETE` 时**已实现**（迁移 `0022` + Thread API / SSE /
+> commands / lifecycle），其「仅设计」措辞是 4C 设计轮的记录。`ending → ended` 与 `queued → discarded` 在
+> `PHASE_5_BATCH_1_DONE` 时**已实现**；delivery / releasing / `done` 仍属 Phase 5 Batch 2。
+
 核心原则（mandate §4）：`execution_work created ≠ running`、`claim ≠ running`、`dispatch ≠ running`；只有
 权威接管/会话开始证据经 `ThreadEventsTakenOver` 钩子成功提交才 `starting → running`。
 
@@ -446,15 +450,57 @@ Covered，T4-14/T4-15 为 DEFERRED，**T4C-1..T4C-34 为 DESIGNED / MISSING（�
 
 ### Phase 5 — Delivery / Releasing / Done
 
-状态：**PLANNED**
+状态：**IN PROGRESS — Batch 1 DONE，Batch 2 除 Revision 登记半边外已交付（受阻面 = G-030）**
+
+**Batch 1 — `SessionEnded` 终态接管（DONE，2026-10-08）**：会话执行的终态 Node 事件走既有 `TakeOverNodeEvent`
+权威（control action `agent_session_takeover`），在单个调用方事务内一并提交：收据、持久终态结果、Thread
+`ending → ended`（也接受 `pending | active | idle`）、仍 `queued` 的用户轮次 `→ discarded`、`running → delivering`、
+恰好一个未登记的 `deliver_revision` 工作项、以及带栅栏的 `last_event_sequence` 推进；提交后发布恰好一条
+`issue_run.thread_changed`。重放为 no-op；拒绝与钩子失败零写入。测试：`integration/agent_run_session_end_test.go`。
+
+**Batch 2 — Delivery → Releasing → Done（除 Revision 登记半边外已交付，2026-10-08）**：`deliver_revision` 工作项经
+**共享的执行工作谓词**认领与派发（`agent_work_claim`/`agent_work_dispatch` 的 kind 白名单扩为
+`('agent_session','deliver_revision')`；恢复读路径 `agent_work_get`/`agent_work_pending` **未**加过滤）；交付终态经
+既有 `ExecutionService.TakeOverNodeEvent` → 控制动作 `agent_delivery_takeover` 接管，事务形状与 Batch 1 相同
+（收据 → 结果 → `DeliverySettled` 钩子 → 带栅栏的序号推进），任一步失败整体 rollback。`DeliverySettled` 的决策顺序为
+「身份校验 → 未知 kind 拒绝 → `phase != 'delivering'` 确定性 no-op → `saved`/`unchanged` 受阻拒绝 → `failed` reason 闭集 →
+`deliveryGivenUp` → 释放或退避重试」，重试**不创建新的逻辑交付**。放弃后在同一事务内完成 `delivering → releasing`、
+D4 派生的 `status` 与**恰好一个** `delete_workspace` 意图；`RunWorkspaceDeleted` 再把 `releasing → done`
+（`done` 重放 no-op，`provisioning`/`starting`/`running`/`delivering` 与未知 run 被拒），且 `done` **不**把业务结果解释为
+`completed`。两条周期补偿（`GiveUpStaleDeliveriesOnce`、`RedeclareRunWorkspaceDeletesOnce`，间隔 10s）只读 PostgreSQL
+并复用既有事务路径，**不是**内存队列权威。测试：`integration/agent_run_delivery_test.go`（P5-7…P5-16）与
+`internal/core/agent_run_release_db_test.go`（5 个白盒）。
+**受阻半边**：Cloud Revision ADR 仍为 `status: proposed`，故 Revision 登记、对象校验与 `GrantRevisionUpload` **未实现**，
+`revision_delivered`/`revision_unchanged` 一律回 `UNAVAILABLE` 且**零写入**（**G-030**）；交付成功路径因此只能经 D5 放弃或
+D6 无会话取消到达 `releasing`。
+
+**Revision ADR Approval Round（规范轮，2026-10-08，`REVISION_ADR_APPROVAL_BLOCKED`）**：对
+`specs/decisions/cloud/revision/0-cloud-owned-object-store-and-verified-revisions.md`（仍 `status: proposed`）做
+approval-readiness 审计，结论 **`REVISION_ADR_NOT_READY_FOR_APPROVAL`** —— 存在 4 个**会导致两种合理实现**的
+阻塞项（见 §13 G-030 的 B-1..B-4）与 3 条精度补充（P-1..P-3）。本轮**未改 ADR 正文、未改 `status`、未改任何生产代码 /
+proto / migration / OpenAPI / frontend**：只登记阻塞项与**最小文本修订提案**，并把**精确的人类审批文本**交给人类裁决。
+同轮裁定：G-029 = `DEFERRED / NON-BLOCKING`（**不**为其扩 schema）；G-031 推荐 **Option B**；G-032 提出 IssueRun
+**D8** 最小 amendment（**未实现**）。下一实现切片仅在 ADR 获批（且 B-1..B-4 按提案收敛）后开始。
+
+**Revision ADR Decision & Amendment Round（决策与修订轮，2026-10-08，`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`）**：把上一轮的
+B-1..B-4 与 P-1..P-3 各自收敛为**唯一**方案，并写入两个 `proposed` ADR 的正文（文首与文末「修订记录」**明确标识为待审批**）——
+B-1 ⇒ D4 的控制面身份 + `PRIMARY KEY (id)` + `UNIQUE (run_id)` + `ON CONFLICT … DO NOTHING` 读回比较负载；
+B-2 ⇒ D2 的「逻辑交付 / 交付尝试 / Revision」三种身份表 + 键模板第三段改为 **Cloud 生成的尝试 ID**；
+B-3 ⇒ D4 的 `revision_ref`（Cloud 生成 `refs/ora/revisions/<runId>`，Node 只回显）；B-4 ⇒ **删除**「缺 `object_store` ⇒ `skipped` 直接释放」，
+改为照常 `delivering` + 拒发授权 ⇒ 交付确定失败 ⇒ **完全由 approved D5 收口**（`failed`），因此**不新增第四条删除触发条件**、
+不新增 `deliveryState` 取值、**不需要**改 IssueRun ADR；P-1..P-3 ⇒ D4 的校验范围 / 重复 `PUT` / `unchanged` 三条精度。
+同轮为 **G-031**（Option B）与 **G-032**（IssueRun D8）输出**精确的 amendment 提案**（**未**改写 approved ADR），
+并新登记 **G-033**（IssueRun D5 的「连续失败」需澄清为自首个交付工作项起算 —— B-4 收口依赖它）与 **G-034**
+（放弃后未登记的 `deliver_revision` 工作项仍可被认领）。**本轮未改生产代码 / proto / migration / OpenAPI / frontend / 测试、
+未改任何 `status`、未自行批准、未实现 Revision 生产路径。**
 
 包含：
 
-- session end
-- delivery settlement
-- cleanup
-- workspace deletion
-- terminal states
+- session end — **Batch 1 DONE**
+- delivery settlement — **Batch 2 DONE（除 Revision 登记半边，G-030）**
+- cleanup — **Batch 2 DONE**
+- workspace deletion — **Batch 2 DONE**
+- terminal states — **Batch 2 DONE**
 
 ---
 
@@ -1009,6 +1055,197 @@ Slice 1 在此基础上继续使用 short transaction + explicit state guard。
   4C 设计该列、谓词与转换，但**不得**实现通往 `ended` 的第二条路径。**WHAT IS NEEDED TO CLOSE**：Phase 5 实现该
   钩子 + 交付并复用 `thread_entries.status` 与 `ending` 谓词；Thread 的「终态顺序」与「轮次结算」义务在此之前保持
   `Partial`/`Missing`。
+  **更新（Phase 5 Batch 1，2026-10-08）**：**拆分为 `PARTIALLY CLOSED — Thread terminal takeover complete; delivery
+  pipeline remains Phase 5 Batch 2`**。已实现并有直接证据：`agent_session_takeover` 权威接管（唯一入口
+  `TakeOverNodeEvent`）、同事务 `ending → ended`（并覆盖 `pending | active | idle`）、`queued → discarded`、
+  `running → delivering`、放出恰好一个未登记的 `deliver_revision` 工作项、收据与 `last_event_sequence` 推进、
+  重放 no-op、任一步失败整体回滚、提交后恰好一条 `thread_changed`。**仍未关闭的部分**：交付流水线
+  （`DeliverRevision` 投递、`DeliverySettled`、`releasing`、`RunWorkspaceDeleted`、`done`）属 **Phase 5 Batch 2**，
+  因此本项**不得**整项标 `CLOSED`。
+  **更新（Phase 5 Batch 2，2026-10-08）**：**`CLOSED`**。交付半边已同一轮落地并有直接证据：`deliver_revision` 工作项的
+  认领与派发（kind 白名单在**共享派发谓词**上扩大）、`agent_delivery_takeover` 的权威接管（收据 + 结果 + 钩子 + 序号推进
+  同事务）、D5 的失败重试与退避（30s × 2^(n-1) 封顶 10min，且**不产生新的逻辑交付**）、D5 的放弃（>2h 连续失败或运行
+  Workspace 的 Node 未知 >30m）→ `delivering → releasing` + D4 派生 `status` + 同事务声明**恰好一个**删除意图、
+  `RunWorkspaceDeleted` 的 `releasing → done`（重放 no-op、非 `releasing` 阶段拒绝）、以及两条周期补偿路径。证据：
+  `integration/agent_run_delivery_test.go` 的 P5-7…P5-16 与 `internal/core/agent_run_release_db_test.go` 的 5 个白盒测试。
+  **唯一未实现的部分不是本项的语义缺口，而是 Revision 登记本身**：Cloud Revision ADR 仍为 `status: proposed`，故
+  `saved`/`unchanged` 一律 `UNAVAILABLE` + 零写入；该受限面**单独**登记为 **G-030**，不再挂在 G-019 上。
+
+- **G-029 — `DEFERRED / NON-BLOCKING`（Phase 5 Batch 2 登记；Revision ADR Approval Round 裁定，2026-10-08）** —
+  原分类 `OPEN / NON-BLOCKING / ADR PRECISION`：IssueRun D4 的结算规则含有
+  「Agent 的回复注释」一类内容，但**没有**任何已批准的字段路径规定它写在哪一列/哪一对象。**WHY 登记而不自行选定**：
+  字段路径属持久化契约，发明它等于静默扩展 ADR（authority order 禁止）。本轮因此**不写**该字段，`releasing` 结算只写
+  D4 明确规定的 `phase`/`status`/`deliveryState` 与既有活动记录。**WHAT IS NEEDED TO CLOSE**：ADR 明确该注释的来源与落点，
+  或删除该义务。**不阻塞**本轮完成。
+  **裁定（Revision ADR Approval Round，2026-10-08）＝ Phase 5 的 `DEFERRED / NON-BLOCKING`，且不为它扩 schema。** 理由：
+  ① 审计对象（Cloud Revision ADR）**不要求**它 —— D5 只承诺「公开读暴露元数据」，从未涉及 Agent 回复注释；
+  ② `issue_runs.result` 的形状由 **approved** IssueRun D4 钉死为 `{revisionId | null, deliveryState}`，**没有**承载该注释的字段，
+  为它加列/加字段属**未获批准的 schema 扩展**；
+  ③ 该义务在数据上**已经由既有结构承载**：Agent 消息本身经 Thread 条目（`thread_entries`，`source = node|user|system`）
+  与随 Revision 一并上传的会话 JSONL 落地，二者按 Thread D2 来自**同一份记录**；
+  ④ 该注释若要成为一条「回复评论」，其 `kind` 词表属 desktop `ora-history` 领域，而 Thread **D2 明确禁止 Cloud 解析业务字段**
+  （只校验是 JSON 对象且 `kind` 在已知集合内）——Cloud 侧自行发明落点会**同时**越界两处。
+  ⇒ **结论**：本项**明确排除**在 Revision ADR 的批准范围之外；Phase 5 不为它扩 schema、不改 `issue_runs.result`、不加列。
+  若产品确需该注释，另开一轮由 ADR 决定承载面。
+
+- **G-030 — 新增 / OPEN / NON-BLOCKING FOR THIS ROUND, BUT THE APPROVED MANDATORY BLOCKER FOR THE REVISION HALF
+  （Phase 5 Batch 2，2026-10-08）**：`specs/decisions/cloud/revision/0-cloud-owned-object-store-and-verified-revisions.md`
+  仍为 **`status: proposed`**，而它定义的正是 Revision 的对象键、`revision_ref`、Cloud 侧对象校验与 `GrantRevisionUpload`
+  的授权形状。依 authority order（approved ADR > AGENTS.md > plan > implementation）与 `specs/AGENTS.md`（`proposed` 阶段
+  不得据其编写契约与核心测试用例），**不得**据此实现。现状：无 `revisions` 表、0022 仍为最新 migration。
+  **本轮的处理是受阻且不静默降级**：`DeliverySettled` 收到 `revision_delivered`/`revision_unchanged` 一律回 `UNAVAILABLE`
+  且**零写入**，运行只能经 D5 放弃或 D6 无会话取消到达 `releasing`；**未**发明第二套 upload auth、**未**信任 Node 上报的
+  tenant/run、**未**先产生外部副作用再补身份。**WHAT IS NEEDED TO CLOSE**：人类把该 ADR 评审为 `approved`，随后另开一轮
+  实现注册、对象校验与上传授权。证据：`TestRevisionDeliveredIsRefusedAndTheRunStaysDelivering`。
+  **更新（Revision ADR Approval Round，2026-10-08）：解除条件细化 —— 不能按现文本批准。** 本轮对该 ADR 做了
+  approval-readiness 审计，结论 `REVISION_ADR_NOT_READY_FOR_APPROVAL`：存在 4 个**每一项都允许两种合理实现**的阻塞项，
+  以及 3 条精度补充。**获批前实现等于猜。**
+  - **B-1 —— Revision 行身份与幂等未定义。** ADR 列出 `revisions` 列，但**没有**规定：`id` 由谁在哪个事务内生成、
+    唯一/幂等键是 `UNIQUE(run_id)` 还是 per-attempt、同一身份再次登记且负载不同时如何处置（拒绝/覆盖/取首次）。
+    对照：**approved** 的 clone 路径对同一问题有**显式**冲突规则，Revision 路径一条都没有。**最小修订提案**：写明
+    「`id` 由 Cloud 在交付接管事务内生成；唯一键 = `run_id`（一次运行至多一条 Revision，因为 `unchanged` 也登记）；
+    已存在同键行时**不**覆盖，按已登记结果结算（确定性 no-op），负载冲突记日志不改变状态」。
+  - **B-2 —— Object key 拼写不可落地。** ADR D2 写键为 `revisions/{tenantId}/{runId}/{deliveryWorkId}/revision.bundle|session.jsonl`，
+    并说明「键在 Cloud 放出交付工作项时生成并写入工作项的输入」。但**交付工作项的 ID 由已冻结的 A seam 在创建时内部生成**
+    （Phase 3B 封签了该签名），Cloud 调用方**拿不到**它用于拼键；Batch 1 的实现因此在同一处改用 Cloud 自己生成的
+    per-attempt id（`newID()`），并在代码里留下「拼写对账是 Phase 5 Batch 2 的活」的注释 —— Batch 2 交付时**未**做该对账。
+    ⇒ ADR 的字面拼写**不是**已交付实现所用的拼写。**最小修订提案**：把 D2 的键段改为 Cloud 生成的 per-attempt 交付尝试 ID
+    （语义与 `deliveryWorkId` 相同，但**由 Cloud 生成并可回传**），并写明「同一次交付尝试内，工作项 ID 与键中的尝试 ID 同源可比」。
+  - **B-3 —— `revision_ref` 拼写无 Cloud 权威。** Cloud ADR 未定义它的形状，proto 只给「必须在 `refs/ora/revisions/` 之下」，
+    另一份**也是 `proposed`** 的 node revision ADR（D2.4）给出 `refs/ora/revisions/<runId>`。只读 Cloud ADR 的实现者可以
+    合理地选别的拼写。**最小修订提案**：在 Cloud ADR 中直接写明 `revision_ref = "refs/ora/revisions/" + runId`（与实现一致），
+    使 Cloud 侧不再依赖 node ADR。
+  - **B-4 —— 「缺 `object_store` ⇒ `skipped`」与 approved IssueRun 不变量 3 冲突。** ADR D1 规定未配置对象存储时运行进入
+    `delivering` 后直接 `deliveryState = skipped` 并进入 release。这**同时**有三个问题：① 它构成**第四个** `delete_workspace`
+    触发条件，而 approved IssueRun **不变量 3** 只承认三种（Revision 已登记 / D5 明确放弃 / D6 无会话取消）；
+    ② 它**复用**了已被 D6 无会话取消占用的 `skipped` 值，使公开读无法区分两种语义；③ 其触发点（在 Batch 1 的 session-ended
+    事务内）**未规定**且该路径**未实现**。**最小修订提案**：把该情形改为「运行**不**进入 `delivering`，按 D6 的无会话取消语义
+    结束」，或为「未配置对象存储」定义**新的** `deliveryState` 值并**同时**修订 IssueRun 不变量 3 —— 二者择一，不得两者都不做。
+  - **精度补充（非阻塞，建议一并写入）**：**P-1** 明确对象校验**只**检查存在性、大小与 SHA-256，**不**检查 commit/base 关系、
+    **不**检查 `revision_ref` 前缀、**不**检查 content-type/编码（归属由键的形状按构造保证）；**P-2** 明确同一 grant 的 TTL 内
+    对**同一键**重复 `PUT` 的行为；**P-3** 明确 `unchanged` **不**复用既有 Revision（v1 没有「从 Revision 续跑」）。
+  **本轮未改 ADR 正文、未改 `status`** —— 修订 approved/proposed ADR 需人类批准（mandate §10）。
+  **更新（Revision ADR Decision & Amendment Round，2026-10-08）：B-1..B-4 与 P-1..P-3 已各自收敛为唯一方案，并已写入该 ADR 正文（文首与文末「修订记录」明确标识为待审批）。** 与上一轮提案相比有**两处实质变化**，需人类注意：
+  - **B-1 的冲突处置改了**：上一轮提案是「已存在同键行时不覆盖、按已登记结果结算（确定性 no-op）、负载冲突记日志」；
+    本轮改为「读回比较负载：**逐字段相同 = 幂等成功并返回既有 `id`；任一字段不同 = 不变式冲突** ⇒ 接管事务整体回滚、
+    事件不确认、Node 重放」。理由：静默 no-op 会让一次**负载不同**的重放（例如 Node 换了 `final_commit`）被当成成功，
+    而 **approved** 的 clone 路径对同一问题的规则是**冲突即回滚、结果不覆盖**；Revision 不应比 clone 更宽松。
+    另写明：`revisions` 是 controller-integration D6 的**控制面**表 ⇒ 由控制面在接管事务内生成 `id` 并写行，
+    随后同事务调用 `deliverySettled`；`PRIMARY KEY (id)` + `UNIQUE (run_id)`；`ON CONFLICT (run_id) DO NOTHING` + 读回；
+    重放由 `node_event_receipts` 判定；行与阶段推进同事务 ⇒ 唯一允许的偏斜是「对象已上传而 Revision 未登记」。
+  - **B-4 选了第三种方案**：上一轮给的是两个选项（① 按 D6 无会话取消语义结束；② 定义新 `deliveryState` 并同时修订不变量 3）。
+    本轮**两个都不选**：① 会让「配置缺失」在公开读里表现为「用户取消」（`skipped`），语义失实；② 需要修订 approved
+    不变量 3（等于承认第四条删除触发条件）并新增一个公开读取值。本轮改为**完全走 approved D5**：照常进入 `delivering`、
+    照常放出交付工作项（D3/D6 的硬约束：不放会让运行停在既无工作项也无失败证据的 `delivering`）、拒发上传授权
+    （`UNAVAILABLE`）、交付**确定失败**、D5 放弃窗口到期 ⇒ `deliveryState = failed` ⇒ `releasing`。
+    **不新增任何删除触发条件、不新增 `deliveryState` 取值、不新增失败码**；`skipped` 归还 D6 的无会话取消专用。
+    **不需要修改 IssueRun ADR**；唯一依赖是对 D5 的一处澄清（放弃窗口自运行的首个交付工作项起算）⇒ 新增 **G-033**，
+    需人类单独批准。否决策略亦已写入 ADR 的「为什么不是这些替代方案」（含拒绝启动、派发前阻塞两条）。
+  - B-2：第三段 = Cloud 生成的**尝试 ID**（**不是**工作项 ID —— 工作项 ID 由 A seam 在插入时才生成，调用方冻结输入时尚不可得）；
+    新增「**逻辑交付 / 交付尝试 / Revision**」三种身份的区分表，并明确**不得**用 per-attempt 身份偷换逻辑交付身份
+    （逻辑交付 = `run_id`；尝试 = 一个交付工作项/一次执行；Revision = 一行，`UNIQUE (run_id)`）。
+  - B-3：`revision_ref` 由 Cloud 生成为 `refs/ora/revisions/<runId>` 并写入输入，Node 只回显、不构造不改写；
+    它按**运行**命名 ⇒ Revision 的内容身份是行内 `final_commit` + 对象摘要，**不是**「ref 现在指向哪里」。
+  - P-1..P-3 已全部写入 D4（校验范围＝HEAD 三项 + 本地输入一致性/形状比较，并明确**不**校验的五项；
+    同一授权内重复 `PUT` 是覆盖写、不符声明即 `failed{verification_failed}` 并重试；`unchanged` 仍登记且不复用既有 Revision）。
+  **`status` 仍为 `proposed`** —— 本轮只收敛文本，**未**自行批准。Node revision ADR 另补一句最小回显条款，
+  也**需单独批准**（「Cloud Revision ADR 获批不代表 Node Revision ADR 自动获批」）。
+
+- **G-031 — 新增 / OPEN / NON-BLOCKING / IDENTITY SPELLING DEVIATION（Phase 5 Batch 2，2026-10-08）**：IssueRun D6 把
+  运行 Workspace 的幂等身份写作 `(issue_run_id, kind)`，而既有实现的唯一约束是 `(workspace_id, kind)`。在本轮全部路径上
+  两者等价（运行 Workspace 与 run 一一对应、`kind` 固定），因此本轮**沿用既有 schema**，**未**新增 migration、
+  **未**改写已应用约束（AGENTS.md 的兼容边界）。**WHAT IS NEEDED TO CLOSE**：ADR 与实现择一对齐（若确需 `issue_run_id`，
+  须有独立 migration 与证据）。**不阻塞**本轮完成。
+  **推荐方案（Revision ADR Approval Round，2026-10-08）＝ Option B：把 ADR 改为 `(workspace_id, kind)`，并限定「未完成的操作」。**
+  理由三条：① **schema 事实**——`operations` 表**没有** `issue_run_id` 列，且它是 run Workspace 与**用户** Workspace 共用的表；
+  按 ADR 字面加列会为一个纯幂等用途付费，并让用户 Workspace 的行多出一个恒为 NULL 的列。
+  ② **等价性已被 approved 权威保证**——IssueRun **不变量 1**（run ↔ run Workspace 1:1）加上 `workspaces.issue_run_id` 的
+  唯一约束，使 `(workspace_id, kind)` 与 `(issue_run_id, kind)` 在运行 Workspace 上**一一对应**；且既有 create 路径本就是
+  **经由 binding**（`workspaces.issue_run_id IS NOT NULL`）识别 run Workspace，而不是靠 operations 表自带身份。
+  ③ **决定性理由**：一个字面的 `UNIQUE(issue_run_id, kind)` 会**禁止重新声明**，而 operation **D4** 恰恰要求「未终态执行仍在时
+  quiesce 失败 ⇒ 重新声明并重试」——该行为已被 `TestRefusedQuiesceIsRedeclaredAndStillReachesDone` 证明是 **approved** 的。
+  因此措辞必须限定为「**未完成**（`state IN ('queued','running','retry_wait','blocked')`）的操作**至多一个**」，而这一限定
+  正是实现已有的形状（`agent_run_workspace_release.go` 的未完成检查 + 迁移 0018 的既有唯一约束）。
+  **本轮未改 schema、未改 ADR** —— 修订 approved ADR 需人类批准。
+  **精确 amendment（Revision ADR Decision & Amendment Round，2026-10-08；待人类批准，本轮未应用，只输出提案）**：
+  ① `specs/decisions/cloud/operation/20260928-plugin-step-and-run-workspace-release.md:73` —— 把
+  「`(issue_run_id, kind)`，由 Cloud 生成，不经过公开幂等键」改为
+  「`(workspace_id, kind)`，由 Cloud 生成，不经过公开幂等键；对同一个运行 Workspace，同一时刻至多存在一个
+  **未完成**（`queued`/`running`/`retry_wait`/`blocked`）的该 `kind` 操作，已终结的操作不占用该身份，
+  因此被拒绝 quiesce 后可以**重新声明**同一 `kind` 的操作」。
+  ② `specs/decisions/cloud/controller-integration/20260928-agent-run-executions-thread-and-upload-grants.md:119` —— 把函数表中的
+  「以 `(issue_run_id, kind)` 幂等地创建运行 Workspace 及其 operation」改为
+  「以 `(workspace_id, kind)` 幂等地创建运行 Workspace 及其 operation（同一时刻至多一个未完成的同 `kind` 操作；
+  运行 Workspace 与运行一一对应，故与按运行限定等价）」。
+  ③ `specs/test-cases/cloud/operation/plugin-step-and-run-workspace.md:62` —— 同一句的用例侧复述同改
+  （`specs/AGENTS.md`：ADR 变更须同步核心用例）。
+  范围 = **两个 approved ADR 各一句 + 一个核心用例一句**；**不改 schema、不加列、不加索引**、不改任何 Go 代码
+  （既有实现已是该语义：`(workspace_id, kind)` 的未完成检查由 `agent_run_workspace_release.go` 表达，
+  数据库侧由既有 `one_project_operation` 传递性串行）。**是否再补一个数据库部分唯一索引是独立问题，不在本 amendment 内。**
+
+- **G-032 — 新增 / OPEN / NON-BLOCKING / MISSING LIMIT（Phase 5 Batch 2，2026-10-08）**：D5 只给**交付**侧放弃窗口
+  （连续失败 >2h、Node 未知 >30m）；**Workspace 删除**侧的持续失败没有上限，删除意图由
+  `RedeclareRunWorkspaceDeletesOnce` 无限重新声明，运行会一直停在 `releasing`。这**不是**本轮引入的回归（本轮之前该路径
+  根本不存在），但属同一生命周期的空缺。**WHAT IS NEEDED TO CLOSE**：后续 ADR 明确删除侧的重试上限与终态。
+  **不阻塞**本轮完成。相关证据：`TestRefusedQuiesceIsRedeclaredAndStillReachesDone` 证明「重新声明」这一半边有效。
+  **最小 proposal（Revision ADR Approval Round，2026-10-08）**：新增 IssueRun **D8「删除侧也有上限，且只以不可达为条件」**，
+  只规定四件事 —— ① **重试来源**：沿用 operation **D4** 既有的 quiesce 失败重试与「同一 operation 的新执行」规则，Cloud 侧由
+  删除重新声明保证任一时刻**至多一个**未完成的 `delete_workspace`（`RedeclareRunWorkspaceDeletesOnce` 已是该形状）；
+  ② **上限**：只以 D5 已有的**不可达**窗口为准（运行 Workspace 的 Node 状态未知超过 `delivery_unreachable_after`，默认 30m）；
+  D5 的 **2h「连续失败」窗口不适用于删除侧**，**Node 明确拒绝 quiesce 不触发放弃**（否则 P5-16 的恢复路径会被判死）；
+  ③ **终态**：超过上限后运行进入 `done`，业务 `status` **保持不变**（`releasing` 时按 D4 派生写入的值），另记
+  `failure_reason = workspace_unavailable`（沿用 D3 对 create_workspace 失败的既有取值），`delete_workspace` operation 以失败码终结；
+  ④ **不留在 `releasing`**：`done` 是唯一终态，且 `done` **不**表示成功（D4「终态不变」）。**不谎报删除**：未真正删除的 Workspace
+  保持存在、operation 标 `failed`，绝不声称删除已发生。**本轮未实现**（规范轮）。
+  **精确 amendment（Revision ADR Decision & Amendment Round，2026-10-08；待人类批准，本轮未应用）**：在 IssueRun ADR
+  新增 **D8** 并只改 D3 阶段表的 `done` 行 —— ① `done` 的进入条件由「`delete_workspace` `succeeded`」改为
+  「`delete_workspace` `succeeded`，或删除侧超过 D8 的上限（此时 `done` **不代表**删除成功）」；② D8 正文四件事：
+  **重试来源**（沿用 operation D4 的 quiesce 拒绝重试与「同一 operation 的新执行」，Cloud 侧由删除重新声明保证
+  任一时刻至多一个未完成的 `delete_workspace`）、**上限**（只取 D5 已有的不可达窗口，证据是 **Cloud 自己观察到的**
+  该 Workspace 的 Node 状态，与 D5 放弃窗口 2 同一证据，**不依赖 Node 上报**；D5 的 2h 窗口**不**适用于删除侧，
+  **Node 明确拒绝 quiesce 不触发放弃**）、**终态**（operation 以既有失败码终结，运行进入 `done`，`status` **保持不变**，
+  另记 `failure_reason = workspace_unavailable`，沿用 D3 对 `create_workspace` 失败的既有取值）、
+  **残留登记**（运行 Workspace 行仍是活的、`issue_run_id` 仍指向该运行，且存在一个处于**终结失败态**的
+  `delete_workspace` operation —— **不新增列、不新增表、不发明后台清理机制**）。
+  ③ 同一次变更必须同步核心用例 `specs/test-cases/cloud/issue-run/agent-run-orchestration.md` 中把 `done` 定义为
+  「delete 到达 `succeeded`」的两处，并登记新验证义务「超上限 ⇒ `done` + 残留 Workspace」（当前 `Missing`）。
+  **明确登记的剩余风险**：超上限后运行 Workspace 及其容器/进程/卷**不会被自动回收**，且运行 Workspace 在公开 API 上
+  不可达（operation D4：公开 `delete` 恒 404）⇒ **没有自助重清路径**，只能由人类/运维处置，或由后续专用决策发明机制；
+  `failure_reason = workspace_unavailable` 是唯一可见信号。**不谎报删除成功**：`done` 只表示「不再重试」，
+  删除是否真的发生由 Workspace 行与 operation 的终态如实体现。
+
+- **G-033 — 新增 / OPEN / 跨 ADR 澄清（Revision ADR Decision & Amendment Round，2026-10-08）**：approved 的 IssueRun D5 写的是
+  「交付连续失败超过 2 小时」，而**缺 `object_store`** 的交付**永远不会产生任何失败结果**（Cloud 拒发授权，Node 连授权都没收到）。
+  本轮 B-4 的收口依赖对 D5 的一处读法：**放弃窗口自该运行的首个 `deliver_revision` 工作项被放出起算**，即「连续失败」包含
+  「从未产生任何结果」。该读法已在 Phase 5 Batch 2 的实现中固化（`deliveryGivenUp` 窗口 1 以首个交付工作项的 `created_at` 起算），
+  但**不是** D5 的字面文本 ⇒ **本轮不据此改写 approved ADR**，只登记为独立待批准项。**精确 amendment**：在 D5 的放弃窗口处补一句
+  「窗口自该运行的首个交付工作项被放出起算，因此一个从未取得上传授权、从未产生任何交付结果的运行同样收敛
+  （不需要为「能力未配置」发明失败码或新的 `deliveryState` 取值）」。**为什么必须单独批准**：它是对 approved ADR 的文本修改，
+  且 B-4「不新增第四条删除触发条件」这一结论建立在该澄清之上。**不阻塞**本轮收敛结论，但**阻塞** B-4 的最终批准
+  （人类可与其他项一并批准）。
+
+- **G-034 — 新增 / OPEN / NON-BLOCKING / 生命周期残留（Revision ADR Decision & Amendment Round，2026-10-08）**：交付工作项在放弃后
+  **不会被清理**——`execution_work` 行在**全仓没有任何删除者**（无 `DELETE FROM execution_work`），而认领路径
+  （`agent_work_claim`/`agent_work_get`/`agent_work_pending`）**没有运行阶段过滤**，因此一个已经 `releasing`/`done` 的运行的
+  **未登记** `deliver_revision` 工作项仍可被认领并派发。终态结果本身无害（`deliverySettled` 在 `phase != 'delivering'` 时是
+  确定性 no-op、零写入），但① 白白消耗一次执行，② 该执行可能对着正在被删除的 Workspace 跑，③ 会留下一条永不完结的执行记录。
+  **本轮不修**：属实现行为，且修复形状取决于 B-4 与 G-032 的最终批准结果（在认领侧加运行阶段谓词，或在放弃/终态时终结未登记的工作项）。
+  **不阻塞**任何批准项。
+
+- **G-027 — 新增 / OPEN / NON-BLOCKING / ADR PRECISION（Phase 5 Batch 1，2026-10-08）**：Thread D4 的末行只写「会话执行终态被
+  接管 ⇒ `ended`」，**未**写明该转换的**活状态集合**，也**未**写明终态事件落在已 `ended` 或非会话阶段时的行为。本轮依据
+  D4 不变量 4 的**无条件**措辞 + IssueRun D3 的 `delivering` 进入条件「任何结束原因」，接受 `pending | active | idle | ending`，
+  其余（已 `ended`/`delivering`、`provisioning`、`releasing`）按 invariant violation 处理（`UNAVAILABLE`、零写入、Node 重放）。
+  **WHY 登记而不自行改 ADR**：ADR 修订需人类批准。**WHAT IS NEEDED TO CLOSE**：在 Thread D4 或 controller-integration D6 写明
+  活状态集合与该前置行为。**不阻塞**本轮完成；证据见 `TestSessionEndedPreconditionMatrix`。
+
+- **G-028 — 新增 / OPEN / NON-BLOCKING / PRE-EXISTING LINT BASELINE（Phase 5 Batch 1 观察到，2026-10-08）**：
+  `internal/core/space_agents.go` 的 `activeSpaceAgentRoster` **无任何调用者**（全仓含 HEAD 零引用），`task lint` 因此报
+  `unused` 1 条。该函数在 `73c2aa4` 引入时即无调用者，**不是**本轮产物：在 `git archive HEAD` 的未改动树上用同一
+  `.golangci.yml` 运行 `golangci-lint` 得到**逐字相同**的 1 条。它与 `internal/core/agent_target.go` 的租户级 roster 读重叠。
+  **WHY 本轮不清理**：删除他人已文档化的读取助手属 Batch 1 范围外的行为变更；加 `//nolint` 等于弱化门禁（AGENTS.md 禁止）；
+  接线为公开读取面则是新 API。**WHAT IS NEEDED TO CLOSE**：由拥有 Space Agent roster 读取面的轮次决定接线或删除。
+  **不阻塞**本轮完成，但**是本仓 `task lint` 全绿的唯一剩余项**。
 - **G-020 — 新增 / OPEN / NON-BLOCKING / DEPENDENCY（Phase 4C 设计轮，2026-10-08）**：SSE 失效提示**不保证送达**——
   hub 为进程内、缓冲 8、单实例，可能丢/重/乱序，无持久化、无 replay（api-boundary ADR，已实现）。**WHY 必须登记**：
   假定「可靠通知」的设计会诱导客户端把流当日志。**WHAT IS NEEDED TO CLOSE**：slice 1 依赖客户端重连 + 周期轮询
@@ -1129,13 +1366,224 @@ Agent 必须更新：
 
 ### 当前 Phase
 
-`Phase 4C COMPLETE — Final Completion Batch（A2 / A3 / A4 / G-018 落地 + 最终验收）`
+`Phase 5 — Revision ADR Decision & Amendment Round`
 
 ### 当前 Slice
 
-`Phase 4C Final Completion Batch：把人类已批准的 A2 / A3 / A4 / G-018 写入对应 approved ADR 正文并实现，随后做 Phase 4B + 4C 全量回归、Final Gate 与收口判定。`
+`把 B-1..B-4 与 P-1..P-3 各自收敛为唯一方案并写入两个 proposed Revision ADR 的正文（明确标识为待审批），为 G-031 / G-032 输出精确的 amendment 提案，登记 G-033 / G-034，并更新 plan/plan.md 与 plan/plan-zh.md。决策与修订轮：不改生产代码、不改任何 ADR 的 status、不改任何 approved ADR 的已批准决策。`
 
 ### 当前状态
+
+`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`
+（本轮为 **DECISION & AMENDMENT ROUND（mandate §1–§11）**。**判定：`REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL`——B-1..B-4 与 P-1..P-3 各自只剩**一个**明确推荐方案；所有跨 ADR 变更已逐项独立列出；两个 `proposed` ADR 的 `status` **未**改动。**
+**权威重读**：`cloud/AGENTS.md`、`specs/AGENTS.md`、`plan/plan.md`、`plan/plan-zh.md`、Cloud Revision ADR（**proposed**，修订对象）、
+node revision ADR（**proposed**）、IssueRun ADR（approved，D3 阶段表 / D4 / D5 / D6 / 不变量 1–3）、
+controller-integration ADR（approved，D1/D4/D6 含函数签名与钩子表）、operation ADR（approved，D4）、
+现有 Phase 5 Batch 1/2 实现（`agent_run_session_settle.go` / `agent_run_delivery.go` / `agent_run_release.go` /
+`agent_run_delivery_loop.go` / `agent_run_execution_work.go` / `agent_run_workspace_release.go`）、
+proto `agent_executions.proto`、migration `0019_execution_work.sql` 与 `0001_core.sql`**全部重读**；
+权威顺序 **approved ADR > AGENTS.md > plan > implementation**。开工前已检查两个仓库 Git 状态并保留全部未提交修改。
+**本轮性质**：**未改**生产代码 / proto / migration / OpenAPI / frontend / 测试；**未改**任何 ADR 的 `status`；
+**未**改写任何 approved ADR 的已批准决策（G-031 / G-032 只输出提案）；**未**自行批准、**未**实现 Revision 生产路径、**未**输出 `PHASE_5_COMPLETE`。
+**B-1（Revision 行身份与幂等）**：`revisions` 是 controller-integration D6 的**控制面**表 ⇒ 控制面在交付终态接管事务内生成 `id`（uuid）并写行，
+随后同事务调用 `deliverySettled` 并传入该 `revisionId`；`PRIMARY KEY (id)` + `UNIQUE (run_id)`；`INSERT ... ON CONFLICT (run_id) DO NOTHING` + 读回比较负载
+（逐字段相同 = 幂等成功并返回既有 `id`；不同 = 不变式冲突 ⇒ 接管事务整体回滚、事件不确认、Node 重放）；重放由 `node_event_receipts` 判定；
+行与收据/结果/阶段推进同事务 ⇒ 不存在孤儿行，唯一允许的偏斜是「对象已上传而 Revision 未登记」。
+**B-2（对象键身份）**：第三段 = **Cloud 生成的尝试 ID**，因为工作项 ID 由 A seam 在插入时生成、调用方冻结工作项输入时尚不可得
+（`EnqueueExecutionWork` 返回 id 但 input 是逐字写入的）；新增「逻辑交付 / 交付尝试 / Revision」三种身份表；两条性质 = 同尝试内键不变、跨尝试键永不相等；
+**不**用 per-attempt 身份偷换逻辑交付身份。改 A seam 签名的方案已列入替代方案表并被否决。
+**B-3（`revision_ref`）**：Cloud 是唯一生成者（`refs/ora/revisions/<runId>`，按**运行**命名）并写入工作项输入；Node 不构造、不改写、原样回显，
+`base_commit` 同；⇒ Revision 的内容身份是行内 `final_commit` + 对象摘要，**不是**「ref 现在指向哪里」，恢复不读 ref。
+**B-4（缺 `object_store`）**：**删除** D1 的「`skipped` 直接释放」路径；改为一律照常进入 `delivering`、照常放出交付工作项（D3/D6 硬约束）、
+拒发授权（`UNAVAILABLE`）⇒ 交付**确定失败** ⇒ **完全由 approved D5 收口**（`deliveryState = failed`、`revisionId = null`、随放弃进入 `releasing`）。
+**不新增第四条 `delete_workspace` 触发条件、不新增 `deliveryState` 取值、不新增失败码**；`skipped` 归还 D6 无会话取消专用；**不需要修改 IssueRun ADR**。
+**P-1..P-3**：校验范围（HEAD 三项 + 本地输入一致性/形状比较，明确**不**校验 Git 谱系、bundle 可应用性、JSONL 可解析性、content-type/编码、ref 当前指向）、
+同授权内重复 `PUT`（覆盖写；按声明摘要校验，不符 ⇒ `failed{verification_failed}` + 重试）、`unchanged` 仍登记且第一版不复用既有 Revision —— 均已写入 D4。
+**跨 ADR 变更（逐项独立列出，本轮**均未应用**）**：① **Node Revision ADR** 补一句「结果原样回显输入的 `revision_ref`/`base_commit`」；
+② **G-033** IssueRun D5 澄清一句（放弃窗口自首个交付工作项起算）；③ **G-031** operation D4 一句 + controller-integration D6 一句 + 核心用例一句；
+④ **G-032** IssueRun D8 正文 + D3 阶段表 `done` 行 + 核心用例两处。**Cloud Revision ADR 获批不代表 Node Revision ADR 自动获批。**
+**新登记**：**G-033**（跨 ADR 澄清，阻塞 B-4 的最终批准）、**G-034**（NON-BLOCKING 生命周期残留：放弃后未登记的 `deliver_revision` 工作项仍可被认领）。
+**剩余风险披露**：G-032 超上限后运行 Workspace **不会被自动回收**且公开 API 不可达（`delete` 恒 404）⇒ 无自助重清路径，只能由人类/运维处置；
+**未**发明任何后台清理机制；`done` 只表示「不再重试」，**不**谎报删除成功。
+**门禁**：`git diff --check`（cloud 与 specs）**均干净**；两个仓库 `git status --short` 已复核，既有未提交工作**全部保留**；
+本轮**未**运行测试（无生产代码/测试变更；本会话最后一次完整 `task test:race` 全绿之后 Go / proto / migration / OpenAPI / frontend 均无改动）。
+**交付面清单**：`Production code changed: NO`；`proto changed: NO`；`migration changed: NO`；`OpenAPI/frontend changed: NO`；`tests changed: NO`；
+`ADR status changed: NO`；`self-approved: NO`；`Revision production behavior implemented: NO`；`staged: NO`；`committed: NO`；`pushed: NO`；`PR: NO`；`destructive git: NO`。
+工作树中 `.gitignore` 的 4 行新增**不属本轮**：**未改、未回滚、不纳入本轮归属判断，仅披露**。
+**供人类定稿的审批文本**：见本轮报告的「人类审批清单」——逐项给出文件、决策与**精确批准文本**（5 项：Cloud Revision ADR、Node Revision ADR、G-033、G-031、G-032）。
+**下一步**：人类逐项裁决；全部获批后才进入 **Revision Completion Slice**（`object_store` 配置 + 对象存储客户端 + `revisions` 迁移 + `GrantRevisionUpload` + 交付成功/校验失败分支 + 两个 ADR 的核心用例）。）
+
+**上一轮（Revision ADR Approval Round — G-030 approval-readiness audit，保留记录）：**
+
+### 上一轮 Phase
+
+`Revision ADR Approval Round — 解除 G-030 并冻结 Phase 5 最终契约`
+
+### 上一轮 Slice
+
+`对 status: proposed 的 Cloud Revision ADR 做 approval-readiness 审计（按 Revision identity / Object identity / Upload grant / Verification / Registration / revision_unchanged / revision_delivered 逐项 YES/NO），输出最小、明确、可批准的 Revision contract 与精确的人类审批文本，并裁定 G-029 / G-031 / G-032。规范轮：只改 plan/plan.md 与 plan/plan-zh.md。`
+
+### 上一轮状态
+
+`REVISION_ADR_APPROVAL_BLOCKED`
+（本轮为 **NORMATIVE / APPROVAL-READINESS ROUND（mandate §1–§14）**。**判定：`REVISION_ADR_APPROVAL_BLOCKED`——审计结论 `REVISION_ADR_NOT_READY_FOR_APPROVAL`。**
+**权威重读**：`cloud/AGENTS.md`、`specs/AGENTS.md`、`plan/plan.md`、`plan/plan-zh.md`、IssueRun ADR（approved，D3/D4/D5/D6/不变量 1–3）、
+controller-integration ADR（approved，D1/D4/D6）、operation ADR（approved，D4）、Thread ADR（approved，D1/D2/D5）、
+Cloud Revision ADR（**proposed**，审计对象）、node revision ADR（**proposed**，D2.4）、
+`cloud/proto/ora/cloud/internal/v1/agent_executions.proto`、以及 Batch 2 既有的交付/删除实现**全部重读**
+（`authoritative constraints re-read: yes`）；权威顺序 **approved ADR > AGENTS.md > plan > implementation**。
+**本轮性质**：**未改生产代码 / proto / migration / OpenAPI / frontend**，**未改任何 ADR 文件**（含**未**改 `status: proposed`），
+**未**自行批准、**未**把 `proposed` 当作已批准、**未**实现 Revision production behavior。
+**审计结论（`REVISION_ADR_NOT_READY_FOR_APPROVAL`）**：4 个阻塞项——**B-1** Revision 行身份未定义（`id` 由谁在哪个事务生成、
+唯一/幂等键是 `UNIQUE(run_id)` 还是 per-attempt、同键不同负载如何处置）——而 approved 的 clone 路径对同一问题有显式冲突规则，
+Revision 路径**一条都没有**；**B-2** Object key 拼写（ADR 写 `{deliveryWorkId}`，实现在放交付工作项时用的是 Cloud 自己生成的
+per-attempt `newID()`，且工作项 ID 由已冻结的 A seam 内部生成不可回传）；**B-3** `revision_ref` 的拼写只有 proto
+前缀约束与 **node** 的 `proposed` ADR（D2.4）给出，**Cloud** ADR 未定义（实现取了 `refs/ora/revisions/<runId>`）；
+**B-4** D1 的「缺 `object_store` ⇒ 运行直接 `deliveryState = skipped` 到 release」既是**第四个** `delete_workspace` 触发条件
+（与 approved IssueRun **不变量 3** 冲突），又**复用**了已被 D6 无会话取消占用的 `skipped`，且触发点（在 Batch 1 的
+session-ended 事务内）未规定、路径未实现。另有 3 条精度补充（P-1 校验范围只含存在性/大小/SHA-256；P-2 同一 grant TTL 内重复
+`PUT` 同一键未规定；P-3 `unchanged` 不复用既有 Revision）。**这不是实现缺陷，而是契约不可批准**——每一项都允许两种合理实现，
+获批前实现即等于**猜**。
+**G-029 裁定**：`DEFERRED / NON-BLOCKING`（Revision ADR 本身不要求它；`issue_runs.result` 无对应字段；Thread 条目与会话 JSONL
+已承载 Agent 消息；`kind` 词表属 desktop `ora-history`，而 Thread D2 禁止 Cloud 解析业务字段）⇒ **不为其扩 schema**，并**明确排除**
+在 Revision ADR 批准范围之外。
+**G-031 推荐**：**Option B** —— 把 controller-integration D6 的幂等身份由字面 `(issue_run_id, kind)` 改为 `(workspace_id, kind)`
+并限定「未完成的操作」：`operations` 表**没有** `issue_run_id` 列且与用户 Workspace 共用；等价性由 approved 不变量 1
+（run ↔ run Workspace 1:1）+ `workspaces.issue_run_id UNIQUE` 保证，且 create 路径本就**通过 binding** 识别 run Workspace；
+决定性理由是一个字面的 `UNIQUE(issue_run_id, kind)` 会**禁止** operation D4 要求的「重新声明」
+（已被 `TestRefusedQuiesceIsRedeclaredAndStillReachesDone` 证明）。**本轮未改 schema、未改 ADR。**
+**G-032 最小 proposal**：新增 IssueRun **D8**（重试来源 = 既有 operation D4 的 quiesce 失败重试 + 任一时刻至多一个未完成
+`delete_workspace`；上限只取 D5 的**不可达**窗口 `delivery_unreachable_after`（默认 30m），2h 连续失败窗口**不**适用于删除侧，
+Node 明确拒绝 quiesce **不**触发放弃；终态 = `done` + 业务 `status` 不变 + `failure_reason = workspace_unavailable`，
+**不**留在 `releasing`）。**未实现。**
+**门禁与披露**：`git diff --check`（cloud 与 specs）干净，两个仓库 `status` 已复核；本轮**未**运行 Go 全量测试（无生产代码变更）。
+工作树中 `.gitignore` 的 4 行新增（`plan/`、`plan/plan.md`、`plan/plan-zh.md`）**不属本轮**：**未改、未回滚、不纳入本轮归属判断，仅披露**。
+**未提交**：无 stage / commit / push / PR / 破坏性 git 操作，cloud 与 specs 的既有未提交修改原样保留。
+**交付面清单**：`Production code changed: NO`；`proto changed: NO`；`migration changed: NO`；`OpenAPI/frontend changed: NO`；
+`ADR text changed: NO`；`ADR status changed: NO`；`self-approved: NO`；`Revision production behavior implemented: NO`；
+`staged: NO`；`committed: NO`；`pushed: NO`；`PR: NO`；`destructive git: NO`。
+**供人类定稿的审批文本（本轮未应用）**：本轮判定为 **NOT-ready**，故建议人类**先**按 B-1..B-4 的最小修订提案修订 ADR 正文
+（建议一并写入 P-1..P-3），**再**使用 READY 分支的一句话批准 —— 「我批准 `…/0-cloud-owned-object-store-and-verified-revisions.md`
+在按 B-1..B-4 修订后成为 `approved`；**并**同时批准 **G-031 的 Option B**（`(workspace_id, kind)` + 限定未完成操作）
+与 **G-032 的 D8**（删除侧只以不可达为放弃条件，终态 `done` + `status` 不变 + `failure_reason = workspace_unavailable`）；
+**不包括** G-029（`DEFERRED / NON-BLOCKING`，不为其扩 schema）」。若不拟一并批准，**必须**在批准文本中逐项显式写「不包括」——
+不得含糊。**本轮未写入任何 ADR 文件、未改 `status`**。
+**下一步**：人类按本轮给出的审批文本裁决；获批（且 B-1..B-4 按提案收敛）后才进入 Revision 实现切片。）
+
+**再上一轮（Phase 5 Batch 2 — Delivery → Releasing → Done，保留记录）：**
+
+### 再上一轮 Phase
+
+`Phase 5 Batch 2 — Delivery → Releasing → Done`
+
+### 再上一轮 Slice
+
+`实现 deliver_revision 工作项的认领与派发、交付终态经 agent_delivery_takeover 的权威接管与结算、D5 的失败重试/退避/放弃、delivering → releasing 与同事务的删除意图声明、RunWorkspaceDeleted 的 releasing → done、两条周期补偿路径，并执行 Phase 5 Final Gate。`
+
+### 再上一轮状态
+
+`PHASE_5_BATCH_2_BLOCKED`
+（本轮为 **IMPLEMENTATION ROUND（Phase 5 Batch 2，mandate §1–§40）**。**判定：`PHASE_5_BATCH_2_BLOCKED`——存在 1 项已批准的 mandatory blocker（G-030）。**
+**权威重读**：`cloud/AGENTS.md`、`plan/plan.md`、`plan/plan-zh.md`、`specs/AGENTS.md`、IssueRun ADR（D3/D4/D5/D6）、
+controller-integration ADR（D2/D6）、Thread ADR、Batch 1 实现与测试、既有 revision / upload-grant / workspace-deletion 实现、
+proto **全部重读**（`authoritative constraints re-read: yes`）；权威顺序 approved ADR > AGENTS.md > plan > implementation。
+**受阻判定（唯一 mandatory blocker）**：`specs/decisions/cloud/revision/0-cloud-owned-object-store-and-verified-revisions.md`
+仍为 **`status: proposed`**，而 `specs/AGENTS.md` 规定 `proposed` 阶段不得据其编写契约与核心测试用例 ⇒
+Revision 登记、对象校验与 `GrantRevisionUpload` **不得实现**。本轮的处理是**受阻且不静默降级**：`DeliverySettled` 收到
+`revision_delivered`/`revision_unchanged` 一律回 `UNAVAILABLE` 且**零写入**（运行只能经 D5 放弃或 D6 无会话取消到达
+`releasing`）；**未**发明第二套 upload auth、**未**信任 Node 上报的 tenant/run、**未**先产生外部副作用再补身份、
+**未**把 `done` 自动解释为 `status=completed`。
+**交付执行与派发**：`agent_work_claim`/`agent_work_dispatch` 的 kind 白名单在**共享派发谓词**上扩为
+`('agent_session','deliver_revision')`（恢复读路径 `agent_work_get`/`agent_work_pending` 未加过滤）；
+`DeliverRevisionSpec` 由持久化 Cloud 状态构造，**未**把 Thread seq / command_id / turn_id 当作交付执行身份。
+**接管事务边界**：交付终态只经既有 `ExecutionService.TakeOverNodeEvent` → 控制动作 `agent_delivery_takeover`
+（**未**新增 public endpoint / route 直接写 delivery state）；形状与 Batch 1 一致：`BEGIN` → 身份/重放/缺口/冲突校验 →
+`INSERT node_event_receipts` → `UPDATE node_executions.result` → `DeliverySettled` 钩子 → fenced `last_event_sequence` 推进 →
+`COMMIT`；任一步失败 `panic(databaseFailure{err})` 整体 rollback。
+**结算决策顺序**：身份校验 → 未知 kind 拒绝 → `phase != 'delivering'` 确定性 no-op → `saved`/`unchanged` 受阻拒绝 →
+`failed` reason 闭集校验 → `deliveryGivenUp` → `releaseAfterDelivery`，否则按 D5 退避放出**同一逻辑交付**的
+`deliver_revision`（重试不创建新的逻辑交付）。
+**重试与放弃（严格取自 D5，未自造数字）**：退避 `30s × 2^(n-1)` 封顶 `10min`；放弃条件为连续失败 >2h 或运行 Workspace 的
+Node 未知 >30m；两个窗口是**部署级时长**（`delivery_give_up_after` 默认 2h、`delivery_unreachable_after` 默认 30m，
+含 `CLOUD_ISSUE_RUNS_*` 覆盖），已在 `configs/config.yaml` 记录；判定使用**数据库时间**。
+**释放与终态**：`releaseAfterDelivery` 在**同一事务**内 CAS `delivering → releasing`、写 D4 派生的 `status`、`revisionId = NULL`、
+追加活动记录，并声明**恰好一个** `delete_workspace` 意图（**不得**在事务内调用 workspace provider，事务只声明 work）；
+`RunWorkspaceDeleted` 把 `releasing → done`（`done` 重放 no-op；`provisioning`/`starting`/`running`/`delivering` 与未知 run 被拒），
+终态失败路径同样是 `done` + `status=failed`（D4「终态不变」）。**补偿非权威**：两条 `pluginmarket.RunSyncLoop` 周期任务
+（`agentDeliveryInterval = 10s`）驱动 `GiveUpStaleDeliveriesOnce` 与 `RedeclareRunWorkspaceDeletesOnce`，两者只读 PostgreSQL
+并复用既有事务路径，**不是**内存队列权威。
+**测试**：新增 `integration/agent_run_delivery_test.go`（P5-7…P5-16，真实 gRPC + 真实 PostgreSQL + 真实公开 HTTP）与
+`internal/core/agent_run_release_db_test.go`（5 个白盒：三行 `status` 的 `releasing → done` 且版本 +1、重放 no-op、
+四个不可有成功删除的阶段被拒、未知 run 被拒、退避数字 {0,1}→30s、2→60s、3→120s、4→240s、5→480s、{6,7,16,1000}→600s）。
+**缺口**：**G-019 = `CLOSED`**；新增 **G-029**（D4 的回复注释无批准字段路径）、**G-030**（上述受阻面，本轮唯一 mandatory blocker）、
+**G-031**（D6 的幂等身份拼写 `(issue_run_id, kind)` 与实现的 `(workspace_id, kind)` 偏差，**未**改 schema）、
+**G-032**（`releasing` 侧删除失败无放弃上限）；G-020/G-021/G-025/G-026/G-027/G-028 **状态未变**
+（G-027 仍为 `OPEN / DOCUMENTATION CLARIFICATION`，**未**自行改 ADR；G-028 仍为 `PRE-EXISTING BASELINE`）。
+**门禁**：`format:check` exit 0；`lint` exit 201 且**仅剩 1 条 PRE-EXISTING BASELINE**（G-028，在 `git archive HEAD` 的
+**未改动树**上逐字相同 ⇒ Phase 5 引入 0 条回归；本轮自身出现的 1 条 G115 已按**修复根因**处理，非 `nolint`、非删除）；
+`build` exit 0；`test` exit 0（**0 FAIL / 0 SKIP**）；`test:race` exit 0（**0 DATA RACE**）；`git diff --check`（cloud 与 specs）干净；
+OpenAPI 与前端生成物**未变**（无 REST 形状变化），故未运行 `frontend:generate`/`frontend:check`。
+**未改**：proto、任何 migration（0022 仍为最新，**未**新增、**未**修改已应用文件）、generated/OpenAPI、前端、
+任何 ADR 的语义或 `status`、Phase 4B/4C/5B1 既有不变量与冻结回归。
+**披露**：工作树中 `.gitignore` 有 4 行新增（`plan/`、`plan/plan.md`、`plan/plan-zh.md`），不属本轮文件集且与
+`plan/*.md` 已被跟踪的事实冲突；**未**改动、**未**回滚（禁止破坏性 git），交由人类判定归属。
+**未提交**：无 stage / commit / push / PR / 破坏性 git 操作，cloud 与 specs 的既有未提交修改原样保留。）
+
+**更早轮次（Phase 5 Batch 1 — SessionEnded 终态接管，保留记录）：**
+
+### 更早轮次 Phase（Phase 5 Batch 1）
+
+`Phase 5 Batch 1 — SessionEnded 终态接管 → ending → ended → queued → discarded`
+
+### 更早轮次状态（Phase 5 Batch 1）
+
+`PHASE_5_BATCH_1_DONE`
+（本轮为 **IMPLEMENTATION ROUND（Phase 5 Batch 1，mandate §1–§23）**。**判定：`PHASE_5_BATCH_1_DONE`——不存在已批准的 mandatory blocker。**
+**权威重读**：`cloud/AGENTS.md`、`plan/plan.md`、`plan/plan-zh.md`、`specs/AGENTS.md`、IssueRun ADR、Thread ADR、
+controller-integration ADR、Phase 4B 接管实现、Phase 4C S5/S7 实现、Final Completion Batch 测试**全部重读**；
+权威顺序 approved ADR > AGENTS.md > plan > implementation。
+**入口唯一合法性**：终态事件只经既有 `ExecutionService.TakeOverNodeEvent` → 控制动作 `agent_session_takeover` 进入
+（controller-integration D2：终态事件仍走 `TakeOverNodeEvent`，**不经** `TakeOverThreadEvents` 批量路径）；**未**新增
+endpoint / route / background job，**未**自造 event，**未**改 proto（`ExecutionResult.outcome` 字段 6 `AgentSessionEnded` +
+`AgentSessionEndReason` 五值即已批准形状）。Phase 4B 的收据身份、重放、缺口、冲突、调用方自有事务、无嵌套事务全部保留。
+**事务边界**：`BEGIN`（lease + submission）→ A 连续性/重放校验 → A `INSERT node_event_receipts` →
+A `UPDATE node_executions.result` → B `AgentRunHooks.SessionEnded`（Thread `ended` + 丢弃 + `delivering` + 放出交付工作项）
+→ A fenced `last_event_sequence` 推进 → `COMMIT` → 之后才允许 `EventAck`；任一步失败整体 rollback。
+**状态矩阵判定（§9/§13）**：Thread D4 末行对**会话执行终态**无条件（不变量 4），IssueRun D3 的 `delivering` 进入条件为
+「会话执行有终态结果（**任何结束原因**）」，故 `pending | active | idle | ending` **一律**接受并推进；ADR **未**给它们设前置条件，
+因此**不是**「未规定 ⇒ invariant violation」。ADR 未覆盖的三种（已 `ended`/`delivering`、`provisioning`、`releasing`）按
+invariant violation 处理：`UNAVAILABLE`、零收据、零序号推进、生命周期不变、Node 重放，**不**为容错自动变 `ended`。
+**范围由 ADR 扩大**：IssueRun D3/D6 把「会话终态」与「`delivering`」规定为同一事务语义，故本轮实现包含
+`running → delivering` 与交付工作项放出（mandate 的「Thread terminal only」默认边界**不适用**）；交付的**执行与结算**
+（`DeliverRevision` 投递、`DeliverySettled`、`releasing`、`done`）**未**实现，留 Batch 2。
+**事件**：提交后**恰好一条** `issue_run.thread_changed`（每 run/事务去重、commit 后、rollback 零事件、`lastSeq` = Thread 高水位）；
+**未**发 `thread_appended`（不追加条目，**未**为发事件人工造条目）。
+**测试**：新增 `integration/agent_run_session_end_test.go`（真实 gRPC + 真实 PostgreSQL + 真实 SSE/HTTP）：P5-1 活状态矩阵；
+P5-2/P5-3 多 `queued` 全 `discarded` 且 `delivered` 不变；P5-4 两种重放全程 no-op；P5-5 四类拒绝零残留；
+P5-6 钩子失败（软删运行 Workspace）全量回滚；§11 公开 GET 重读读回 `discarded` 且其余条目逐字节不变；
+§13 三类非法状态完整 `UNAVAILABLE` 断言；§14 提交/回滚/重放三面通知；§15 `discarded` 只在会话终态出现；
+§19 三个并发子用例（竞态 POST、同一终态并发双发、空闲扫描器抢占）。
+**Phase 4C 回归**：全量 `go test ./...`（含 `integration`）通过，Thread POST / GET / `/thread/end` / 取消拒绝 / 分页 /
+事件 / `queued→delivered` / `active⇄idle` / 空闲超时 / 取消 → `ending` / 命令投递全部未变。
+**缺口**：**G-019 拆分为 `PARTIALLY CLOSED — Thread terminal takeover complete; delivery pipeline remains Phase 5 Batch 2`**；
+新增 **G-027**（ADR 未写明活状态集合）与 **G-028**（`activeSpaceAgentRoster` 无调用者——**PRE-EXISTING** lint 基线）。
+**门禁**：`format:check` exit 0；`lint` **仅剩 1 条 PRE-EXISTING BASELINE**（G-028，在 `git archive HEAD` 未改动树上逐字相同；
+本轮新增 0 条；**未**加 `nolint`、**未**删除他人代码）；`build` exit 0；`test` 全绿（真实 PostgreSQL）；
+`test:race` exit 0 / **0 DATA RACE**；`git diff --check`（cloud 与 specs）干净；OpenAPI 与前端生成物**未变**（无 REST 形状变化）。
+**未改**：proto、任何 migration（0022 未动、无新 migration）、generated/OpenAPI、前端、任何 ADR 的语义或 `status`、
+Phase 4B/4C 既有不变量。**未提交**：无 stage / commit / push / PR / 破坏性 git 操作，cloud 与 specs 的既有未提交修改原样保留。）
+
+**更早轮次（Phase 4C COMPLETE — Final Completion Batch，保留记录）：**
+
+### 更早轮次 Phase（保留记录）
+
+`Phase 4C COMPLETE — Final Completion Batch（A2 / A3 / A4 / G-018 落地 + 最终验收）`
+
+### 更早轮次 Slice（保留记录）
+
+`Phase 4C Final Completion Batch：把人类已批准的 A2 / A3 / A4 / G-018 写入对应 approved ADR 正文并实现，随后做 Phase 4B + 4C 全量回归、Final Gate 与收口判定。`
+
+### 更早轮次状态（Phase 4C COMPLETE，保留记录）
 
 `PHASE_4C_COMPLETE`
 （本轮为 **FINAL COMPLETION BATCH**：**判定 `PHASE_4C_COMPLETE` —— 不存在已批准的 mandatory blocker**。
@@ -1659,6 +2107,15 @@ receipt / takeover 事务、proto、任何 ADR 文件或其 `status`、`specs/te
 （`GrantRevisionUpload`）、**完整 cancel API（`cancel_requested_at` 无生产写者，G-026——本仓只实现反应与读侧谓词）**、
 SSE 的客户端重连/轮询兜底（无 Thread 面板）、多实例投递（G-020）、多 worker 命令分区（G-021）、
 收据 GC / event 保留清理 / 任意 event 上限（G-015 PARTIAL）、migration README 债务（G-025）。
+> **更新（Phase 5 Batch 1 + Batch 2，2026-10-08）**：上述 roster 的**大部分已实现**，逐项取代如下 ——
+> `ending → ended` / `SessionEnded` / `queued → discarded` = **已实现**（Batch 1；G-019 = `CLOSED`）；
+> `running → delivering` = **已实现**（Batch 1）；`delivering → releasing → done`、`DeliverySettled`、
+> `RunWorkspaceDeleted`、`DeliverRevision` 的派发与执行 = **已实现**（Batch 2）；
+> **仍未实现**：`GrantRevisionUpload` 与 Revision 登记/对象校验（**G-030**，Cloud Revision ADR 仍为 `proposed`，
+> 故 `revision_delivered`/`revision_unchanged` 回 `UNAVAILABLE` + 零写入）、完整 cancel API（**G-026**，未变）、
+> SSE 客户端兜底与多实例投递（**G-020**，未变）、多 worker 命令分区（**G-021**，未变）、收据 GC / event 保留清理
+> （**G-015 PARTIAL**，未变）、migration README 债务（**G-025**，未变）。
+> 本轮**未**触碰上述任何一项（mandate §0 只记录不修）。
 **无会话取消的判别键是 `thread_state IS NULL`**（IssueRun D6 的「（尚无会话）」限定语），与 plan §4C.11 按 `phase` 的措辞不同：
 ADR 优先于 plan，偏离已登记在 `plan.md` §15 与本文件。
 
@@ -1676,6 +2133,60 @@ G-020（SSE 客户端重连 + 周期轮询义务、多实例投递与重放）�
 （Create/Delete RunWorkspace 与 `EnqueueThreadCommand` 归各自 Phase）、G-011 不在 Phase 4 顺手解决。
 **controller-session ADR 仍 `proposed`** —— 是 desktop 侧独立待批准决策，**不是** Cloud 的 blocker，
 也**不是** 4C 任何决策的前提（D-4C-01..12 的论证**不依赖**它）。
+
+### 当前 Blockers（Phase 5 Batch 2，2026-10-08）
+
+**存在 1 项已批准的 mandatory blocker** ⇒ Phase 5 Batch 2 判定 `PHASE_5_BATCH_2_BLOCKED`。
+**APPROVED MANDATORY BLOCKER**：**G-030** —— Cloud Revision ADR
+（`specs/decisions/cloud/revision/0-cloud-owned-object-store-and-verified-revisions.md`）仍为 `status: proposed`，
+故 Revision 登记 / 对象校验 / `GrantRevisionUpload` **不得实现**；`revision_delivered`/`revision_unchanged` 一律回
+`UNAVAILABLE` + **零写入**（**不**静默降级）。解除条件：人类把该 ADR 评审为 `approved`。
+**CLOSED**：**G-019**（Batch 1 的 Thread 终态半边 + Batch 2 的交付/释放/删除终态半边均已实现并有直接证据）。
+**NON-BLOCKING OPEN（本轮新增）**：**G-029**（D4 的回复注释无批准字段路径）、**G-031**（D6 的幂等身份拼写与实现的
+`(workspace_id, kind)` 偏差，**未**改 schema）、**G-032**（`releasing` 侧删除失败无放弃上限）。
+**NON-BLOCKING OPEN（状态未变，§0 只记录不修）**：**G-020**（多实例 SSE 投递与客户端重连/轮询义务）、
+**G-021**（多 worker 命令分区）、**G-025**（migration README 文档债）、**G-026**（`cancel_requested_at` 无生产写者）、
+**G-027**（`OPEN / DOCUMENTATION CLARIFICATION`——**未**自行改 ADR）、**G-028**（`PRE-EXISTING BASELINE` lint 基线，
+本仓 `task lint` 的唯一剩余项）。**G-012 / G-015 / G-001 / G-009 / G-011 状态不变。**
+
+### 上一轮 Blockers（Revision ADR Approval Round，2026-10-08，保留）
+
+**审计判定 `REVISION_ADR_NOT_READY_FOR_APPROVAL` ⇒ 该轮 `REVISION_ADR_APPROVAL_BLOCKED`。**
+**仍存在的 approved mandatory blocker**：**G-030**（未变；本轮**未**改其 `status`，**未**自行批准）。
+**新登记的 4 项批准阻塞（都属 G-030 的解除条件细化）**：
+- **B-1** Revision 行身份与幂等未定义（`id` 生成者/事务、唯一键是 `UNIQUE(run_id)` 还是 per-attempt、同键不同负载如何处置）。
+- **B-2** Object key 拼写：ADR 写 `{deliveryWorkId}`，而工作项 ID 由已冻结的 A seam 内部生成、Cloud 拿不到；
+  实现只能用 Cloud 自生成的 per-attempt id。**ADR 的字面拼写不是已交付实现的拼写。**
+- **B-3** `revision_ref` 的拼写只有 proto 前缀约束 + **node** 的 `proposed` ADR 给出，**Cloud** ADR 未定义。
+- **B-4** D1 的「缺 `object_store` ⇒ 直接 `skipped` 到 release」构成**第四个** `delete_workspace` 触发条件，与 approved
+  IssueRun **不变量 3** 冲突；且**复用**了 D6 无会话取消已占用的 `skipped`；触发点未规定、路径未实现。
+**精度补充（非阻塞）**：P-1 校验范围只含存在性/大小/SHA-256；P-2 grant TTL 内重复 `PUT` 同一键未规定；
+P-3 `unchanged` 不复用既有 Revision。
+**本轮裁定**：**G-029 = `DEFERRED / NON-BLOCKING`**（**不**为其扩 schema，明确排除在批准范围外）；
+**G-031 推荐 Option B**（`(workspace_id, kind)` + 限定未完成操作；**本轮未改 schema/ADR**）；
+**G-032 最小 proposal = IssueRun D8**（重试沿用 operation D4、上限只取不可达窗口、终态 `done` + `status` 不变 +
+`failure_reason = workspace_unavailable`；**未实现**）。
+**其他缺口状态全部未变**：G-020 / G-021 / G-025 / G-026 / G-027 / G-028 与本轮前一致；**G-019 保持 `CLOSED`**。
+**生产面**：**未改** Go / proto / migration / OpenAPI / frontend / 任何 ADR 文件或其 `status`；**未**实现任何 Revision behavior。
+
+### 当前 Blockers（Revision ADR Decision & Amendment Round，2026-10-08）
+
+**判定 `REVISION_ADR_DECISIONS_READY_FOR_HUMAN_APPROVAL` ⇒ 本轮的阻塞不再是「未定义的决策」，而是「待人类批准」。
+没有任何未收敛的歧义残留。**
+**仍存在的 approved mandatory blocker**：**G-030** —— Cloud Revision ADR 仍为 `status: proposed`（本轮**未**改其 `status`、
+**未**自行批准）。它的解除条件已从「文本不可批准」变为**明确的 5 项审批清单**（见当前状态与报告）。
+**B-1..B-4 与 P-1..P-3 全部收敛**（每项只剩一个方案），并已写入 ADR 正文；跨 ADR 变更逐项独立列出且**均未应用**：
+① Node Revision ADR 的一句回显条款；② **G-033** 的 IssueRun D5 澄清；③ **G-031** 的 operation D4 + controller-integration D6 + 核心用例各一句；
+④ **G-032** 的 IssueRun D8 + D3 阶段表 `done` 行 + 核心用例两处。
+**新登记的缺口**：**G-033**（`OPEN / CROSS-ADR CLARIFICATION`，**阻塞 B-4 的最终批准**，不阻塞本轮收敛）；
+**G-034**（`OPEN / NON-BLOCKING`，放弃后未登记的 `deliver_revision` 工作项仍可被认领 —— 认领路径无运行阶段过滤、
+`execution_work` 从无删除者；**本轮不修**）。
+**明确披露的剩余风险**：G-032 超上限后运行 Workspace **不会被自动回收**，且公开 API 对运行 Workspace 的 `delete` 恒 404
+⇒ **没有自助重清路径**，只能由人类/运维处置；**本轮未发明任何后台清理机制**；`done` 只表示「不再重试」，**不**谎报删除成功。
+**G-029 保持 `DEFERRED / NON-BLOCKING`**（**不**为其扩 schema，明确排除在批准范围外）；
+**G-019 保持 `CLOSED`**；G-020 / G-021 / G-025 / G-026 / G-027 / G-028 / G-012 / G-015 / G-001 / G-009 / G-011 状态全部未变。
+**生产面**：**未改** Go / proto / migration / OpenAPI / frontend / 测试；**未改**任何 approved ADR 的已批准决策
+（G-031 / G-032 只输出提案）；两个 `proposed` ADR 的 `status` **未改**；**未**实现任何 Revision 生产路径。
 
 ---
 
