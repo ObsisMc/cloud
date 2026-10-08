@@ -95,13 +95,25 @@ type Store struct {
 	// a safe reason, or skipped when storage is unconfigured. It runs after receipt/Revision writes.
 	OnDeliverySettled func(context.Context, *sql.Tx, string, string, Object) error
 
-	// Collaboration ports (consuming-side seams; see collaboration.go). Each is nil by default
-	// ("Unavailable"); dev/demo/integration wire the in-memory fixtures, production real adapters.
+	// Collaboration ports (consuming-side seams; see collaboration.go). NewStore wires the real
+	// workflow-backed Directory and Forms, because Cloud owns the workflow document and needs no
+	// external backend to serve those two. The remaining three stay nil ("Unavailable") until a
+	// deployment wires them: dev/demo/integration add the in-memory fixtures on top, which is why
+	// WireDevelopmentFixtures layers the Agent/Team targets in front of Directory instead of
+	// replacing it.
 	Directory  CollaborationDirectory
 	Context    ContextBuilder
 	Dispatcher ExecutionDispatcher
 	Forms      FormDescriptorProvider
 	Assist     InputAssistProvider
+
+	// Simulator is the workflow run executor under Cloud: a deterministic stand-in that
+	// walks a frozen snapshot graph and produces node_states/rounds, instead of an engine
+	// Cloud does not have. Wired by WireDevelopmentFixtures only; a production Store keeps
+	// it nil, leaving runs `pending` — the honest "no real work ran" convention issue_runs
+	// follows. A create that bumps a run straight to `succeeded` must not be possible
+	// without this port.
+	Simulator WorkflowRunSimulator
 
 	// Events broadcasts committed collaboration-space invalidation notices to live
 	// SSE subscribers. Every project belongs to its tenant's sole collaboration
@@ -113,6 +125,13 @@ type Store struct {
 	Signals *ControlHub
 }
 
+// WorkflowRunSimulator produces the execution trace for one workflow run. Cloud has no
+// engine, so only dev/demo deployments provide one; the result must never claim that real
+// work ran (see the mock's output wording).
+type WorkflowRunSimulator interface {
+	SimulateWorkflowRun(graph, input Object) (nodeStates Object, rounds []Object, status string)
+}
+
 // NewStore obtains the injected SQL pool without creating or migrating schema.
 func NewStore(db *gorm.DB) (*Store, error) {
 	if db == nil {
@@ -122,7 +141,13 @@ func NewStore(db *gorm.DB) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get database pool: %w", err)
 	}
-	return &Store{Pool: pool, Events: NewSpaceHub(), Signals: NewControlHub()}, nil
+	return &Store{
+		Pool:      pool,
+		Events:    NewSpaceHub(),
+		Signals:   NewControlHub(),
+		Directory: WorkflowDirectory{Pool: pool},
+		Forms:     WorkflowFormDescriptors{Pool: pool},
+	}, nil
 }
 
 // NewDevelopmentStore explicitly enables the retired unscoped clone test contract. Production
@@ -144,6 +169,7 @@ type transaction struct {
 	contextBuilder ContextBuilder
 	forms          FormDescriptorProvider
 	assist         InputAssistProvider
+	simulator      WorkflowRunSimulator
 	// queued names operations this transaction made claimable; they are published only after commit.
 	legacyCloneFixture    bool
 	pluginExecution       PluginExecutionCapability
@@ -262,7 +288,7 @@ func (s *Store) transact(ctx context.Context, fn func(*transaction) Object) (out
 			}
 		}
 	}()
-	t := &transaction{tx: tx, ctx: ctx, pluginExecution: s.PluginExecution, legacyCloneFixture: s.legacyCloneFixture, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist, objectStore: s.ObjectStore, onThreadEvents: s.OnThreadEvents, onSessionEnded: s.OnSessionEnded}
+	t := &transaction{tx: tx, ctx: ctx, pluginExecution: s.PluginExecution, legacyCloneFixture: s.legacyCloneFixture, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist, simulator: s.Simulator, objectStore: s.ObjectStore, onThreadEvents: s.OnThreadEvents, onSessionEnded: s.OnSessionEnded}
 	t.onRunWorkspaceSettled, t.onRunWorkspaceDeleted, t.onDeliverySettled = s.OnRunWorkspaceSettled, s.OnRunWorkspaceDeleted, s.OnDeliverySettled
 	t.exec("SELECT pg_advisory_xact_lock(67420911)")
 	out = fn(t)

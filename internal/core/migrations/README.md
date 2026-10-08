@@ -49,6 +49,11 @@
 - **`0015_plugins.sql`**：增加插件目录、空间级选择和运行时安装记录。
 - **`0016_workspace_runtime_follows_node.sql`**：停用旧存储卷与工作树创建流程，采用独立 Workspace 数据、Node 和仓库克隆初始化，保留历史记录供读取。
 - **`0017_tenant_membership_and_join.sql`**：收敛为一租户一空间，租户成员身份成为唯一权限来源；恢复项目必须归属空间的约束，空间 slug 在全平台唯一且归档后不复用；为 IDaaS 关联身份、邀请和加入申请增加持久化表。历史多空间、无空间项目、重复 slug 或租户与空间名称不一致的测试数据必须重建；迁移不会静默拆分或改名。
+- **`0027_workflows.sql`**（append-only，工作流编辑器移植）：工作流图文档 `workflows`——租户拥有的整份图（`graph jsonb`：nodes / edges / viewport / annotations / global variables），刻意只有一张表和一个图列：图是文档而不是关系聚合，没有逐节点/逐边表，也没有 draft/published 拆分。
+- **`0028_workflow_snapshots.sql`**：不可变的版本化快照 `workflow_snapshots`。发布把实时图冻结成一行并递增每个工作流的版本号，恢复把选中的快照写回实时图；快照 append-only，一次编辑不会重写任何历史版本。
+- **`0029_workflow_runs.sql`**：一次执行对应一个冻结快照的 `workflow_runs`。运行视图只需要快照图（画布）与逐节点状态（着色），图本身经 `snapshot_id` 从 `workflow_snapshots.graph` 读取而不复制。Cloud 没有工作流引擎：新建的运行停在 `pending`，只有经 `Store.WorkflowRunSimulator` 显式接入的开发夹具才会推进状态——与 `issue_runs` 一样，绝不谎称真实执行发生过。
+
+> 编号说明：这三个迁移原为 `0014–0016`，与 upstream 的同号迁移（`0014_clone_coordination` / `0015_plugins` / `0016_workspace_runtime_follows_node`）撞号，合入 `upstream/main` 时按 append-only 规则顺延到 `0024–0026`；随后 upstream 又追加了自己的 `0024_agent_run_control_plane` / `0025_agent_control_integrity` / `0026_run_runtime_control`，于是再顺延到 `0027–0029`，排在 `0026` 之后。`schema_migrations.version` 是**完整文件名**，所以每次重命名都会改变迁移身份：已经跑过旧名字的数据库必须重建或手工改 `schema_migrations`，否则 `CheckSchema` 会以「内嵌迁移缺失」拒绝启动。
 
 ## 校验和完整性与不可变性
 

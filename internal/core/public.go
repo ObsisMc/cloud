@@ -11,11 +11,16 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // PublicRequest is populated only after service and final-user credentials are verified.
 type PublicRequest struct {
-	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, CloneID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, InteractionID, FormRef, InvitationID, JoinLinkID, JoinRequestID, Key, After, Query, GroupBy string
-	Limit                                                                                                                                                                                                                                                  int
-	Body                                                                                                                                                                                                                                                   Object
-	Identity                                                                                                                                                                                                                                               *Claims
-	Person                                                                                                                                                                                                                                                 *DirectoryPerson
+	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, CloneID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, InteractionID, WorkflowID, SnapshotID, FormRef, InvitationID, JoinLinkID, JoinRequestID, Key, After, Query, GroupBy string
+	// FormIssueID is the optional `issueId` query parameter of the form-descriptor route. It is
+	// deliberately its own field rather than a fallback into IssueID: IssueID drives dispatch in both
+	// readPublic and Public, so a query parameter folded into it would let `GET /issues?issueId=…`
+	// hijack routing.
+	FormIssueID string
+	Limit       int
+	Body        Object
+	Identity    *Claims
+	Person      *DirectoryPerson
 }
 
 // Public executes one authorized public request in a short database transaction.
@@ -272,6 +277,26 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 			default:
 				reject(404, "not_found")
 			}
+		case strings.Contains(r.Path, "/workflows"):
+			switch {
+			case strings.HasSuffix(r.Path, "/runs"):
+				out = Object{"resource": createWorkflowRun(t, r)}
+			case strings.HasSuffix(r.Path, "/publish"):
+				out = Object{"resource": publishWorkflow(t, r)}
+			case strings.HasSuffix(r.Path, "/restore"):
+				out = restoreWorkflowSnapshot(t, r)
+			default:
+				switch r.Method {
+				case "POST":
+					out = Object{"resource": createWorkflow(t, r)}
+				case "PUT":
+					out = updateWorkflow(t, r)
+				case "DELETE":
+					out = deleteWorkflow(t, r)
+				default:
+					reject(404, "not_found")
+				}
+			}
 		default:
 			reject(404, "not_found")
 		}
@@ -371,6 +396,14 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 		return listSpaces(t, r, uid)
 	case strings.HasSuffix(r.Path, "/members"):
 		return page(t, "SELECT m.user_id AS id,m.tenant_id,m.user_id,m.role,m.status,m.version,u.display_name FROM tenant_memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1", []any{r.TenantID}, "m.user_id", r)
+	case r.WorkflowID != "" && (r.RunID != "" || strings.HasSuffix(r.Path, "/runs")):
+		// Workflow runs resolve here, before the generic issue-`/runs` case below: that case
+		// matches any path containing "/runs", so .../workflows/:wfid/runs would otherwise be
+		// swallowed with an empty IssueID and die a 404.
+		if r.RunID != "" {
+			return workflowRun(t, r.TenantID, r.WorkflowID, r.RunID)
+		}
+		return workflowRunList(t, r)
 	case strings.Contains(r.Path, "/runs"):
 		if r.RunID != "" {
 			return run(t, r.TenantID, r.IssueID, r.RunID)
@@ -406,6 +439,17 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 		return issueList(t, r)
 	case strings.HasSuffix(r.Path, "/resource-status"):
 		return page(t, "SELECT w.id,w.project_id,w.owner_user_id,w.kind,w.desired_state,w.observed_state,w.runtime_generation,w.version FROM workspaces w WHERE w.tenant_id=$1 AND w.deleted_at IS NULL AND w.issue_run_id IS NULL", []any{r.TenantID}, "w.id", r)
+	case strings.Contains(r.Path, "/workflows"):
+		if r.SnapshotID != "" {
+			return workflowSnapshot(t, r.TenantID, r.WorkflowID, r.SnapshotID)
+		}
+		if r.WorkflowID == "" {
+			return workflowList(t, r)
+		}
+		if strings.HasSuffix(r.Path, "/snapshots") {
+			return workflowSnapshotList(t, r)
+		}
+		return workflow(t, r.TenantID, r.WorkflowID)
 	case r.OperationID != "":
 		return ownedOperation(t, r, uid)
 	case r.WorkspaceID != "" && strings.HasSuffix(r.Path, "/control"):
