@@ -193,14 +193,22 @@ func writeObject(path string, o core.Object) error {
 }
 
 func git(ctx context.Context, args ...string) (string, error) {
-	args = append([]string{"-c", "core.longpaths=true"}, args...)
-	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204,G702 -- simulator helper executing git fixture operations.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1")
+	cmd := gitCommand(ctx, args...)
 	b, e := cmd.CombinedOutput()
 	if e != nil {
 		return "", fmt.Errorf("git command failed: %w: %s", e, b)
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+// gitCommand applies the simulator's process policy without mutating repository configuration.
+func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	// Git may detach automatic maintenance even below GC thresholds, leaving a writer behind
+	// after CombinedOutput returns. Simulator lifecycle and TempDir cleanup own these repositories.
+	args = append([]string{"-c", "core.longpaths=true", "-c", "maintenance.auto=false", "-c", "gc.auto=0"}, args...)
+	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204,G702 -- simulator helper executing git fixture operations.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1")
+	return cmd
 }
 func exists(path string) bool { _, e := os.Stat(path); return e == nil }
 
