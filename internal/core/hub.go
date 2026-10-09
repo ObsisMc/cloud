@@ -4,11 +4,21 @@ import "sync"
 
 // SpaceEvent is a lightweight invalidation notice broadcast after commit.
 // Clients refetch authoritative state over REST; events never carry it.
+//
+// IssueID/RunID/LastSeq belong to the one event that addresses a single resource rather than a
+// whole space — `issue_run.thread_appended` (Thread D5, plan §4C.7/§4C.8). They are additive and
+// omitted when empty, so every event that predates them serializes to the same bytes it did before
+// (`project.created`'s ProjectID is the precedent). An event still never carries business state:
+// LastSeq says only "there is data at or below this seq", never which entries exist, and it never
+// advances a client's cursor — only the Thread GET does that.
 type SpaceEvent struct {
 	Type      string `json:"type"`
 	SpaceID   string `json:"spaceId"`
 	ProjectID string `json:"projectId,omitempty"`
 	Version   int64  `json:"version,omitempty"`
+	IssueID   string `json:"issueId,omitempty"`
+	RunID     string `json:"runId,omitempty"`
+	LastSeq   int64  `json:"lastSeq,omitempty"`
 }
 
 // SpaceHub fans committed workspace events out to live subscribers.
@@ -44,7 +54,12 @@ func (h *SpaceHub) Subscribe(spaceID string) (events <-chan SpaceEvent, cancel f
 }
 
 // Publish delivers without blocking; a slow subscriber drops stale events and
-// is refreshed by the next mutation or an explicit refetch.
+// is refreshed by the next mutation or an explicit refetch. The notice is taken
+// by value on purpose: `ch <- e` copies it into each subscriber's buffer, so a
+// publisher that reuses its own SpaceEvent can never race with a reader, while a
+// pointer would alias one struct across every subscriber channel.
+//
+//nolint:gocritic // by value on purpose, see above: each subscriber gets its own copy.
 func (h *SpaceHub) Publish(e SpaceEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -61,6 +76,8 @@ func (h *SpaceHub) Publish(e SpaceEvent) {
 // same non-blocking delivery as Publish. MVP single-instance facility; a
 // multi-instance deployment replaces it with a broker behind the same
 // PublishAll/Subscribe boundary.
+//
+//nolint:gocritic // by value for the same reason as Publish: every subscriber gets its own copy.
 func (h *SpaceHub) PublishAll(e SpaceEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

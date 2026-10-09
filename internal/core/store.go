@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -115,6 +116,22 @@ type Store struct {
 	// without this port.
 	Simulator WorkflowRunSimulator
 
+	// ThreadIdleTimeout is how long a Thread may sit `idle` before Cloud asks the session to end
+	// (Thread D4's idle window). It is a deployment configuration value, not a column, and it is
+	// judged entirely on the database clock. Zero (the zero-value Store) means the idle path is not
+	// configured: the scan is a no-op rather than a zero-length window that would end every Thread
+	// the moment it went idle.
+	ThreadIdleTimeout time.Duration
+
+	// DeliveryGiveUpAfter and DeliveryUnreachableAfter are IssueRun D5's two first-version give-up
+	// limits for a Revision delivery: how long delivery may fail continuously before Cloud abandons
+	// it, and how long the run Workspace's Node may be unreachable before Cloud does the same. They
+	// are deployment configuration values, not columns, and both are judged entirely on the database
+	// clock. Zero (the zero-value Store) means that condition never gives up, so the scan is a no-op
+	// rather than a zero-length window that would abandon every delivery the moment it was declared.
+	DeliveryGiveUpAfter      time.Duration
+	DeliveryUnreachableAfter time.Duration
+
 	// Events broadcasts committed collaboration-space invalidation notices to live
 	// SSE subscribers. Every project belongs to its tenant's sole collaboration
 	// space; current tenant membership gates visibility and authorization.
@@ -164,6 +181,10 @@ func NewDevelopmentStore(db *gorm.DB) (*Store, error) {
 type transaction struct {
 	tx  *sql.Tx
 	ctx context.Context
+	// store is the Store that opened this transaction. The B-side business hooks are invoked with
+	// the raw handle and need their way back to the owning Store's policy; carrying it here keeps
+	// that lookup from becoming another context value.
+	store *Store
 	// collaboration ports shadowed from the Store so transaction-scoped helpers can use them.
 	directory      CollaborationDirectory
 	contextBuilder ContextBuilder
@@ -288,8 +309,13 @@ func (s *Store) transact(ctx context.Context, fn func(*transaction) Object) (out
 			}
 		}
 	}()
-	t := &transaction{tx: tx, ctx: ctx, pluginExecution: s.PluginExecution, legacyCloneFixture: s.legacyCloneFixture, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist, simulator: s.Simulator, objectStore: s.ObjectStore, onThreadEvents: s.OnThreadEvents, onSessionEnded: s.OnSessionEnded}
+	t := &transaction{tx: tx, ctx: ctx, store: s, pluginExecution: s.PluginExecution, legacyCloneFixture: s.legacyCloneFixture, directory: s.Directory, contextBuilder: s.Context, forms: s.Forms, assist: s.Assist, simulator: s.Simulator, objectStore: s.ObjectStore, onThreadEvents: s.OnThreadEvents, onSessionEnded: s.OnSessionEnded}
 	t.onRunWorkspaceSettled, t.onRunWorkspaceDeleted, t.onDeliverySettled = s.OnRunWorkspaceSettled, s.OnRunWorkspaceDeleted, s.OnDeliverySettled
+	// Publish this transaction to the B-side hooks, which the seams below invoke with the *sql.Tx
+	// alone. Without it a hook could only wrap the handle in a second transaction view, and every
+	// enqueue, Thread entry and post-commit hint it produced would be collected in a set that is
+	// discarded when the control plane's own transaction commits. See businessTransaction.
+	t.ctx = context.WithValue(t.ctx, businessTransactionKey{}, t)
 	t.exec("SELECT pg_advisory_xact_lock(67420911)")
 	out = fn(t)
 	if err = tx.Commit(); err == nil {

@@ -7,6 +7,12 @@ import (
 	"github.com/wanglongan587/cloud/internal/objectstore"
 )
 
+// revisionVerificationFailure is the reason Cloud records on its own verdict when the declared
+// objects could not be confirmed. It is Cloud's word, never a Node's: the wire's closed set
+// deliberately excludes it so a Node cannot assert Cloud's verification outcome about objects Cloud
+// has not looked at. The business settlement recognizes it as the one reason outside that set.
+const revisionVerificationFailure = "verification_failed"
+
 type revisionVerification struct {
 	input string
 	valid bool
@@ -102,7 +108,7 @@ func settleVerifiedRevision(t *transaction, r *ControlRequest, e Object) {
 	}
 	var reason any
 	if !verification.valid {
-		outcome, reason = "failed", "verification_failed"
+		outcome, reason = "failed", revisionVerificationFailure
 	}
 	t.exec("INSERT INTO revision_verifications(execution_id,outcome,reason) VALUES($1,$2,$3)", e.S("executionId"), outcome, reason)
 	settled := Object{"outcome": outcome}

@@ -23,7 +23,32 @@ type Config struct {
 	Directory     DirectoryConfig     `mapstructure:"directory"`
 	Control       ControlConfig       `mapstructure:"control"`
 	Plugins       PluginConfig        `mapstructure:"plugins"`
+	IssueRuns     IssueRunsConfig     `mapstructure:"issue_runs"`
 	ObjectStore   ObjectStoreConfig   `mapstructure:"object_store"`
+}
+
+// IssueRunsConfig holds the Thread lifecycle policy that belongs to Cloud's own dispatch loop
+// rather than to any individual run (IssueRun B side). Leaf keys are bound to CLOUD_ISSUE_RUNS_*
+// environment overrides like every other section.
+type IssueRunsConfig struct {
+	// ThreadIdleTimeout is Thread D4's idle window: how long a Thread may sit `idle` before Cloud
+	// asks the session to end. It is a duration configured per deployment, never a per-run column,
+	// and the comparison that judges it runs on database time — no Cloud, Controller or Node process
+	// clock decides that a Thread is idle. Zero or negative selects the approved default (15 minutes)
+	// rather than a zero-length window that would end every Thread the moment it went idle.
+	ThreadIdleTimeout time.Duration `mapstructure:"thread_idle_timeout"`
+
+	// DeliveryGiveUpAfter is IssueRun D5's continuous-delivery-failure window: how long a Revision
+	// delivery may keep failing before Cloud abandons it and releases the run's Workspace. It is the
+	// limit that keeps a Workspace from being held indefinitely by a delivery that will never
+	// succeed. Zero or negative selects the approved default (2 hours).
+	DeliveryGiveUpAfter time.Duration `mapstructure:"delivery_give_up_after"`
+
+	// DeliveryUnreachableAfter is IssueRun D5's unreachability window: how long the run Workspace's
+	// Node may be unreachable before Cloud treats it as gone and closes the run out in the G-032
+	// give-up path, without waiting out the full failure window. Zero or negative selects the
+	// approved default (30 minutes).
+	DeliveryUnreachableAfter time.Duration `mapstructure:"delivery_unreachable_after"`
 }
 
 // PluginConfig is the cloud-side plugin marketplace configuration. Leaf keys
@@ -130,9 +155,35 @@ func Load(configPath string) (*Config, error) {
 	if err := validatePlugins(cfg.Plugins); err != nil {
 		return nil, err
 	}
+	// Thread D4's approved default. Applied here rather than left at the zero value so an operator
+	// who omits the key (or sets a nonsensical value) gets the approved window instead of a
+	// zero-length one that would end every idle Thread immediately.
+	if cfg.IssueRuns.ThreadIdleTimeout <= 0 {
+		cfg.IssueRuns.ThreadIdleTimeout = DefaultThreadIdleTimeout
+	}
+	// IssueRun D5's two approved defaults, applied for the same reason: an operator who omits the keys
+	// gets the limits the decision fixes, not a zero-length window that would abandon every delivery
+	// immediately.
+	if cfg.IssueRuns.DeliveryGiveUpAfter <= 0 {
+		cfg.IssueRuns.DeliveryGiveUpAfter = DefaultDeliveryGiveUpAfter
+	}
+	if cfg.IssueRuns.DeliveryUnreachableAfter <= 0 {
+		cfg.IssueRuns.DeliveryUnreachableAfter = DefaultDeliveryUnreachableAfter
+	}
 
 	return &cfg, nil
 }
+
+// DefaultThreadIdleTimeout is Thread D4's first-version idle window, applied when
+// issue_runs.thread_idle_timeout is absent or not positive.
+const DefaultThreadIdleTimeout = 15 * time.Minute
+
+// DefaultDeliveryGiveUpAfter and DefaultDeliveryUnreachableAfter are IssueRun D5's first-version
+// give-up limits, applied when the corresponding key is absent or not positive.
+const (
+	DefaultDeliveryGiveUpAfter      = 2 * time.Hour
+	DefaultDeliveryUnreachableAfter = 30 * time.Minute
+)
 
 // validatePlugins enforces the plugin marketplace configuration contract. An
 // empty section is legal while sync is disabled; once sync is enabled the

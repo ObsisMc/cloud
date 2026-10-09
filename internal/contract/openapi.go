@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/wanglongan587/cloud/internal/api/router"
+	"github.com/wanglongan587/cloud/internal/core"
 )
 
 type obj = map[string]any
@@ -145,6 +146,21 @@ func Document() map[string]any {
 	runProps["externalExecutionId"] = str()
 	runProps["executionContextRef"] = optional(uuid())
 	runProps["workflowInvocationRef"] = optional(uuid())
+	// ThreadEntry is one ordered record of an Agent run's Thread (Thread D1/D2/D3). `seq` is the
+	// run-scoped conversation order, starting at 1 and gapless; `record` is the verbatim ora-history
+	// line, which Cloud stores and returns without ever rewriting it. `turnId` and `status` describe
+	// the per-turn lifecycle and exist only for a user turn — a `queued` entry becomes `delivered`
+	// when the Node echoes that turn_id — so Node and system entries carry neither. The Node's own
+	// execution id and sequence are deliberately not part of this resource.
+	s["ThreadEntry"] = object(obj{
+		"seq":       obj{"type": "integer", "format": "int64", "minimum": 1},
+		"source":    enumeration("node", "user", "system"),
+		"kind":      str(),
+		"record":    obj{"type": "object", "additionalProperties": true},
+		"turnId":    optional(uuid()),
+		"status":    optional(obj{"type": "string", "enum": []string{"queued", "delivered", "discarded"}, "nullable": true, "description": "User-turn lifecycle. Null for node and system entries."}),
+		"createdAt": timestamp(),
+	}, "seq", "source", "kind", "record", "createdAt")
 	s["ContextRef"] = resource("id tenantId issueId refType refId createdAt", "")
 	contextRefProps := properties(s, "ContextRef")
 	contextRefProps["refType"] = contextRefTypeEnum()
@@ -316,6 +332,15 @@ func Document() map[string]any {
 		}
 		if isList(r) {
 			parameters = append(parameters, obj{"name": "limit", "in": "query", "schema": obj{"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}, obj{"name": "after", "in": "query", "schema": uuid(), "description": "Exclusive UUID cursor, ascending stable ordering."})
+		}
+		if r.Method == "GET" && r.Path == router.ThreadPath {
+			// The Thread read has its own cursor vocabulary and window: `seq` is a decimal
+			// conversation position, not a UUID, and D5 caps the window at 500 rather than the
+			// shared 100. All three parameters are described in full in the operation description.
+			parameters = append(parameters,
+				obj{"name": "limit", "in": "query", "schema": obj{"type": "integer", "minimum": 1, "maximum": core.ThreadPageLimit, "default": core.ThreadPageDefault}},
+				obj{"name": "after", "in": "query", "schema": obj{"type": "integer", "format": "int64", "minimum": 0}, "description": "Forward Thread seq cursor: the window starts after this seq. Mutually exclusive with before; neither cursor reads the tail."},
+				obj{"name": "before", "in": "query", "schema": obj{"type": "integer", "format": "int64", "minimum": 0}, "description": "Backward Thread seq cursor: the window ends just before this seq, taking the entries closest to it from below. Mutually exclusive with after."})
 		}
 		if strings.Contains(r.Path, "/collaboration/forms/") {
 			// Optional, and absent by default: a caller that omits it gets the descriptor without the
@@ -583,6 +608,28 @@ func responseSchema(r router.Route) (schema obj, status string) {
 			return object(obj{"resource": ref("Label")}, "resource"), "200"
 		}
 		return ref("Label"), "200"
+	case strings.HasSuffix(r.Path, "/thread/messages"):
+		// Appending a user turn returns the entry it created, not the run: the caller already has
+		// the run and the message is the new resource.
+		return object(obj{"resource": ref("ThreadEntry")}, "resource"), "201"
+	case strings.HasSuffix(r.Path, "/thread/end"):
+		// Ending a Thread returns the Thread's new state, not a resource: the endpoint creates
+		// nothing to point at, and the caller's next move is to watch `threadState` reach `ended`.
+		// 202 because the request is accepted for asynchronous shutdown — the session is asked to
+		// stop, it has not stopped.
+		return object(obj{"threadState": enumeration("ending")}, "threadState"), "202"
+	case strings.HasSuffix(r.Path, "/thread"):
+		// Reading a Thread returns one ascending-by-seq window of entries plus the run's Thread
+		// state and idle instant, all from one snapshot. `threadState` and `idleSince` are projected
+		// here rather than read off the run resource, which keeps stripping these columns from
+		// IssueRun (T4C-10). The window's cursors are nullable because an empty Thread has neither.
+		return object(obj{
+			"items":       array(ref("ThreadEntry")),
+			"threadState": enumeration("pending", "active", "idle", "ending", "ended"),
+			"idleSince":   obj{"type": "string", "format": "date-time", "nullable": true, "description": "When the Thread became idle; null in every other state."},
+			"nextCursor":  obj{"type": "integer", "format": "int64", "nullable": true, "description": "The window's last seq, to be sent back as `after`. Null for an empty window."},
+			"prevCursor":  obj{"type": "integer", "format": "int64", "nullable": true, "description": "The window's first seq, to be sent back as `before`. Null for an empty window."},
+		}, "items", "threadState", "idleSince", "nextCursor", "prevCursor"), "200"
 	case strings.Contains(r.Path, "/runs"):
 		if r.Method == "GET" && strings.HasSuffix(r.Path, "/runs") {
 			return object(obj{"items": array(ref("IssueRun")), "nextCursor": str()}, "items", "nextCursor"), "200"
@@ -770,6 +817,11 @@ func inputSchema(name string, r router.Route) obj {
 		return uuid()
 	case "targets":
 		return array(object(obj{"type": enumeration("user", "agent", "team", "workflow"), "id": uuid(), "task": str()}, "type", "id"))
+	case "content":
+		// Thread D3 message content. v1 defines exactly one block type, so the enum is the whole
+		// vocabulary rather than an open string, and the 64 KiB bound is on the total text — a
+		// property of the whole array, which OpenAPI cannot express per-property.
+		return array(object(obj{"type": enumeration("text"), "text": str()}, "type", "text"))
 	}
 	return str()
 }
@@ -838,6 +890,21 @@ func description(r router.Route) string {
 	}
 	if strings.Contains(r.Path, "/clones") {
 		base += "Unscoped clone submission is retired in production and returns 410 runtime_scope_required; existing requests remain readable by their original submitter. An explicit development store can exercise the legacy coordination fixture without enabling a production bypass. requestId is the caller's durable request identity: repeating it with the same repository and branch returns the original request, a different input is 409 idempotency_conflict. repository must be an https or ssh URL the Controller can clone; branch is a short branch name, never HEAD. executionId and nodeId are null until a dispatch is recorded; a pending state means awaiting reconciliation, never failure. "
+	}
+	if strings.HasSuffix(r.Path, "/thread/messages") {
+		// The Thread POST's own fault vocabulary. It is stated here rather than added to the shared
+		// per-status descriptions, which every unrelated route also carries.
+		base += "Appends one user turn to an agent run's Thread and returns the entry that was created, with the Cloud-generated turnId the Node will echo back. Authorized like a comment: any active tenant member who can read the Issue. content accepts text blocks only and their total text must not exceed 64 KiB, otherwise 400 content_too_large; an unrecognized block type is 400 invalid_field_type, never a silent drop. Accepted while the Thread is pending, active or idle and no cancellation has been requested; a Thread that is ending or ended, and a run whose cancellation request is already recorded, both answer 409 thread_closed — a turn accepted after a cancellation would be persisted and never executed. The entry and the delivery command for it commit together with the idempotency record, so a failure anywhere in that transaction leaves nothing behind and the same key may be retried as a first request. A missing or mismatched tenant, Issue or run is 404 not_found. "
+	}
+	if strings.HasSuffix(r.Path, "/thread/end") {
+		// The user-initiated end's own fault vocabulary, stated here rather than in the shared
+		// per-status descriptions that unrelated routes also carry.
+		base += "Ends an agent run's Thread at the user's request, which is what makes the Thread's upper lifecycle reachable from the UI rather than only from an expired idle window or a cancellation. The body is an empty JSON object and any field is 400 unknown_field. Accepted while the Thread is pending, active or idle, answering 202 with the Thread's new state ending; a Thread already ending or ended answers 409 thread_closed. The transition and the EndSession command it releases commit together with the idempotency record, so a failure anywhere in that transaction leaves nothing behind and the same key may be retried as a first request. This endpoint never advances the Thread to ended, never marks a queued turn discarded and never touches the run's phase, status, result or Workspace: ending a Thread asks the session to stop and the session's own terminal state decides what follows. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. "
+	}
+	if strings.HasSuffix(r.Path, "/thread") {
+		// The Thread GET's own fault vocabulary and cursor semantics, stated here rather than in the
+		// shared per-status descriptions that unrelated routes also carry.
+		base += "Reads one ascending-by-seq window of an agent run's Thread together with the run's threadState and idleSince, all taken from one database snapshot, so the entries and the state are never mixed across instants. after and before are exclusive decimal seq cursors in opposite directions and are mutually exclusive: after=0 reads from the first entry, before=N returns the entries closest to N from below, and sending both is 400 invalid_pagination. Sending neither reads the tail — the newest limit entries — which is the window a panel opening on a live conversation wants. The response is always ascending by seq whichever cursor was used, and it reports the window's own nextCursor and prevCursor so a client pages in both directions by feeding each back as after and before. limit defaults to 200 and must not exceed 500; a limit outside 1..500 is 400 invalid_pagination and a cursor that is not a non-negative decimal integer is 400 invalid_cursor. Windows are chosen by seq range, never by OFFSET, so a concurrent append neither shifts a page nor duplicates an entry; entries are append-only and seq is gapless, so a client that re-reads with after set to its highest seen seq never misses or repeats an entry. There is no cross-request snapshot guarantee. This read changes nothing: it allocates no seq, writes no state and publishes no event. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. "
 	}
 	if strings.Contains(r.Path, "members") && !strings.Contains(r.Path, "/spaces") {
 		if r.Method == "GET" {

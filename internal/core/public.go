@@ -11,7 +11,7 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // PublicRequest is populated only after service and final-user credentials are verified.
 type PublicRequest struct {
-	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, CloneID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, InteractionID, WorkflowID, SnapshotID, FormRef, InvitationID, JoinLinkID, JoinRequestID, Key, After, Query, GroupBy string
+	Method, Path, TenantID, ProjectID, WorkspaceID, SpaceID, OperationID, CloneID, UserID, IssueID, CommentID, LabelID, StatusID, ViewID, RunID, ContextRefID, InteractionID, WorkflowID, SnapshotID, FormRef, InvitationID, JoinLinkID, JoinRequestID, Key, After, Before, Query, GroupBy string
 	// FormIssueID is the optional `issueId` query parameter of the form-descriptor route. It is
 	// deliberately its own field rather than a fallback into IssueID: IssueID drives dispatch in both
 	// readPublic and Public, so a query parameter folded into it would let `GET /issues?issueId=…`
@@ -180,6 +180,20 @@ func (s *Store) Public(ctx context.Context, r *PublicRequest) (Object, int, erro
 			}
 		case r.IssueID != "" || strings.HasSuffix(r.Path, "/issues"):
 			switch {
+			case strings.HasSuffix(r.Path, "/thread/messages"):
+				// Thread D3: appending a user turn. Matched before the /runs arm because the path
+				// contains "/runs/" too, and the thread sub-resource is a different write.
+				require(r.Method == "POST", 404, "not_found")
+				out = Object{"resource": appendThreadMessage(t, s, r, uid)}
+				status = 201
+			case strings.HasSuffix(r.Path, "/thread/end"):
+				// Thread D4 (G-018): the user ending the conversation. Also matched before the /runs
+				// arm, and answered 202 because the request is accepted for asynchronous shutdown —
+				// the Thread is `ending`, not `ended`. The response is the Thread state itself rather
+				// than a wrapped resource: the endpoint creates no new resource to point at.
+				require(r.Method == "POST", 404, "not_found")
+				out = endThreadByUser(t, s, r)
+				status = 202
 			case strings.Contains(r.Path, "/runs"):
 				switch r.Method {
 				case "POST":
@@ -396,6 +410,11 @@ func readPublic(t *transaction, r *PublicRequest, uid string) Object {
 		return listSpaces(t, r, uid)
 	case strings.HasSuffix(r.Path, "/members"):
 		return page(t, "SELECT m.user_id AS id,m.tenant_id,m.user_id,m.role,m.status,m.version,u.display_name FROM tenant_memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1", []any{r.TenantID}, "m.user_id", r)
+	case strings.HasSuffix(r.Path, "/thread"):
+		// Thread D5: reading a run's Thread. Matched before the /runs arm below because the path
+		// contains "/runs/" too and this is a different resource — the Thread, not the run. The POST
+		// side is dispatched in Public before readPublic; this arm is the GET.
+		return threadRead(t, r)
 	case r.WorkflowID != "" && (r.RunID != "" || strings.HasSuffix(r.Path, "/runs")):
 		// Workflow runs resolve here, before the generic issue-`/runs` case below: that case
 		// matches any path containing "/runs", so .../workflows/:wfid/runs would otherwise be

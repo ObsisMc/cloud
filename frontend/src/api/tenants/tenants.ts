@@ -59,6 +59,8 @@ import type {
   GetApiV1TenantsTidIssuesIidLabelsParams,
   GetApiV1TenantsTidIssuesIidRuns200,
   GetApiV1TenantsTidIssuesIidRunsParams,
+  GetApiV1TenantsTidIssuesIidRunsRidThread200,
+  GetApiV1TenantsTidIssuesIidRunsRidThreadParams,
   GetApiV1TenantsTidIssuesIidSubscribers200,
   GetApiV1TenantsTidIssuesIidSubscribersParams,
   GetApiV1TenantsTidIssuesIidTimeline200,
@@ -105,6 +107,10 @@ import type {
   PostApiV1TenantsTidIssuesIidMoveBody,
   PostApiV1TenantsTidIssuesIidRuns200,
   PostApiV1TenantsTidIssuesIidRunsBody,
+  PostApiV1TenantsTidIssuesIidRunsRidThreadEnd202,
+  PostApiV1TenantsTidIssuesIidRunsRidThreadEndBody,
+  PostApiV1TenantsTidIssuesIidRunsRidThreadMessages201,
+  PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody,
   PostApiV1TenantsTidIssuesIidSubscribers200,
   PostApiV1TenantsTidIssuesIidSubscribersBody,
   PostApiV1TenantsTidJoinLinksBody,
@@ -3379,6 +3385,263 @@ export function useGetApiV1TenantsTidIssuesIidRunsRid<TData = Awaited<ReturnType
 
 
 /**
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Reads one ascending-by-seq window of an agent run's Thread together with the run's threadState and idleSince, all taken from one database snapshot, so the entries and the state are never mixed across instants. after and before are exclusive decimal seq cursors in opposite directions and are mutually exclusive: after=0 reads from the first entry, before=N returns the entries closest to N from below, and sending both is 400 invalid_pagination. Sending neither reads the tail — the newest limit entries — which is the window a panel opening on a live conversation wants. The response is always ascending by seq whichever cursor was used, and it reports the window's own nextCursor and prevCursor so a client pages in both directions by feeding each back as after and before. limit defaults to 200 and must not exceed 500; a limit outside 1..500 is 400 invalid_pagination and a cursor that is not a non-negative decimal integer is 400 invalid_cursor. Windows are chosen by seq range, never by OFFSET, so a concurrent append neither shifts a page nor duplicates an entry; entries are append-only and seq is gapless, so a client that re-reads with after set to its highest seen seq never misses or repeats an entry. There is no cross-request snapshot guarantee. This read changes nothing: it allocates no seq, writes no state and publishes no event. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary GET /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread
+ */
+export const getApiV1TenantsTidIssuesIidRunsRidThread = (
+    tid: string,
+    iid: string,
+    rid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsRidThreadParams,
+ options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
+) => {
+
+
+      return customInstance<GetApiV1TenantsTidIssuesIidRunsRidThread200>(
+      {url: `/api/v1/tenants/${tid}/issues/${iid}/runs/${rid}/thread`, method: 'GET',
+        params, signal
+    },
+      options);
+    }
+
+
+
+
+export const getGetApiV1TenantsTidIssuesIidRunsRidThreadQueryKey = (tid: string,
+    iid: string,
+    rid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsRidThreadParams,) => {
+    return [
+    `/api/v1/tenants/${tid}/issues/${iid}/runs/${rid}/thread`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetApiV1TenantsTidIssuesIidRunsRidThreadQueryOptions = <TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError = ErrorType<Error>>(tid: string,
+    iid: string,
+    rid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsRidThreadParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetApiV1TenantsTidIssuesIidRunsRidThreadQueryKey(tid,iid,rid,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>> = ({ signal }) => getApiV1TenantsTidIssuesIidRunsRidThread(tid,iid,rid,params, requestOptions, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: tid !== null && tid !== undefined && iid !== null && iid !== undefined && rid !== null && rid !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetApiV1TenantsTidIssuesIidRunsRidThreadQueryResult = NonNullable<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>>
+export type GetApiV1TenantsTidIssuesIidRunsRidThreadQueryError = ErrorType<Error>
+
+
+export function useGetApiV1TenantsTidIssuesIidRunsRidThread<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError = ErrorType<Error>>(
+ tid: string,
+    iid: string,
+    rid: string,
+    params: undefined |  GetApiV1TenantsTidIssuesIidRunsRidThreadParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>,
+          TError,
+          Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApiV1TenantsTidIssuesIidRunsRidThread<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError = ErrorType<Error>>(
+ tid: string,
+    iid: string,
+    rid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsRidThreadParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>,
+          TError,
+          Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApiV1TenantsTidIssuesIidRunsRidThread<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError = ErrorType<Error>>(
+ tid: string,
+    iid: string,
+    rid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsRidThreadParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary GET /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread
+ */
+
+export function useGetApiV1TenantsTidIssuesIidRunsRidThread<TData = Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError = ErrorType<Error>>(
+ tid: string,
+    iid: string,
+    rid: string,
+    params?: GetApiV1TenantsTidIssuesIidRunsRidThreadParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiV1TenantsTidIssuesIidRunsRidThread>>, TError, TData>>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetApiV1TenantsTidIssuesIidRunsRidThreadQueryOptions(tid,iid,rid,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+/**
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Ends an agent run's Thread at the user's request, which is what makes the Thread's upper lifecycle reachable from the UI rather than only from an expired idle window or a cancellation. The body is an empty JSON object and any field is 400 unknown_field. Accepted while the Thread is pending, active or idle, answering 202 with the Thread's new state ending; a Thread already ending or ended answers 409 thread_closed. The transition and the EndSession command it releases commit together with the idempotency record, so a failure anywhere in that transaction leaves nothing behind and the same key may be retried as a first request. This endpoint never advances the Thread to ended, never marks a queued turn discarded and never touches the run's phase, status, result or Workspace: ending a Thread asks the session to stop and the session's own terminal state decides what follows. Authorized like a comment: any active tenant member who can read the Issue; a missing or mismatched tenant, Issue or run, a soft-deleted run, a run that is not an agent run, and a run whose session has not been declared yet are all 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary POST /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/end
+ */
+export const postApiV1TenantsTidIssuesIidRunsRidThreadEnd = (
+    tid: string,
+    iid: string,
+    rid: string,
+    postApiV1TenantsTidIssuesIidRunsRidThreadEndBody: PostApiV1TenantsTidIssuesIidRunsRidThreadEndBody,
+ options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
+) => {
+
+
+      return customInstance<PostApiV1TenantsTidIssuesIidRunsRidThreadEnd202>(
+      {url: `/api/v1/tenants/${tid}/issues/${iid}/runs/${rid}/thread/end`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: postApiV1TenantsTidIssuesIidRunsRidThreadEndBody, signal
+    },
+      options);
+    }
+
+
+
+
+export const getPostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationKey = () => ['postApiV1TenantsTidIssuesIidRunsRidThreadEnd'] as const;
+
+export const getPostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadEnd>>, TError,PostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadEnd>>, TError,PostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationVariables, TContext> => {
+
+const mutationKey = getPostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadEnd>>, PostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationVariables> = (props) => {
+          const {tid,iid,rid,data} = props ?? {};
+
+          return  postApiV1TenantsTidIssuesIidRunsRidThreadEnd(tid,iid,rid,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationResult = NonNullable<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadEnd>>>
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationBody = PostApiV1TenantsTidIssuesIidRunsRidThreadEndBody
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationError = ErrorType<Error>
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationVariables = {tid: string;iid: string;rid: string;data: PostApiV1TenantsTidIssuesIidRunsRidThreadEndBody}
+
+    /**
+ * @summary POST /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/end
+ */
+export const usePostApiV1TenantsTidIssuesIidRunsRidThreadEnd = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadEnd>>, TError,PostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadEnd>>,
+        TError,
+        PostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostApiV1TenantsTidIssuesIidRunsRidThreadEndMutationOptions(options), queryClient);
+    }
+    /**
+ * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Appends one user turn to an agent run's Thread and returns the entry that was created, with the Cloud-generated turnId the Node will echo back. Authorized like a comment: any active tenant member who can read the Issue. content accepts text blocks only and their total text must not exceed 64 KiB, otherwise 400 content_too_large; an unrecognized block type is 400 invalid_field_type, never a silent drop. Accepted while the Thread is pending, active or idle and no cancellation has been requested; a Thread that is ending or ended, and a run whose cancellation request is already recorded, both answer 409 thread_closed — a turn accepted after a cancellation would be persisted and never executed. The entry and the delivery command for it commit together with the idempotency record, so a failure anywhere in that transaction leaves nothing behind and the same key may be retried as a first request. A missing or mismatched tenant, Issue or run is 404 not_found. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
+ * @summary POST /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages
+ */
+export const postApiV1TenantsTidIssuesIidRunsRidThreadMessages = (
+    tid: string,
+    iid: string,
+    rid: string,
+    postApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody: PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody,
+ options?: SecondParameter<typeof customInstance>,signal?: AbortSignal
+) => {
+
+
+      return customInstance<PostApiV1TenantsTidIssuesIidRunsRidThreadMessages201>(
+      {url: `/api/v1/tenants/${tid}/issues/${iid}/runs/${rid}/thread/messages`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: postApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody, signal
+    },
+      options);
+    }
+
+
+
+
+export const getPostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationKey = () => ['postApiV1TenantsTidIssuesIidRunsRidThreadMessages'] as const;
+
+export const getPostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>, TError,PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+): UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>, TError,PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables, TContext> => {
+
+const mutationKey = getPostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>, PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables> = (props) => {
+          const {tid,iid,rid,data} = props ?? {};
+
+          return  postApiV1TenantsTidIssuesIidRunsRidThreadMessages(tid,iid,rid,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationResult = NonNullable<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>>
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationBody = PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationError = ErrorType<Error>
+    export type PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables = {tid: string;iid: string;rid: string;data: PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesBody}
+
+    /**
+ * @summary POST /api/v1/tenants/:tid/issues/:iid/runs/:rid/thread/messages
+ */
+export const usePostApiV1TenantsTidIssuesIidRunsRidThreadMessages = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>, TError,PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables, TContext>, request?: SecondParameter<typeof customInstance>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postApiV1TenantsTidIssuesIidRunsRidThreadMessages>>,
+        TError,
+        PostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostApiV1TenantsTidIssuesIidRunsRidThreadMessagesMutationOptions(options), queryClient);
+    }
+    /**
  * Public requests require a gateway service credential plus a caller-bound user credential. Active tenant membership is checked before lookup. Shared projects expose safe runtime summaries; runtime content and use require the verified creator or current tenant administrator. Conflicting mutations additionally require an effective server-confirmed control session. Requires matching resource version and no active project operation. Atomically closes new execution admission. Active tickets return 409 resource_in_use without changing admission. Unknown Node activity requires later proof and remains pending/blocked. main Workspace cannot be independently deleted. Mutation version conflicts return 409; a missing required version returns 428. Unknown fields are rejected. Lists use ascending UUID pagination.
  * @summary DELETE /api/v1/tenants/:tid/issues/:iid/subscribers
  */

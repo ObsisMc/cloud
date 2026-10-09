@@ -65,13 +65,22 @@ func collaborationTargetList(t *transaction, r *PublicRequest) Object {
 
 // resolveCollaborationTarget confirms that a selected target exists and is usable from this tenant.
 // Humans must be active members; agent/team/workflow must resolve through the directory (Unavailable
-// directory => 404 target_not_found, never cross-tenant leakage). Rejects via panic like the rest of
-// the core helpers.
+// directory => 404 target_not_found, never cross-tenant leakage). Agents are authoritative and
+// against the space_agents roster first (IssueRun D1), falling through to the directory only for ids
+// that are not a real Space Agent (dev/compat fixtures). Rejects via panic like the rest of the core
+// helpers.
 func resolveCollaborationTarget(t *transaction, tid, targetType, targetID string) {
 	require(validTargetType(targetType) && validID(targetID), 400, "invalid_target")
 	if targetType == "user" {
 		require(t.one("SELECT m.user_id FROM tenant_memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1 AND m.user_id=$2 AND m.status='active' AND u.status='active' AND u.deleted_at IS NULL", tid, targetID) != nil, 404, "target_not_found")
 		return
+	}
+	if targetType == "agent" {
+		// Only an ACTIVE space_agents row resolves; resolve in-transaction so the run's atomic read of
+		// the same row cannot be raced by a retire. Unknown/foreign/retired ids fall through below.
+		if _, ok := agentRunEvidence(t, tid, targetID); ok {
+			return
+		}
 	}
 	if t.directory == nil {
 		reject(404, "target_not_found")

@@ -43,6 +43,13 @@ func main() {
 // a fixture identity.
 func configureCollaboration(store *core.Store, developmentFixtures bool, log *zap.Logger) {
 	if !developmentFixtures {
+		// Production: Agent is the one collaboration target with real backing (space_agents). Wire a
+		// roster-backed directory so target discovery serves real Space Agents; Team/Workflow
+		// (cross-module ports, still unbuilt) stay unreported. Run-create resolution re-validates
+		// against space_agents in-transaction regardless of this directory.
+		if store.Pool != nil {
+			store.Directory = core.NewSpaceAgentDirectory(store.Pool)
+		}
 		return
 	}
 	collab.WireDevelopmentFixtures(store)
@@ -77,6 +84,13 @@ func run() (runErr error) {
 		return e
 	}
 	configureCollaboration(store, cfg.Collaboration.DevelopmentFixtures, log)
+	// The B side of the Agent Run seam: Cloud's IssueRun/Thread lifecycle is driven by these five
+	// callbacks, each of which runs inside the control-plane transaction that just persisted the
+	// evidence it reacts to (controller-integration D6). They are the only writer of the B-side
+	// business tables, and the control plane is the only writer of the execution evidence they read —
+	// no second dispatcher, no second state machine. Leaving them unset keeps the A side a no-op
+	// handoff, which is what a control-plane-only deployment wants.
+	core.BindBusinessHooks(store)
 	if e := store.CheckSchema(ctx); e != nil {
 		return e
 	}
@@ -107,6 +121,89 @@ func run() (runErr error) {
 		go func() {
 			defer syncGroup.Done()
 			pluginmarket.RunSyncLoop(ctx, syncer.Sync, cfg.Plugins.SyncInterval, pluginmarket.ContextSleep, log)
+		}()
+	}
+	// B-owned dispatch loop for queued real Space Agent runs: a bounded rescan (limit
+	// agentDispatchBatchSize, ordered by created_at,id) that moves a queued run to
+	// phase='provisioning', status='dispatched' only when the A side accepts, and leaves busy runs
+	// queued to retry at the next tick. It is owned by the process lifecycle like the marketplace
+	// loop: ctx cancellation stops it and the WaitGroup below waits for the in-flight pass (each
+	// dispatch runs in its own short transaction; no transaction spans the sleep). The 10s cadence
+	// means a project that was busy at claim time unblocks within a tick.
+	{
+		const agentDispatchInterval = 10 * time.Second
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.DispatchQueuedAgentRunsOnce, agentDispatchInterval, pluginmarket.ContextSleep, log)
+		}()
+	}
+	// Session-start loop: B-owned recovery for runs settled into phase='starting' (their run
+	// Workspace is provisioned and admitted). A bounded rescan releases each run's exactly-once first
+	// produce: thread_entries seq=1 plus one EnqueueExecutionWork item in one transaction. The run
+	// leaves 'starting' only on takeover evidence, so this loop stays idempotent alongside the
+	// dispatch loop.
+	{
+		const agentSessionStartInterval = 10 * time.Second
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.StartQueuedAgentSessionsOnce, agentSessionStartInterval, pluginmarket.ContextSleep, log)
+		}()
+	}
+	// Thread-ending loops: B-owned recovery for the two ending triggers reachable without a new
+	// public API. The idle scan ends a Thread whose idle window has expired (thread_state='idle' with
+	// idle_since older than cfg.IssueRuns.ThreadIdleTimeout), and the cancel pass reacts to a
+	// cancellation request recorded on a live run. Each run is handled in its own short transaction
+	// and each transition is a CAS, so a repeated tick emits no second EndSession. Both stop at
+	// thread_state='ending': the session terminal (`ended`) and everything after it belong to the
+	// delivery loops below.
+	{
+		const agentThreadEndInterval = 10 * time.Second
+		store.ThreadIdleTimeout = cfg.IssueRuns.ThreadIdleTimeout
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.EndIdleAgentThreadsOnce, agentThreadEndInterval, pluginmarket.ContextSleep, log)
+		}()
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.ReactToCancelledAgentRunsOnce, agentThreadEndInterval, pluginmarket.ContextSleep, log)
+		}()
+	}
+	// Delivery/release loops. The first applies IssueRun D5's give-up limits to runs still
+	// `delivering`: once delivery has failed for cfg.IssueRuns.DeliveryGiveUpAfter, or the run
+	// Workspace's Node has been unreachable for cfg.IssueRuns.DeliveryUnreachableAfter, the run is
+	// released with deliveryState=failed and its Workspace delete declared. The second reconciles the
+	// release half: a `releasing` run whose delete_workspace operation has no operation in flight gets
+	// its delete re-declared, which is the Cloud-side retry the decision requires after a Node refuses
+	// to quiesce (the run Workspace has no public API and no user to retry it). The third applies
+	// IssueRun D8's single give-up limit to the delete side (G-032): a `releasing` run whose Workspace
+	// Node has been unknown for cfg.IssueRuns.DeliveryUnreachableAfter — the same window, D8 adds no
+	// new one — is settled `done` with failure_reason=workspace_unavailable, its delete operation left
+	// terminally failed and its Workspace row retained; `done` there means Cloud stopped retrying,
+	// never that the Workspace was released. All three are bounded passes of one short transaction per
+	// run, so a repeated tick produces no second release, no second delete operation, and no second
+	// phase transition.
+	{
+		const agentDeliveryInterval = 10 * time.Second
+		store.DeliveryGiveUpAfter = cfg.IssueRuns.DeliveryGiveUpAfter
+		store.DeliveryUnreachableAfter = cfg.IssueRuns.DeliveryUnreachableAfter
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.GiveUpStaleDeliveriesOnce, agentDeliveryInterval, pluginmarket.ContextSleep, log)
+		}()
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.RedeclareRunWorkspaceDeletesOnce, agentDeliveryInterval, pluginmarket.ContextSleep, log)
+		}()
+		syncGroup.Add(1)
+		go func() {
+			defer syncGroup.Done()
+			pluginmarket.RunSyncLoop(ctx, store.GiveUpStaleWorkspaceReleasesOnce, agentDeliveryInterval, pluginmarket.ContextSleep, log)
 		}()
 	}
 	gin.SetMode(cfg.Server.Mode)

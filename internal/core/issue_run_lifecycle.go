@@ -90,16 +90,22 @@ func enqueueRun(t *transaction, tid, iid, executorType, executorID string, input
 // committed and the observer writes (reply comment + activities) must not contend on the comment's
 // advisory lock.
 func (s *Store) dispatchRun(ctx context.Context, tenantID, runID string) error {
-	if s.Dispatcher == nil {
-		return nil
-	}
 	var (
-		req   DispatchRequest
-		found bool
+		req      DispatchRequest
+		found    bool
+		agentRun bool
 	)
 	_, err := s.transact(ctx, func(t *transaction) Object {
 		o := t.one("SELECT * FROM issue_runs WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL", runID, tenantID)
 		if o == nil || o.S("status") != "queued" {
+			return Object{}
+		}
+		if o.S("executorType") == "agent" && isSpaceAgentRun(t, tenantID, o.S("executorId")) {
+			// A real Space Agent run is claimed by AgentRunDispatcher (Claim + Busy), independent of
+			// whether the legacy ExecutionDispatcher is wired (nil in production). This routing is the
+			// low-latency after-commit optimization only; the retry loop re-discovers the same runs
+			// when it does not fire.
+			agentRun = true
 			return Object{}
 		}
 		req = DispatchRequest{
@@ -113,8 +119,14 @@ func (s *Store) dispatchRun(ctx context.Context, tenantID, runID string) error {
 		found = true
 		return Object{}
 	})
-	if err != nil || !found {
+	if err != nil {
 		return err
+	}
+	if agentRun {
+		return s.agentRunDispatcher().Dispatch(ctx, runID)
+	}
+	if !found || s.Dispatcher == nil {
+		return nil
 	}
 	res, err := s.Dispatcher.Dispatch(ctx, req)
 	if err != nil || !res.Accepted {

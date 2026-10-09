@@ -60,7 +60,23 @@ func deleteRunWorkspace(t *transaction, runID string) Object {
 	}
 	closeAdmission(t, w, "deleted")
 	actor := w.S("creatorUserId")
-	op := newOperation(t, &PublicRequest{TenantID: w.S("tenantId"), Key: "run-workspace-" + runID + "-delete"}, actor, w.S("projectId"), w.S("id"), "delete_workspace", "quiesce", requestHash("run-workspace-delete", runID, Object{}), Object{})
+	// The request carries the pre-declaration Workspace row, exactly as the public delete path does
+	// (`workspaceAction`): it is the snapshot `restoreAdmission` restores from when a Node refuses to
+	// quiesce, and a run Workspace is deleted through this path rather than through the public API.
+	// Without it a refused quiesce would leave the Workspace `deleting` with admission closed and no
+	// state to return to, while the operation contract requires the refusal to restore it.
+	//
+	// The one field the document never carries is `issueRunId`: the request is part of the operation
+	// claim response, whose Workspace document deliberately omits the run binding (see
+	// `transaction.list`), so the snapshot is the row minus that column.
+	snapshot := Object{}
+	for k, v := range w {
+		if k != "issueRunId" {
+			snapshot[k] = v
+		}
+	}
+	req := Object{"previous": Object{w.S("id"): snapshot}}
+	op := newOperation(t, &PublicRequest{TenantID: w.S("tenantId"), Key: "run-workspace-" + runID + "-delete"}, actor, w.S("projectId"), w.S("id"), "delete_workspace", "quiesce", requestHash("run-workspace-delete", runID, Object{}), req)
 	reserveRuntimeMaintenance(t, w.S("id"), op.S("id"))
 	return Object{"busy": false, "workspace": t.one("SELECT * FROM workspaces WHERE id=$1", w.S("id")), "operation": op}
 }

@@ -81,3 +81,5 @@
 0027 仅前向新增 Revision、验证结论与未配置存储跳过记录，保留原 Node 证据。复合外键约束租户/run/Workspace/project 范围；changed 与 unchanged 元数据互斥。revision_upgrade_test.go 验证真实 0026 升级与重复迁移；agent_plugin_upgrade_test.go 验证 0023 在途旧插件 effect 保留及新步骤重启。
 
 与当前上游合并时保留 `0027_verified_revisions.sql`、`0027_workflows.sql` 及 `0028–0029` 的完整文件名和原始 SQL；前缀相同不等于迁移身份相同，执行器按完整文件名和校验和追踪已应用迁移。`TestRevisionUpgradePreservesPublishedWorkflowSchema` 直接验证已经应用上游工作流迁移的数据库可追加 Revision 表，重复迁移后原工作流、快照、运行和迁移账本均保持完整。
+
+0030–0031 在已发布 0029 之后追加，是把 B 侧业务生命周期移植到上游控制面时**唯一**新增的 schema，functionB 原有但上游已具备的部分（0024–0029 的执行侧）一律不再新建：0030 只给 `issue_runs` 增加业务列（`phase`、`workspace_id`、`cancel_requested_at`、`thread_state`、`idle_since`）、agent 专用列约束、`workspace_id` 唯一绑定和 idle 线程的部分索引；0031 新建 `thread_entries`（`(run_id,seq)` 主键、Node 来源按 `(node_execution_id,node_sequence)` 幂等、user 来源必带 turn 生命周期、`record` 限 256 KiB JSON 对象）。两者纯前向、可重复执行，不回填也不改写任何既有行（0030 的列由它自己创建，旧行不可能带有需要迁移的值；非 agent 运行的整行保持原样），并且不覆盖上游 `0018–0029` 的同号文件。真实新库、升级与重复迁移证据见 `integration/migration_upgrade_path_test.go` 的 `TestMigration0030AgentRunBusinessLifecycleAppliesFreshAndUpgrades` 与 `TestMigration0031AgentRunThreadEntriesAppliesFreshAndUpgrades`。

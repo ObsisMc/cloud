@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/wanglongan587/cloud/internal/collab"
 	"github.com/wanglongan587/cloud/internal/core"
 )
 
@@ -185,9 +186,9 @@ func TestIssueCommentThreadingAndSharedTimeline(t *testing.T) {
 	// Fresh issue so the timeline starts at seq 1: comments and run activities interleave in one space.
 	c := f.call("POST", f.path("/issues"), core.Object{"title": "Timeline"}, "t-tl", 200).O("resource")
 	c1 := f.call("POST", f.path("/issues/"+c.S("id")+"/comments"), core.Object{"body": "one"}, "t-c1", 200).O("resource")
-	f.call("POST", f.path("/issues/"+c.S("id")+"/runs"), core.Object{"executorType": "agent", "executorId": uuid.NewString()}, "t-r1", 200)
+	f.call("POST", f.path("/issues/"+c.S("id")+"/runs"), core.Object{"executorType": "agent", "executorId": collab.BackendAgentID}, "t-r1", 200)
 	c2 := f.call("POST", f.path("/issues/"+c.S("id")+"/comments"), core.Object{"body": "three"}, "t-c2", 200).O("resource")
-	f.call("POST", f.path("/issues/"+c.S("id")+"/runs"), core.Object{"executorType": "agent", "executorId": uuid.NewString()}, "t-r2", 200)
+	f.call("POST", f.path("/issues/"+c.S("id")+"/runs"), core.Object{"executorType": "agent", "executorId": collab.ReviewAgentID}, "t-r2", 200)
 
 	if f.scalar("SELECT seq FROM issue_comments WHERE id=$1", c1.S("id")) != 1 {
 		t.Fatal("comment 1 seq != 1")
@@ -216,7 +217,7 @@ func TestIssueRuns(t *testing.T) {
 	f := setup(t)
 	issue := f.call("POST", f.path("/issues"), core.Object{"title": "Run me"}, "r-issue", 200).O("resource")
 
-	executor := uuid.NewString()
+	executor := collab.BackendAgentID
 	run := f.call("POST", f.path("/issues/"+issue.S("id")+"/runs"), core.Object{"executorType": "agent", "executorId": executor, "input": core.Object{"prompt": "hi"}}, "run-1", 200).O("resource")
 	if run.S("status") != "queued" || run.S("executorType") != "agent" || run.S("executorId") != executor {
 		t.Fatalf("unexpected enqueued run: %v", run)

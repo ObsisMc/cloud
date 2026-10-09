@@ -55,6 +55,10 @@ type fixture struct {
 	executions             controlpb.ExecutionServiceClient
 	controlConn            *grpc.ClientConn
 	controlSessions        map[string]string
+	// objects is the fixture's one object-store double. It is created on first use and reused, so a
+	// test that installs storage and a helper that needs storage configured name the same endpoint
+	// and the same recorded probes.
+	objects *revisionStore
 }
 
 // testSchema creates an isolated PostgreSQL schema for one test and returns a pool bound to it.

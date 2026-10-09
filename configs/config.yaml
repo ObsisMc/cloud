@@ -50,6 +50,25 @@ auth:
       issuer: ora-internal-issuer
       kind: user
       public_key_file: .local/gateway/user-identity.pem
+issue_runs:
+  # Thread D4's idle window: how long a Thread may sit `idle` (its last taken-over record was
+  # `TurnEnded` and no user turn is still queued) before Cloud releases `EndSession{idle_timeout}`
+  # and moves it to `ending`. A deployment duration, not a per-run column, and judged on database
+  # time. The approved first-version default is 15m; omitting the key (or setting it non-positive)
+  # selects that default. Override: CLOUD_ISSUE_RUNS_THREAD_IDLE_TIMEOUT.
+  thread_idle_timeout: 15m
+  # IssueRun D5's two give-up limits for a Revision delivery, both deployment durations judged on
+  # database time and both not per-run columns. `delivery_give_up_after` is the continuous-failure
+  # window: once a run has been failing to deliver for longer than this, Cloud abandons the delivery
+  # (`deliveryState = failed`) and releases the run's Workspace. `delivery_unreachable_after` is the
+  # unreachability window: once the run Workspace's Node has been in an unknown state this long, the
+  # delivery cannot succeed and Cloud gives up without waiting out the full failure window. The
+  # approved first-version defaults are 2h and 30m; omitting a key (or setting it non-positive)
+  # selects its default. Overrides: CLOUD_ISSUE_RUNS_DELIVERY_GIVE_UP_AFTER /
+  # CLOUD_ISSUE_RUNS_DELIVERY_UNREACHABLE_AFTER.
+  delivery_give_up_after: 2h
+  delivery_unreachable_after: 30m
+
 plugins:
   # Plugin marketplace the cloud server syncs into its own catalog snapshot (git fetch + scan of
   # registry/**/orax.toml). The catalog API always reads the PostgreSQL snapshot and never the
@@ -59,9 +78,22 @@ plugins:
   marketplace_branch: "main"
   sync_interval: 5m
   sync_enabled: true
+
 object_store:
-  # Optional S3-compatible upload-grant service. Credentials are mounted files, never values here.
+  # Cloud's own S3-compatible object storage for Revision objects (Cloud Revision D1): optional
+  # S3-compatible upload-grant service. Credentials are mounted files, never values here.
   # CLOUD_OBJECT_STORE_* overrides each key; this does not enable Revision verification (M3).
+  #
+  # `enabled: false` (or leaving the section out) runs the server without object storage: every
+  # Revision upload grant is refused as UNAVAILABLE and each delivery fails until IssueRun D5's
+  # give-up window releases the run — the server logs the missing capability at startup.
+  #
+  # Credentials are references, never values: `access_key_id_file` and `secret_access_key_file` name
+  # files that are read at startup and then live only in the Cloud process. Never put a key or secret
+  # in this file, an environment variable or a log. `public_endpoint` is only for deployments whose
+  # Nodes reach the store at a different address than Cloud does; `path_style` is what MinIO needs.
+  # Overrides: CLOUD_OBJECT_STORE_ENDPOINT / _PUBLIC_ENDPOINT / _REGION / _BUCKET / _PATH_STYLE /
+  # _ACCESS_KEY_ID_FILE / _SECRET_ACCESS_KEY_FILE / _UPLOAD_GRANT_TTL.
   enabled: false
   endpoint: ""
   public_endpoint: ""
