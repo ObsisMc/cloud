@@ -629,6 +629,8 @@ export type IssueRunPreparation = {
   /** @nullable */
   retryAt: string | null;
   stage: IssueRunPreparationStage;
+  /** @nullable */
+  syncErrorCode: string | null;
 } | null;
 
 /**
@@ -1183,6 +1185,8 @@ export interface RunPreparation {
   /** @nullable */
   retryAt: string | null;
   stage: RunPreparationStage;
+  /** @nullable */
+  syncErrorCode: string | null;
 }
 
 export type RuntimeControlState = typeof RuntimeControlState[keyof typeof RuntimeControlState];
