@@ -108,6 +108,11 @@ Cloud 领域方法。冻结与撤销规则见 [模型连接契约](../../../docs
 ## 0036：工作流插件资产导入
 
 `0036_workflow_asset_imports.sql` 记录 `kind='workflow'` 插件的资产导入：`workflow_asset_imports` 每个（空间，插件）一行，保存管理员每次安装/重装递增的 `requested_revision`、导入进度与租约；`workflow_asset_documents` 每个文档路径一行，只有 `outcome='imported'` 的行永久占用（空间，命名空间，标识，文档路径），失败的文档下次触发重试。导入出的工作流和已发布快照是普通用户数据，这两张表只记录来源、幂等和逐文档结果。纯前向新增，不改动既有表。
+
+## 0037：仓库 Binding、快照与仓库 Operation
+
+Git Server 成为 Project 的代码中枢（cloud/git-server 契约决策）：Project 的外部仓库从 `projects` 的列移到它的 Binding。新增 `repository_bindings`（第一阶段每个 Project 恰有一个，含仓库地址、分支与凭据引用），把既有 Project 的 `repository_url`、`default_branch`、`credential_ref_id`、`repository_credential_ref_id` 原样复制为 Binding 后从 `projects` 删除这四列；新增 `repository_operations`（同步与发布 Operation，状态与终态取自契约，每个 Binding 至多一个未结束的同步）与 `repository_snapshots`（Binding 当前快照，只指向不可变的快照 ref）。约束对真实行的拒绝见 `integration/repository_binding_test.go` 的 `TestRepositoryOperationStorageConstraints`。
+
 ## 0038：退役租户级 clone
 
 Workspace 改为从 Git Server 快照 clone 后的切换，不迁移数据。删除不属于 Workspace 的 clone execution 及其收据，去掉 `clone_executions.clone_request_id` 与索引 `one_request_execution`，`clone_executions.workspace_id` 改为 NOT NULL，删除 `clone_requests`；Workspace 的 clone execution 与收据保留。可重复执行。仍有租户级 clone 的数据库升级见 `integration/migration_upgrade_path_test.go` 的 `TestMigration0038RetiresTenantLevelClonesKeepingWorkspaceClones`。

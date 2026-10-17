@@ -79,7 +79,7 @@ go run ./cmd/cloudctl -command migrate
 go run ./cmd/simulator
 ```
 
-演示启动独立 loopback HTTP cloud/Substrate，创建测试租户、模拟 sandbox 和 Node，并把仓库真实 clone 到 main Workspace 自己的数据中，再输出 Ready Workspace。磁盘在 `.local/demo/`，PG 记录保留；再次运行创建新的演示租户。模拟器没有生产基础设施凭据，不部署 Kubernetes，不启动真实 Agent/Deno。
+演示启动独立 loopback HTTP cloud/Substrate，创建测试租户、模拟 sandbox 和 Node，在 Git Server 替身中登记演示 Project 的快照，并把该快照真实 clone 到 main Workspace 自己的数据中，再输出 Ready Workspace。磁盘在 `.local/demo/`，PG 记录保留；再次运行创建新的演示租户。模拟器没有生产基础设施凭据，不部署 Kubernetes，不启动真实 Agent/Deno。
 
 ## 前端
 
@@ -142,4 +142,4 @@ npm run build          # tsc -b && vite build
 
 参见 [运行时控制](docs/runtime-control.md) / [English](docs/runtime-control.en.md)：创建者使用权限、页面独占、持久重启和目标强停。部署必须配置管理双向 TLS；旧无 scope 新执行关闭。真实插件执行器、项目凭据提供方与云端文件/终端/Agent 执行尚未开放。
 
-进程内模拟器显式使用仅供开发的旧 clone 测试夹具；插件选择因缺少真实执行器保留持久 pending（待执行）。它不证明运行时独占、管理认证或工作负载隔离；这些保障须通过 cluster Compose 和真实验收脚本验证。
+进程内模拟器的 Node 只从 Git Server 替身取快照，演示 Project 的快照由替身代替外部线登记；插件选择因缺少真实执行器保留持久 pending（待执行）。它不证明运行时独占、管理认证或工作负载隔离；这些保障须通过 cluster Compose 和真实验收脚本验证。
