@@ -60,7 +60,7 @@ Before starting production, configure internal verification public keys as descr
 go run ./cmd/server -config /path/to/config.yaml
 ```
 
-The server only checks applied migrations and their checksums; it does not execute DDL. Database, migration, trust, or listen failures cause a non-zero exit. `GET /healthz` checks PostgreSQL reachability.
+The server only checks applied migrations and their checksums; it does not execute DDL. Database, migration, trust, or listen failures cause a non-zero exit. `GET /healthz` checks PostgreSQL reachability and reports whether the object store and the Git Server are configured (`objectStore`, `gitServer`: `configured|unconfigured`).
 
 Local end-to-end development (browser → Gateway → Cloud, see [Authentication Gateway](docs/gateway.md)) needs no GitHub account: the Gateway ships a local-only developer login where any typed identity signs in. To exercise real GitHub login, create an OAuth App (callback `http://localhost:5173/auth/callback/github`) and fill in `[github]` in `config.toml`.
 
