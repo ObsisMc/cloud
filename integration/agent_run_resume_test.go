@@ -2,7 +2,7 @@ package integration
 
 // Resuming a new IssueRun from its Issue's latest Revision (specs
 // decisions/cloud/issue-run/20261010-resume-run-from-latest-issue-revision.md as changed by
-// cloud/revision/20261012-git-server-delivery-and-verified-delivery-refs.md D7 and
+// cloud/revision/20261017-git-native-delivery-refs-and-resume.md D7 and
 // cloud/controller-integration/20261016-snapshot-clone-input-and-execution-ref-grants.md D8). Every
 // case drives the production paths: session start through StartQueuedAgentSessionsOnce, dispatch
 // through clone_claim and clone_dispatch, session end and delivery through TakeOverNodeEvent.
