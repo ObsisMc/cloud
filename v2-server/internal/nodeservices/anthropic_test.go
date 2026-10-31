@@ -32,6 +32,24 @@ func messages(t *testing.T, c *http.Client, url, key, body string) (int, string)
 	return resp.StatusCode, string(data)
 }
 
+// grantFor admits execution on binding and returns the grant's token and protocol, checking that
+// the grant points at its protocol's proxy route.
+func grantFor(t *testing.T, s *Service, c *http.Client, execution, binding string) (token, protocol string) {
+	t.Helper()
+	if err := s.Permit(execution, binding); err != nil {
+		t.Fatal(err)
+	}
+	status, data := request(t, c, "POST", s.URL+"/internal/v1/model-grants", "", `{"bindingId":"`+binding+`","executionId":"`+execution+`"}`)
+	var body struct{ Token, Protocol, ProxyBaseURL string }
+	if status != 200 || json.Unmarshal(data, &body) != nil {
+		t.Fatalf("grant %s=%d %s", binding, status, data)
+	}
+	if want := s.URL + proxyPath[Protocol(body.Protocol)]; body.ProxyBaseURL != want {
+		t.Fatalf("grant %s proxy=%q want %q", binding, body.ProxyBaseURL, want)
+	}
+	return body.Token, body.Protocol
+}
+
 // A grant names its protocol's route, and its token works only there: a Messages token cannot
 // reach an OpenAI provider and an OpenAI token cannot reach a Messages provider.
 func TestGrantTokenWorksOnlyOnItsProtocolRoute(t *testing.T) {
@@ -40,26 +58,11 @@ func TestGrantTokenWorksOnlyOnItsProtocolRoute(t *testing.T) {
 		"messages": {Model: testModel, Protocol: AnthropicMessages, Provider: MessagesFixtureProvider{}},
 	})
 	c, public := serviceClient(t, s, true), serviceClient(t, s, false)
-	grant := func(execution, binding string) (token string, protocol string) {
-		t.Helper()
-		if err := s.Permit(execution, binding); err != nil {
-			t.Fatal(err)
-		}
-		status, data := request(t, c, "POST", s.URL+"/internal/v1/model-grants", "", `{"bindingId":"`+binding+`","executionId":"`+execution+`"}`)
-		var body struct{ Token, Protocol, ProxyBaseURL string }
-		if status != 200 || json.Unmarshal(data, &body) != nil {
-			t.Fatalf("grant %s=%d %s", binding, status, data)
-		}
-		if want := s.URL + proxyPath[Protocol(body.Protocol)]; body.ProxyBaseURL != want {
-			t.Fatalf("grant %s proxy=%q want %q", binding, body.ProxyBaseURL, want)
-		}
-		return body.Token, body.Protocol
-	}
-	messagesToken, protocol := grant("claude", "messages")
+	messagesToken, protocol := grantFor(t, s, c, "claude", "messages")
 	if protocol != "anthropic-messages" {
 		t.Fatalf("Messages grant protocol=%q", protocol)
 	}
-	openAIToken, protocol := grant("opencode", "openai")
+	openAIToken, protocol := grantFor(t, s, c, "opencode", "openai")
 	if protocol != "openai-completions" {
 		t.Fatalf("OpenAI grant protocol=%q", protocol)
 	}
@@ -78,6 +81,53 @@ func TestGrantTokenWorksOnlyOnItsProtocolRoute(t *testing.T) {
 	s.End("claude")
 	if status, _ := messages(t, public, route, messagesToken, `{"messages":[{"role":"user","content":"hi"}]}`); status != 401 {
 		t.Errorf("Messages route after End=%d", status)
+	}
+}
+
+// Each model route reads its token from one header only. The OpenAI route needs the Bearer scheme,
+// so a bare token is refused before any grant is matched; the Messages route reads x-api-key and
+// ignores Authorization, which Claude Code fills with a placeholder.
+func TestModelRoutesReadTokensOnlyFromTheirHeader(t *testing.T) {
+	s := testServiceWith(t, map[string]Binding{
+		"openai":   {Model: testModel, Protocol: OpenAICompletions, Provider: FixtureProvider{}},
+		"messages": {Model: testModel, Protocol: AnthropicMessages, Provider: MessagesFixtureProvider{}},
+	})
+	c, public := serviceClient(t, s, true), serviceClient(t, s, false)
+	openAIToken, _ := grantFor(t, s, c, "opencode", "openai")
+	messagesToken, _ := grantFor(t, s, c, "claude", "messages")
+	const openAI, anthropic = "/runtime/openai/v1/chat/completions", "/runtime/anthropic/v1/messages"
+	for _, tc := range []struct {
+		name, route string
+		header      map[string]string
+		want        int
+	}{
+		{"OpenAI Bearer token", openAI, map[string]string{"Authorization": "Bearer " + openAIToken}, 200},
+		{"OpenAI bare token", openAI, map[string]string{"Authorization": openAIToken}, 401},
+		{"OpenAI empty Bearer", openAI, map[string]string{"Authorization": "Bearer "}, 401},
+		{"OpenAI token in x-api-key", openAI, map[string]string{"X-Api-Key": openAIToken}, 401},
+		{"Messages x-api-key alone", anthropic, map[string]string{"X-Api-Key": messagesToken}, 200},
+		{"Messages x-api-key beside bare Authorization", anthropic, map[string]string{"X-Api-Key": messagesToken, "Authorization": "acp-proxy"}, 200},
+		{"Messages token only as Bearer", anthropic, map[string]string{"Authorization": "Bearer " + messagesToken}, 401},
+	} {
+		req, err := http.NewRequest("POST", s.URL+tc.route, strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k, v := range tc.header {
+			req.Header.Set(k, v)
+		}
+		resp, err := public.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != tc.want {
+			t.Errorf("%s=%d want %d", tc.name, resp.StatusCode, tc.want)
+		}
 	}
 }
 

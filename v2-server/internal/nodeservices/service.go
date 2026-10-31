@@ -284,7 +284,11 @@ func (s *Service) track(next http.HandlerFunc) http.Handler {
 func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/runtime/openai/v1/chat/completions":
-		token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		// A header without the Bearer scheme carries no token; model rejects the empty one with 401.
+		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok {
+			token = ""
+		}
 		s.model(w, r, OpenAICompletions, token)
 	case r.URL.Path == "/runtime/anthropic/v1/messages":
 		// Claude Code also sends a placeholder bearer; only x-api-key carries the grant token.

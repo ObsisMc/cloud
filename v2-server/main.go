@@ -141,6 +141,10 @@ func run(addr, dbURL string, cleanup, fixture bool) (resultErr error) {
 			resultErr = errors.Join(resultErr, fmt.Errorf("execution shutdown unconfirmed: %w", err))
 		}
 	}()
+	// Recovery above ended the previous process's sessions; show their conversations read-only now.
+	if e := db.InterruptEndedChatSessions(ctx); e != nil {
+		return e
+	}
 	scope, demo, e := prepareDemo(ctx, db, projects, bootstrap)
 	if e != nil {
 		return e

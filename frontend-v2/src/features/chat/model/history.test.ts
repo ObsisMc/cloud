@@ -80,6 +80,19 @@ describe('conversationOf', () => {
     expect(conversationOf([view({ id: 's1', records: [user(1, 'a')] })]).markers).toEqual([])
   })
 
+  it('shows a turn stopped before its Agent started, which no history snapshot holds', () => {
+    const cancelled: ChatResult = { ...done, status: 'cancelled', stopReason: 'cancelled' }
+    let v = emptySessionView('s1')
+    v = applySessionEvent(v, { sequence: 1, occurredAt: at(0), kind: 'turn_ended', turnId: 't1', result: cancelled, prompt: '停下来' })
+    v = applySessionEvent(v, { sequence: 2, occurredAt: at(0), kind: 'session_ended', turnId: '' })
+    const c = conversationOf([{ ...v, endReason: 'stopped' }])
+    expect(c.turns.map((t) => [t.prompt.text, t.status])).toEqual([['停下来', 'cancelled']])
+    expect(c.markers).toEqual([{ kind: 'session', id: 'session-s1', afterTurn: 1, reason: 'stopped' }])
+    // A turn the history does hold is not shown twice.
+    const recorded = conversationOf([{ ...v, records: [user(1, '停下来')], endReason: 'stopped' }])
+    expect(recorded.turns).toHaveLength(1)
+  })
+
   it('joins a prompt sent as several blocks', () => {
     const [turn] = conversationOf([view({ records: [user(1, '第一行'), user(2, '第二行')] })]).turns
     expect(turn.prompt.text).toBe('第一行第二行')

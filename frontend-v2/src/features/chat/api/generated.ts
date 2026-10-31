@@ -184,6 +184,8 @@ export interface ChatEvent {
   history?: ChatHistory;
   textDelta?: string;
   result?: ChatResult;
+  /** On turn_ended, the text the turn was asked. A turn stopped before its Agent started never appears in a history snapshot; this is how a page still shows it. */
+  prompt?: string;
 }
 
 export interface ChatProjectOrder {
