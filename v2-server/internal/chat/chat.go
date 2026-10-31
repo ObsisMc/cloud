@@ -51,7 +51,7 @@ type Service struct {
 	now     func() time.Time
 	// locks serialize work on one conversation, so two first prompts cannot both start a session.
 	// v2-server is a single process, which is what makes an in-memory lock sufficient.
-	locks sync.Map
+	locks keyedLocks
 }
 
 // New returns a Service that runs Agents on runtime and lists the choices from catalog: the
@@ -63,11 +63,42 @@ func New(s Store, runtime execution.Service, catalog execution.Catalog, o Option
 	return &Service{store: s, runtime: runtime, catalog: catalog, now: o.Now}
 }
 
-func (s *Service) lock(id string) func() {
-	m, _ := s.locks.LoadOrStore(id, &sync.Mutex{})
-	mu := m.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
+func (s *Service) lock(id string) func() { return s.locks.lock(id) }
+
+// keyedLocks is a mutex per key. A key's entry lives only while someone holds or awaits it, so
+// conversations that ended or were deleted leave nothing behind.
+type keyedLocks struct {
+	mu      sync.Mutex
+	entries map[string]*keyedLock
+}
+
+type keyedLock struct {
+	sync.Mutex
+	holders int // holding or waiting; guarded by keyedLocks.mu
+}
+
+// lock acquires the key's mutex and returns its release.
+func (l *keyedLocks) lock(key string) func() {
+	l.mu.Lock()
+	if l.entries == nil {
+		l.entries = map[string]*keyedLock{}
+	}
+	k := l.entries[key]
+	if k == nil {
+		k = &keyedLock{}
+		l.entries[key] = k
+	}
+	k.holders++
+	l.mu.Unlock()
+	k.Lock()
+	return func() {
+		k.Unlock()
+		l.mu.Lock()
+		if k.holders--; k.holders == 0 {
+			delete(l.entries, key)
+		}
+		l.mu.Unlock()
+	}
 }
 
 // Executors lists the Agent and model bindings a chat can start with.
@@ -135,25 +166,42 @@ func (s *Service) Send(ctx context.Context, scope execution.Scope, conversationI
 	case c.Ended():
 		return c, ref, execution.ErrSessionEnded
 	case !ok:
-		// The first turn's outcome was unknown and never settled; this prompt starts the session.
-		ref, e = s.start(ctx, scope, c, key, prompt)
+		// The first turn's outcome was never learned. If the port did accept it, its session is
+		// this conversation's: starting another would leave that one running unclaimed.
+		first, re := s.runtime.ReadAttempt(ctx, scope, caller(c.ID, c.CreateKey))
+		switch {
+		case errors.Is(re, execution.ErrNotFound):
+			ref, e = s.start(ctx, scope, c, key, prompt)
+		case re != nil:
+			return c, ref, fmt.Errorf("settle first turn: %w", re)
+		default:
+			if e = s.store.RecordChatTurn(ctx, c.ID, first.Ref.SessionID, c.CreateKey, first.Ref.TurnID, s.now()); e == nil {
+				ref, e = s.append(ctx, scope, c.ID, first.Ref.SessionID, key, prompt)
+			}
+		}
 	default:
-		ref, e = s.runtime.Append(ctx, scope, execution.AppendRequest{
-			SessionID: live.ID, Caller: caller(c.ID, key), Prompt: execution.TextPrompt(prompt),
-		})
-		if errors.Is(e, execution.ErrSessionEnded) {
-			// Ended outside chat (a restart): record it so the page shows the conversation as ended.
-			return c, ref, errors.Join(e, s.store.EndChatSession(ctx, live.ID, store.EndInterrupted, s.now()))
-		}
-		if e == nil {
-			e = s.store.RecordChatTurn(ctx, c.ID, ref.SessionID, key, ref.TurnID, s.now())
-		}
+		ref, e = s.append(ctx, scope, c.ID, live.ID, key, prompt)
 	}
 	if e != nil {
 		return c, ref, e
 	}
 	c, e = s.store.ChatConversation(ctx, scope.TenantID, scope.UserID, c.ID)
 	return c, ref, e
+}
+
+// append sends the next prompt to the conversation's live session. The caller holds the lock.
+func (s *Service) append(ctx context.Context, scope execution.Scope, conversationID, sessionID, key, prompt string) (execution.Ref, error) {
+	ref, e := s.runtime.Append(ctx, scope, execution.AppendRequest{
+		SessionID: sessionID, Caller: caller(conversationID, key), Prompt: execution.TextPrompt(prompt),
+	})
+	if errors.Is(e, execution.ErrSessionEnded) {
+		// Ended outside chat (a restart): record it so the page shows the conversation as ended.
+		return ref, errors.Join(e, s.store.EndChatSession(ctx, sessionID, store.EndInterrupted, s.now()))
+	}
+	if e != nil {
+		return ref, e
+	}
+	return ref, s.store.RecordChatTurn(ctx, conversationID, ref.SessionID, key, ref.TurnID, s.now())
 }
 
 // ending runs a call that may end the live session, with the reason recorded first so a page
@@ -237,11 +285,27 @@ func (s *Service) Delete(ctx context.Context, scope execution.Scope, conversatio
 			return fmt.Errorf("end session: %w", e)
 		}
 	}
-	if e := s.store.DeleteChatConversation(ctx, scope.TenantID, scope.UserID, conversationID); e != nil {
-		return e
+	return s.store.DeleteChatConversation(ctx, scope.TenantID, scope.UserID, conversationID)
+}
+
+// TurnPrompt returns the text a turn of the session was asked. A turn stopped before its Agent
+// started never reaches the Node history, so this is how a page can still show what was asked.
+func (s *Service) TurnPrompt(ctx context.Context, scope execution.Scope, sessionID, turnID string) (string, error) {
+	for cursor := ""; ; {
+		page, e := s.runtime.ReadTurns(ctx, scope, sessionID, cursor, 100)
+		if e != nil {
+			return "", e
+		}
+		for _, t := range page.Items {
+			if t.Ref.TurnID == turnID {
+				return t.Prompt.Text()
+			}
+		}
+		if page.NextCursor == "" {
+			return "", execution.ErrNotFound
+		}
+		cursor = page.NextCursor
 	}
-	s.locks.Delete(conversationID)
-	return nil
 }
 
 // Subscribe follows the conversation's session events after the cursor, so a page can only

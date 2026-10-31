@@ -25,6 +25,8 @@ npm run e2e           # 端到端测试，自己拉起 v2-server（:8091）和�
 
 端到端测试默认连接 `task v2:db` 的 PostgreSQL（库 `ora_v2_e2e`，可用 `E2E_DATABASE_URL` 指定）。第一次运行前执行 `npx playwright install chromium`；本机已有 Chromium 时，也可以用 `PW_CHROMIUM_PATH` 指定可执行文件。
 
+默认不运行真实 Agent，和 CI 一样。设了 `V2_NODE_ASSETS_DIR`（先 `task v2:node:prepare`）后，对话的端到端测试改为在真实 Node 和 Agent 上跑 fixture 模型：新建对话等到真实回复，停止另一个对话后只读，刷新后历史一致。项目第一次启动 Node 要装插件，整条用例约一两分钟。`V2_DATA_DIR` 要用短路径（如 `mktemp -d /tmp/v2e2e.XXXX`），否则 Node 的 Unix socket 路径会超长；也别和正在运行的 `task v2:dev` 共用同一个数据目录。
+
 ## 结构
 
 ```text

@@ -14,6 +14,8 @@ export interface SessionView {
   incomplete: boolean
   /** One per ended turn, in turn order. */
   results: ChatResult[]
+  /** What each ended turn was asked, aligned with `results`. */
+  prompts: string[]
   ended: boolean
   /** Why chat ended the session; empty when it ended outside chat (a restart) or is live. */
   endReason: ChatSessionEndReason
@@ -22,7 +24,7 @@ export interface SessionView {
 }
 
 /** A session before any event has arrived. */
-export const emptySessionView = (id: string): SessionView => ({ id, records: [], incomplete: false, results: [], ended: false, endReason: '', cursor: 0 })
+export const emptySessionView = (id: string): SessionView => ({ id, records: [], incomplete: false, results: [], prompts: [], ended: false, endReason: '', cursor: 0 })
 
 /**
  * Folds one event-stream message into a session. A history snapshot replaces the whole history,
@@ -35,7 +37,7 @@ export function applySessionEvent(base: SessionView, event: ChatEvent): SessionV
     case 'history_snapshot':
       return event.history ? { ...view, records: event.history.records, incomplete: event.history.incomplete } : view
     case 'turn_ended':
-      return event.result ? { ...view, results: [...view.results, event.result] } : view
+      return event.result ? { ...view, results: [...view.results, event.result], prompts: [...view.prompts, event.prompt ?? ''] } : view
     case 'session_ended':
       return { ...view, ended: true }
     default:
@@ -113,6 +115,12 @@ function appendSession(base: Conversation, session: SessionView): Conversation {
     for (const event of eventsOf(update, record.sequence, line, at)) conversation = applyEvent(conversation, event.event, event.at)
   }
   close(Date.now())
+  // A turn stopped before its Agent started never reached the history; show it from its result.
+  for (let i = index + 1; i < session.results.length; i++) {
+    const at = Date.now()
+    conversation = applyEvent(conversation, { type: 'prompt', turnId: `${session.id}:turn-${i}`, text: session.prompts[i] ?? '' }, at)
+    conversation = applyEvent(conversation, endOf(session.results[i]), at)
+  }
   return markFailures(conversation, startTurns, session.results)
 }
 
