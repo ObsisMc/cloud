@@ -1,7 +1,6 @@
-import { FlaskConicalIcon, RotateCcwIcon, SquarePenIcon } from 'lucide-react'
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { SquarePenIcon } from 'lucide-react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from 'react'
 import { useGetApiV1MeTenants } from '@/api/me/me'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Composer } from './components/composer'
@@ -13,15 +12,17 @@ import { Notice } from './components/notice'
 import { SandboxLabel } from './components/sandbox-label'
 import { ContextUsage, LandingHeading, Thread } from './components/thread'
 import { isResponding } from './model/conversation'
-import { emptyConversation } from './model/types'
-import { scenarios } from './samples/scenarios'
-import { type Agent, agentsOf, emptyDraft, isEnded, newChatKey, sampleAgents, samplePlugins, type Session, useChatStore } from './store'
+import { emptyConversation, type PluginRef } from './model/types'
+import { type Agent, agentsOf, emptyDraft, isEnded, newChatKey, type Session, useChatStore } from './store'
 
 /** The run view brings the graph canvas, so it loads only once a run is opened. */
 const RunPane = lazy(() => import('./workflow-run/run-pane'))
 
 /** Shared so a session with nothing queued keeps a stable selector result. */
 const noQueue: string[] = []
+/** The backend takes text only: no plugins to offer, and no permission requests to answer. */
+const noPlugins: PluginRef[] = []
+const noAnswer = () => {}
 
 /** How the input slides from the middle of the page to the bottom when the first prompt goes out. */
 const slide = { duration: 420, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' }
@@ -65,7 +66,6 @@ function ChatPane({ session }: { session?: Session }) {
   const conversation = useChatStore((s) => (session && s.conversations[session.id]) || emptyConversation)
   const draft = useChatStore((s) => s.drafts[key] ?? emptyDraft)
   const queued = useChatStore((s) => (session && s.queued[session.id]) || noQueue)
-  const playing = useChatStore((s) => !!(session && s.playing[session.id]))
   const newChat = useChatStore((s) => s.newChat)
   const newChatOpens = useChatStore((s) => s.newChatOpens)
   const projects = useChatStore((s) => s.projects)
@@ -74,14 +74,10 @@ function ChatPane({ session }: { session?: Session }) {
   const notice = useChatStore((s) => s.notices[key])
   // A backend conversation whose session ended (stopped, or the server restarted) is read-only.
   const ended = useChatStore((s) => !!session?.remote && isEnded(s.views[session.id]))
-  const { send, sendNewChat, startNewChat, stop, answer, setAgentModel, setNewChat, setDraft, unqueue, replay, dismiss } = useChatStore.getState()
-  const onAnswer = useCallback((permissionId: string, optionId: string) => session && answer(session.id, permissionId, optionId), [answer, session])
-  const scenario = scenarios.find((s) => s.id === session?.scenarioId)
+  const { send, sendNewChat, startNewChat, stop, setNewChat, setDraft, unqueue, dismiss } = useChatStore.getState()
   const landing = conversation.turns.length === 0
-  // Samples play in the browser; everything else runs on the backend, text only, and keeps the
-  // agent and model it started with.
-  const local = !!session?.scenarioId
-  const agents: Agent[] = local ? sampleAgents : session ? [{ id: session.agent, name: session.agent, models: [session.model] }] : agentsOf(executors)
+  // A conversation runs on the backend, text only, and keeps the agent and model it started with.
+  const agents: Agent[] = session ? [{ id: session.agent, name: session.agent, models: [session.model] }] : agentsOf(executors)
 
   // FLIP: where the input was when the first prompt left; once the layout has switched, it is
   // offset back there and animated home.
@@ -103,29 +99,12 @@ function ChatPane({ session }: { session?: Session }) {
         <h2 className="flex min-w-0 text-sm font-medium">
           <FadeText text={session?.title ?? '新对话'} />
         </h2>
-        {session && !session.scenarioId && <SandboxLabel />}
-        {scenario && (
-          <Badge variant="outline" className="gap-1 text-muted-foreground">
-            <FlaskConicalIcon />
-            样例：{scenario.covers}
-          </Badge>
-        )}
+        {session && <SandboxLabel />}
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          {import.meta.env.VITE_CHAT_DEMO === '1' && !local && (
-            <Badge variant="outline" className="text-muted-foreground" title="对话和回复由浏览器里的演示后端生成，不经过 v2-server，也不运行 Agent">
-              演示模式
-            </Badge>
-          )}
           <ContextUsage conversation={conversation} />
-          {session && scenario && (
-            <Button variant="ghost" size="sm" onClick={() => replay(session.id)}>
-              <RotateCcwIcon />
-              重新播放
-            </Button>
-          )}
         </div>
       </header>
-      <main className={cn('flex min-h-0 flex-1 flex-col', landing && ['overflow-y-auto', subtleScrollbar])} data-playing={playing || undefined}>
+      <main className={cn('flex min-h-0 flex-1 flex-col', landing && ['overflow-y-auto', subtleScrollbar])}>
         {landing ? (
           // mt-auto here and mb-auto on the input split the free space, centring the pair.
           <div className="mt-auto w-full px-3 pt-10 sm:px-6">
@@ -135,7 +114,7 @@ function ChatPane({ session }: { session?: Session }) {
           </div>
         ) : (
           <div className="min-h-0 flex-1">
-            <Thread key={key} conversation={conversation} onAnswer={onAnswer} />
+            <Thread key={key} conversation={conversation} onAnswer={noAnswer} />
           </div>
         )}
         <div
@@ -149,7 +128,7 @@ function ChatPane({ session }: { session?: Session }) {
           <div className="mx-auto w-full max-w-[760px]">
             {!session && (backend === 'unavailable' || backend === 'loading') && (
               <p role="status" className="mb-2 rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
-                {backend === 'loading' ? '正在连接后端…' : '后端还不能运行 Agent，暂时无法开始新对话。左栏的示例不依赖后端，可以先看看。'}
+                {backend === 'loading' ? '正在连接后端…' : '后端还不能运行 Agent，暂时无法开始新对话。'}
               </p>
             )}
             {notice && !ended && <Notice notice={notice} onDismiss={() => dismiss(key)} />}
@@ -179,11 +158,11 @@ function ChatPane({ session }: { session?: Session }) {
               agents={agents}
               agent={session?.agent ?? newChat.agent}
               model={session?.model ?? newChat.model}
-              onChoose={(agent, model) => (session ? setAgentModel(session.id, agent, model) : setNewChat({ agent, model }))}
-              plugins={samplePlugins}
-              textOnly={!local}
+              onChoose={(agent, model) => !session && setNewChat({ agent, model })}
+              plugins={noPlugins}
+              textOnly
               focusKey={session ? undefined : newChatOpens}
-              context={!session && <ContextBar value={newChat} projects={projects.filter((p) => !p.samples)} onChange={setNewChat} />}
+              context={!session && <ContextBar value={newChat} projects={projects} onChange={setNewChat} />}
             />
             )}
           </div>

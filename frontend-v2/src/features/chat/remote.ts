@@ -91,8 +91,6 @@ async function once<T>(run: (headers: Record<string, string>) => Promise<T>): Pr
 export const remote = {
   /** Loads what the page needs, all from v2-server's candidate routes. */
   async load(tid: string): Promise<RemoteState> {
-    // `npm run dev:demo` swaps the backend for one that plays scripted replies in the browser.
-    if (import.meta.env.VITE_CHAT_DEMO === '1') (await import('./demo/backend')).installDemoBackend()
     const [executors, conversations, projects, order] = await Promise.all([
       listChatExecutors(tid),
       listChatConversations(tid),

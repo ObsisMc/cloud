@@ -46,9 +46,8 @@ export function applySessionEvent(base: SessionView, event: ChatEvent): SessionV
 }
 
 /**
- * The conversation its session shows. The history is rebuilt from scratch through the same
- * reducer the recorded samples use; a marker after an ended session says the conversation cannot
- * continue. A conversation has one session; the list is empty until its first turn.
+ * The conversation its session shows. The history is rebuilt from scratch through the
+ * conversation reducer; a marker after an ended session says the conversation cannot continue. A conversation has one session; the list is empty until its first turn.
  */
 export function conversationOf(sessions: SessionView[]): Conversation {
   let conversation = emptyConversation

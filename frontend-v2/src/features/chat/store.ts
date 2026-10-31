@@ -4,10 +4,8 @@ import type { SidebarLayout } from '@/components/sidebar-resize-handle'
 import type { ChatConversation, ChatEvent, ChatExecutor } from './api/generated'
 import { applyEvent, isResponding } from './model/conversation'
 import { applySessionEvent, conversationOf, emptySessionView, type SessionView } from './model/history'
-import { type Attachment, type ChatEvent as ModelEvent, type Conversation, emptyConversation, type PluginRef } from './model/types'
+import { type Attachment, type Conversation, emptyConversation, type PluginRef } from './model/types'
 import { type Failure, failureOf, remote, type RemoteState } from './remote'
-import { scenarios } from './samples/scenarios'
-import { script, type Step } from './samples/script'
 
 /**
  * What the first version of the chat backend can do. The input and the history hide what it
@@ -21,8 +19,6 @@ export interface Project {
   name: string
   /** Where the project's main checkout lives, for projects the person added. */
   path?: string
-  /** Samples replay recorded conversations; the person cannot add sessions to them. */
-  samples?: boolean
 }
 
 export interface Session {
@@ -32,8 +28,6 @@ export interface Session {
   /** The agent's id in the selector, and the model it runs with. */
   agent: string
   model: string
-  /** The recorded conversation this session replays, for sample sessions. */
-  scenarioId?: string
   /** Set for conversations the backend runs, each in its own directory: with which executor. */
   remote?: { executorId: string }
   createdAt: number
@@ -65,23 +59,6 @@ export interface Agent {
   models: string[]
 }
 
-/** The agents the recorded samples use; the selector offers them only inside a sample. */
-export const sampleAgents: Agent[] = [
-  { id: 'claude-code', name: 'Claude Code', models: ['Claude Sonnet 5.5', 'Claude Opus 5.5', 'Claude Haiku 5.5'] },
-  { id: 'codex', name: 'Codex', models: ['GPT-5.5', 'GPT-5.5 Mini'] },
-  { id: 'opencode', name: 'OpenCode', models: ['Claude Sonnet 5.5', 'GPT-5.5', 'Qwen3 Coder'] },
-]
-
-const defaultChoice = { agent: sampleAgents[0].id, model: sampleAgents[0].models[0] }
-const agentName = (id: string) => sampleAgents.find((a) => a.id === id)?.name ?? id
-
-/** The plugins a sample's input can apply; the backend does not take plugins yet. */
-export const samplePlugins: PluginRef[] = [
-  { id: 'ui-guidelines', name: 'UI 规范' },
-  { id: 'code-review', name: '代码审查' },
-  { id: 'git-helper', name: 'Git 助手' },
-]
-
 /** The backend's executors as the selector shows them: each agent with the models it runs. */
 export function agentsOf(executors: ChatExecutor[]): Agent[] {
   const byAgent = new Map<string, Agent>()
@@ -98,7 +75,7 @@ export const defaultSidebar: SidebarLayout = { width: 288, open: true }
 
 /**
  * Whether the backend can run chats: still loading, ready, or unable to (no execution runtime, no
- * projects, or unreachable). The samples work in every case.
+ * projects, or unreachable).
  */
 export type BackendState = 'idle' | 'loading' | 'ready' | 'unavailable'
 
@@ -115,8 +92,6 @@ interface State {
   unread: Record<string, true>
   /** What the person has typed but not sent, per session. */
   drafts: Record<string, Draft>
-  /** Sessions whose recording (or stand-in reply) is still playing, including while it waits on an answer. */
-  playing: Record<string, true>
   selectedId?: string
   /** The workflow run shown instead of a session, picked from a project's runs. */
   selectedRunId?: string
@@ -159,52 +134,11 @@ interface State {
   send: (id: string, draft: Draft) => void
   /** Stops the running turn; for a backend conversation this ends it, leaving it read-only. */
   stop: (id: string) => void
-  answer: (id: string, permissionId: string, optionId: string) => void
-  /** Switches a sample's agent and model; once it has turns the switch is marked in the thread. */
-  setAgentModel: (id: string, agent: string, model: string) => void
   setDraft: (id: string, draft: Draft) => void
   /** Removes the queued prompt at `index`. */
   unqueue: (id: string, index: number) => void
-  /** Plays a sample session's recording again from the start. */
-  replay: (id: string) => void
 }
 
-const sampleProject: Project = { id: 'samples', name: '示例', samples: true }
-
-const sampleSessions: Session[] = scenarios.map((s, i) => ({
-  id: `sample-${s.id}`,
-  projectId: sampleProject.id,
-  title: s.title,
-  ...defaultChoice,
-  scenarioId: s.id,
-  createdAt: i,
-}))
-
-/**
- * How replay waits between steps. Tests set it to run without delays; the scale lets a demo
- * play faster.
- */
-export const replayClock = {
-  scale: 1,
-  wait: (ms: number, run: () => void): (() => void) => {
-    if (replayClock.scale === 0) {
-      run()
-      return () => {}
-    }
-    const timer = setTimeout(run, ms * replayClock.scale)
-    return () => clearTimeout(timer)
-  },
-}
-
-/** A running replay: what is left to play, and how to stop the step that is waiting. */
-interface Player {
-  steps: Step[]
-  cancel?: () => void
-  /** Set while the replay waits on a permission answer. */
-  awaiting?: Extract<Step, { kind: 'await' }>
-}
-
-const players = new Map<string, Player>()
 /** The event streams being followed, by conversation id. */
 const streams = new Map<string, () => void>()
 /** Conversations whose stream reached its end: everything their session will ever send has been read. */
@@ -261,77 +195,16 @@ function ordered(projects: Project[], order: string[]): Project[] {
 export const useChatStore = create<State>()(
   persist(
     (set, get) => {
-      const dispatch = (id: string, event: ModelEvent) => {
-        set((s) => {
-          const before = s.conversations[id] ?? emptyConversation
-          const after = applyEvent(before, event, Date.now())
-          const queued =
-            event.type === 'prompt' && s.queued[id]?.[0] === event.text
-              ? { ...s.queued, [id]: s.queued[id].slice(1) }
-              : s.queued
-          const finished = isResponding(before) && !isResponding(after) && s.selectedId !== id
-          return {
-            // A recording's model switch stays within the session's agent; an agent switch is
-            // applied by setAgentModel and only marked here.
-            sessions:
-              event.type === 'model'
-                ? s.sessions.map((x) => (x.id === id && sampleAgents.find((a) => a.id === x.agent)?.models.includes(event.model) ? { ...x, model: event.model } : x))
-                : s.sessions,
-            conversations: { ...s.conversations, [id]: after },
-            queued,
-            unread: finished ? { ...s.unread, [id]: true } : s.unread,
-          }
-        })
-      }
-
-      /** Plays steps until one has to wait; returns when the recording ends or pauses. */
-      const advance = (id: string) => {
-        const player = players.get(id)
-        if (!player) return
-        const step = player.steps.shift()
-        if (!step) {
-          players.delete(id)
-          setPlaying(id, false)
-          sendQueued(id)
-          return
-        }
-        if (step.kind === 'await') {
-          player.awaiting = step
-          return
-        }
-        player.cancel = replayClock.wait(step.delay, () => {
-          if (step.kind === 'event') dispatch(id, step.event)
-          if (step.kind === 'queue') set((s) => ({ queued: { ...s.queued, [id]: [...(s.queued[id] ?? []), step.text] } }))
-          advance(id)
-        })
-      }
-
-      const setPlaying = (id: string, on: boolean) =>
-        set((s) => {
-          const { [id]: _, ...rest } = s.playing
-          return { playing: on ? { ...rest, [id]: true } : rest }
-        })
-
-      const play = (id: string, steps: Step[]) => {
-        players.get(id)?.cancel?.()
-        players.set(id, { steps: [...steps] })
-        setPlaying(id, true)
-        advance(id)
-      }
-
       const isRemote = (id: string) => !!get().sessions.find((x) => x.id === id)?.remote
 
       /** Sends the next queued prompt once the agent is free, as the person would have. */
       const sendQueued = (id: string) => {
         const next = get().queued[id]?.[0]
-        if (next === undefined || players.has(id) || isResponding(get().conversations[id] ?? emptyConversation)) return
-        if (isRemote(id)) {
-          if (isEnded(get().views[id]) || awaitingTurnEnd.has(id)) return
-          set((s) => ({ queued: { ...s.queued, [id]: s.queued[id].slice(1) } }))
-          void sendRemote(id, next)
-          return
-        }
-        play(id, standInReply(next, { text: next, attachments: [], plugins: [] }).steps)
+        // A placeholder's queue moves to its conversation once the backend creates it.
+        if (next === undefined || !isRemote(id) || isResponding(get().conversations[id] ?? emptyConversation)) return
+        if (isEnded(get().views[id]) || awaitingTurnEnd.has(id)) return
+        set((s) => ({ queued: { ...s.queued, [id]: s.queued[id].slice(1) } }))
+        void sendRemote(id, next)
       }
 
       const notify = (key: string, failure: Failure) => set((s) => ({ notices: { ...s.notices, [key]: { ...failure, key } } }))
@@ -449,13 +322,12 @@ export const useChatStore = create<State>()(
       }
 
       return {
-        projects: [sampleProject],
-        sessions: [...sampleSessions],
+        projects: [],
+        sessions: [],
         conversations: {},
         queued: {},
         unread: {},
         drafts: {},
-        playing: {},
         sidebar: defaultSidebar,
         backend: 'idle',
         executors: [],
@@ -474,14 +346,12 @@ export const useChatStore = create<State>()(
             return
           }
           const projects = loaded.projects.map((p): Project => ({ id: p.id, name: p.name }))
-          const local = get().projects.filter((p) => p.samples)
           const order = loaded.projectOrder.length ? loaded.projectOrder : get().projects.map((p) => p.id)
-          const all = ordered([...local, ...projects], order)
           const first = loaded.executors[0]
           set((s) => ({
             backend: projects.length && loaded.executors.length ? 'ready' : 'unavailable',
             executors: loaded.executors,
-            projects: all,
+            projects: ordered(projects, order),
             sessions: [...s.sessions.filter((x) => !x.remote), ...loaded.conversations.map((c) => sessionOf(c, loaded.executors))],
             views: Object.fromEntries(loaded.conversations.map((c) => [c.id, viewsOf(c)])),
             newChat: {
@@ -504,10 +374,7 @@ export const useChatStore = create<State>()(
             return { selectedId: id, selectedRunId: undefined, unread }
           })
           if (previous && previous !== id) prune(previous)
-          const session = get().sessions.find((x) => x.id === id)
-          // A sample plays the first time it is opened, so picking it is enough to see it work.
-          if (session?.scenarioId && !get().conversations[id] && !players.has(id)) get().replay(id)
-          if (session?.remote) follow(id)
+          if (isRemote(id)) follow(id)
         },
         selectRun: (id) => set({ selectedRunId: id }),
         newChat: { projectId: '', agent: '', model: '' },
@@ -527,7 +394,7 @@ export const useChatStore = create<State>()(
           const { tenantId: tid, newChat, executors, projects } = get()
           const executor = executors.find((x) => x.agentName === newChat.agent && x.modelName === newChat.model)
           const project = projects.find((p) => p.id === newChat.projectId)
-          if (!tid || !executor || !project || project.samples) {
+          if (!tid || !executor || !project) {
             notify(newChatKey, { kind: 'unavailable' })
             return
           }
@@ -590,9 +457,6 @@ export const useChatStore = create<State>()(
             streams.get(id)?.()
             streams.delete(id)
           }
-          players.get(id)?.cancel?.()
-          players.delete(id)
-          setPlaying(id, false)
           set((s) => {
             const { [id]: _, ...conversations } = s.conversations
             const { [id]: __, ...views } = s.views
@@ -622,76 +486,37 @@ export const useChatStore = create<State>()(
             return
           }
           const conversation = get().conversations[id] ?? emptyConversation
-          if (isResponding(conversation) || players.has(id) || get().pending[id]) {
+          // A placeholder still waiting for its conversation keeps what is typed until it exists.
+          if (!isRemote(id) || isResponding(conversation) || get().pending[id]) {
             set((s) => ({ queued: { ...s.queued, [id]: [...(s.queued[id] ?? []), draft.text] } }))
             return
           }
-          if (isRemote(id)) {
-            void sendRemote(id, draft.text)
-            return
-          }
-          play(id, standInReply(draft.text, draft).steps)
+          void sendRemote(id, draft.text)
         },
         stop: (id) => {
-          // A first prompt still being admitted has nothing to stop yet.
-          if (id.startsWith('pending-')) return
           const tid = get().tenantId
-          if (isRemote(id) && tid) {
-            // The fixed Node ends the whole session, and its stream can report that before the
-            // stop request returns; the reason is set first so the marker reads right either way.
-            // Prompts queued behind the stopped turn can never be sent.
-            const reason = (endReason: SessionView['endReason']) =>
-              refresh(id, (s) => ({ views: { ...s.views, [id]: (s.views[id] ?? []).map((v) => (v.ended ? v : { ...v, endReason })) } }))
-            set((s) => ({ queued: { ...s.queued, [id]: [] } }))
-            reason('stopped')
-            remote.stop(tid, id).catch((error: unknown) => (reason(''), notify(id, failureOf(error))))
-            return
-          }
-          const player = players.get(id)
-          player?.cancel?.()
-          players.delete(id)
-          setPlaying(id, false)
-          if (isResponding(get().conversations[id] ?? emptyConversation)) {
-            dispatch(id, { type: 'turnEnd', stopReason: 'cancelled' })
-          }
-        },
-        answer: (id, permissionId, optionId) => {
-          const player = players.get(id)
-          if (player?.awaiting?.id === permissionId) {
-            const branch = player.awaiting.branches[optionId] ?? []
-            player.awaiting = undefined
-            player.steps.unshift(...branch)
-            advance(id)
-            return
-          }
-          dispatch(id, { type: 'permissionResolved', id: permissionId, optionId })
-        },
-        setAgentModel: (id, agent, model) => {
-          const session = get().sessions.find((x) => x.id === id)
-          // A backend conversation keeps its executor: the first version cannot switch models.
-          if (!session || session.remote || (session.agent === agent && session.model === model)) return
-          set((s) => ({ sessions: s.sessions.map((x) => (x.id === id ? { ...x, agent, model } : x)) }))
-          if ((get().conversations[id]?.turns.length ?? 0) > 0) {
-            dispatch(id, { type: 'model', model: agent === session.agent ? model : `${agentName(agent)} · ${model}` })
-          }
+          // A first prompt still being admitted has nothing to stop yet.
+          if (!isRemote(id) || !tid) return
+          // The fixed Node ends the whole session, and its stream can report that before the
+          // stop request returns; the reason is set first so the marker reads right either way.
+          // Prompts queued behind the stopped turn can never be sent.
+          const reason = (endReason: SessionView['endReason']) =>
+            refresh(id, (s) => ({ views: { ...s.views, [id]: (s.views[id] ?? []).map((v) => (v.ended ? v : { ...v, endReason })) } }))
+          set((s) => ({ queued: { ...s.queued, [id]: [] } }))
+          reason('stopped')
+          remote.stop(tid, id).catch((error: unknown) => (reason(''), notify(id, failureOf(error))))
         },
         setDraft: (id, draft) => set((s) => ({ drafts: { ...s.drafts, [id]: draft } })),
         unqueue: (id, index) =>
           set((s) => ({ queued: { ...s.queued, [id]: (s.queued[id] ?? []).filter((_, i) => i !== index) } })),
-        replay: (id) => {
-          const scenario = scenarios.find((s) => s.id === get().sessions.find((x) => x.id === id)?.scenarioId)
-          if (!scenario) return
-          set((s) => ({ conversations: { ...s.conversations, [id]: emptyConversation }, queued: { ...s.queued, [id]: [] } }))
-          play(id, scenario.steps)
-        },
       }
     },
     {
       name: 'ora-v2-chat',
       version: 1,
       storage: createJSONStorage(() => localStorage),
-      // The backend keeps the order of its projects; this copy orders the samples among them
-      // and covers a backend that cannot run chats.
+      // The backend keeps the order of its projects; this copy covers a backend that cannot run
+      // chats.
       partialize: (s) => ({ projectOrder: s.projects.map((p) => p.id), sidebar: s.sidebar }),
       merge: (persisted, current) => {
         const saved = persisted as { projectOrder?: string[]; sidebar?: SidebarLayout } | undefined
@@ -705,45 +530,19 @@ export const useChatStore = create<State>()(
   ),
 )
 
-/**
- * The reply a sample session gets when the person types into it: it says plainly that it is a
- * stand-in and echoes what was sent, so the input, attachments and plugins can be tried without
- * the backend.
- */
-function standInReply(text: string, draft: Draft) {
-  const turnId = newId('turn')
-  const s = script()
-  s.steps.push({ kind: 'event', delay: 0, event: { type: 'prompt', turnId, text, attachments: draft.attachments, plugins: draft.plugins } })
-  s.think('示例项目不连后端，这是前端的演示回复。')
-  const extras = [
-    draft.attachments.length ? `${draft.attachments.length} 个附件` : '',
-    draft.plugins.length ? `插件：${draft.plugins.map((p) => p.name).join('、')}` : '',
-  ].filter(Boolean)
-  s.say(
-    `这是演示回复：示例只回放录好的对话。在你的项目里新建对话，才会由 Agent 真正回答。\n\n你发送的是：\n\n> ${text.replace(/\n/g, '\n> ')}${
-      extras.length ? `\n\n（${extras.join('；')}）` : ''
-    }`,
-  )
-  s.end()
-  return s
-}
-
 /** Resets everything to the initial state; tests call it between cases. */
 export function resetChatStore() {
-  for (const p of players.values()) p.cancel?.()
-  players.clear()
   for (const stop of streams.values()) stop()
   streams.clear()
   drained.clear()
   awaitingTurnEnd.clear()
   useChatStore.setState({
-    projects: [sampleProject],
-    sessions: [...sampleSessions],
+    projects: [],
+    sessions: [],
     conversations: {},
     queued: {},
     unread: {},
     drafts: {},
-    playing: {},
     sidebar: defaultSidebar,
     tenantId: undefined,
     backend: 'idle',

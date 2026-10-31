@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import Page from './page'
-import { replayClock, resetChatStore, useChatStore } from './store'
+import { resetChatStore, useChatStore } from './store'
 import { type ChatBackend, chatBackend, FakeEventSource, line } from './test-backend'
 
 const renderPage = () =>
@@ -25,12 +25,8 @@ const renderReady = async () => {
 describe('chat page', () => {
   let backend: ChatBackend
   beforeEach(() => {
-    replayClock.scale = 0
     resetChatStore()
     backend = chatBackend()
-  })
-  afterEach(() => {
-    replayClock.scale = 1
   })
 
   it('groups history by project', async () => {
@@ -60,37 +56,12 @@ describe('chat page', () => {
     expect(input).toHaveFocus()
   })
 
-  it('opens a sample from the history and shows its work', async () => {
-    renderPage()
-    await userEvent.click(within(sidebar()).getByRole('button', { name: '工具调用：读、搜、改、执行' }))
-    expect(screen.getByRole('heading', { level: 2, name: '工具调用：读、搜、改、执行' })).toBeInTheDocument()
-    expect(screen.getByText('把对话页的标题改成"对话"，然后跑一下检查')).toBeInTheDocument()
-    expect(screen.getByText('部分操作失败')).toBeInTheDocument()
-    expect(screen.getByText('修改了 1 个文件')).toBeInTheDocument()
-    // The summary opens into the individual steps.
-    await userEvent.click(screen.getByText('部分操作失败'))
-    expect(screen.getByText('运行 npm run e2e')).toBeInTheDocument()
-    expect(screen.getByText(/PostgreSQL is not reachable/)).toBeInTheDocument()
-  })
-
-  it('asks for permission inline and continues with the answer', async () => {
-    renderPage()
-    await userEvent.click(within(sidebar()).getByRole('button', { name: '权限确认' }))
-    const card = screen.getByRole('group', { name: '权限确认' })
-    await userEvent.click(within(card).getByRole('button', { name: '允许一次' }))
-    expect(screen.queryByRole('group', { name: '权限确认' })).not.toBeInTheDocument()
-    expect(screen.getByText('你选择了：允许一次')).toBeInTheDocument()
-    expect(screen.getByText('依赖已经重新安装，共 412 个包。')).toBeInTheDocument()
-  })
-
-  it('keeps plugins and files for samples, where the input can be tried without the backend', async () => {
-    renderPage()
-    await userEvent.click(within(sidebar()).getByRole('button', { name: '工具调用：读、搜、改、执行' }))
-    const input = screen.getByRole('textbox', { name: '消息' })
-    await userEvent.type(input, '检查一下 @代码')
-    await userEvent.click(screen.getByRole('option', { name: '代码审查' }))
-    await userEvent.type(input, '{Enter}')
-    expect(screen.getByText(/插件：代码审查/)).toBeInTheDocument()
+  it('lists only the backend\'s projects and conversations, with no samples or replay', async () => {
+    await renderReady()
+    expect(within(sidebar()).queryByRole('region', { name: '项目 示例' })).not.toBeInTheDocument()
+    await userEvent.click(within(sidebar()).getByRole('button', { name: '梳理 v2 接口缺口' }))
+    expect(screen.queryByRole('button', { name: '重新播放' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/^样例：/)).not.toBeInTheDocument()
   })
 
   it('starts a conversation in a project with a text prompt, and shows the Agent\'s reply', async () => {
@@ -215,9 +186,9 @@ describe('chat page', () => {
   it('reorders projects when one is dropped on another', async () => {
     await renderReady()
     const order = () => within(sidebar()).getAllByRole('region').map((r) => r.getAttribute('aria-label'))
-    expect(order()).toEqual(['项目 示例', '项目 ora-space/cloud', '项目 ora-space/desktop'])
+    expect(order()).toEqual(['项目 ora-space/cloud', '项目 ora-space/desktop'])
     // dnd-kit's keyboard sensor needs layout jsdom lacks, so drive the store the drop calls.
-    act(() => useChatStore.getState().moveProject('p-desktop', 'samples'))
-    expect(order()).toEqual(['项目 ora-space/desktop', '项目 示例', '项目 ora-space/cloud'])
+    act(() => useChatStore.getState().moveProject('p-desktop', 'p-cloud'))
+    expect(order()).toEqual(['项目 ora-space/desktop', '项目 ora-space/cloud'])
   })
 })
