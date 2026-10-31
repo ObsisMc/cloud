@@ -1,116 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { emptyConversation } from './model/types'
-import { emptyDraft, isEnded, newChatKey, replayClock, resetChatStore, useChatStore } from './store'
+import { emptyDraft, isEnded, newChatKey, resetChatStore, useChatStore } from './store'
 import { type ChatBackend, chatBackend, FakeEventSource, line, tenantId } from './test-backend'
 
 const state = () => useChatStore.getState()
 const conversation = (id: string) => state().conversations[id] ?? emptyConversation
 
-describe('chat store: samples', () => {
-  beforeEach(() => {
-    replayClock.scale = 0
-    resetChatStore()
-  })
-  afterEach(() => {
-    replayClock.scale = 1
-    vi.useRealTimers()
-  })
-
-  it('plays a sample through to the end the first time it is opened', () => {
-    state().select('sample-tools')
-    const c = conversation('sample-tools')
-    expect(c.turns).toHaveLength(1)
-    expect(c.turns[0].status).toBe('completed')
-    expect(c.turns[0].items.filter((i) => i.kind === 'tool').map((t) => t.status)).toEqual([
-      'completed',
-      'completed',
-      'completed',
-      'completed',
-      'completed',
-      'failed',
-    ])
-    expect(state().playing['sample-tools']).toBeUndefined()
-  })
-
-  it('every sample plays to a finished conversation', () => {
-    for (const s of state().sessions.filter((x) => x.scenarioId && x.scenarioId !== 'permission')) {
-      state().select(s.id)
-      const c = conversation(s.id)
-      expect(c.turns.length, s.id).toBeGreaterThan(0)
-      expect(c.turns.every((t) => t.status !== 'streaming'), s.id).toBe(true)
-    }
-  })
-
-  it('waits on a permission and plays the branch for the answer', () => {
-    state().select('sample-permission')
-    expect(conversation('sample-permission').permissions).toMatchObject([{ id: 'perm-1' }])
-    expect(conversation('sample-permission').turns[0].status).toBe('streaming')
-    expect(state().playing['sample-permission']).toBe(true)
-
-    state().answer('sample-permission', 'perm-1', 'reject')
-    const c = conversation('sample-permission')
-    expect(c.permissions[0].outcome).toEqual({ optionId: 'reject' })
-    expect(c.turns[0]).toMatchObject({ status: 'completed' })
-    expect(c.turns[0].items.find((i) => i.kind === 'tool')).toMatchObject({ status: 'failed' })
-  })
-
-  it('replays a sample from the start', () => {
-    state().select('sample-markdown')
-    state().replay('sample-markdown')
-    expect(conversation('sample-markdown').turns).toHaveLength(1)
-  })
-
-  it('takes the model a sample switches to', () => {
-    state().select('sample-context')
-    expect(state().sessions.find((s) => s.id === 'sample-context')?.model).toBe('Claude Opus 5.5')
-  })
-
-  it('answers a prompt typed into a sample with a stand-in that says so', () => {
-    state().select('sample-markdown')
-    state().send('sample-markdown', { ...emptyDraft, text: '再来一段' })
-    const turn = conversation('sample-markdown').turns.at(-1)
-    expect(turn).toMatchObject({ prompt: { text: '再来一段' }, status: 'completed' })
-    expect(turn?.items.at(-1)).toMatchObject({ kind: 'message', text: expect.stringContaining('演示回复') })
-  })
-
-  it('queues a prompt typed while a sample replies and sends it afterwards', () => {
-    vi.useFakeTimers()
-    state().select('sample-markdown')
-    replayClock.scale = 1
-    state().send('sample-markdown', { ...emptyDraft, text: '第一条' })
-    state().send('sample-markdown', { ...emptyDraft, text: '第二条' })
-    expect(state().queued['sample-markdown']).toEqual(['第二条'])
-    vi.runAllTimers()
-    expect(state().queued['sample-markdown']).toEqual([])
-    expect(conversation('sample-markdown').turns.slice(-2).map((t) => [t.prompt.text, t.status])).toEqual([
-      ['第一条', 'completed'],
-      ['第二条', 'completed'],
-    ])
-  })
-
-  it('stops a sample mid-reply', () => {
-    vi.useFakeTimers()
-    state().select('sample-markdown')
-    replayClock.scale = 1
-    state().send('sample-markdown', { ...emptyDraft, text: '写长一点' })
-    vi.advanceTimersByTime(300)
-    state().stop('sample-markdown')
-    vi.runAllTimers()
-    expect(conversation('sample-markdown').turns.at(-1)).toMatchObject({ status: 'cancelled', stopReason: 'cancelled' })
-    expect(state().playing['sample-markdown']).toBeUndefined()
-  })
-
-  it('records a sample model switch once it has turns, naming the agent when it changes', () => {
-    state().setAgentModel('sample-markdown', 'claude-code', 'Claude Haiku 5.5')
-    expect(conversation('sample-markdown').markers).toEqual([])
-    state().select('sample-markdown')
-    state().setAgentModel('sample-markdown', 'claude-code', 'Claude Opus 5.5')
-    state().setAgentModel('sample-markdown', 'codex', 'GPT-5.5')
-    expect(conversation('sample-markdown').markers).toMatchObject([
-      { kind: 'model', model: 'Claude Opus 5.5', afterTurn: 1 },
-      { kind: 'model', model: 'Codex · GPT-5.5', afterTurn: 1 },
-    ])
-  })
+describe('chat store: layout', () => {
+  beforeEach(() => resetChatStore())
 
   it('remembers how the history column is laid out', async () => {
     state().setSidebar({ width: 360 })
@@ -127,7 +24,6 @@ describe('chat store: samples', () => {
 describe('chat store: backend conversations', () => {
   let backend: ChatBackend
   beforeEach(async () => {
-    replayClock.scale = 0
     resetChatStore()
     backend = chatBackend()
     await state().connect(tenantId)
@@ -135,7 +31,7 @@ describe('chat store: backend conversations', () => {
 
   it('loads projects, executors and conversations', () => {
     expect(state().backend).toBe('ready')
-    expect(state().projects.map((p) => p.name)).toEqual(['示例', 'ora-space/cloud', 'ora-space/desktop'])
+    expect(state().projects.map((p) => p.name)).toEqual(['ora-space/cloud', 'ora-space/desktop'])
     expect(state().sessions.find((s) => s.id === 'c-style')).toMatchObject({ projectId: 'p-cloud', agent: 'OpenCode', model: 'Fixture' })
     expect(state().newChat).toEqual({ projectId: 'p-cloud', agent: 'OpenCode', model: 'Fixture' })
   })
@@ -249,24 +145,18 @@ describe('chat store: backend conversations', () => {
   })
 
   it('saves the project order for the person', () => {
-    state().moveProject('p-desktop', 'samples')
-    expect(state().projects.map((p) => p.id)).toEqual(['p-desktop', 'samples', 'p-cloud'])
-    expect(backend.bodies.at(-1)).toEqual({ projectIds: ['p-desktop', 'samples', 'p-cloud'] })
-  })
-
-  it('keeps a conversation on its executor', () => {
-    state().setAgentModel('c-main', 'Claude Code', 'Claude Sonnet 5.5')
-    expect(state().sessions.find((s) => s.id === 'c-main')).toMatchObject({ agent: 'OpenCode', model: 'Fixture' })
+    state().moveProject('p-desktop', 'p-cloud')
+    expect(state().projects.map((p) => p.id)).toEqual(['p-desktop', 'p-cloud'])
+    expect(backend.bodies.at(-1)).toEqual({ projectIds: ['p-desktop', 'p-cloud'] })
   })
 })
 
 describe('chat store: backend that cannot run Agents', () => {
-  it('reports unavailable and keeps the samples', async () => {
+  it('reports unavailable and refuses a new chat', async () => {
     resetChatStore()
     chatBackend({ unavailable: true })
     await state().connect(tenantId)
     expect(state().backend).toBe('unavailable')
-    expect(state().sessions.every((s) => s.scenarioId)).toBe(true)
     await state().sendNewChat({ ...emptyDraft, text: 'hi' })
     expect(state().notices[newChatKey]).toMatchObject({ kind: 'unavailable' })
   })

@@ -13,7 +13,6 @@ import {
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import {
   ChevronRightIcon,
-  FlaskConicalIcon,
   FolderIcon,
   GripVerticalIcon,
   MoreHorizontalIcon,
@@ -21,7 +20,6 @@ import {
   PanelLeftOpenIcon,
   PencilIcon,
   PlusIcon,
-  RotateCcwIcon,
   SquarePenIcon,
   Trash2Icon,
 } from 'lucide-react'
@@ -152,7 +150,6 @@ function ProjectGroup({ project, dropLine }: { project: Project; dropLine?: 'bef
   // Sortable for the drop targets and keyboard moves only: nothing shifts while dragging.
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useSortable({ id: project.id })
   const [runWorkflow, setRunWorkflow] = useState<PublishedWorkflow>()
-  const Icon = project.samples ? FlaskConicalIcon : FolderIcon
 
   return (
     <section ref={setNodeRef} className="relative rounded-md" aria-label={`项目 ${project.name}`} data-dragging={isDragging || undefined}>
@@ -173,24 +170,22 @@ function ProjectGroup({ project, dropLine }: { project: Project; dropLine?: 'bef
           </button>
           <CollapsibleTrigger className="group/trigger flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm font-medium">
             <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
-            <Icon className="size-4 shrink-0 text-muted-foreground" />
+            <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
             <FadeText text={project.name} />
           </CollapsibleTrigger>
-          {!project.samples && (
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`在 ${project.name} 新建对话`} />}>
-                <PlusIcon />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem onClick={() => startNewChat({ projectId: project.id })}>
-                  <SquarePenIcon />
-                  新建对话
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <RunWorkflowSubmenu onPick={setRunWorkflow} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`在 ${project.name} 新建对话`} />}>
+              <PlusIcon />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={() => startNewChat({ projectId: project.id })}>
+                <SquarePenIcon />
+                新建对话
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <RunWorkflowSubmenu onPick={setRunWorkflow} />
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <CollapsibleContent>
           <div className="mt-0.5 mb-1 ml-[1.9rem] flex flex-col pl-2">
@@ -209,12 +204,11 @@ function ProjectGroup({ project, dropLine }: { project: Project; dropLine?: 'bef
 
 /** The project row that follows the pointer while the project is dragged. */
 function LiftedProject({ project }: { project: Project }) {
-  const Icon = project.samples ? FlaskConicalIcon : FolderIcon
   return (
     <div className="flex h-8 cursor-grabbing items-center gap-1.5 rounded-md bg-background pr-2 text-sm font-medium shadow-md ring-1 ring-border">
       <GripVerticalIcon className="ml-0.5 size-3.5 shrink-0 text-muted-foreground" />
       <ChevronRightIcon className="size-3.5 shrink-0 rotate-90 text-muted-foreground" />
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
       <FadeText text={project.name} />
     </div>
   )
@@ -224,7 +218,7 @@ function SessionRow({ session }: { session: Session }) {
   const selected = useChatStore((s) => s.selectedId === session.id && !s.selectedRunId)
   const responding = useChatStore((s) => isResponding(s.conversations[session.id] ?? emptyConversation))
   const unread = useChatStore((s) => !!s.unread[session.id])
-  const { select, renameSession, deleteSession, replay } = useChatStore.getState()
+  const { select, renameSession, deleteSession } = useChatStore.getState()
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
 
@@ -269,12 +263,6 @@ function SessionRow({ session }: { session: Session }) {
           <MoreHorizontalIcon />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40">
-          {session.scenarioId && (
-            <DropdownMenuItem onClick={() => (select(session.id), replay(session.id))}>
-              <RotateCcwIcon />
-              重新播放
-            </DropdownMenuItem>
-          )}
           <DropdownMenuItem onClick={() => setEditing(true)}>
             <PencilIcon />
             重命名

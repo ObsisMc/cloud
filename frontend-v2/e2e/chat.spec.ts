@@ -6,7 +6,7 @@ const projects = (page: Page) => page.getByRole('complementary', { name: '聊天
 // Agents on the fixture model; without them, as in CI, it can run none.
 const realAgents = !!process.env.V2_NODE_ASSETS_DIR
 
-test('chat: replay a sample, say the backend cannot run Agents yet, resize the column', async ({ page }) => {
+test('chat: lists only the backend\'s projects, says it cannot run Agents yet, resize the column', async ({ page }) => {
   test.skip(realAgents, 'the backend can run Agents')
   await page.goto('/chat')
   await page.getByRole('button', { name: '开发者登录' }).click()
@@ -15,18 +15,14 @@ test('chat: replay a sample, say the backend cannot run Agents yet, resize the c
   // The runtime seeds a real demo project. CI has no Node assets, so the executor list remains
   // empty and a new Agent conversation stays explicitly unavailable.
   await expect(page.getByRole('status').filter({ hasText: /后端还不能运行 Agent/ })).toBeVisible()
-  expect(await projects(page).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(['项目 示例', '项目 Demo'])
+  // Only what v2-server returns: no sample project, and the demo project has no conversations yet.
+  expect(await projects(page).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(['项目 Demo'])
+  await expect(projects(page).getByText('还没有会话')).toBeVisible()
 
-  // A sample replays its recording: tool calls stream in, then fold into a summary.
-  await projects(page).filter({ hasText: '示例' }).getByRole('button', { name: '工具调用：读、搜、改、执行', exact: true }).click()
-  await expect(page.getByText('运行 npm run check')).toBeVisible()
-  await expect(page.getByText('部分操作失败')).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByText('修改了 1 个文件')).toBeVisible()
-
-  // Typing into a sample gets the stand-in reply, which says it is one.
+  // A send is refused up front rather than failing on the backend.
   await page.getByRole('textbox', { name: '消息' }).fill('你好')
   await page.keyboard.press('Enter')
-  await expect(page.getByText(/这是演示回复/)).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: '新对话' })).toBeVisible()
 
   // The column's edge resizes it; dragged onto the icon rail, the column folds away.
   const column = page.getByRole('complementary', { name: '聊天记录' })

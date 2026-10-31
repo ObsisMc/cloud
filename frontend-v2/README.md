@@ -50,12 +50,11 @@ e2e/            Playwright 端到端测试
 
 `src/features/chat/` 是对话页，界面对齐 desktop 的对话界面。组件用 shadcn 的 chat 组件（MessageScroller、Message、Bubble、Trace、Code Block、Attachment、Marker），复制进来的 AI Elements pattern 放在 `components/`。Code Block 的高亮依赖 shadcn 一起生成的 `src/lib/highlighter.tsx` 和 `src/hooks/use-highlighted-code.ts`。
 
-- `model/`：把 ACP 事件（`session/update`、权限请求、轮次结束）归约成界面条目，再排成显示用的行（活动块、子代理分组、改动文件）。示例走增量事件；后端对话的历史快照由 `model/history.ts` 每次整份重建成轮次，走同一个归约器。
-- `samples/`：录好的示例对话，覆盖工具调用、思考、计划、子代理、权限确认、测试结果、报错、引用、上下文、检查点、附件和插件，在左栏"示例"项目里回放，不连后端。
+- `model/`：把 ACP 事件（`session/update`、权限请求、轮次结束）归约成界面条目，再排成显示用的行（活动块、子代理分组、改动文件）。后端对话的历史快照由 `model/history.ts` 每次整份重建成轮次，走同一个归约器。
 - `api/`：由 `v2-server/chat.openapi.json` 生成的客户端（`npm run api:generate:chat`），不手改。
-- `remote.ts`：对后端的调用和事件流（Server-Sent Events）。`store.ts`：项目、对话、事件流和回放状态。
+- `remote.ts`：对后端的调用和事件流（Server-Sent Events）。`store.ts`：项目、对话和事件流的状态。
 
-左栏按项目分组：示例之外的项目和对话都来自后端，对话直接列在所属项目下；拖动项目可调整顺序（存到后端），拖动左栏右边缘可调宽度或收起（存在浏览器本地）。
+左栏按项目分组：项目和对话都来自后端，对话直接列在所属项目下；拖动项目可调整顺序（存到后端），拖动左栏右边缘可调宽度或收起（存在浏览器本地）。
 
 新对话的排版照 desktop：没有对话选中时显示新对话，标题和输入框在页面中间，输入框上方选项目和启动模式（网页上只有云端），旁边一个"沙盒"标签说明每个对话在独立的沙盒中运行（悬停有说明）；第一条消息发出时才由后端建对话，输入框滑到底部。输入框右下角先选 Agent 再选模型，清单来自后端的执行器。
 
@@ -67,7 +66,7 @@ e2e/            Playwright 端到端测试
 - 只能发文字，对话不能换执行器；新建项目等后端支持后再开放（`backendSupports`）。
 - 没有在看、也没有在等回复的对话会关掉事件流，再打开时从上次的序号接着读。
 
-后端还不能运行 Agent 时，新对话上方会提示，示例照常可用。
+后端还不能运行 Agent 时，新对话上方会提示。
 
 ### 运行工作流
 
