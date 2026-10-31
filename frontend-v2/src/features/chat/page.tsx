@@ -74,7 +74,7 @@ function ChatPane({ session }: { session?: Session }) {
   const notice = useChatStore((s) => s.notices[key])
   // A backend conversation whose session ended (stopped, or the server restarted) is read-only.
   const ended = useChatStore((s) => !!session?.remote && isEnded(s.views[session.id]))
-  const { send, sendNewChat, startNewChat, stop, setNewChat, setDraft, unqueue, dismiss } = useChatStore.getState()
+  const { send, sendNewChat, startNewChat, stop, setNewChat, setDraft, unqueue, dismiss, createProject } = useChatStore.getState()
   const landing = conversation.turns.length === 0
   // A conversation runs on the backend, text only, and keeps the agent and model it started with.
   const agents: Agent[] = session ? [{ id: session.agent, name: session.agent, models: [session.model] }] : agentsOf(executors)
@@ -162,7 +162,7 @@ function ChatPane({ session }: { session?: Session }) {
               plugins={noPlugins}
               textOnly
               focusKey={session ? undefined : newChatOpens}
-              context={!session && <ContextBar value={newChat} projects={projects} onChange={setNewChat} />}
+              context={!session && <ContextBar value={newChat} projects={projects} onChange={setNewChat} onCreateProject={createProject} />}
             />
             )}
           </div>

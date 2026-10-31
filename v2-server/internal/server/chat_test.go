@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -348,6 +349,37 @@ func TestChatEventStream(t *testing.T) {
 	req, _ = http.NewRequest("GET", strings.Replace(path, id, "00000000-0000-0000-0000-000000000009", 1), nil)
 	if res, _ := c.http.Do(req); res.StatusCode != 404 {
 		t.Fatalf("unknown conversation = %d", res.StatusCode)
+	}
+}
+
+func TestChatEventStreamWithoutPrompt(t *testing.T) {
+	rt := withRuntime(nil)
+	rt.ReadTurnsFunc = func(context.Context, execution.Scope, string, string, int) (execution.TurnPage, error) {
+		return execution.TurnPage{}, errors.New("turns unreadable")
+	}
+	c := newChatClient(t, rt)
+	_, created := c.post("/conversations", "k1", map[string]any{"projectId": "demo", "executorId": "fixture", "prompt": "你好"})
+	id := created["conversation"].(map[string]any)["id"].(string)
+	res, e := c.http.Get(c.base + "/api/v2/tenants/" + c.tenant + "/chat/conversations/" + id + "/events")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer res.Body.Close()
+	var lines []string
+	sc := bufio.NewScanner(res.Body)
+	for sc.Scan() {
+		if l := sc.Text(); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	// Every event still arrives and the stream ends cleanly, not with "failure".
+	if len(lines) != 8 || lines[2] != "id: 2" || lines[6] != "event: end" {
+		t.Fatalf("stream = %q", lines)
+	}
+	var ended map[string]any
+	_ = json.Unmarshal([]byte(strings.TrimPrefix(lines[3], "data: ")), &ended)
+	if _, has := ended["prompt"]; ended["kind"] != "turn_ended" || ended["result"] == nil || has {
+		t.Fatalf("turn_ended without a readable prompt = %v, want the result and no prompt", ended)
 	}
 }
 

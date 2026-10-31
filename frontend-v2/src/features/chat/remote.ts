@@ -14,7 +14,7 @@ import {
   setChatProjectOrder,
   stopChatConversation,
 } from './api/generated'
-import { getApiV2TenantsTidProjects } from './projects-api/generated'
+import { type CreateProject, getApiV2TenantsTidProjects, postApiV2TenantsTidProjects } from './projects-api/generated'
 
 /** A project the backend can run chats in; each conversation gets its own directory of it. */
 export interface RemoteProject {
@@ -59,6 +59,19 @@ export function failureOf(error: unknown): Failure {
   if (status === 503 && body?.code === 'stop_unconfirmed') return { kind: 'error', message: '还没确认停下，请稍后再试。' }
   if (status === 400 && body?.code === 'unsupported_content') return { kind: 'error', message: '首版只能发送文字消息。' }
   return { kind: 'error', message: '请求失败，请重试。' }
+}
+
+/**
+ * Why creating a project failed, as the dialog says it. The backend clones the repository before
+ * it records anything, so every failure leaves no project behind.
+ */
+export function projectFailureOf(error: unknown, input: CreateProject): string {
+  const status = statusOf(error)
+  const body = isAxiosError(error) ? (error.response?.data as { code?: string } | undefined) : undefined
+  if (status === 400 && body?.code === 'invalid_project') return '项目名、仓库地址或分支不合法。仓库地址要用 HTTPS，不能带用户名、查询参数或 #。'
+  if (status === 400 && body?.code === 'repository_unavailable') return `无法克隆这个仓库，或仓库里没有分支 ${input.defaultBranch}。请确认地址能公开访问、分支存在。`
+  if (status === 409 && body?.code === 'project_conflict') return '和已有项目冲突，请重试。'
+  return '新建项目失败，请重试。'
 }
 
 /** Whether a request's outcome is unknown and must be retried with the same idempotency key. */
@@ -111,6 +124,11 @@ export const remote = {
   rename: (tid: string, cid: string, title: string) => renameChatConversation(tid, cid, { title }),
   remove: (tid: string, cid: string) => deleteChatConversation(tid, cid),
   saveOrder: (tid: string, projectIds: string[]) => setChatProjectOrder(tid, { projectIds }),
+  /** Clones the repository and records the project; resolves only once both have succeeded. */
+  createProject: async (tid: string, input: CreateProject): Promise<RemoteProject> => {
+    const p = await postApiV2TenantsTidProjects(tid, input)
+    return { id: p.id, name: p.name }
+  },
 
   /**
    * Follows a conversation's session events. The browser's EventSource resumes after the last
