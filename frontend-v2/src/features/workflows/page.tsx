@@ -5,17 +5,22 @@ import { I18nextProvider } from "react-i18next";
 import "@xyflow/react/dist/style.css";
 import { Toaster } from "@/components/ui/sonner";
 import {
+  browserDraftKeeper,
   createContractsClient,
   createHttpWorkflowContracts,
-  keepDraftOnLeave,
 } from "@/lib/workflows/data/contracts-client";
 import { ContractsClientProvider } from "@/lib/workflows/data/contracts-client-provider";
-import { pendingDrafts, replayPendingDrafts } from "@/lib/workflows/data/pending-drafts";
+import {
+  pendingDrafts,
+  replayPendingDrafts,
+  type DraftConflict,
+} from "@/lib/workflows/data/pending-drafts";
 import { toast } from "@/lib/workflows/host/ui";
 import { createWorkflowQueryClient } from "@/lib/workflows/data/query-client";
 import { WorkflowEditor } from "./editor/workflow-editor";
 import { workflowI18n } from "@/lib/workflows/host/i18n";
 import { useDarkTheme } from "@/lib/workflows/host/theme";
+import { DraftConflicts } from "./draft-conflicts";
 import { WorkflowSidebar } from "./workflow-sidebar";
 
 /**
@@ -49,47 +54,71 @@ export default function Page() {
 
 /**
  * One tenant's library. Drafts a closed page left unsaved are written first, so the editor
- * reads the last edits instead of the draft the server had before them.
+ * reads the last edits instead of the draft the server had before them; one whose workflow
+ * someone else changed meanwhile is put to the user before the editor opens.
  */
 function TenantWorkflows({ tenantId }: { tenantId: string }) {
   const [contracts] = useState(() => createHttpWorkflowContracts(tenantId));
   const [client] = useState(() =>
-    createContractsClient(contracts, (draft) => keepDraftOnLeave(tenantId, draft)),
+    createContractsClient(contracts, browserDraftKeeper(tenantId)),
   );
   const [queryClient] = useState(createWorkflowQueryClient);
-  const [replaying, setReplaying] = useState(() => pendingDrafts(tenantId).length > 0);
+  const [phase, setPhase] = useState<"replaying" | "ready" | DraftConflict[]>(() =>
+    pendingDrafts(tenantId).length > 0 ? "replaying" : "ready",
+  );
+  const replaying = phase === "replaying";
   useEffect(() => {
     if (!replaying) return;
     let live = true;
-    void replayPendingDrafts(tenantId, contracts).then((waiting) => {
+    void replayPendingDrafts(tenantId, contracts).then((result) => {
       if (!live) return;
-      if (waiting > 0) toast.error(`有 ${waiting} 个工作流上次离开时的修改还没保存到服务端，下次打开会再试`);
-      setReplaying(false);
+      if (result.waiting > 0) {
+        toast.error(`有 ${result.waiting} 个工作流上次离开时的修改还没保存到服务端，下次打开会再试`);
+      }
+      if (result.refusedNames.length > 0) {
+        toast.error(`标题「${result.refusedNames.join("」「")}」没能保存（已被占用或为空），图已保存`);
+      }
+      setPhase(result.conflicts.length > 0 ? result.conflicts : "ready");
     });
     return () => {
       live = false;
     };
   }, [contracts, replaying, tenantId]);
+  let content;
+  if (phase === "replaying") {
+    content = (
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-12 shrink-0 items-center px-4">
+          <h1 className="text-sm font-semibold">工作流</h1>
+        </div>
+        <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          正在保存上次离开时的修改…
+        </p>
+      </div>
+    );
+  } else if (phase !== "ready") {
+    content = (
+      <DraftConflicts
+        tenantId={tenantId}
+        contracts={contracts}
+        conflicts={phase}
+        onSettled={() => setPhase("ready")}
+      />
+    );
+  } else {
+    content = (
+      <I18nextProvider i18n={workflowI18n}>
+        <QueryClientProvider client={queryClient}>
+          <ContractsClientProvider client={client}>
+            <WorkflowWorkspace />
+          </ContractsClientProvider>
+        </QueryClientProvider>
+      </I18nextProvider>
+    );
+  }
   return (
     <>
-      {replaying ? (
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex h-12 shrink-0 items-center px-4">
-            <h1 className="text-sm font-semibold">工作流</h1>
-          </div>
-          <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            正在保存上次离开时的修改…
-          </p>
-        </div>
-      ) : (
-        <I18nextProvider i18n={workflowI18n}>
-          <QueryClientProvider client={queryClient}>
-            <ContractsClientProvider client={client}>
-              <WorkflowWorkspace />
-            </ContractsClientProvider>
-          </QueryClientProvider>
-        </I18nextProvider>
-      )}
+      {content}
       <WorkflowToaster />
     </>
   );

@@ -158,6 +158,56 @@ describe("workflow page", () => {
     expect(stored()).toBe(2);
   });
 
+  it("asks before writing kept edits over a teammate's later change", async () => {
+    const user = userEvent.setup();
+    const first = await renderPage();
+    await createWorkflow(user, "共用");
+    const canvas = await screen.findByLabelText("工作流画布");
+    await waitFor(() => expect(canvas).toHaveAttribute("data-workflow-node-count", "1"));
+    await user.click(
+      within(screen.getByRole("toolbar", { name: "添加工作流节点" })).getByRole("button", { name: /^Agent$/ }),
+    );
+    await waitFor(() => expect(canvas).toHaveAttribute("data-workflow-node-count", "2"));
+
+    // The page goes away before its last edit reaches the server; a teammate then edits the draft.
+    server.refuse = {
+      match: /PUT .*\/draft$/,
+      status: 503,
+      data: { code: "workflow_store_unavailable", params: {}, requestId: "r" },
+    };
+    fireEvent(window, new Event("pagehide"));
+    first.unmount();
+    await waitFor(() => expect(server.keptAlive.length).toBeGreaterThan(0));
+    server.refuse = undefined;
+    const id = server.backend.list().workflows.find((w) => w.name === "共用")!.id;
+    const graph = JSON.parse(server.backend.getDraft({ workflowId: id }).snapshot.graph) as {
+      nodes: unknown[];
+      description?: string;
+    };
+    expect(graph.nodes).toHaveLength(1);
+    const theirs = JSON.stringify({ ...graph, description: "队友改的" });
+    server.backend.updateDraft({ workflowId: id, graph: theirs });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TooltipProvider>
+          <Page />
+        </TooltipProvider>
+      </QueryClientProvider>,
+    );
+    const conflict = await screen.findByRole("region", { name: "「共用」离开前的修改" });
+    expect(server.backend.getDraft({ workflowId: id }).snapshot.graph).toBe(theirs);
+
+    await user.click(within(conflict).getByRole("button", { name: "另存为新工作流" }));
+
+    expect(await within(library()).findByRole("button", { name: "共用（离开前的修改）" })).toBeInTheDocument();
+    expect(server.backend.getDraft({ workflowId: id }).snapshot.graph).toBe(theirs);
+    const copy = server.backend.list().workflows.find((w) => w.name === "共用（离开前的修改）")!;
+    expect(
+      (JSON.parse(server.backend.getDraft({ workflowId: copy.id }).snapshot.graph) as { nodes: unknown[] }).nodes,
+    ).toHaveLength(2);
+  });
+
   it("offers once to import the workflows this browser kept", async () => {
     const user = userEvent.setup();
     new LocalWorkflowBackend({ storage: browserWorkflowStorage }).create({ name: "本机旧流程", graph: null });

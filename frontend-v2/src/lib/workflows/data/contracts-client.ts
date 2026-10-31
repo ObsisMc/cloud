@@ -56,6 +56,7 @@ import type {
 import { ContractError } from "../contracts";
 import {
   forgetPendingDraft,
+  pendingDrafts,
   rememberPendingDraft,
   type PendingDraft,
 } from "./pending-drafts";
@@ -163,33 +164,59 @@ export function createHttpWorkflowContracts(tenantId: string): WorkflowContracts
     update: send(async ({ workflowId, name }: UpdateWorkflowRequest, signal) => ({
       workflow: workflow((await updateWorkflow(tid, workflowId, { name }, undefined, signal)).workflow),
     })),
-    updateDraft: send(async ({ workflowId, graph }: UpdateDraftRequest, signal) => {
-      const saved = await updateWorkflowDraft(tid, workflowId, { graph }, undefined, signal);
-      // This write is newer than anything a closed page left behind.
-      forgetPendingDraft(tid, workflowId);
-      return { snapshot: snapshot(saved.snapshot) };
-    }),
+    updateDraft: send(async ({ workflowId, graph }: UpdateDraftRequest, signal) => ({
+      snapshot: snapshot(
+        (await updateWorkflowDraft(tid, workflowId, { graph }, undefined, signal)).snapshot,
+      ),
+    })),
   };
 }
 
 /**
- * Keeps the draft a page is leaving with: it is remembered in the browser at once, so the next
- * visit writes it first (`replayPendingDrafts`), and sent with `keepalive` so it usually reaches
- * the server even as the page unloads. Axios cannot send a keepalive request, hence `fetch`.
+ * Axios's fetch adapter with `keepalive`: the one request the browser carries on after the page
+ * unloads. The default XHR adapter cannot do that, so leaving the page asks for this one.
  */
-export function keepDraftOnLeave(tenantId: string, draft: PendingDraft): void {
-  rememberPendingDraft(tenantId, draft);
-  try {
-    void fetch(`/api/v2/tenants/${tenantId}/workflows/${draft.workflowId}/draft`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph: draft.graph }),
-      credentials: "same-origin",
-      keepalive: true,
-    }).catch(() => undefined);
-  } catch {
-    // A body over the keepalive limit throws; the remembered draft still covers it.
-  }
+export const keepaliveRequest = {
+  adapter: "fetch",
+  fetchOptions: { keepalive: true },
+} as const;
+
+/** The drafts of pages that went away before their last edits were saved, in one tenant. */
+export interface DraftKeeper {
+  /**
+   * Keeps the draft a page or route is leaving with: remembered in the browser at once, so the
+   * next visit writes it first (`replayPendingDrafts`), and sent with `keepalive`, so it usually
+   * reaches the server even as the page unloads. Must stay synchronous.
+   */
+  keep(draft: PendingDraft): void;
+  /** Forgets the workflow's draft once the server holds exactly `graph`. */
+  saved(workflowId: string, graph: string): void;
+  /** Drafts a replay found someone else's edits behind, which the user has to settle. */
+  conflicts(): PendingDraft[];
+  /** Drops the workflow's draft for good: the user settled it. */
+  discard(workflowId: string): void;
+}
+
+/** The browser's pending drafts for `tenantId`, sent through the generated workflow client. */
+export function browserDraftKeeper(tenantId: string): DraftKeeper {
+  return {
+    keep(draft) {
+      rememberPendingDraft(tenantId, draft);
+      try {
+        void updateWorkflowDraft(tenantId, draft.workflowId, { graph: draft.graph }, keepaliveRequest)
+          .then(() => {
+            // A title still to apply keeps the draft: the next visit renames without rewriting.
+            if (draft.name === null) forgetPendingDraft(tenantId, draft.workflowId, draft.graph);
+          })
+          .catch(() => undefined);
+      } catch {
+        // A body over the keepalive limit throws; the remembered draft still covers it.
+      }
+    },
+    saved: (workflowId, graph) => forgetPendingDraft(tenantId, workflowId, graph),
+    conflicts: () => pendingDrafts(tenantId).filter((draft) => draft.conflict),
+    discard: (workflowId) => forgetPendingDraft(tenantId, workflowId),
+  };
 }
 
 /**
@@ -199,8 +226,8 @@ export function keepDraftOnLeave(tenantId: string, draft: PendingDraft): void {
  */
 export function createContractsClient(
   workflow: WorkflowContracts,
-  /** Keeps the draft of a page that is going away; absent where nothing can outlive the page. */
-  keepDraftOnLeave?: (draft: PendingDraft) => void,
+  /** Keeps the drafts of pages that go away; absent where nothing can outlive the page. */
+  drafts?: DraftKeeper,
 ) {
   const answer =
     <Request, Response>(operation: (request: Request) => Response) =>
@@ -208,7 +235,7 @@ export function createContractsClient(
       operation(request);
   return {
     workflow,
-    keepDraftOnLeave,
+    drafts,
     agent: {
       list: answer((_request: Record<string, never>) => ({ agents: demoRoles })),
     },

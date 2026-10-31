@@ -56,6 +56,8 @@ export interface WorkflowServer {
   backend: LocalWorkflowBackend;
   /** Requests seen, as "METHOD /path". */
   seen: string[];
+  /** The requests among them sent with `keepalive`, as "METHOD /path". */
+  keptAlive: string[];
   /** Makes every request whose "METHOD /path" matches answer this instead. */
   refuse?: { match: RegExp; status: number; data: unknown };
 }
@@ -69,7 +71,8 @@ export function serveWorkflows(
   tenantId: string,
   backend: LocalWorkflowBackend,
 ): WorkflowServer {
-  const server: WorkflowServer = { backend, seen: [] };
+  routeFetchToFakes();
+  const server: WorkflowServer = { backend, seen: [], keptAlive: [] };
   const base = `/api/v2/tenants/${tenantId}/workflows`;
   const previous = http.defaults.adapter as AxiosAdapter | undefined;
   const adapter: AxiosAdapter = async (config) => {
@@ -80,6 +83,9 @@ export function serveWorkflows(
     }
     const method = config.method?.toUpperCase() ?? "GET";
     server.seen.push(`${method} ${url}`);
+    if ((config.fetchOptions as RequestInit | undefined)?.keepalive) {
+      server.keptAlive.push(`${method} ${url}`);
+    }
     const refused = server.refuse;
     const answer =
       refused && refused.match.test(`${method} ${url}`)
@@ -99,6 +105,27 @@ export function serveWorkflows(
   };
   http.defaults.adapter = adapter;
   return server;
+}
+
+let fetchRouted = false;
+
+/**
+ * The keepalive transport names axios's fetch adapter on the request, which would pass over the
+ * fake installed as the default adapter; while a fake is installed, it answers those requests too.
+ */
+function routeFetchToFakes(): void {
+  if (fetchRouted) return;
+  fetchRouted = true;
+  http.interceptors.request.use(
+    (config) => {
+      if (config.adapter === "fetch" && typeof http.defaults.adapter === "function") {
+        config.adapter = http.defaults.adapter;
+      }
+      return config;
+    },
+    undefined,
+    { synchronous: true },
+  );
 }
 
 function body(config: InternalAxiosRequestConfig): Record<string, unknown> {
