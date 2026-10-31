@@ -8,7 +8,6 @@ Cloud v2 的正式 Web 前端，中文界面。技术栈：Vite、React 19、Typ
 
 ```sh
 task v2:dev    # PostgreSQL + v2-server（:8090）+ 前端（http://localhost:5173）
-task v2:demo   # 同上，但对话页用浏览器里的演示后端（脚本回复，不运行 Agent）
 task v2:e2e    # Playwright 端到端测试
 ```
 
@@ -17,7 +16,6 @@ task v2:e2e    # Playwright 端到端测试
 ```sh
 npm ci
 npm run dev           # /api、/auth、/healthz 代理到 v2-server（V2_SERVER，默认 :8090）
-npm run dev:demo      # 同上，对话页改用演示后端（VITE_CHAT_DEMO=1）
 npm run check         # 类型检查、lint、单元测试、构建；CI 的 v2 workflow 跑同一条
 npm run api:generate  # api/openapi.json 变化后重新生成 src/api
 npm run e2e           # 端到端测试，自己拉起 v2-server（:8091）和前端（:5174）
@@ -56,7 +54,6 @@ e2e/            Playwright 端到端测试
 - `samples/`：录好的示例对话，覆盖工具调用、思考、计划、子代理、权限确认、测试结果、报错、引用、上下文、检查点、附件和插件，在左栏"示例"项目里回放，不连后端。
 - `api/`：由 `v2-server/chat.openapi.json` 生成的客户端（`npm run api:generate:chat`），不手改。
 - `remote.ts`：对后端的调用和事件流（Server-Sent Events）。`store.ts`：项目、对话、事件流和回放状态。
-- `demo/`：浏览器里的演示后端，见下文。
 
 左栏按项目分组：示例之外的项目和对话都来自后端，对话直接列在所属项目下；拖动项目可调整顺序（存到后端），拖动左栏右边缘可调宽度或收起（存在浏览器本地）。
 
@@ -71,10 +68,6 @@ e2e/            Playwright 端到端测试
 - 没有在看、也没有在等回复的对话会关掉事件流，再打开时从上次的序号接着读。
 
 后端还不能运行 Agent 时，新对话上方会提示，示例照常可用。
-
-### 演示后端
-
-`npm run dev:demo`（或 `task v2:demo`）让对话页改用 `demo/backend.ts`：它在浏览器里实现 chat 的接口和事件流，规则同上，项目是编出来的，回复由 `demo/agent.ts` 的脚本按固定 Node 的历史格式生成，界面右上角标"演示模式"。消息里写"长"会慢慢输出，可以试停止；写"失败"会显示工具失败和没能完整读取的回答。预置的三个对话分别是还能继续的、已停止的、被服务重启结束的。登录等其余请求仍走 v2-server。刷新页面相当于重启这个后端，回到预置的三个对话。
 
 ### 运行工作流
 
