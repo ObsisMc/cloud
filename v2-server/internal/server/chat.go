@@ -321,16 +321,13 @@ func (h *handler) chatEvents(w http.ResponseWriter, r *http.Request, c chatReque
 				out.Result = &res
 			}
 			if ev.Kind == execution.EventTurnEnded {
-				prompt, e := c.svc.TurnPrompt(ctx, c.scope, ev.Ref.SessionID, ev.Ref.TurnID)
-				if e != nil {
-					if ctx.Err() == nil {
-						slog.Error("chat events", "conversation", cid, "error", e)
-						writeEvent(w, "failure", "", map[string]string{"code": eventFailure(e)})
-						flusher.Flush()
-					}
-					return
+				// The prompt only lets a page show a turn no history snapshot holds; without it the
+				// event is still the turn's authoritative result, so the stream goes on.
+				if prompt, e := c.svc.TurnPrompt(ctx, c.scope, ev.Ref.SessionID, ev.Ref.TurnID); e == nil {
+					out.Prompt = prompt
+				} else if ctx.Err() == nil {
+					slog.Warn("chat event prompt", "conversation", cid, "turn", ev.Ref.TurnID, "error", e)
 				}
-				out.Prompt = prompt
 			}
 			writeEvent(w, "", strconv.FormatUint(ev.Sequence, 10), out)
 		}

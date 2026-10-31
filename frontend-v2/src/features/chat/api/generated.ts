@@ -184,7 +184,7 @@ export interface ChatEvent {
   history?: ChatHistory;
   textDelta?: string;
   result?: ChatResult;
-  /** On turn_ended, the text the turn was asked. A turn stopped before its Agent started never appears in a history snapshot; this is how a page still shows it. */
+  /** On turn_ended, the text the turn was asked. A turn stopped before its Agent started never appears in a history snapshot; this is how a page still shows it. Absent when it could not be read; the event and the stream are unaffected. */
   prompt?: string;
 }
 
