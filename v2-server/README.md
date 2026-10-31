@@ -102,8 +102,6 @@ main 创建一个共用协调器/Host，用一秒 ticker 发现持久配置的�
 
 公共 Service 必须先完成启动恢复，再启动 Host。扫描器、立即运行和取消共用同一个 `Options.Schedules`；main 将公共 `executionruntime.Service` 注入 `Options.Execution`/`Catalog`，完成启动恢复后沿用同一接线启动 Host，不另造 provider。退出时停止 ticker、取消并等待扫描和已进入的 HTTP 操作，之后才关闭公共执行及数据库；退出不伪造成功，未完成运行下次由公共恢复和原身份核对处理。项目 Agent 的公开配置/目录仍需配置工作线接入，工作流不走对话适配器。
 
-专用 HTTP 集成测试按此候选 OpenAPI 验证响应，并覆盖创建编辑、暂停恢复、服务替换、归属隔离及错误输入；数据库测试覆盖连接池关闭重开和并发版本冲突。
-
 ### 定时触发历史
 
 定时触发历史提供只读 `GET /api/v2/tenants/{tid}/schedule-configs/{id}/runs`、`GET /api/v2/tenants/{tid}/schedule-configs/{id}/runs/{oid}` 及 `GET /api/v2/tenants/{tid}/schedule-configs/{id}/runs/{oid}/result`。候选契约、权限、分页和结果边界见 [运行历史 HTTP](schedule-history.md)。结果读取经统一 `Options.Execution` 注入，校验当前身份、服务端 Caller 和已存 Ref；不启动执行或推进状态。配置响应中的 `runs` 仍为空，公共事件订阅未在历史 HTTP 暴露；未注入执行服务时结果接口返回 503。
@@ -234,13 +232,13 @@ End 和重启不自动删除目录。停止服务后 `go run . -cleanup` 只删�
 
 ConversationAdapter 按冻结配置分流：无项目文本对话用公共 StartModel 和明确模型 ID，有项目文本对话用公共 Start 和明确的 projectId、target.executorId。每次触发新建会话，有项目时由公共服务创建独立目录，两路不相互降级。HTTP/前端仍未开放项目绑定，公共项目和执行器目录就绪后才能接入。适配层共用 ReadAttempt/Cancel/End，不直接调用 provider 或 Node，也不另存 Session/Turn。成功要求 AnswerComplete；结果终态和 End 确认分开，End 失败不释放任务占位。缺失绑定、工作流目标明确拒绝，不从演示名称猜测可执行绑定。
 
-协调器本身不创建 goroutine；main 的 Host 接入周期扫描和上述 HTTP 操作，前端按钮尚未接入。main 注入公共 `executionruntime.Service` 驱动实际派发；普通测试通过公共 Stub 和实际 PostgreSQL 验证编排、HTTP 和生命周期，opt-in 测试另组合真实公共 Service。
+协调器本身不创建 goroutine；main 的 Host 接入周期扫描和上述 HTTP 操作，前端页面已接入运行与取消等操作。main 注入公共 `executionruntime.Service` 驱动实际派发；普通测试通过公共 Stub 和实际 PostgreSQL 验证编排、HTTP 和生命周期，opt-in 测试另组合真实公共 Service。
 
 `server.NewScheduleCoordinator(records, options, now)` 使用页面统一的 `Options.Execution`，不另建执行服务；宿主在公共启动恢复完成后调用 Recover，再驱动 Tick/Manual。Start 与同记录的核对/取消不会并行。启动错误或本地引用未保存时只按原 Caller 读取；无引用且确定没有进行中的 Start，查询未命中可记 skipped/execution_not_started。读取错误或已有引用但缺失记录时保留占位，不重放 prompt。Agent Cancel 结束会话，model-only Cancel 只停当前轮；定时对话两路都随后确认 End，保留历史与目录。详细状态、原因及 released 含义见 [状态说明](internal/store/occurrence-states.md)。
 
 ### 定时触发记录基础
 
-`internal/schedule.Next` 提供服务端时间计算；`Store.RecordOccurrence` 在事务内锁定配置、检查创建者与当前成员关系，并写入 `v2_schedule_occurrences`。记录层自身不调用执行模块；扫描和操作入口由 Host/协调器承担。配置页面尚未连接运行操作。
+`internal/schedule.Next` 提供服务端时间计算；`Store.RecordOccurrence` 在事务内锁定配置、检查创建者与当前成员关系，并写入 `v2_schedule_occurrences`。记录层自身不调用执行模块；扫描和操作入口由 Host/协调器承担。配置页面已接入运行与取消等操作。
 
 - 自动触发身份为配置 ID + scheduled + UTC 计划时刻，服务端从时刻生成键；同一时刻不因配置版本变化重复生成。
 - 手动触发使用配置 ID + manual + 稳定请求键；同键同版本同请求时刻返回原记录，变更参数返回冲突；显式重跑使用新键。暂停配置允许明确的手动记录，但仍不执行。
