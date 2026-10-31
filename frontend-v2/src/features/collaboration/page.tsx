@@ -8,13 +8,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { codeOf, statusOf } from '@/lib/api-client'
-import { archiveSquad, addSquadMember, createSquad, getSquad, listSquads, removeSquadMember, updateSquad, type SquadDetail, type SquadMember } from './api/generated'
+import { archiveSquad, addSquadMember, createSquad, getSquad, listSquads, removeSquadMember, updateSquad, updateSquadMember, type SquadDetail, type SquadMember } from './api/generated'
 import { MemberPicker } from './member-picker'
 import { SquadCard } from './squad-card'
 import { SquadDetailView } from './squad-detail'
 import { SquadDialog } from './squad-dialog'
 import { SquadForm, type SquadDraft } from './squad-form'
-import { canMaintain, squadTotals } from './squad-model'
+import { canMaintain, isLeader, squadTotals } from './squad-model'
 import './collaboration.css'
 
 type Panel = { kind: 'create' } | { kind: 'detail'; id: string } | { kind: 'edit'; id: string } | { kind: 'members'; id: string } | null
@@ -77,10 +77,26 @@ export default function Page() {
   const remove = useMutation({
     mutationFn: ({ member, target }: { member: SquadMember; target: SquadDetail }) =>
       removeSquadMember(tenantId, target.id, member.id, { version: target.version }),
-    onSuccess: (updated, v) => settle(updated, `已移除 ${v.member.displayName}`),
+    onSuccess: (updated, v) => settle(updated, v.member.userId === me.id ? `已退出 ${v.member.displayName}` : `已移除 ${v.member.displayName}`),
+    onError: e => setError(messageFor(e)),
+  })
+  const toggleMaintainer = useMutation({
+    mutationFn: ({ member, target }: { member: SquadMember; target: SquadDetail }) =>
+      updateSquadMember(tenantId, target.id, member.id, { role: member.role, maintainer: !member.maintainer, version: target.version }),
+    onSuccess: (updated, v) => settle(updated, v.member.maintainer ? `已取消 ${v.member.displayName} 的维护者` : `已设 ${v.member.displayName} 为维护者`),
+    onError: e => setError(messageFor(e)),
+  })
+  const setLeader = useMutation({
+    mutationFn: ({ member, target }: { member: SquadMember; target: SquadDetail }) =>
+      updateSquad(tenantId, target.id, {
+        name: target.name, description: target.description, charter: target.charter,
+        leaderAgentId: isLeader(target, member) ? null : member.spaceAgentId, version: target.version,
+      }),
+    onSuccess: (updated, v) => settle(updated, isLeader(v.target, v.member) ? `已清除 leader` : `已设 ${v.member.displayName} 为 leader`),
     onError: e => setError(messageFor(e)),
   })
   const removing = remove.isPending ? remove.variables?.member.id ?? '' : ''
+  const updating = (toggleMaintainer.isPending ? toggleMaintainer.variables?.member.id : '') || (setLeader.isPending ? setLeader.variables?.member.id : '')
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 3500); return () => clearTimeout(timer) }, [toast])
   const openCreate = () => { setError(''); setPanel({ kind: 'create' }) }
   const openSquad = (id: string) => { setError(''); setPanel({ kind: 'detail', id }) }
@@ -140,7 +156,7 @@ export default function Page() {
         ? <p role="status" className="mc-dialog-status">正在加载小队…</p>
         : detail.isError
           ? <p role="alert" className="mc-dialog-status">小队加载失败，请关闭后重试。</p>
-          : squad && <SquadDetailView squad={squad} canMaintain={canMaintain(squad, me.id, workspaceRole)} archiving={archive.isPending} removing={removing} error={error} onEdit={() => { setError(''); setPanel({ kind: 'edit', id: squad.id }) }} onArchive={() => archive.mutate(squad)} onAddMembers={() => { setError(''); setPanel({ kind: 'members', id: squad.id }) }} onRemove={member => { setError(''); remove.mutate({ member, target: squad }) }} />}
+          : squad && <SquadDetailView squad={squad} userId={me.id} canMaintain={canMaintain(squad, me.id, workspaceRole)} archiving={archive.isPending} removing={removing} updating={updating} error={error} onEdit={() => { setError(''); setPanel({ kind: 'edit', id: squad.id }) }} onArchive={() => archive.mutate(squad)} onAddMembers={() => { setError(''); setPanel({ kind: 'members', id: squad.id }) }} onRemove={member => { setError(''); remove.mutate({ member, target: squad }) }} onToggleMaintainer={member => { setError(''); toggleMaintainer.mutate({ member, target: squad }) }} onSetLeader={member => { setError(''); setLeader.mutate({ member, target: squad }) }} />}
     </SquadDialog>}
 
     {panel?.kind === 'members' && squad && <SquadDialog title={`添加成员到 ${squad.name}`} subtitle="可以加入当前工作区的有效成员或已安装的 Agent；移出小队不影响工作区成员资格。" onClose={close}>

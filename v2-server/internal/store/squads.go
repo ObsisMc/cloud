@@ -170,9 +170,24 @@ func requireManager(ctx context.Context, q dbTX, tenant, user, squadID string) e
 	return nil
 }
 
-// lockSquad opens the mutation transaction: it locks the squad for the caller and rejects stale
-// versions before any write, so revocation, archiving and edits serialize on one row.
+// lockSquad opens the mutation transaction: it locks the squad for the caller, rejects stale
+// versions before any write and requires manager authority, so revocation, archiving and edits
+// serialize on one row. Callers that let a member act on their own record (self-exit) use
+// lockSquadBase and check authority themselves.
 func lockSquad(ctx context.Context, tx pgx.Tx, tenant, user, id string, version int64) (SquadSummary, error) {
+	s, e := lockSquadBase(ctx, tx, tenant, id, version)
+	if e != nil {
+		return s, e
+	}
+	if e := requireManager(ctx, tx, tenant, user, id); e != nil {
+		return s, e
+	}
+	return s, nil
+}
+
+// lockSquadBase locks the squad row and enforces the archived and version gates, leaving the
+// manager check to the caller.
+func lockSquadBase(ctx context.Context, tx pgx.Tx, tenant, id string, version int64) (SquadSummary, error) {
 	s, e := scanSquad(tx.QueryRow(ctx, `SELECT `+squadColumns+` FROM v2_squads s WHERE s.tenant_id = $1 AND s.id = $2 FOR UPDATE`, tenant, id))
 	if e != nil {
 		return s, e
@@ -182,9 +197,6 @@ func lockSquad(ctx context.Context, tx pgx.Tx, tenant, user, id string, version 
 	}
 	if s.Version != version {
 		return s, ErrConflict
-	}
-	if e := requireManager(ctx, tx, tenant, user, id); e != nil {
-		return s, e
 	}
 	return s, nil
 }
@@ -495,25 +507,33 @@ func (s *Store) UpdateSquadMember(ctx context.Context, tenant, user, id, memberI
 }
 
 // RemoveSquadMember ends a live membership. Removing the current leader clears the leader in the
-// same transaction so no squad keeps a leader who is no longer a member.
+// same transaction so no squad keeps a leader who is no longer a member. A human removing their
+// own record is a self-exit: the ADR lets every active member leave, so the manager check is
+// skipped for them and the membership keeps its history like any other removal.
 func (s *Store) RemoveSquadMember(ctx context.Context, tenant, user, id, memberID string, version int64) (SquadDetail, error) {
 	var out SquadDetail
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		leader, e := lockSquad(ctx, tx, tenant, user, id, version)
+		leader, e := lockSquadBase(ctx, tx, tenant, id, version)
 		if e != nil {
 			return e
 		}
 		var memberType string
-		var agentID *string
+		var userID, agentID *string
 		e = tx.QueryRow(ctx, `
-			SELECT member_type, space_agent_id::text FROM v2_squad_members
+			SELECT member_type, user_id::text, space_agent_id::text FROM v2_squad_members
 			WHERE id = $1 AND squad_id = $2 AND ended_at IS NULL FOR UPDATE`,
-			memberID, id).Scan(&memberType, &agentID)
+			memberID, id).Scan(&memberType, &userID, &agentID)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		if e != nil {
 			return fmt.Errorf("look up squad member: %w", e)
+		}
+		selfExit := memberType == MemberHuman && userID != nil && *userID == user
+		if !selfExit {
+			if e := requireManager(ctx, tx, tenant, user, id); e != nil {
+				return e
+			}
 		}
 		if _, e := tx.Exec(ctx, `UPDATE v2_squad_members SET ended_at = now() WHERE id = $1`, memberID); e != nil {
 			return fmt.Errorf("end squad membership: %w", e)

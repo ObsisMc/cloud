@@ -1,34 +1,54 @@
 import { useState } from 'react'
-import { Bot, Pencil, UserPlus, UserRound, X } from 'lucide-react'
+import { Bot, Crown, Pencil, ShieldCheck, UserPlus, UserRound, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { SquadDetail, SquadMember } from './api/generated'
-import { activeMembers, endedMembers, formatTime, leaderName } from './squad-model'
+import { activeMembers, endedMembers, formatTime, isLeader, leaderName, ownMembership } from './squad-model'
 
 /**
  * Read-only view of one squad with its maintainer actions: edit the squad's own text, add an
- * existing workspace member, remove a live member, or archive. Removing a member ends only the
- * squad membership; the workspace membership is untouched.
+ * existing workspace member, toggle a human's maintainer mark, set or clear the leader (an in-squad
+ * active Agent), remove a live member, or archive. A member always sees an exit action on their own
+ * record; the server skips the maintainer check for self-exit. Removing ends only the squad
+ * membership; the workspace membership is untouched.
  */
-export function SquadDetailView({ squad, canMaintain, archiving, removing, error, onEdit, onArchive, onAddMembers, onRemove }: {
+export function SquadDetailView({ squad, userId, canMaintain, archiving, removing, updating, error, onEdit, onArchive, onAddMembers, onRemove, onToggleMaintainer, onSetLeader }: {
   squad: SquadDetail
+  userId: string
   canMaintain: boolean
   archiving: boolean
-  /** Membership id currently being removed, or '' when none. */
+  /** Membership id currently being removed or exited, or '' when none. */
   removing: string
+  /** Membership id whose maintainer or leader mark is being written, or '' when none. */
+  updating: string
   /** Error from the last archive or membership attempt. */
   error: string
   onEdit: () => void
   onArchive: () => void
   onAddMembers: () => void
   onRemove: (member: SquadMember) => void
+  onToggleMaintainer: (member: SquadMember) => void
+  onSetLeader: (member: SquadMember) => void
 }) {
-  const [confirming, setConfirming] = useState(false)
-  const [removingMember, setRemovingMember] = useState('')
+  const [confirmingArchive, setConfirmingArchive] = useState(false)
+  const [confirmingRemove, setConfirmingRemove] = useState('')
   const live = activeMembers(squad)
   const ended = endedMembers(squad)
   const leader = leaderName(squad)
   const archived = squad.archivedAt !== null
+  const own = ownMembership(squad, userId)
+
+  const removeActions = (member: SquadMember) => {
+    const isOwn = member.id === own?.id
+    if (confirmingRemove === member.id) {
+      return <>
+        <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmingRemove('')} disabled={removing === member.id}><X size={14} />取消</Button>
+        <Button type="button" variant="destructive" size="sm" onClick={() => { setConfirmingRemove(''); onRemove(member) }} disabled={removing === member.id}>{removing === member.id ? '处理中…' : isOwn ? '确认退出' : '确认移除'}</Button>
+      </>
+    }
+    return <Button type="button" variant="ghost" size="sm" aria-label={isOwn ? `退出${member.displayName}` : `移除${member.displayName}`} onClick={() => setConfirmingRemove(member.id)}>{isOwn ? '退出小队' : <><X size={14} />移除</>}</Button>
+  }
+
   return <div className="mc-detail">
     <div className="mc-detail-scroll">
       {archived && <p className="mc-archived">这个小队已归档，成员编组已结束，只保留历史。</p>}
@@ -56,15 +76,16 @@ export function SquadDetailView({ squad, canMaintain, archiving, removing, error
               {member.displayName}
               <em>{member.type === 'human' ? '人类' : 'Agent'}</em>
               {member.maintainer && <Badge variant="outline">维护者</Badge>}
-              {member.spaceAgentId !== null && member.spaceAgentId === squad.leaderAgentId && <Badge variant="outline">leader</Badge>}
+              {isLeader(squad, member) && <Badge variant="outline">leader</Badge>}
             </span>
             <span className="mc-member-role">{member.role || '未填写职责'}</span>
-            {canMaintain && !archived && (removingMember === member.id
-              ? <>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setRemovingMember('')} disabled={removing === member.id}><X size={14} />取消</Button>
-                <Button type="button" variant="destructive" size="sm" onClick={() => { setRemovingMember(''); onRemove(member) }} disabled={removing === member.id}>{removing === member.id ? '移除中…' : '确认移除'}</Button>
-              </>
-              : <Button type="button" variant="ghost" size="sm" aria-label={`移除${member.displayName}`} onClick={() => setRemovingMember(member.id)}><X size={14} />移除</Button>)}
+            {!archived && canMaintain && member.type === 'human' && (
+              <Button type="button" variant="ghost" size="sm" disabled={updating === member.id} onClick={() => onToggleMaintainer(member)}>{member.maintainer ? <><ShieldCheck size={14} />取消维护者</> : '设为维护者'}</Button>
+            )}
+            {!archived && canMaintain && member.type === 'agent' && (
+              <Button type="button" variant="ghost" size="sm" disabled={updating === member.id} onClick={() => onSetLeader(member)}>{isLeader(squad, member) ? '取消 leader' : <><Crown size={14} />设为 leader</>}</Button>
+            )}
+            {!archived && (member.id === own?.id || canMaintain) && removeActions(member)}
           </li>)}</ul>}
       </section>
 
@@ -83,15 +104,15 @@ export function SquadDetailView({ squad, canMaintain, archiving, removing, error
     <footer className="mc-detail-footer">
       {archived
         ? <span className="mc-muted">已归档 · 只读</span>
-        : confirming
+        : confirmingArchive
           ? <>
             <span className="mc-confirm">归档后不能恢复，全部有效编组会结束。</span>
-            <Button type="button" variant="outline" size="sm" onClick={() => setConfirming(false)} disabled={archiving}>取消</Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setConfirmingArchive(false)} disabled={archiving}>取消</Button>
             <Button type="button" variant="destructive" size="sm" onClick={onArchive} disabled={archiving}>{archiving ? '归档中…' : '确认归档'}</Button>
           </>
           : <>
             {!canMaintain && <span className="mc-muted">只有本队人类维护者或工作区管理员可以修改。</span>}
-            <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(true)} disabled={!canMaintain}>归档</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmingArchive(true)} disabled={!canMaintain}>归档</Button>
             <Button type="button" variant="ghost" size="sm" onClick={onAddMembers} disabled={!canMaintain}><UserPlus size={14} />添加成员</Button>
             <Button type="button" variant="outline" size="sm" onClick={onEdit} disabled={!canMaintain}><Pencil size={14} />编辑</Button>
           </>}

@@ -299,3 +299,52 @@ func TestSquadHTTPLifecycle(t *testing.T) {
 		t.Fatalf("missing squad = %d", status)
 	}
 }
+
+func TestSquadHTTPSelfExit(t *testing.T) {
+	f := newSquadServer(t)
+	c := f.client()
+	c.login()
+	tid := f.tenant(t)
+	base := "/api/v2/tenants/" + tid + "/squads"
+
+	status, created := c.do("POST", base, map[string]any{"name": "退出小队", "description": "", "charter": ""})
+	if status != 201 {
+		t.Fatalf("create = %d %v", status, created)
+	}
+	sid := created["id"].(string)
+
+	// A second workspace member joins as an ordinary (non-maintainer) human.
+	token := storetest.SignIn(t, f.store, "second", "第二人", store.RoleOwner)
+	second, e := f.store.SessionUser(f.ctx, token)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e := f.db.Exec(f.ctx, `UPDATE memberships SET role = 'member' WHERE tenant_id = $1 AND user_id = $2`, tid, second.ID); e != nil {
+		t.Fatal(e)
+	}
+	status, withMember := c.do("POST", base+"/"+sid+"/members", map[string]any{
+		"type": "human", "userId": second.ID, "role": "评审", "maintainer": false, "version": 1,
+	})
+	if status != 201 || withMember["humanCount"] != float64(2) {
+		t.Fatalf("add member = %d %v", status, withMember)
+	}
+	var memberID string
+	for _, raw := range withMember["members"].([]any) {
+		m := raw.(map[string]any)
+		if m["userId"] == second.ID && m["endedAt"] == nil {
+			memberID = m["id"].(string)
+		}
+	}
+	if memberID == "" {
+		t.Fatalf("second membership missing: %v", withMember["members"])
+	}
+
+	// The member uses their own session and exits their own record without being a maintainer.
+	other := f.client()
+	req, _ := http.NewRequest("GET", other.base, nil)
+	other.http.Jar.SetCookies(req.URL, []*http.Cookie{{Name: server.SessionCookie, Value: token}})
+	status, removed := other.do("DELETE", base+"/"+sid+"/members/"+memberID+"?version=2", nil)
+	if status != 200 || removed["humanCount"] != float64(1) {
+		t.Fatalf("self-exit = %d %v", status, removed)
+	}
+}

@@ -95,6 +95,16 @@ func liveMembers(d store.SquadDetail) []store.SquadMember {
 	return out
 }
 
+// liveHumanID returns the live membership id of a human member, or "" when they are not in the squad.
+func liveHumanID(d store.SquadDetail, userID string) string {
+	for _, m := range d.Members {
+		if m.UserID != nil && *m.UserID == userID && m.EndedAt == nil {
+			return m.ID
+		}
+	}
+	return ""
+}
+
 func TestSquadLifecycle(t *testing.T) {
 	f := newSquadFixture(t)
 	ctx := f.ctx
@@ -255,6 +265,145 @@ func TestSquadLifecycle(t *testing.T) {
 	}
 	if _, e := f.store.Squad(ctx, "00000000-0000-0000-0000-000000000001", created.ID); !errors.Is(e, store.ErrNotFound) {
 		t.Fatalf("cross-tenant read = %v", e)
+	}
+}
+
+func TestSquadSelfExit(t *testing.T) {
+	f := newSquadFixture(t)
+	ctx := f.ctx
+	owner := f.login(t, "owner", "owner")
+	member := f.login(t, "member", "member")
+	other := f.login(t, "other", "member")
+
+	created, e := f.store.CreateSquad(ctx, f.tenant, owner, store.SquadInput{Name: "退出小队"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	withMember, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: 1})
+	if e != nil {
+		t.Fatal(e)
+	}
+	withOther, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: other, Version: withMember.Version})
+	if e != nil {
+		t.Fatal(e)
+	}
+	memberID := liveHumanID(withOther, member)
+	otherID := liveHumanID(withOther, other)
+	if memberID == "" || otherID == "" {
+		t.Fatalf("memberships missing: %+v", withOther.Members)
+	}
+
+	// A plain member cannot remove another member; only self-exit bypasses the manager check.
+	if _, e := f.store.RemoveSquadMember(ctx, f.tenant, member, created.ID, otherID, withOther.Version); !errors.Is(e, store.ErrForbidden) {
+		t.Fatalf("non-maintainer remove other = %v", e)
+	}
+
+	// Self-exit ends only the caller's membership and keeps it as history.
+	removed, e := f.store.RemoveSquadMember(ctx, f.tenant, member, created.ID, memberID, withOther.Version)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if removed.HumanCount != 2 || removed.MaintainerCount != 1 {
+		t.Fatalf("after self-exit = %+v", removed)
+	}
+	exited := 0
+	for _, m := range removed.Members {
+		if m.UserID != nil && *m.UserID == member && m.EndedAt != nil {
+			exited++
+		}
+	}
+	if exited != 1 {
+		t.Fatalf("self-exit history = %+v", removed.Members)
+	}
+}
+
+func TestSquadMaintainerHandover(t *testing.T) {
+	f := newSquadFixture(t)
+	ctx := f.ctx
+	owner := f.login(t, "owner", "owner")
+	member := f.login(t, "member", "member")
+
+	created, e := f.store.CreateSquad(ctx, f.tenant, owner, store.SquadInput{Name: "交接小队"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	withMember, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: 1})
+	if e != nil {
+		t.Fatal(e)
+	}
+	memberID := liveHumanID(withMember, member)
+	ownerID := liveHumanID(withMember, owner)
+	if memberID == "" || ownerID == "" {
+		t.Fatalf("memberships missing: %+v", withMember.Members)
+	}
+
+	// A maintainer promotes another human to maintainer.
+	promoted, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: true, Version: withMember.Version})
+	if e != nil || promoted.MaintainerCount != 2 {
+		t.Fatalf("promote = %+v %v", promoted, e)
+	}
+	// And demotes them again, leaving a single maintainer.
+	demoted, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: false, Version: promoted.Version})
+	if e != nil || demoted.MaintainerCount != 1 {
+		t.Fatalf("demote = %+v %v", demoted, e)
+	}
+
+	// Removing the last maintainer mark leaves zero maintainers; only the workspace owner can
+	// restore authority afterwards.
+	zero, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, ownerID, store.SquadMemberUpdate{Role: "", Maintainer: false, Version: demoted.Version})
+	if e != nil || zero.MaintainerCount != 0 {
+		t.Fatalf("zero maintainers = %+v %v", zero, e)
+	}
+	if _, e := f.store.AddSquadMember(ctx, f.tenant, member, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: owner, Version: zero.Version}); !errors.Is(e, store.ErrForbidden) {
+		t.Fatalf("non-maintainer edit at zero = %v", e)
+	}
+	restored, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: true, Version: zero.Version})
+	if e != nil || restored.MaintainerCount != 1 {
+		t.Fatalf("owner restore = %+v %v", restored, e)
+	}
+}
+
+func TestSquadLastMaintainerSelfExit(t *testing.T) {
+	f := newSquadFixture(t)
+	ctx := f.ctx
+	owner := f.login(t, "owner", "owner")
+	member := f.login(t, "member", "member")
+
+	created, e := f.store.CreateSquad(ctx, f.tenant, owner, store.SquadInput{Name: "最后维护者"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	withMember, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Maintainer: true, Version: 1})
+	if e != nil {
+		t.Fatal(e)
+	}
+	ownerID := liveHumanID(withMember, owner)
+	memberID := liveHumanID(withMember, member)
+	if ownerID == "" || memberID == "" {
+		t.Fatalf("memberships missing: %+v", withMember.Members)
+	}
+	// Drop the owner's own maintainer mark so member is the sole maintainer.
+	demoted, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, ownerID, store.SquadMemberUpdate{Maintainer: false, Version: withMember.Version})
+	if e != nil || demoted.MaintainerCount != 1 {
+		t.Fatalf("sole maintainer = %+v %v", demoted, e)
+	}
+
+	// The last maintainer leaves on their own authority; no last-maintainer guard blocks it.
+	removed, e := f.store.RemoveSquadMember(ctx, f.tenant, member, created.ID, memberID, demoted.Version)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if removed.MaintainerCount != 0 || removed.HumanCount != 1 {
+		t.Fatalf("after last maintainer self-exit = %+v", removed)
+	}
+	exited := 0
+	for _, m := range removed.Members {
+		if m.UserID != nil && *m.UserID == member && m.EndedAt != nil {
+			exited++
+		}
+	}
+	if exited != 1 {
+		t.Fatalf("last maintainer history = %+v", removed.Members)
 	}
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SquadDetail, SquadMember, SquadSummary } from './api/generated'
-import { activeMembers, canMaintain, endedMembers, leaderName, squadTotals, validateSquad } from './squad-model'
+import { activeMembers, canMaintain, endedMembers, isLeader, leaderName, ownMembership, squadTotals, validateSquad } from './squad-model'
 
 const member = (overrides: Partial<SquadMember>): SquadMember => ({
   id: 'member', type: 'human', userId: 'user', spaceAgentId: null, displayName: '成员', role: '', maintainer: false,
@@ -26,6 +26,20 @@ describe('squad members', () => {
     expect(leaderName(squad({ leaderAgentId: 'agent-1', members: [{ ...agent, endedAt: '2026-10-02T00:00:00Z' }] }))).toBeNull()
     expect(leaderName(squad({ leaderAgentId: 'gone' }))).toBeNull()
     expect(leaderName(squad())).toBeNull()
+  })
+
+  it('tells the leader agent apart from other members', () => {
+    const agent = member({ id: 'agent', type: 'agent', userId: null, spaceAgentId: 'agent-1', displayName: '研究员' })
+    const other = member({ id: 'other', type: 'agent', userId: null, spaceAgentId: 'agent-2' })
+    const detail = squad({ leaderAgentId: 'agent-1', members: [agent, other] })
+    expect(isLeader(detail, agent)).toBe(true)
+    expect(isLeader(detail, other)).toBe(false)
+  })
+
+  it('finds the current user live membership for self-exit', () => {
+    const detail = squad({ members: [member({ id: 'me', userId: 'me' }), member({ id: 'left', userId: 'left', endedAt: '2026-10-02T00:00:00Z' })] })
+    expect(ownMembership(detail, 'me')?.id).toBe('me')
+    expect(ownMembership(detail, 'left')).toBeUndefined()
   })
 
   it('recognizes a live human maintainer or a workspace administrator as editor', () => {
