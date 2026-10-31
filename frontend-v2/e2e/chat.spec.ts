@@ -91,3 +91,39 @@ test('chat: a real Agent answers, a stopped chat turns read-only, history surviv
   await expect(page.getByText('已停止 · 这个对话已结束，不能继续追问')).toBeVisible()
   await expect(ended).toBeVisible()
 })
+
+/** The names of the projects v2-server lists for the signed-in person's team. */
+async function backendProjects(page: Page): Promise<string[]> {
+  const tenants = (await (await page.request.get('/api/v1/me/tenants')).json()) as { items: { id: string }[] }
+  const list = (await (await page.request.get(`/api/v2/tenants/${tenants.items[0].id}/projects?limit=100`)).json()) as { items: { name: string }[] }
+  return list.items.map((p) => p.name)
+}
+
+test('chat: creates a project from a public repository and starts the new chat in it', async ({ page }) => {
+  // The backend clones the repository before it answers; this one is small and public.
+  test.setTimeout(150_000)
+  await page.goto('/chat')
+  await page.getByRole('button', { name: '开发者登录' }).click()
+  await expect(page.getByRole('heading', { name: '今天想构建什么？' })).toBeVisible()
+  const name = `Hello-World ${Date.now()}`
+
+  await page.getByRole('button', { name: '选择项目' }).click()
+  await page.getByRole('option', { name: /新建项目/ }).click()
+  const dialog = page.getByRole('dialog', { name: '新建项目' })
+  await dialog.getByLabel('仓库地址').fill('https://github.com/octocat/Hello-World.git')
+  await expect(dialog.getByLabel('项目名')).toHaveValue('Hello-World')
+
+  // A branch the repository lacks is refused, and no project is recorded.
+  await dialog.getByLabel('默认分支').fill('no-such-branch')
+  await dialog.getByLabel('项目名').fill(name)
+  await dialog.getByRole('button', { name: '新建项目' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('仓库里没有分支 no-such-branch', { timeout: 120_000 })
+  expect(await backendProjects(page)).not.toContain(name)
+
+  await dialog.getByLabel('默认分支').fill('master')
+  await dialog.getByRole('button', { name: '新建项目' }).click()
+  await expect(dialog).toBeHidden({ timeout: 120_000 })
+  await expect(page.getByRole('region', { name: `项目 ${name}` })).toBeVisible()
+  await expect(page.getByRole('button', { name: '选择项目' })).toHaveText(name)
+  expect(await backendProjects(page)).toContain(name)
+})
