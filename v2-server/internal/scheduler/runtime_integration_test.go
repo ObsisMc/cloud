@@ -31,6 +31,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/scheduler"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 // Opt-in tests require the public runtime/M3 packages. No test-defined Service or
@@ -176,10 +177,7 @@ func TestScheduledRuntimeProcess(t *testing.T) {
 			t.Fatal(err)
 		}
 	} else {
-		token, err := db.Login(ctx, store.Identity{Source: "test", Subject: "runtime-schedule", DisplayName: "Owner"}, time.Hour)
-		if err != nil {
-			t.Fatal(err)
-		}
+		token := storetest.SignIn(t, db, "runtime-schedule", "Owner", store.RoleOwner)
 		u, err := db.SessionUser(ctx, token)
 		if err != nil {
 			t.Fatal(err)
@@ -283,10 +281,7 @@ func TestScheduledRuntimeProcess(t *testing.T) {
 	options.Schedules = host
 	httpServer := httptest.NewServer(server.New(db, options))
 	defer httpServer.Close()
-	token, err := db.Login(ctx, store.Identity{Source: "test", Subject: "runtime-schedule", DisplayName: "Owner"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, db, "runtime-schedule", "Owner", store.RoleOwner)
 	action := func(path string, input any) string {
 		t.Helper()
 		body, _ := json.Marshal(input)

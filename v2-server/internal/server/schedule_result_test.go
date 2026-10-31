@@ -19,6 +19,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution/executiontest"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 // This suite uses real occurrence SQL and the public callback Stub. It proves HTTP
@@ -26,10 +27,7 @@ import (
 func TestScheduleResultHTTP(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t)
-	token, err := s.Login(ctx, store.Identity{Source: "test", Subject: "result-owner", DisplayName: "Owner"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, s, "result-owner", "Owner", store.RoleOwner)
 	u, err := s.SessionUser(ctx, token)
 	if err != nil {
 		t.Fatal(err)
@@ -271,10 +269,7 @@ func TestScheduleResultHTTP(t *testing.T) {
 	for _, q := range []string{"sessionId=foreign", "turnId=foreign", "caller=foreign", "limit=1"} {
 		call(handler, path+"?"+q, token, 400)
 	}
-	otherToken, err := s.Login(ctx, store.Identity{Source: "test", Subject: "result-other", DisplayName: "Other"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	otherToken := storetest.SignIn(t, s, "result-other", "Other", store.RoleOwner)
 	call(handler, path, otherToken, 404)
 	call(handler, strings.Replace(path, scope.TenantID, "00000000-0000-0000-0000-000000000001", 1), token, 404)
 	call(handler, strings.Replace(path, cfg.ID, "00000000-0000-0000-0000-000000000001", 1), token, 404)

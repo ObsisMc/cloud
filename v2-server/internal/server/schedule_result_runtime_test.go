@@ -27,6 +27,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/projectrepos"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 // This opt-in test needs the public executionruntime/M3 implementation. It does not
@@ -110,10 +111,7 @@ func TestScheduleResultRuntimeProcess(t *testing.T) {
 	statePath := os.Getenv("SCHEDULE_RESULT_STATE")
 	mode, root := os.Getenv("SCHEDULE_RESULT_MODE"), os.Getenv("SCHEDULE_RESULT_ROOT")
 	if phase == "execute" {
-		saved.Token, err = db.Login(ctx, store.Identity{Source: "test", Subject: "runtime-result", DisplayName: "Owner"}, time.Hour)
-		if err != nil {
-			t.Fatal(err)
-		}
+		saved.Token = storetest.SignIn(t, db, "runtime-result", "Owner", store.RoleOwner)
 		user, err := db.SessionUser(ctx, saved.Token)
 		if err != nil {
 			t.Fatal(err)

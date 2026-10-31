@@ -17,6 +17,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution/executiontest"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 type modelFixture struct {
@@ -64,10 +65,7 @@ func newConversationFixture(t *testing.T, project string, target json.RawMessage
 		t.Fatal(err)
 	}
 	t.Cleanup(records.Close)
-	token, err := records.Login(ctx, store.Identity{Source: "test", Subject: "owner", DisplayName: "Owner"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, records, "owner", "Owner", store.RoleOwner)
 	u, err := records.SessionUser(ctx, token)
 	if err != nil {
 		t.Fatal(err)
