@@ -2,11 +2,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { LogOut } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { logout } from '@/lib/auth-api'
-import { useUser } from './user'
+import { useRole, useUser } from './user'
 
 /** The bottom of the icon rail: who is signed in, and sign out. */
 export function UserMenu() {
   const user = useUser()
+  const role = useRole()
+  const roleLabel = role === 'owner' ? 'owner' : role === 'member' ? '成员' : ''
   const queryClient = useQueryClient()
   // Dropping every cached query makes the session gate ask /api/v1/me again and show the login.
   const signOut = useMutation({ mutationFn: logout, onSuccess: () => queryClient.resetQueries() })
@@ -35,7 +37,9 @@ export function UserMenu() {
         >
           {user.displayName.slice(0, 1)}
         </TooltipTrigger>
-        <TooltipContent side="right">{user.displayName}</TooltipContent>
+        <TooltipContent side="right">
+          {roleLabel === '' ? user.displayName : `${user.displayName}（${roleLabel}）`}
+        </TooltipContent>
       </Tooltip>
     </div>
   )
