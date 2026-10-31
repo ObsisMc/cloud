@@ -1,13 +1,13 @@
 import { Client } from 'pg'
 
-// The development login always signs in as the same demo account, so a workspace can never hold
-// a second human through the UI alone. E2E adds that precondition straight to the database the
-// v2-server uses, the same way the Go tests seed members.
+// The owner could invite the second human through the UI, but the squad specs only need the row:
+// seeding it straight into the database the v2-server uses keeps them independent of the
+// invitation form, the same way the Go tests seed members.
 const database = process.env.E2E_DATABASE_URL ?? 'postgres://ora:ora-local@127.0.0.1:55432/ora_v2_e2e?sslmode=disable'
 
 /**
- * Creates (or renames) a workspace member outside the development login and joins them to the
- * demo workspace. Call it after the first browser login, which is what creates that workspace.
+ * Creates (or renames) a workspace member outside the browser and joins them to the demo
+ * workspace. Call it after the first sign-in, which is what creates that workspace.
  */
 export async function seedWorkspaceMember(displayName: string): Promise<void> {
   const client = new Client({ connectionString: database })
