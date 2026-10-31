@@ -213,6 +213,21 @@ func (s *Store) EndChatSession(ctx context.Context, sessionID, reason string, at
 	return nil
 }
 
+// InterruptEndedChatSessions records every chat session whose execution session has ended as
+// interrupted, keeping a reason marked while ending. Startup calls it after execution recovery has
+// ended the previous process's sessions, so the history shows them read-only at once rather than
+// only when someone next writes to them.
+func (s *Store) InterruptEndedChatSessions(ctx context.Context) error {
+	_, e := s.pool.Exec(ctx, `
+		UPDATE v2_chat_sessions c SET ended_at = x.ended_at, end_reason = COALESCE(NULLIF(c.end_reason, ''), $1)
+		FROM v2_execution_sessions x
+		WHERE x.id = c.session_id AND c.ended_at IS NULL AND x.ended_at IS NOT NULL`, EndInterrupted)
+	if e != nil {
+		return fmt.Errorf("interrupt ended chat sessions: %w", e)
+	}
+	return nil
+}
+
 // MarkChatSessionEnding records why chat is about to end a live session, before it asks the
 // execution port to, so the reason is readable as soon as the session_ended event is.
 func (s *Store) MarkChatSessionEnding(ctx context.Context, sessionID, reason string) error {
