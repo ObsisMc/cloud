@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import Page from './page'
 import { resetChatStore, useChatStore } from './store'
-import { type ChatBackend, chatBackend, FakeEventSource, line } from './test-backend'
+import { type ChatBackend, chatBackend, FakeEventSource, line, tenantId } from './test-backend'
 
 const renderPage = () =>
   render(
@@ -113,13 +113,58 @@ describe('chat page', () => {
     expect(await screen.findByRole('menuitem', { name: /本地/ })).toHaveAttribute('aria-disabled', 'true')
   })
 
-  it('searches the backend\'s projects, with no way to add one yet', async () => {
+  it('searches the backend\'s projects', async () => {
     await renderReady()
     await userEvent.click(screen.getByRole('button', { name: '选择项目' }))
     await userEvent.type(await screen.findByPlaceholderText('搜索项目'), 'desk')
     expect(screen.getByRole('option', { name: 'ora-space/desktop' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'ora-space/cloud' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: /新建项目/ })).not.toBeInTheDocument()
+  })
+
+  /** Opens the new project dialog from the project menu and fills in a repository. */
+  const fillNewProject = async (url: string, branch?: string) => {
+    await userEvent.click(screen.getByRole('button', { name: '选择项目' }))
+    await userEvent.click(await screen.findByRole('option', { name: /新建项目/ }))
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    await userEvent.type(within(dialog).getByLabelText('仓库地址'), url)
+    if (branch !== undefined) {
+      await userEvent.clear(within(dialog).getByLabelText('默认分支'))
+      await userEvent.type(within(dialog).getByLabelText('默认分支'), branch)
+    }
+    return dialog
+  }
+
+  it('creates a project from a repository and starts the new chat in it', async () => {
+    await renderReady()
+    const dialog = await fillNewProject('https://github.com/octocat/Hello-World.git', 'master')
+    expect(within(dialog).getByLabelText('项目名')).toHaveValue('Hello-World')
+    await userEvent.click(within(dialog).getByRole('button', { name: '新建项目' }))
+    expect(await within(sidebar()).findByRole('region', { name: '项目 Hello-World' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '选择项目' })).toHaveTextContent('Hello-World')
+    expect(backend.seen).toContain(`POST /api/v2/tenants/${tenantId}/projects`)
+    expect(backend.bodies).toContainEqual({ name: 'Hello-World', repositoryUrl: 'https://github.com/octocat/Hello-World.git', defaultBranch: 'master' })
+
+    // The new chat's first prompt goes to the new project.
+    await userEvent.type(screen.getByRole('textbox', { name: '消息' }), '读一下 README{Enter}')
+    await within(sidebar()).findByText('读一下 README')
+    expect(backend.bodies).toContainEqual({ projectId: 'p-new-1', executorId: 'oc-fixture', prompt: '读一下 README' })
+  })
+
+  it.each([
+    ['invalid_project', 400, /仓库地址要用 HTTPS/],
+    ['repository_unavailable', 400, /无法克隆这个仓库，或仓库里没有分支 nope/],
+    ['project_conflict', 409, /和已有项目冲突/],
+  ])('says why a project was not created (%s), keeping the dialog and what was typed', async (code, status, message) => {
+    await renderReady()
+    backend.refuseProject = { status, data: { code, params: {}, requestId: 'r' } }
+    const dialog = await fillNewProject('https://github.com/octocat/missing', 'nope')
+    await userEvent.click(within(dialog).getByRole('button', { name: '新建项目' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(message)
+    expect(within(dialog).getByLabelText('仓库地址')).toHaveValue('https://github.com/octocat/missing')
+    expect(within(dialog).getByLabelText('默认分支')).toHaveValue('nope')
+    expect(within(sidebar()).queryByRole('region', { name: '项目 missing' })).not.toBeInTheDocument()
+    expect(backend.created).toEqual([])
   })
 
   it('picks an agent, then one of its models, from the backend\'s executors', async () => {

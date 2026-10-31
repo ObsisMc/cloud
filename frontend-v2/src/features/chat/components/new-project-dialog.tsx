@@ -1,9 +1,22 @@
+import { LoaderCircleIcon } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import type { CreateProject } from '../projects-api/generated'
 
-/** Asks for the folder a new project lives in, as desktop does; the project is named after it. */
+/** The name a repository suggests for its project: the last part of its address, without `.git`. */
+function nameOf(repositoryUrl: string): string {
+  return repositoryUrl.trim().replace(/[?#].*$/, '').replace(/\/+$/, '').replace(/\.git$/, '').split('/').at(-1) ?? ''
+}
+
+const empty = { repositoryUrl: '', defaultBranch: 'main', name: '' }
+
+/**
+ * Asks for the repository a new project comes from. The backend clones it before answering, which
+ * can take a while, so the dialog stays open until it has; a failure keeps what was typed.
+ */
 export function NewProjectDialog({
   open,
   onOpenChange,
@@ -11,42 +24,83 @@ export function NewProjectDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCreate: (path: string) => void
+  /** Resolves to why the project could not be created, if it could not. */
+  onCreate: (input: CreateProject) => Promise<string | undefined>
 }) {
-  const [path, setPath] = useState('')
-  const name = path.trim().replace(/[\\/]+$/, '').split(/[\\/]/).at(-1)
+  const [form, setForm] = useState(empty)
+  // The name follows the address until it is edited.
+  const [named, setNamed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const name = named ? form.name : nameOf(form.repositoryUrl)
+  const reset = () => (setForm(empty), setNamed(false), setError(undefined))
+
+  const submit = async () => {
+    const input = { name: name.trim(), repositoryUrl: form.repositoryUrl.trim(), defaultBranch: form.defaultBranch.trim() }
+    if (busy || !input.name || !input.repositoryUrl || !input.defaultBranch) return
+    setBusy(true)
+    setError(undefined)
+    const failure = await onCreate(input)
+    setBusy(false)
+    if (failure) return setError(failure)
+    reset()
+    onOpenChange(false)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(o) => (onOpenChange(o), o || setPath(''))}>
+    // While the clone runs the dialog cannot be dismissed: its result still has to be shown.
+    <Dialog open={open} onOpenChange={(o) => busy || (onOpenChange(o), o || reset())}>
       <DialogContent>
         <form
           className="contents"
           onSubmit={(e) => {
             e.preventDefault()
-            if (!path.trim()) return
-            onCreate(path.trim())
-            setPath('')
+            void submit()
           }}
         >
           <DialogHeader>
-            <DialogTitle>添加项目</DialogTitle>
-            <DialogDescription>填写项目在云端机器上的路径，项目名取最后一级目录名。</DialogDescription>
+            <DialogTitle>新建项目</DialogTitle>
+            <DialogDescription>云端会克隆这个仓库，项目里的每个对话都从这个分支开始。</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-1.5">
-            <Input
-              name="path"
-              aria-label="项目文件夹"
-              placeholder="/workspace/my-project"
-              autoFocus
-              required
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              className="font-mono"
-            />
-            {name && <p className="text-xs text-muted-foreground">项目名：{name}</p>}
-          </div>
+          <fieldset disabled={busy} className="flex min-w-0 flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="new-project-url">仓库地址</Label>
+              <Input
+                id="new-project-url"
+                placeholder="https://github.com/owner/repo.git"
+                autoFocus
+                required
+                value={form.repositoryUrl}
+                onChange={(e) => setForm({ ...form, repositoryUrl: e.target.value })}
+                className="font-mono"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="new-project-branch">默认分支</Label>
+              <Input
+                id="new-project-branch"
+                required
+                value={form.defaultBranch}
+                onChange={(e) => setForm({ ...form, defaultBranch: e.target.value })}
+                className="font-mono"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="new-project-name">项目名</Label>
+              <Input id="new-project-name" required value={name} onChange={(e) => (setNamed(true), setForm({ ...form, name: e.target.value }))} />
+            </div>
+          </fieldset>
+          {error && (
+            <p role="alert" className="text-xs text-destructive">
+              {error}
+            </p>
+          )}
           <DialogFooter>
-            <DialogClose render={<Button variant="outline" type="button" />}>取消</DialogClose>
-            <Button type="submit">添加项目</Button>
+            <DialogClose render={<Button variant="outline" type="button" disabled={busy} />}>取消</DialogClose>
+            <Button type="submit" disabled={busy}>
+              {busy && <LoaderCircleIcon className="animate-spin" />}
+              {busy ? '正在克隆仓库…' : '新建项目'}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

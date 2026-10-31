@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import type { CreateProject } from '../projects-api/generated'
 import type { NewChat, Project } from '../store'
 import { NewProjectDialog } from './new-project-dialog'
 import { SandboxLabel } from './sandbox-label'
@@ -62,8 +63,8 @@ export function ContextBar({
   /** Projects a chat can start in. */
   projects: Project[]
   onChange: (patch: Partial<NewChat>) => void
-  /** Adds a project from a folder; the menu offers it only when given. */
-  onCreateProject?: (path: string) => void
+  /** Creates a project from a repository, resolving to why it failed; the menu offers it only when given. */
+  onCreateProject?: (input: CreateProject) => Promise<string | undefined>
 }) {
   const [creating, setCreating] = useState(false)
   const project = projects.find((p) => p.id === value.projectId)
@@ -139,7 +140,7 @@ export function ContextBar({
       </DropdownMenu>
       <SandboxLabel />
 
-      <NewProjectDialog open={creating} onOpenChange={setCreating} onCreate={(path) => (onCreateProject?.(path), setCreating(false))} />
+      {onCreateProject && <NewProjectDialog open={creating} onOpenChange={setCreating} onCreate={onCreateProject} />}
     </div>
   )
 }
