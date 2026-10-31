@@ -16,8 +16,11 @@ test('chat: lists only the backend\'s projects, says it cannot run Agents yet, r
   // empty and a new Agent conversation stays explicitly unavailable.
   await expect(page.getByRole('status').filter({ hasText: /后端还不能运行 Agent/ })).toBeVisible()
   // Only what v2-server returns: no sample project, and the demo project has no conversations yet.
-  expect(await projects(page).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(['项目 Demo'])
-  await expect(projects(page).getByText('还没有会话')).toBeVisible()
+  // Other specs may leave projects of their own in a reused database, so only these two are checked.
+  const labels = await projects(page).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
+  expect(labels).toContain('项目 Demo')
+  expect(labels).not.toContain('项目 示例')
+  await expect(projects(page).filter({ hasText: 'Demo' }).getByText('还没有会话')).toBeVisible()
 
   // A send is refused up front rather than failing on the backend.
   await page.getByRole('textbox', { name: '消息' }).fill('你好')
