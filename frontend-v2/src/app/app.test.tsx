@@ -69,6 +69,20 @@ describe('session gate', () => {
     expect(seen).toContain('POST /auth/login')
   })
 
+  it('shows no email entry when the gateway does not offer it', async () => {
+    fakeBackend((c) => {
+      if (c.url === '/api/v1/me') return { status: 401, data: { code: 'unauthenticated', params: {}, requestId: 'x' } }
+      if (c.url === '/auth/providers') return { status: 200, data: { providers: ['github'], default: 'github' } }
+      return undefined
+    })
+    renderAt('/workflows')
+    expect(await screen.findByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument()
+    // An address field against a gateway without `email` could only fail as unknown_provider.
+    expect(screen.queryByLabelText('邮箱')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^登录$/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/演示环境：只凭邮箱即可登录/)).not.toBeInTheDocument()
+  })
+
   it('tells a disabled user on 403', async () => {
     fakeBackend((c) => (c.url === '/api/v1/me' ? { status: 403, data: {} } : undefined))
     renderAt('/')
