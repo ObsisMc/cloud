@@ -23,6 +23,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/scheduler"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 type actionFixture struct {
@@ -38,10 +39,7 @@ func newActionFixture(t *testing.T) *actionFixture {
 	f := &actionFixture{db: openStore(t)}
 	ctx := context.Background()
 	var err error
-	f.token, err = f.db.Login(ctx, store.Identity{Source: "test", Subject: "actions", DisplayName: "Owner"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f.token = storetest.SignIn(t, f.db, "actions", "Owner", store.RoleOwner)
 	u, err := f.db.SessionUser(ctx, f.token)
 	if err != nil {
 		t.Fatal(err)
@@ -298,10 +296,7 @@ func TestScheduleActionAuthorizationValidationAndUnavailable(t *testing.T) {
 	if code, _ := call(base+"/run", map[string]string{"requestId": "x"}, ""); code != 401 {
 		t.Fatal(code)
 	}
-	other, err := f.db.Login(t.Context(), store.Identity{Source: "test", Subject: "other", DisplayName: "Other"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	other := storetest.SignIn(t, f.db, "other", "Other", store.RoleOwner)
 	if code, _ := call(base+"/run", map[string]string{"requestId": "x"}, other); code != 404 {
 		t.Fatal(code)
 	}

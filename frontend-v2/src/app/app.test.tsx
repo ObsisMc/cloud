@@ -55,15 +55,32 @@ describe('app shell, signed in', () => {
 })
 
 describe('session gate', () => {
-  it('shows the login screen on 401, with one button per provider', async () => {
-    fakeBackend((c) => {
+  it('shows the login screen on 401 and signs in by email alone', async () => {
+    const seen = fakeBackend((c) => {
       if (c.url === '/api/v1/me') return { status: 401, data: { code: 'unauthenticated', params: {}, requestId: 'x' } }
-      if (c.url === '/auth/providers') return { status: 200, data: { providers: ['dev'], default: 'dev' } }
+      if (c.url === '/auth/providers') return { status: 200, data: { providers: ['email'], default: 'email' } }
+      if (c.url === '/auth/login') return { status: 200, data: { authorizationUrl: '/auth/callback?code=abc' } }
       return undefined
     })
     renderAt('/workflows')
     expect(await screen.findByRole('heading', { name: '登录 Ora' })).toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: '开发者登录' })).toBeInTheDocument()
+    await userEvent.type(await screen.findByLabelText('邮箱'), 'owner@demo.ora-space.dev')
+    await userEvent.click(screen.getByRole('button', { name: '登录' }))
+    expect(seen).toContain('POST /auth/login')
+  })
+
+  it('shows no email entry when the gateway does not offer it', async () => {
+    fakeBackend((c) => {
+      if (c.url === '/api/v1/me') return { status: 401, data: { code: 'unauthenticated', params: {}, requestId: 'x' } }
+      if (c.url === '/auth/providers') return { status: 200, data: { providers: ['github'], default: 'github' } }
+      return undefined
+    })
+    renderAt('/workflows')
+    expect(await screen.findByRole('button', { name: '使用 GitHub 登录' })).toBeInTheDocument()
+    // An address field against a gateway without `email` could only fail as unknown_provider.
+    expect(screen.queryByLabelText('邮箱')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^登录$/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/演示环境：只凭邮箱即可登录/)).not.toBeInTheDocument()
   })
 
   it('tells a disabled user on 403', async () => {
@@ -77,7 +94,7 @@ describe('session gate', () => {
     const seen = fakeBackend((c) => {
       if (c.url === '/api/v1/me') return signedIn ? { status: 200, data: demoUser } : { status: 401, data: {} }
       if (c.url === '/auth/logout') return (signedIn = false), { status: 204 }
-      if (c.url === '/auth/providers') return { status: 200, data: { providers: ['dev'] } }
+      if (c.url === '/auth/providers') return { status: 200, data: { providers: ['email'] } }
       return undefined
     })
     renderAt('/')

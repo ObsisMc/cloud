@@ -4,25 +4,22 @@ import {
   DEMO_TENANT,
   pluginKey,
   type ConnectionDraft,
+  type DemoUser,
   type SkillDraft,
   type Snapshot,
 } from './types'
 
-export function requireAdmin(data: Snapshot, userId: string) {
-  if (
-    !data.members.some(
-      (m) => m.userId === userId && m.role === 'admin' && m.status === 'active',
-    )
-  )
-    throw new Error('需要演示工作空间管理员权限。')
+/** Demo writes mirror the real workspace role: only an owner may change plugin installation. */
+export function requireOwner(actor: DemoUser) {
+  if (actor.role !== 'owner') throw new Error('需要工作空间 owner 权限。')
 }
 export function setPluginInstalled(
   data: Snapshot,
-  userId: string,
+  actor: DemoUser,
   key: string,
   installed: boolean,
 ) {
-  requireAdmin(data, userId)
+  requireOwner(actor)
   const entry = data.catalog.find((p) => pluginKey(p) === key)
   if (!entry || entry.kind === 'agent' || entry.kind === 'pack')
     throw new Error('此插件暂不支持安装。')

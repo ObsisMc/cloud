@@ -21,6 +21,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/nodeservices"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 type runtimeFixture struct {
@@ -99,10 +100,7 @@ func runtimeDatabase(t *testing.T, provider nodeservices.Provider) *runtimeFixtu
 
 func runtimeMember(t *testing.T, f *runtimeFixture, subject string) execution.Scope {
 	t.Helper()
-	token, err := f.db.Login(f.ctx, store.Identity{Source: "test", Subject: subject, DisplayName: subject}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, f.db, subject, subject, store.RoleOwner)
 	u, err := f.db.SessionUser(f.ctx, token)
 	if err != nil {
 		t.Fatal(err)

@@ -20,6 +20,7 @@ go run .                               # 监听 127.0.0.1:8090
 | `V2_ADDR` | `127.0.0.1:8090` | 监听地址 |
 | `V2_DATABASE_URL` | `postgres://ora:ora-local@127.0.0.1:55432/ora_v2?sslmode=disable` | PostgreSQL |
 | `V2_DATA_DIR` | `$HOME/.ora-v2` | 仓库 mirror、Node 与对话目录；同一目录只允许一个进程持有，使用短路径以满足 Unix socket 长度限制 |
+| `V2_USERS_FILE` | `users.json` | 启动时预置的账号文件（相对进程工作目录）：`email`、`displayName`、`role`（`owner` / `member`）。启动时幂等写入，已存在的账号只更新名字和角色，不在文件里的账号不删除；文件缺失、没有 owner 或邮箱重复时拒绝启动 |
 | `V2_NODE_ASSETS_DIR` | 未设置 | `task v2:node:prepare` 生成的固定 Node、host、guardian、Deno、OpenCode 和 Claude Code 资源；未设置时只启用纯模型路径 |
 | `V2_MODEL_BASE_URL` / `V2_MODEL_API_KEY` / `V2_MODEL_NAME` | 未设置 | 可选的一组 HTTPS OpenAI 兼容 provider；必须同时设置，OpenCode 与纯模型共用，清单只公开模型名称与版本 |
 | `V2_ANTHROPIC_MODEL_BASE_URL` / `V2_ANTHROPIC_MODEL_API_KEY` / `V2_ANTHROPIC_MODEL_NAME` | 未设置 | 可选的一组 HTTPS Anthropic 兼容 provider（Messages API，base URL 写到 `/v1`，如 `https://api.anthropic.com/v1`）；必须同时设置，只供 Claude Code 使用 |
@@ -46,16 +47,26 @@ key 放在仓库外的 `~/ora-demo/.env`，一台机器配一次，主目录和�
 | 路由 | 来源 | 说明 |
 |---|---|---|
 | `GET /healthz` | 契约 | 数据库可达即 `ok` |
-| `GET /auth/providers` | Gateway | 只有 `dev` |
-| `POST /auth/login` | Gateway | `dev` 登录：直接以演示用户登录、加入"演示团队"，设置 `ora_session` Cookie，`authorizationUrl` 即 `returnTo`（只接受站内路径） |
+| `GET /auth/providers` | Gateway | 只有 `email` |
+| `POST /auth/login` | Gateway | 邮箱登录：`email` 必须是预置文件或 owner 邀请过的账号，否则 `403 email_not_invited`，不会自动建用户；成功后设置 `ora_session` Cookie，`authorizationUrl` 即 `returnTo`（只接受站内路径）。只凭邮箱就能登录等于谁都能冒充谁，**仅用于演示环境** |
 | `POST /auth/logout` | Gateway | 吊销会话，`204` |
-| `GET /api/v1/me` | 契约 | 当前用户；无会话 `401 unauthenticated` |
+| `GET /api/v1/me` | 契约 | 当前用户；无会话 `401 unauthenticated`。契约禁止额外字段，当前用户的角色从 `GET /api/v1/me/tenants` 的 `role` 读取 |
 | `GET /api/v1/me/tenants` | 契约 | 当前用户所在租户，一页返回全部，`nextCursor` 为空 |
 | `GET /api/v1/tenants/{tid}/members` | 契约 | 当前用户所在工作区成员，一页返回全部，按显示名排序；非成员 `403 forbidden`，非法租户 id `404 not_found` |
 | `GET /api/v1/tenants/{tid}/spaces` | 契约 | 当前用户所在工作区的空间，一页返回全部；v2 每个租户一个「演示空间」，`role` 取调用者的工作区角色；非成员 `403 forbidden` |
 | `GET /api/v1/tenants/{tid}/spaces/{sid}/plugins` | 契约 | 该空间里 `kind=agent` 且已安装的插件，一页返回全部；空间不属于调用者的工作区时 `403 forbidden`，非法 id `404 not_found` |
 
 ## 契约之外
+
+### 成员邀请
+
+邀请接口不在正式契约里，由独立候选契约 [`members.openapi.json`](members.openapi.json) 描述（正式 Cloud 的成员写入收敛后替换）。
+
+| 路由 | 行为 |
+|---|---|
+| `POST /api/v2/tenants/{tid}/members` | 只有 owner 可以邀请：`email` 必填，`displayName` 选填（默认取邮箱 @ 前面的部分），`squadId` 选填（同时加入该小队，小队必须属于本工作区且未归档）。提交即创建账号并加入"演示团队"（角色 `member`），不需要对方接受；被邀请的邮箱随后可以直接登录。写权限不足 `403 forbidden`，已在团队 `409 member_exists`，小队不存在 `404 not_found` |
+
+升级已有数据库时注意：旧开发登录建出的 `dev/demo`「演示用户」仍留在库里，但邮箱登录不再认这个身份，它再也无法登录，名下的成员记录、小队与对话却还会出现在成员页里。演示请用全新数据库，不要把旧库当成干净基线；这里不做账号清理，避免删掉别人正在引用的历史。
 
 ### 定时任务配置
 

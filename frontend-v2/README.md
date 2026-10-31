@@ -11,7 +11,7 @@ task v2:dev    # PostgreSQL + v2-server（:8090）+ 前端（http://localhost:51
 task v2:e2e    # Playwright 端到端测试
 ```
 
-打开页面后点"开发者登录"，以演示用户进入。只改前端时也可以在本目录：
+打开页面后在登录页填预置账号的邮箱（默认 owner 是 `owner@demo.ora-space.dev`，见 `v2-server/users.json`）即可进入；没有密码，只用于演示。只改前端时也可以在本目录：
 
 ```sh
 npm ci
@@ -115,7 +115,7 @@ v2-server 还没有工作流接口，现在由 `lib/workflows/data/local-workflo
 
 ## 设置
 
-主导航的「设置」包含成员、模型连接、主题、Plugins、Skills 五个独立子页面，默认进入成员页。主题真实作用于整个 V2；其余管理页使用清楚标注、按登录用户隔离的本机演示数据。没有真实成员写入、API Key、模型调用或插件下载，也不改变聊天和工作流的资源。详情见 [`src/features/settings/README.md`](src/features/settings/README.md)。
+主导航的「设置」包含成员、模型连接、主题、Plugins、Skills 五个独立子页面，默认进入成员页。成员页读取真实的 `GET /api/v1/tenants/{tid}/members`，owner 还能填邮箱邀请（`POST /api/v2/tenants/{tid}/members`，契约之外，见 v2-server README）；主题真实作用于整个 V2；模型连接、Plugins、Skills 仍是清楚标注、按登录用户隔离的本机演示数据。没有真实 API Key、模型调用或插件下载，也不改变聊天和工作流的资源。详情见 [`src/features/settings/README.md`](src/features/settings/README.md)。
 
 端到端测试可通过 `E2E_WEB_PORT`、`E2E_SERVER_PORT` 指定独立端口，默认仍为 5174、8091。与其他应用共用机器时选择空闲端口；测试不会复用已启动的服务。
 
@@ -129,4 +129,6 @@ v2-server 还没有工作流接口，现在由 `lib/workflows/data/local-workflo
 
 ## 登录
 
-和正式 Cloud 一样，以 `GET /api/v1/me` 判断是否登录：`401` 时在当前位置显示登录页，登录后回到原页面；`403` 表示账号已停用。登录页按 `GET /auth/providers` 为每种登录方式显示一个按钮，`POST /auth/login` 后跳转到返回的地址。v2-server 只提供开发者登录，接入正式 Gateway 时前端不用改。
+和正式 Cloud 一样，以 `GET /api/v1/me` 判断是否登录：`401` 时在当前位置显示登录页，登录后回到原页面；`403` 表示账号已停用。登录页按 `GET /auth/providers` 显示登录方式：v2-server 只提供 `email`，表单填邮箱，`POST /auth/login` 带上邮箱后跳转到返回的地址；不在演示团队里的邮箱得到 `email_not_invited`，页面据此提示找 owner 邀请。其他 provider 仍按按钮呈现，接入正式 Gateway 时前端不用改。
+
+当前用户的角色不在 `GET /api/v1/me` 里（契约禁止额外字段），由 `GET /api/v1/me/tenants` 的 `role` 得出，见 `app/auth/user.ts` 的 `useRole()`；邀请入口只对 owner 显示。

@@ -8,10 +8,10 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestLegacyScheduleReferencesRemainReadableButCannotBeWritten(t *testing.T) {
@@ -19,10 +19,7 @@ func TestLegacyScheduleReferencesRemainReadableButCannotBeWritten(t *testing.T) 
 		t.Run(kind, func(t *testing.T) {
 			db := openStore(t)
 			ctx := context.Background()
-			token, err := db.Login(ctx, store.Identity{Source: "test", Subject: "legacy", DisplayName: "Owner"}, time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
+			token := storetest.SignIn(t, db, "legacy", "Owner", store.RoleOwner)
 			user, err := db.SessionUser(ctx, token)
 			if err != nil {
 				t.Fatal(err)

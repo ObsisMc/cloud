@@ -9,6 +9,7 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -20,7 +21,8 @@ import (
 
 func TestScheduleConfigurationLifecycle(t *testing.T) {
 	s := openStore(t)
-	srv := httptest.NewServer(server.New(s, server.Options{SessionTTL: time.Hour, DemoUser: store.Identity{Source: "dev", Subject: "schedule-owner", DisplayName: "Owner"}}))
+	storetest.SignIn(t, s, "schedule-owner", "Owner", store.RoleOwner)
+	srv := httptest.NewServer(server.New(s, server.Options{SessionTTL: time.Hour}))
 	defer srv.Close()
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar}
@@ -61,7 +63,7 @@ func TestScheduleConfigurationLifecycle(t *testing.T) {
 		_ = json.Unmarshal(raw, &out)
 		return res.StatusCode, out
 	}
-	call("POST", "/auth/login", map[string]string{})
+	call("POST", "/auth/login", map[string]string{"provider": "email", "email": storetest.Email("schedule-owner")})
 	_, tenants := call("GET", "/api/v1/me/tenants", nil)
 	tid := tenants["items"].([]any)[0].(map[string]any)["id"].(string)
 	path := "/api/v2/tenants/" + tid + "/schedule-configs"
@@ -88,10 +90,7 @@ func TestScheduleConfigurationLifecycle(t *testing.T) {
 	srv.Close()
 	srv = httptest.NewServer(server.New(s, server.Options{SessionTTL: time.Hour}))
 	defer srv.Close()
-	token, e := s.Login(context.Background(), store.Identity{Source: "dev", Subject: "schedule-owner", DisplayName: "Owner"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token := storetest.SignIn(t, s, "schedule-owner", "Owner", store.RoleOwner)
 	req, _ := http.NewRequest("GET", srv.URL, nil)
 	jar.SetCookies(req.URL, []*http.Cookie{{Name: server.SessionCookie, Value: token}})
 	status, list := call("GET", path, nil)
@@ -104,10 +103,7 @@ func TestScheduleConfigurationLifecycle(t *testing.T) {
 		t.Fatalf("resume %d %v", status, resumed)
 	}
 	// A second member of the same tenant cannot read or mutate the owner's configuration.
-	token, e = s.Login(context.Background(), store.Identity{Source: "dev", Subject: "other", DisplayName: "Other"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token = storetest.SignIn(t, s, "other", "Other", store.RoleOwner)
 	jar.SetCookies(req.URL, []*http.Cookie{{Name: server.SessionCookie, Value: token}})
 	_, list = call("GET", path, nil)
 	if len(list["items"].([]any)) != 0 {

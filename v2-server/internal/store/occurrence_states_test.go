@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 	"os"
 	"testing"
 	"time"
@@ -42,10 +43,7 @@ func TestExecutionStateRules(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer func() { s.Close() }()
-	token, e := s.Login(ctx, store.Identity{Source: "test", Subject: "owner", DisplayName: "Owner"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token := storetest.SignIn(t, s, "owner", "Owner", store.RoleOwner)
 	u, e := s.SessionUser(ctx, token)
 	if e != nil {
 		t.Fatal(e)
@@ -211,10 +209,8 @@ func TestExecutionStateRules(t *testing.T) {
 	if e != nil || !queued.Released || queued.Reason != "invalid_model" {
 		t.Fatalf("definite rejection %v %v", queued, e)
 	}
-	other, e := s.Login(ctx, store.Identity{Source: "test", Subject: "other", DisplayName: "Other"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	// A second person in the same demo team: the occurrences above are still foreign to them.
+	other := storetest.SignIn(t, s, "other", "Other", store.RoleMember)
 	v, _ := s.SessionUser(ctx, other)
 	if _, e = s.GetOccurrence(ctx, tid, v.ID, queued.ID); !errors.Is(e, store.ErrNotFound) {
 		t.Fatal("foreign get")

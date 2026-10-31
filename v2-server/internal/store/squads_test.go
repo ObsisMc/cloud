@@ -7,12 +7,12 @@ import (
 	"errors"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 type squadFixture struct {
@@ -62,10 +62,7 @@ func newSquadFixture(t *testing.T) *squadFixture {
 // login returns the user id and makes sure the fixture tenant is known.
 func (f *squadFixture) login(t *testing.T, subject, role string) string {
 	t.Helper()
-	token, e := f.store.Login(f.ctx, store.Identity{Source: "test", Subject: subject, DisplayName: subject}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token := storetest.SignIn(t, f.store, subject, subject, role)
 	u, e := f.store.SessionUser(f.ctx, token)
 	if e != nil {
 		t.Fatal(e)
@@ -75,9 +72,6 @@ func (f *squadFixture) login(t *testing.T, subject, role string) string {
 		t.Fatalf("tenants = %v %v", tenants, e)
 	}
 	f.tenant = tenants[0].ID
-	if _, e := f.db.Exec(f.ctx, `UPDATE memberships SET role = $1 WHERE tenant_id = $2 AND user_id = $3`, role, f.tenant, u.ID); e != nil {
-		t.Fatal(e)
-	}
 	return u.ID
 }
 

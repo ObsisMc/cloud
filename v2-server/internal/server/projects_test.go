@@ -2,7 +2,6 @@ package server_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -25,6 +24,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/projectrepos"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestProjectRepositoryLifecycle(t *testing.T) {
@@ -39,7 +39,8 @@ func TestProjectRepositoryLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverOptions := server.Options{SessionTTL: time.Hour, DemoUser: store.Identity{Source: "dev", Subject: "project-owner", DisplayName: "Owner"}, Projects: projects}
+	storetest.SignIn(t, s, "project-owner", "Owner", store.RoleOwner)
+	serverOptions := server.Options{SessionTTL: time.Hour, Projects: projects}
 	srv := httptest.NewServer(server.New(s, serverOptions))
 	defer func() { srv.Close() }()
 	jar, _ := cookiejar.New(nil)
@@ -90,7 +91,7 @@ func TestProjectRepositoryLifecycle(t *testing.T) {
 	if status, _ := call("GET", "/api/v2/tenants/"+absentTenant+"/projects", nil); status != 401 {
 		t.Fatalf("anonymous status=%d", status)
 	}
-	call("POST", "/auth/login", map[string]string{})
+	call("POST", "/auth/login", map[string]string{"provider": "email", "email": storetest.Email("project-owner")})
 	_, who := call("GET", "/api/v1/me", nil)
 	_, tenants := call("GET", "/api/v1/me/tenants", nil)
 	tenant := tenants["items"].([]any)[0].(map[string]any)["id"].(string)
@@ -161,7 +162,7 @@ func TestProjectRepositoryLifecycle(t *testing.T) {
 	}
 	serverOptions.Projects = projects
 	srv = httptest.NewServer(server.New(s, serverOptions))
-	call("POST", "/auth/login", map[string]string{})
+	call("POST", "/auth/login", map[string]string{"provider": "email", "email": storetest.Email("project-owner")})
 	if status, got := call("GET", path+"/"+id, nil); status != 200 || got["commitId"] != commit {
 		t.Fatalf("restart read: %d %v", status, got)
 	}
@@ -179,10 +180,7 @@ func TestProjectRepositoryLifecycle(t *testing.T) {
 	}
 
 	// A second tenant member sees the recorded creator, not their own identity.
-	token, err := s.Login(context.Background(), store.Identity{Source: "dev", Subject: "project-reader", DisplayName: "Reader"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, s, "project-reader", "Reader", store.RoleOwner)
 	base, _ := http.NewRequest("GET", srv.URL, nil)
 	jar.SetCookies(base.URL, []*http.Cookie{{Name: server.SessionCookie, Value: token}})
 	if status, got := call("GET", path+"/"+id, nil); status != 200 || got["ownerUserId"] != who["id"] {
@@ -214,10 +212,7 @@ func TestTrustedDemoRepositorySeed(t *testing.T) {
 		t.Skip("v2 repository service requires Linux/WSL")
 	}
 	s := openStore(t)
-	token, err := s.Login(t.Context(), store.Identity{Source: "dev", Subject: "fixture-owner", DisplayName: "Owner"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, s, "fixture-owner", "Owner", store.RoleOwner)
 	user, err := s.SessionUser(t.Context(), token)
 	if err != nil {
 		t.Fatal(err)

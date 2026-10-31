@@ -11,15 +11,13 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution/executiontest"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestScheduleCoordinatorUsesSharedOptionsExecution(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
-	token, err := s.Login(ctx, store.Identity{Source: "test", Subject: "scheduler", DisplayName: "Scheduler"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, s, "scheduler", "Scheduler", store.RoleOwner)
 	u, err := s.SessionUser(ctx, token)
 	if err != nil {
 		t.Fatal(err)

@@ -1,9 +1,10 @@
 /// <reference lib="dom" />
 import { expect, test } from '@playwright/test'
+import { signIn } from './login.ts'
 
 test('unwired target kinds stay disabled, real Fixture model is selectable, and no sample project is presented', async ({ page }) => {
   await page.goto('/schedules')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   await page.locator('header').getByRole('button', { name: '新建任务', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('button', { name: /运行工作流/ })).toBeDisabled()

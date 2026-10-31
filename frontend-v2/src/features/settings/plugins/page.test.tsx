@@ -1,10 +1,19 @@
 import { beforeEach, expect, it } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { fakeBackend } from '@/test/backend'
 import { renderSettingsPage } from '../test-utils'
 import PluginsPage from './page'
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  // Demo writes mirror the real role, so the page needs an owner membership to offer them.
+  fakeBackend((c) =>
+    c.url === '/api/v1/me/tenants'
+      ? { status: 200, data: { items: [{ id: 'tenant', role: 'owner' }] } }
+      : undefined,
+  )
+})
 it('searches and filters plugins, opens real details, and confirms demo removal', async () => {
   const user = userEvent.setup()
   renderSettingsPage(<PluginsPage />, '/settings/plugins')

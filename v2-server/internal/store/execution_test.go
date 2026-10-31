@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 type executionFixture struct {
@@ -75,10 +76,7 @@ func executionDatabase(t *testing.T) *executionFixture {
 func executionMember(t *testing.T, s *store.Store, subject string) execution.Scope {
 	t.Helper()
 	ctx := context.Background()
-	token, err := s.Login(ctx, store.Identity{Source: "test", Subject: subject, DisplayName: subject}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, s, subject, subject, store.RoleOwner)
 	u, err := s.SessionUser(ctx, token)
 	if err != nil {
 		t.Fatal(err)

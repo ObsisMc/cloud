@@ -3,10 +3,8 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	_ "embed"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"time"
@@ -79,7 +77,8 @@ func (s *Store) Close() { s.pool.Close() }
 // Ping checks the database is reachable.
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-// User mirrors the contract's User.
+// User mirrors the contract's User. The contract forbids extra fields, so the caller's workspace
+// role travels with GET /api/v1/me/tenants instead.
 type User struct {
 	ID          string     `json:"id"`
 	DisplayName string     `json:"displayName"`
@@ -97,51 +96,8 @@ type Tenant struct {
 	Role   string `json:"role"`
 }
 
-// Identity is who a login says the user is.
-type Identity struct{ Source, Subject, DisplayName string }
-
 // DemoTenant is the tenant every development login joins.
 const DemoTenant = "演示团队"
-
-// Login upserts the user, makes sure they belong to the demo tenant, and opens a session.
-// It returns the session token, which only the cookie carries.
-func (s *Store) Login(ctx context.Context, who Identity, ttl time.Duration) (string, error) {
-	token := make([]byte, 32)
-	if _, e := rand.Read(token); e != nil {
-		return "", fmt.Errorf("session token: %w", e)
-	}
-	secret := base64.RawURLEncoding.EncodeToString(token)
-	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var userID, tenantID string
-		if e := tx.QueryRow(ctx, `
-			INSERT INTO users (source, subject, display_name) VALUES ($1, $2, $3)
-			ON CONFLICT (source, subject) DO UPDATE SET display_name = excluded.display_name
-			RETURNING id`, who.Source, who.Subject, who.DisplayName).Scan(&userID); e != nil {
-			return fmt.Errorf("upsert user: %w", e)
-		}
-		if e := tx.QueryRow(ctx, `
-			INSERT INTO tenants (name) VALUES ($1)
-			ON CONFLICT (name) DO UPDATE SET name = excluded.name
-			RETURNING id`, DemoTenant).Scan(&tenantID); e != nil {
-			return fmt.Errorf("upsert tenant: %w", e)
-		}
-		if _, e := tx.Exec(ctx, `
-			INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')
-			ON CONFLICT DO NOTHING`, tenantID, userID); e != nil {
-			return fmt.Errorf("join tenant: %w", e)
-		}
-		if e := ensureDemoSpace(ctx, tx, tenantID, userID); e != nil {
-			return e
-		}
-		if _, e := tx.Exec(ctx, `
-			INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() + $3::interval)`,
-			hash(secret), userID, ttl.String()); e != nil {
-			return fmt.Errorf("create session: %w", e)
-		}
-		return nil
-	})
-	return secret, e
-}
 
 // Logout ends the session; ending an unknown one is not an error.
 func (s *Store) Logout(ctx context.Context, token string) error {

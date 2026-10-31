@@ -142,7 +142,8 @@ type chatClient struct {
 func newChatClient(t *testing.T, rt *executiontest.Stub) *chatClient {
 	t.Helper()
 	s := storetest.Open(t)
-	opts := server.Options{SessionTTL: time.Hour, DemoUser: store.Identity{Source: "dev", Subject: "chat", DisplayName: "Chat"}}
+	storetest.SignIn(t, s, "chat", "Chat", store.RoleOwner)
+	opts := server.Options{SessionTTL: time.Hour}
 	if rt != nil {
 		opts.Execution, opts.Catalog = rt, rt
 	}
@@ -150,7 +151,7 @@ func newChatClient(t *testing.T, rt *executiontest.Stub) *chatClient {
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
 	cl := &chatClient{t: t, base: srv.URL, http: &http.Client{Jar: jar}}
-	cl.raw("POST", "/auth/login", map[string]string{}, nil)
+	cl.raw("POST", "/auth/login", map[string]string{"provider": "email", "email": storetest.Email("chat")}, nil)
 	_, me := cl.raw("GET", "/api/v1/me/tenants", nil, nil)
 	cl.tenant = me["items"].([]any)[0].(map[string]any)["id"].(string)
 	return cl

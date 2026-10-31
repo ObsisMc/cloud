@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 	"os"
 	"testing"
 	"time"
@@ -42,10 +43,7 @@ func TestOccurrenceDeduplicationAndSnapshots(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer func() { s.Close() }()
-	token, e := s.Login(ctx, store.Identity{Source: "test", Subject: "owner", DisplayName: "Owner"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token := storetest.SignIn(t, s, "owner", "Owner", store.RoleOwner)
 	u, e := s.SessionUser(ctx, token)
 	if e != nil {
 		t.Fatal(e)
@@ -144,10 +142,7 @@ func TestOccurrenceDeduplicationAndSnapshots(t *testing.T) {
 	if e != nil || len(page) != 2 || page[0].ID != items[2].ID || page[1].ID != items[3].ID {
 		t.Fatalf("pagination %v %v", page, e)
 	}
-	other, e := s.Login(ctx, store.Identity{Source: "test", Subject: "other", DisplayName: "Other"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	other := storetest.SignIn(t, s, "other", "Other", store.RoleOwner)
 	otherUser, _ := s.SessionUser(ctx, other)
 	if _, e = s.Occurrences(ctx, tid, otherUser.ID, cfg.ID, store.OccurrenceCursor{}, 100); !errors.Is(e, store.ErrNotFound) {
 		t.Fatalf("foreign read %v", e)
@@ -185,10 +180,7 @@ func TestOccurrencesTimeDescendingPagination(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer func() { s.Close() }()
-	token, e := s.Login(ctx, store.Identity{Source: "test", Subject: "pager", DisplayName: "Pager"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token := storetest.SignIn(t, s, "pager", "Pager", store.RoleOwner)
 	u, e := s.SessionUser(ctx, token)
 	if e != nil {
 		t.Fatal(e)
@@ -337,10 +329,7 @@ func TestOccurrenceInvalidRuleIsIneligible(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer func() { s.Close() }()
-	token, e := s.Login(ctx, store.Identity{Source: "test", Subject: "owner", DisplayName: "Owner"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token := storetest.SignIn(t, s, "owner", "Owner", store.RoleOwner)
 	u, e := s.SessionUser(ctx, token)
 	if e != nil {
 		t.Fatal(e)

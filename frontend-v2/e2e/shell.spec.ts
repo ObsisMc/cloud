@@ -1,15 +1,16 @@
 import { expect, test } from '@playwright/test'
+import { signIn } from './login.ts'
 
 test('log in, switch pages, log out', async ({ page }) => {
   // Signed out: the login screen appears in place of the requested page.
   await page.goto('/workflows')
   await expect(page.getByRole('heading', { name: '登录 Ora' })).toBeVisible()
 
-  // The development login returns to the requested page as the demo user.
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  // The email login returns to the requested page as the preset owner.
+  await signIn(page)
   await expect(page).toHaveURL(/\/workflows$/)
   await expect(page.getByRole('heading', { level: 1, name: '工作流' })).toBeVisible()
-  await expect(page.getByRole('img', { name: '演示用户' })).toBeVisible()
+  await expect(page.getByRole('img', { name: '演示 Owner' })).toBeVisible()
 
   for (const title of ['对话', '协作', '定时任务', '仪表盘']) {
     await page.getByRole('link', { name: title }).click()

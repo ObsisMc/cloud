@@ -5,15 +5,13 @@ type StoragePort = Pick<Storage, 'getItem' | 'setItem'>
 /** Small local boundary: failed writes never become successful UI state. No HTTP or credentials. */
 export class DemoRepository {
   readonly key: string
-  readonly user: DemoUser
   private readonly storage: () => StoragePort
   constructor(
     user: DemoUser,
     storage: () => StoragePort = () => window.localStorage,
   ) {
-    this.user = user
     this.storage = storage
-    this.key = `ora-v2-settings-demo:v1:${encodeURIComponent(user.id)}:${DEMO_SPACE}`
+    this.key = `ora-v2-settings-demo:v2:${encodeURIComponent(user.id)}:${DEMO_SPACE}`
   }
   async read(): Promise<Snapshot> {
     return this.readNow()
@@ -26,7 +24,7 @@ export class DemoRepository {
       throw new Error('无法读取浏览器演示数据，请检查存储权限后重试。')
     }
     if (raw === null) {
-      const initial = seed(this.user)
+      const initial = seed()
       this.write(initial)
       return initial
     }
@@ -53,7 +51,7 @@ export class DemoRepository {
     return latest
   }
   async reset(): Promise<Snapshot> {
-    const initial = seed(this.user)
+    const initial = seed()
     initial.revision = Date.now()
     this.write(initial)
     return initial
@@ -85,15 +83,11 @@ function rows(value: unknown, fields: string[]) {
 function isSnapshot(value: unknown): value is Snapshot {
   if (
     !record(value) ||
-    value.schema !== 1 ||
+    value.schema !== 2 ||
     !Number.isSafeInteger(value.revision)
   )
     return false
   if (
-    !rows(value.members, ['id', 'userId', 'displayName', 'role', 'status']) ||
-    !rows(value.history, ['id', 'userId', 'method', 'joinedAt']) ||
-    !rows(value.links, ['id', 'kind', 'expiresAt']) ||
-    !rows(value.requests, ['id', 'userId', 'status']) ||
     !rows(value.catalog, [
       'id',
       'identifier',

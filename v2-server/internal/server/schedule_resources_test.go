@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -18,15 +17,13 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution/executiontest"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestScheduleSharedResourcesAndBindingAuthorization(t *testing.T) {
 	db := openStore(t)
 	ctx := context.Background()
-	token, err := db.Login(ctx, store.Identity{Source: "test", Subject: "resources", DisplayName: "Owner"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, db, "resources", "Owner", store.RoleOwner)
 	u, err := db.SessionUser(ctx, token)
 	if err != nil {
 		t.Fatal(err)

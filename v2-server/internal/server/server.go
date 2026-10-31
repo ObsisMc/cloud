@@ -26,7 +26,9 @@ const SessionCookie = "ora_session"
 // Store is what the handlers need from the database.
 type Store interface {
 	Ping(ctx context.Context) error
-	Login(ctx context.Context, who store.Identity, ttl time.Duration) (string, error)
+	UserByEmail(ctx context.Context, email string) (store.User, error)
+	StartSession(ctx context.Context, userID string, ttl time.Duration) (string, error)
+	InviteMember(ctx context.Context, tenant, caller string, in store.Invite) (store.Member, error)
 	Logout(ctx context.Context, token string) error
 	SessionUser(ctx context.Context, token string) (store.User, error)
 	Tenants(ctx context.Context, userID string) ([]store.Tenant, error)
@@ -39,8 +41,6 @@ type Store interface {
 type Options struct {
 	// SessionTTL is how long a login lasts.
 	SessionTTL time.Duration
-	// DemoUser is the identity the development login signs in as.
-	DemoUser store.Identity
 	// Projects prepares fixed repository mirrors; nil leaves project operations unavailable.
 	Projects *projectrepos.Service
 	// Execution is the shared backend for page-owned conversations and runs.
@@ -64,6 +64,7 @@ func New(s Store, o Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/me", h.authed(h.me))
 	mux.HandleFunc("GET /api/v1/me/tenants", h.authed(h.tenants))
 	mux.HandleFunc("GET /api/v1/tenants/{tid}/members", h.authed(h.members))
+	mux.HandleFunc("POST /api/v2/tenants/{tid}/members", h.authed(h.invite))
 	mux.HandleFunc("GET /api/v1/tenants/{tid}/spaces", h.authed(h.spaces))
 	mux.HandleFunc("GET /api/v1/tenants/{tid}/spaces/{sid}/plugins", h.authed(h.spacePlugins))
 	mux.HandleFunc("GET /api/v2/tenants/{tid}/projects", h.authed(h.projects))
@@ -130,16 +131,21 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// providers matches the Gateway: v2-server offers only the development login.
+// providers matches the Gateway: v2-server offers only the email login.
 func (h *handler) providers(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"providers": []string{"dev"}, "default": "dev"})
+	writeJSON(w, http.StatusOK, map[string]any{"providers": []string{LoginProviderEmail}, "default": LoginProviderEmail})
 }
 
-// login is the Gateway's POST /auth/login with the provider round trip skipped: the development
-// login signs in at once and sends the browser straight back to returnTo.
+// LoginProviderEmail is the only login provider: the address alone identifies the account.
+const LoginProviderEmail = "email"
+
+// login is the Gateway's POST /auth/login with the provider round trip skipped: the email login
+// signs in at once and sends the browser straight back to returnTo. Only an address the startup
+// preset lists or an owner already invited may sign in; an unknown one is rejected, never created.
 func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Provider string `json:"provider"`
+		Email    string `json:"email"`
 		ReturnTo string `json:"returnTo"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
@@ -148,11 +154,25 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 		fault(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	if in.Provider != "" && in.Provider != "dev" {
+	if in.Provider != "" && in.Provider != LoginProviderEmail {
 		fault(w, http.StatusBadRequest, "unknown_provider")
 		return
 	}
-	token, e := h.store.Login(r.Context(), h.opts.DemoUser, h.opts.SessionTTL)
+	email, e := store.NormalizeEmail(in.Email)
+	if e != nil {
+		fault(w, http.StatusBadRequest, "invalid_email")
+		return
+	}
+	u, e := h.store.UserByEmail(r.Context(), email)
+	if errors.Is(e, store.ErrNotFound) {
+		fault(w, http.StatusForbidden, "email_not_invited")
+		return
+	}
+	if e != nil {
+		internal(w, "find login account", e)
+		return
+	}
+	token, e := h.store.StartSession(r.Context(), u.ID, h.opts.SessionTTL)
 	if e != nil {
 		internal(w, "login", e)
 		return

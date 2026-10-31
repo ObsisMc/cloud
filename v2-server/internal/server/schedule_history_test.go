@@ -18,15 +18,13 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestScheduleHistoryHTTP(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t)
-	token, err := s.Login(ctx, store.Identity{Source: "test", Subject: "history-owner", DisplayName: "Owner"}, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := storetest.SignIn(t, s, "history-owner", "Owner", store.RoleOwner)
 	user, err := s.SessionUser(ctx, token)
 	if err != nil {
 		t.Fatal(err)
@@ -246,10 +244,7 @@ func TestScheduleHistoryHTTP(t *testing.T) {
 		call(path+"?"+q, token, 400)
 	}
 	// A second active member cannot list or read the owner's history.
-	other, e := s.Login(ctx, store.Identity{Source: "test", Subject: "other-history", DisplayName: "Other"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	other := storetest.SignIn(t, s, "other-history", "Other", store.RoleOwner)
 	call(path, other, 404)
 	call(path+"/"+previous, other, 404)
 	call("/api/v2/tenants/00000000-0000-0000-0000-000000000001/schedule-configs/"+cfg.ID+"/runs", token, 404)
@@ -257,7 +252,7 @@ func TestScheduleHistoryHTTP(t *testing.T) {
 	// Service replacement preserves the original cursor and frozen configuration.
 	input.Name = "edited"
 	input.Version = 1
-	if _, e = s.UpdateScheduleConfig(ctx, tenant, user.ID, cfg.ID, input, nil); e != nil {
+	if _, e := s.UpdateScheduleConfig(ctx, tenant, user.ID, cfg.ID, input, nil); e != nil {
 		t.Fatal(e)
 	}
 	srv.Close()

@@ -14,6 +14,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/legacy"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 // contractClient sends requests to v2-server and validates every response against Cloud's own
@@ -87,7 +88,8 @@ func (c *contractClient) do(method, path string, body any) (int, map[string]any)
 func (c *contractClient) login() {
 	c.t.Helper()
 	// The Gateway's login routes are not part of Cloud's contract, so they bypass validation.
-	res, e := c.http.Post(c.base+"/auth/login", "application/json", bytes.NewReader([]byte("{}")))
+	body, _ := json.Marshal(map[string]string{"provider": "email", "email": storetest.Email("squad-demo")})
+	res, e := c.http.Post(c.base+"/auth/login", "application/json", bytes.NewReader(body))
 	if e != nil {
 		c.t.Fatal(e)
 	}
@@ -150,5 +152,86 @@ func TestMembersRoute(t *testing.T) {
 	}
 	if status, body := c.do("GET", "/api/v1/tenants/not-a-uuid/members", nil); status != 404 || body["code"] != "not_found" {
 		t.Fatalf("malformed members = %d %v", status, body)
+	}
+}
+
+// TestEmailLoginAndOwnerInvite walks the multi-user flow through HTTP: a preset owner invites an
+// address, the invitee signs in with nothing but that address, and only owners may invite.
+func TestEmailLoginAndOwnerInvite(t *testing.T) {
+	f := newSquadServer(t)
+	call := func(t *testing.T, c *http.Client, method, path string, body any) (int, map[string]any) {
+		t.Helper()
+		var reader io.Reader
+		if body != nil {
+			b, _ := json.Marshal(body)
+			reader = bytes.NewReader(b)
+		}
+		req, e := http.NewRequest(method, f.srv.URL+path, reader)
+		if e != nil {
+			t.Fatal(e)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		res, e := c.Do(req)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer res.Body.Close()
+		out := map[string]any{}
+		_ = json.NewDecoder(res.Body).Decode(&out)
+		return res.StatusCode, out
+	}
+	signIn := func(t *testing.T, email string) (*http.Client, int, map[string]any) {
+		t.Helper()
+		jar, _ := cookiejar.New(nil)
+		c := &http.Client{Jar: jar}
+		status, body := call(t, c, "POST", "/auth/login", map[string]string{"provider": "email", "email": email})
+		return c, status, body
+	}
+
+	owner, status, body := signIn(t, storetest.Email("squad-demo"))
+	if status != 200 {
+		t.Fatalf("owner login = %d %v", status, body)
+	}
+	status, body = call(t, owner, "GET", "/api/v1/me/tenants", nil)
+	items, _ := body["items"].([]any)
+	if status != 200 || len(items) != 1 {
+		t.Fatalf("tenants = %d %v", status, body)
+	}
+	tenant := items[0].(map[string]any)["id"].(string)
+	invite := "/api/v2/tenants/" + tenant + "/members"
+
+	// An address nobody preset is refused and not created.
+	if _, status, body := signIn(t, "stranger@demo.test"); status != 403 || body["code"] != "email_not_invited" {
+		t.Fatalf("stranger login = %d %v", status, body)
+	}
+	if _, status, body := signIn(t, "not-an-address"); status != 400 || body["code"] != "invalid_email" {
+		t.Fatalf("invalid login = %d %v", status, body)
+	}
+
+	status, member := call(t, owner, "POST", invite, map[string]string{"email": "New@Demo.test"})
+	if status != 201 || member["displayName"] != "new" || member["role"] != "member" || member["userId"] != member["id"] {
+		t.Fatalf("invite = %d %v", status, member)
+	}
+	// The invitee signs in with the address alone and sees the workspace.
+	stranger, status, body := signIn(t, "new@demo.test")
+	if status != 200 {
+		t.Fatalf("invitee login = %d %v", status, body)
+	}
+	if status, body := call(t, stranger, "GET", "/api/v1/me", nil); status != 200 || body["displayName"] != "new" {
+		t.Fatalf("invitee me = %d %v", status, body)
+	}
+
+	// A member may read the roster but not invite.
+	if status, body := call(t, stranger, "GET", "/api/v1/tenants/"+tenant+"/members", nil); status != 200 || len(body["items"].([]any)) != 2 {
+		t.Fatalf("member roster = %d %v", status, body)
+	}
+	if status, body := call(t, stranger, "POST", invite, map[string]string{"email": "third@demo.test"}); status != 403 || body["code"] != "forbidden" {
+		t.Fatalf("member invite = %d %v", status, body)
+	}
+	if status, body := call(t, owner, "POST", invite, map[string]string{"email": "new@demo.test"}); status != 409 || body["code"] != "member_exists" {
+		t.Fatalf("duplicate invite = %d %v", status, body)
+	}
+	if status, body := call(t, owner, "POST", invite, map[string]string{"email": "third@demo.test", "squadId": "00000000-0000-0000-0000-000000000001"}); status != 404 || body["code"] != "not_found" {
+		t.Fatalf("unknown squad invite = %d %v", status, body)
 	}
 }
