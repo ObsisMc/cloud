@@ -1,15 +1,16 @@
 /// <reference lib="dom" />
 import { expect, test } from '@playwright/test'
 import { seedWorkspaceMember } from './roster.ts'
+import { signIn } from './login.ts'
 
 test('create a squad, add and remove a member, then archive it', async ({ page }) => {
   const suffix = crypto.randomUUID().slice(0, 8)
   const name = `演示小队-${suffix}`
   const colleague = `同事-${suffix}`
   await page.goto('/collaboration')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   await expect(page.getByRole('heading', { level: 1, name: '协作' })).toBeVisible()
-  // The demo login creates the workspace; the second human has to exist before the picker opens.
+  // The startup preset creates the workspace; the second human has to exist before the picker opens.
   await seedWorkspaceMember(colleague)
 
   // The creator becomes the squad's first human maintainer; the counts come from the backend.
@@ -22,12 +23,12 @@ test('create a squad, add and remove a member, then archive it', async ({ page }
   await expect(dialog.getByRole('heading', { name })).toBeVisible()
   await expect(dialog.getByText(/人类\s*1/)).toBeVisible()
   await expect(dialog.getByText(/维护者\s*1/)).toBeVisible()
-  await expect(dialog.getByText('演示用户')).toBeVisible()
+  await expect(dialog.getByText('演示 Owner')).toBeVisible()
 
   // An existing workspace member joins the squad with a role; the picker never offers the creator.
   await dialog.getByRole('button', { name: '添加成员' }).click()
   const picker = page.getByRole('dialog')
-  await expect(picker.getByText('演示用户')).toHaveCount(0)
+  await expect(picker.getByText('演示 Owner')).toHaveCount(0)
   await picker.getByLabel('职责（可选）').fill('外部协作')
   await page.screenshot({ path: test.info().outputPath('picker.png'), fullPage: true })
   await picker.getByRole('listitem').filter({ hasText: colleague }).getByRole('button', { name: '加入' }).click()

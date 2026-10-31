@@ -1,11 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
+import { memberEmail, signIn } from './login.ts'
 
-async function login(page: Page, path: string) {
+async function login(page: Page, path: string, email?: string) {
   await page.goto(path)
-  await page.getByRole('button', { name: '开发者登录' }).click()
-  // The login screen keeps the requested URL. Its equality alone does not mean the
-  // authentication redirect has finished; wait for the newly authenticated shell.
-  await expect(page.getByRole('img', { name: '演示用户', exact: true })).toBeVisible()
+  // The login screen keeps the requested URL; signIn waits for the authenticated shell.
+  await signIn(page, email)
   await expect(page).toHaveURL(new RegExp(path.replace(/[?]/g, '\\?') + '$'))
 }
 async function theme(page: Page, name: '浅色' | '深色' | '跟随系统') {
@@ -243,28 +242,22 @@ for (const width of [768, 375]) {
   })
 }
 
-test('members approve applications and preserve disabled records', async ({
+test('the roster comes from the server and a member sees no invitation entry', async ({
   page,
 }) => {
   await login(page, '/settings/members')
-  await page.getByRole('button', { name: /加入申请/ }).click()
-  await page.getByRole('button', { name: '批准', exact: true }).click()
-  await expect(
-    page.getByRole('button', { name: '批准', exact: true }),
-  ).toHaveCount(0)
-  await page.getByRole('button', { name: '成员列表', exact: true }).click()
-  const row = page.getByRole('row', { name: /许安/ })
-  await row.getByRole('button', { name: '加入历史' }).click()
-  await expect(page.getByRole('dialog')).toContainText('申请批准')
-  await page.getByRole('button', { name: '关闭详情' }).click()
-  await row.getByRole('button', { name: '停用', exact: true }).click()
-  await page
-    .getByRole('alertdialog')
-    .getByRole('button', { name: '停用成员' })
-    .click()
-  await expect(row.getByText('已停用')).toBeVisible()
-  await page.reload()
-  await expect(row.getByText('已停用')).toBeVisible()
+  // The preset owner is the only guaranteed row; the badge names the real role.
+  const row = page.getByRole('row', { name: /演示 Owner/ })
+  await expect(row.getByText('owner', { exact: true })).toBeVisible()
+  await expect(page.getByRole('form', { name: '邀请成员' })).toBeVisible()
+
+  // A preset member reads the same roster and is told why there is nothing to invite with.
+  await page.getByRole('button', { name: '退出登录' }).click()
+  await login(page, '/settings/members', memberEmail)
+  await expect(page.getByRole('img', { name: '爱丽丝' })).toBeVisible()
+  await expect(page.getByText(/邀请入口只向 owner 开放/)).toBeVisible()
+  await expect(page.getByRole('form', { name: '邀请成员' })).toHaveCount(0)
+  await expect(page.getByRole('row', { name: /演示 Owner/ })).toBeVisible()
 })
 
 test('model metadata and simulated credentials never send model requests', async ({

@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 import { expect, test } from '@playwright/test'
+import { signIn } from './login.ts'
 
 test('configuration persists through reload, edits, pause and resume', async ({ page }) => {
   const suffix = crypto.randomUUID().slice(0, 8)
@@ -8,7 +9,7 @@ test('configuration persists through reload, edits, pause and resume', async ({ 
   // An empty list renders a second 新建任务 in its empty state, so always use the page header's.
   const create = page.locator('header').getByRole('button', { name: '新建任务', exact: true })
   await page.goto('/schedules')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   await expect(page.getByRole('heading', { name: '定时任务', exact: true })).toBeVisible()
   await create.click()
   const dialog = page.getByRole('dialog')

@@ -1,9 +1,10 @@
 /// <reference lib="dom" />
 import { expect, test } from '@playwright/test'
+import { signIn } from './login.ts'
 
 test('configures a workflow schedule without calling configuration writes', async ({ page }) => {
   await page.goto('/workflows')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   // Publish in the editor, then navigate within the app so the library must refresh.
   const library = page.getByRole('complementary', { name: '工作流列表' })
   await library.getByRole('button', { name: '示例：代码审查', exact: true }).click()
@@ -41,7 +42,7 @@ test('existing task schedules extend the original table and drawer without API w
   const writes: string[] = []
   page.on('request', request => { if (request.url().includes('/api/') && request.method() !== 'GET') writes.push(request.url()) })
   await page.goto('/schedules')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   await expect(page.getByLabel('状态筛选')).toBeVisible()
   await expect(page.getByText('体验新功能')).toHaveCount(0)
   await page.locator('.sp-page-header').getByRole('button', { name: '新建任务', exact: true }).click()

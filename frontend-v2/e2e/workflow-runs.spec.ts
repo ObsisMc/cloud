@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { signIn } from './login.ts'
 
 test('workflow runs: start a published workflow from chat and follow it to the result', async ({ page }) => {
   // The demo engine takes 1.5 s a node, so the sample needs about ten seconds to finish.
@@ -12,7 +13,7 @@ test('workflow runs: start a published workflow from chat and follow it to the r
     route.fulfill({ json: { items: [{ id: 'oc-fixture', name: 'OpenCode · Fixture', agentName: 'OpenCode', modelName: 'Fixture' }] } }),
   )
   await page.goto('/chat')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   const cloud = page.getByRole('complementary', { name: '聊天记录' }).getByRole('region').filter({ hasText: 'ora-space/cloud' })
 
   // A project's + offers the published workflows; the run opens pending in the main area.

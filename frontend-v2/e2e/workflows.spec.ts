@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test'
+import { signIn } from './login.ts'
 
 test('workflows: open a sample, build a chain, keep it across a reload, publish', async ({ page }) => {
   await page.goto('/workflows')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   const library = page.getByRole('complementary', { name: '工作流列表' })
 
   // A fresh browser finds the published samples, the first one open on the canvas.

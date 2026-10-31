@@ -1,10 +1,11 @@
 import { expect, type Page, test } from '@playwright/test'
+import { signIn } from './login.ts'
 
 const projects = (page: Page) => page.getByRole('complementary', { name: '聊天记录' }).getByRole('region')
 
 test('chat: replay a sample, say the backend cannot run Agents yet, resize the column', async ({ page }) => {
   await page.goto('/chat')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   await expect(page.getByRole('heading', { name: '今天想构建什么？' })).toBeVisible()
 
   // The runtime seeds a real demo project. CI has no Node assets, so the executor list remains
