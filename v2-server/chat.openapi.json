@@ -1207,7 +1207,7 @@
           },
           "prompt": {
             "type": "string",
-            "description": "On turn_ended, the text the turn was asked. A turn stopped before its Agent started never appears in a history snapshot; this is how a page still shows it."
+            "description": "On turn_ended, the text the turn was asked. A turn stopped before its Agent started never appears in a history snapshot; this is how a page still shows it. Absent when it could not be read; the event and the stream are unaffected."
           }
         },
         "required": [
