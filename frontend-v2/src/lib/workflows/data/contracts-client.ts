@@ -55,6 +55,11 @@ import type {
 } from "../contracts";
 import { ContractError } from "../contracts";
 import {
+  forgetPendingDraft,
+  rememberPendingDraft,
+  type PendingDraft,
+} from "./pending-drafts";
+import {
   demoAgentModels,
   demoPlugins,
   demoRoles,
@@ -157,12 +162,33 @@ export function createHttpWorkflowContracts(tenantId: string): WorkflowContracts
     update: send(async ({ workflowId, name }: UpdateWorkflowRequest, signal) => ({
       workflow: workflow((await updateWorkflow(tid, workflowId, { name }, undefined, signal)).workflow),
     })),
-    updateDraft: send(async ({ workflowId, graph }: UpdateDraftRequest, signal) => ({
-      snapshot: snapshot(
-        (await updateWorkflowDraft(tid, workflowId, { graph }, undefined, signal)).snapshot,
-      ),
-    })),
+    updateDraft: send(async ({ workflowId, graph }: UpdateDraftRequest, signal) => {
+      const saved = await updateWorkflowDraft(tid, workflowId, { graph }, undefined, signal);
+      // This write is newer than anything a closed page left behind.
+      forgetPendingDraft(tid, workflowId);
+      return { snapshot: snapshot(saved.snapshot) };
+    }),
   };
+}
+
+/**
+ * Keeps the draft a page is leaving with: it is remembered in the browser at once, so the next
+ * visit writes it first (`replayPendingDrafts`), and sent with `keepalive` so it usually reaches
+ * the server even as the page unloads. Axios cannot send a keepalive request, hence `fetch`.
+ */
+export function keepDraftOnLeave(tenantId: string, draft: PendingDraft): void {
+  rememberPendingDraft(tenantId, draft);
+  try {
+    void fetch(`/api/v2/tenants/${tenantId}/workflows/${draft.workflowId}/draft`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ graph: draft.graph }),
+      credentials: "same-origin",
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    // A body over the keepalive limit throws; the remembered draft still covers it.
+  }
 }
 
 /**
@@ -170,13 +196,18 @@ export function createHttpWorkflowContracts(tenantId: string): WorkflowContracts
  * the catalogs the Agent node's pickers read. v2-server reports no Roles, Skills or MCP servers
  * yet, so the catalogs are still the demo entries.
  */
-export function createContractsClient(workflow: WorkflowContracts) {
+export function createContractsClient(
+  workflow: WorkflowContracts,
+  /** Keeps the draft of a page that is going away; absent where nothing can outlive the page. */
+  keepDraftOnLeave?: (draft: PendingDraft) => void,
+) {
   const answer =
     <Request, Response>(operation: (request: Request) => Response) =>
     async (request: Request, _options?: Options) =>
       operation(request);
   return {
     workflow,
+    keepDraftOnLeave,
     agent: {
       list: answer((_request: Record<string, never>) => ({ agents: demoRoles })),
     },

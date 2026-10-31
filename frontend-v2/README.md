@@ -111,7 +111,7 @@ e2e/            Playwright 端到端测试
 
 `lib/workflows/samples/` 是样例工作流：`authored.ts` 写了两份，代码审查（开始 → Agent → 条件分支 → 两个 Agent → 变量聚合器 → 输出）和逐段翻译（迭代）；另外三份是 desktop 自带的 Loop 样例（`artifacts/workflow-loop-examples/`），原样复制，导入时把 Agent 改成演示执行器、去掉角色。五份合起来覆盖全部八种可执行节点。工作流库是整个团队共用的，所以样例不再自动加入：左栏标题旁的"添加样例工作流"按钮按导入对话框的同一条路径把它们加进库、发布为 `v1`；同名的跳过，发布被拒绝的留作草稿并提示。
 
-工作流存在 v2-server 上（`v2-server/workflows.openapi.json`，客户端由 `npm run api:generate:workflows` 生成到 `lib/workflows/api/`，不手改）。`data/contracts-client.ts` 把 desktop 编辑器调用的 14 个定义操作接到生成的客户端上：服务端的毫秒数转成 DTO 的 `bigint`，拒绝转成编辑器按 `errors.<code>` 本地化的 `ContractError`，所以编辑器本身不用改。页面按当前用户的团队建客户端和查询缓存，换团队时整页重建。发布要服务端能检查图；服务端还不能检查时，发布返回的错误照常提示，不当作成功。
+工作流存在 v2-server 上（`v2-server/workflows.openapi.json`，客户端由 `npm run api:generate:workflows` 生成到 `lib/workflows/api/`，不手改）。`data/contracts-client.ts` 把 desktop 编辑器调用的 14 个定义操作接到生成的客户端上：服务端的毫秒数转成 DTO 的 `bigint`，拒绝转成编辑器按 `errors.<code>` 本地化的 `ContractError`，所以编辑器本身不用改。页面按当前用户的团队建客户端和查询缓存，换团队时整页重建。草稿在最后一次修改 1 秒后自动保存；保存完成前标题旁显示"未保存"或"保存中…"，不沿用上次的保存时间。刷新或关闭页面时浏览器不会等请求完成，所以离开时还没保存的草稿会立即记在浏览器里（`data/pending-drafts.ts`），同时用 `keepalive` 请求发出；下次打开工作流页时先把记下的草稿写到服务端，再读工作流库。之后任何一次成功保存都会清掉这条记录；工作流已被删除时直接丢弃，其他失败则保留到下次再试。发布要服务端能检查图；服务端还不能检查时，发布返回的错误照常提示，不当作成功。
 
 以前的版本把工作流存在浏览器 localStorage 里。`data/legacy-library.ts` 只读这份旧数据：浏览器里还有旧工作流时，左栏顶部提示一次，点"导入"按名字逐个建到服务端（只带草稿，旧的发布版本要重新发布；同名的跳过），点"不导入"就不再提示；两种情况都不删浏览器里的旧数据。`data/local-workflow-backend.ts` 照搬 desktop Rust 实现的规则（名称去空格后不能为空、不能重名；一个可编辑的 `draft` 加不可变的发布版本；不能删除草稿和当前生效的版本等），现在用来读取旧数据，也是单元测试的假服务端（`lib/workflows/test/workflow-server.ts`）。
 

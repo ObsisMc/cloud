@@ -16,6 +16,11 @@ type UseWorkflowDraftAutosaveOptions = {
    * generation that started the save so overlapping edits can reschedule.
    */
   save: () => Promise<"saved" | "stale" | "skipped" | "failed">;
+  /**
+   * Keeps the pending edits when the page goes away (reload, tab close), synchronously, since the
+   * browser does not wait for a request. Without it the hook starts `save` and hopes it lands.
+   */
+  leave?: () => void;
 };
 
 type UseWorkflowDraftAutosaveResult = {
@@ -42,10 +47,12 @@ export function useWorkflowDraftAutosave({
   enabled,
   debounceMs = WORKFLOW_DRAFT_AUTOSAVE_MS,
   save,
+  leave,
 }: UseWorkflowDraftAutosaveOptions): UseWorkflowDraftAutosaveResult {
   const [status, setStatus] = useState<WorkflowDraftSaveStatus>("clean");
   const enabledRef = useRef(enabled);
   const saveRef = useRef(save);
+  const leaveRef = useRef(leave);
   const statusRef = useRef<WorkflowDraftSaveStatus>("clean");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
@@ -176,6 +183,7 @@ export function useWorkflowDraftAutosave({
   useEffect(() => {
     enabledRef.current = enabled;
     saveRef.current = save;
+    leaveRef.current = leave;
     scheduleRef.current = schedule;
     runSaveRef.current = runSave;
   });
@@ -191,12 +199,17 @@ export function useWorkflowDraftAutosave({
     }
   }, [clearTimer, enabled, schedule]);
 
-  // A browser reload or tab close never unmounts the editor, so persist the edits still inside
-  // the debounce window when the page goes away. The local store writes synchronously, so the
-  // save lands before the page unloads.
+  // A browser reload or tab close never unmounts the editor, and the browser does not wait for a
+  // network write, so the edits still inside the debounce window (or in flight) are handed to
+  // `leave` synchronously. An in-flight write may land too; the kept draft is the same or newer.
   useEffect(() => {
     const persistOnPageHide = () => {
-      if (!dirtyRef.current) {
+      if (!dirtyRef.current && inFlightRef.current === null) {
+        return;
+      }
+      if (leaveRef.current !== undefined) {
+        // The debounce keeps running: a page restored from the back/forward cache still saves.
+        leaveRef.current();
         return;
       }
       clearTimer();

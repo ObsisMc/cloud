@@ -1021,28 +1021,9 @@ function WorkflowEditorContent({
     const startedGeneration = editGenerationRef.current;
     setManagerError(null);
     try {
-      const definition = normalizeWorkflowDocument({
-        id: snapshot.id,
-        name: snapshot.name,
-        description: snapshot.description,
-        updatedAt: snapshot.updatedAt,
-        viewport: snapshot.viewport,
-        nodes: snapshot.nodes,
-        edges: snapshot.edges,
-        globalVariables: normalizeWorkflowGlobalVariables(
-          snapshot.globalVariables,
-        ),
-      });
       await updateDraftMutation.mutateAsync({
         workflowId: snapshot.id,
-        graph: serializeWorkflowGraph({
-          nodes: definition.nodes,
-          edges: definition.edges,
-          viewport: definition.viewport,
-          annotations: snapshot.annotations ?? [],
-          globalVariables: definition.globalVariables,
-          description: definition.description,
-        }),
+        graph: serializeDraftGraph(snapshot),
       });
       const nextName = snapshot.name.trim();
       // Skip rename when the title is unchanged so graph-only autosaves stay one request.
@@ -1069,9 +1050,29 @@ function WorkflowEditorContent({
     updateDraftMutation,
   ]);
 
+  /**
+   * Hands the live draft to the client as the page goes away: a reload or tab close does not
+   * wait for an autosave request, so this must stay synchronous.
+   */
+  const keepDraftOnLeave = client.keepDraftOnLeave;
+  const leaveWithDraft = useMemo(() => {
+    if (keepDraftOnLeave === undefined) return undefined;
+    return () => {
+      const current = workflowRef.current;
+      if (current === null || previewedVersionRef.current !== null) return;
+      const snapshot = workflowFromCanvasSnapshot(current, toObject());
+      keepDraftOnLeave({
+        workflowId: snapshot.id,
+        graph: serializeDraftGraph(snapshot),
+        name: snapshot.name,
+      });
+    };
+  }, [keepDraftOnLeave, toObject]);
+
   const autosave = useWorkflowDraftAutosave({
     enabled: workflow !== null && previewedVersion === null,
     save: persistDraft,
+    leave: leaveWithDraft,
   });
   const markWorkflowDirty = autosave.markDirty;
   const undoHistory = workflowHistory.undo;
@@ -3063,4 +3064,26 @@ function WorkflowLoadError({
       </div>
     </section>
   );
+}
+
+/** The stored form of a draft: desktop's normalized document, serialized as the backend keeps it. */
+function serializeDraftGraph(snapshot: DemoWorkflow): string {
+  const definition = normalizeWorkflowDocument({
+    id: snapshot.id,
+    name: snapshot.name,
+    description: snapshot.description,
+    updatedAt: snapshot.updatedAt,
+    viewport: snapshot.viewport,
+    nodes: snapshot.nodes,
+    edges: snapshot.edges,
+    globalVariables: normalizeWorkflowGlobalVariables(snapshot.globalVariables),
+  });
+  return serializeWorkflowGraph({
+    nodes: definition.nodes,
+    edges: definition.edges,
+    viewport: definition.viewport,
+    annotations: snapshot.annotations ?? [],
+    globalVariables: definition.globalVariables,
+    description: definition.description,
+  });
 }

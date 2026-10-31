@@ -122,6 +122,42 @@ describe("workflow page", () => {
     expect(screen.getByText("暂未发布")).toBeInTheDocument();
   });
 
+  it("keeps the edits a reload interrupts and writes them before the editor reads the library", async () => {
+    const user = userEvent.setup();
+    const first = await renderPage();
+    await createWorkflow(user, "离页");
+    const canvas = await screen.findByLabelText("工作流画布");
+    await waitFor(() => expect(canvas).toHaveAttribute("data-workflow-node-count", "1"));
+    await user.click(
+      within(screen.getByRole("toolbar", { name: "添加工作流节点" })).getByRole("button", { name: /^Agent$/ }),
+    );
+    await waitFor(() => expect(canvas).toHaveAttribute("data-workflow-node-count", "2"));
+    expect(screen.getByText("未保存")).toBeInTheDocument();
+
+    // The page goes away inside the quiet period, and no request it starts gets through.
+    server.refuse = {
+      match: /PUT .*\/draft$/,
+      status: 503,
+      data: { code: "workflow_store_unavailable", params: {}, requestId: "r" },
+    };
+    fireEvent(window, new Event("pagehide"));
+    first.unmount();
+    await waitFor(() => expect(server.seen.at(-1)).toMatch(/PUT .*\/draft$/));
+    server.refuse = undefined;
+    const id = server.backend.list().workflows.find((w) => w.name === "离页")!.id;
+    const stored = () =>
+      (JSON.parse(server.backend.getDraft({ workflowId: id }).snapshot.graph) as { nodes: unknown[] })
+        .nodes.length;
+    expect(stored()).toBe(1);
+
+    await renderPage();
+    await user.click(await within(library()).findByRole("button", { name: "离页" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("工作流画布")).toHaveAttribute("data-workflow-node-count", "2"),
+    );
+    expect(stored()).toBe(2);
+  });
+
   it("offers once to import the workflows this browser kept", async () => {
     const user = userEvent.setup();
     new LocalWorkflowBackend({ storage: browserWorkflowStorage }).create({ name: "本机旧流程", graph: null });

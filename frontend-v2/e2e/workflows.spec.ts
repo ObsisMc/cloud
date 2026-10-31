@@ -25,12 +25,20 @@ test('workflows: build a chain on the server, keep it across a reload, add the s
   }
   await expect(canvas).toHaveAttribute('data-workflow-node-count', '3')
 
-  // The draft autosaves to v2-server, so a reload in a fresh page restores it.
-  await expect(page.getByText('已实时保存')).toBeVisible()
+  // Reloading inside the autosave quiet period keeps the last edits: the page hands them over as
+  // it goes away, and the next visit writes them to v2-server before the editor reads the draft.
   await page.reload()
   await library.getByRole('button', { name, exact: true }).click()
   await expect(page.getByRole('textbox', { name: '工作流名称' })).toHaveValue(name)
   await expect(canvas).toHaveAttribute('data-workflow-node-count', '3')
+
+  // A settled autosave says so, and survives a reload as well.
+  await catalog.getByRole('button', { name: '输出', exact: true }).click()
+  await canvas.press('Escape')
+  await expect(page.getByText('已实时保存')).toBeVisible()
+  await page.reload()
+  await library.getByRole('button', { name, exact: true }).click()
+  await expect(canvas).toHaveAttribute('data-workflow-node-count', '4')
 
   // v2-server checks a graph before publishing it; until the workflow kernel is wired into it,
   // publishing is refused, and the page says so instead of pretending a version exists.

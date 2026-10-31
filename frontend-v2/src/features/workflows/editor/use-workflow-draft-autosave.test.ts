@@ -62,6 +62,43 @@ describe("useWorkflowDraftAutosave", () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
+  it("hands unsaved and in-flight edits to leave on pagehide instead of starting a write", async () => {
+    let finish: (value: "saved") => void = () => undefined;
+    const save = vi.fn(() => new Promise<"saved">((resolve) => (finish = resolve)));
+    const leave = vi.fn();
+    const { result } = renderHook(() =>
+      useWorkflowDraftAutosave({ enabled: true, save, leave }),
+    );
+
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(leave).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.markDirty();
+    });
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+
+    // A write already in flight may not land before the page unloads, so it is kept too.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WORKFLOW_DRAFT_AUTOSAVE_MS);
+    });
+    expect(save).toHaveBeenCalledTimes(1);
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(leave).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      finish("saved");
+    });
+    expect(result.current.status).toBe("clean");
+  });
+
   it("flush writes immediately and cancels the pending timer", async () => {
     const save = vi.fn().mockResolvedValue("saved" as const);
     const { result } = renderHook(() =>

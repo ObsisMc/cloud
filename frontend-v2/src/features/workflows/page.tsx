@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useGetApiV1MeTenants } from "@/api/me/me";
 import { I18nextProvider } from "react-i18next";
@@ -7,8 +7,11 @@ import { Toaster } from "@/components/ui/sonner";
 import {
   createContractsClient,
   createHttpWorkflowContracts,
+  keepDraftOnLeave,
 } from "@/lib/workflows/data/contracts-client";
 import { ContractsClientProvider } from "@/lib/workflows/data/contracts-client-provider";
+import { pendingDrafts, replayPendingDrafts } from "@/lib/workflows/data/pending-drafts";
+import { toast } from "@/lib/workflows/host/ui";
 import { createWorkflowQueryClient } from "@/lib/workflows/data/query-client";
 import { WorkflowEditor } from "./editor/workflow-editor";
 import { workflowI18n } from "@/lib/workflows/host/i18n";
@@ -44,20 +47,51 @@ export default function Page() {
   return <TenantWorkflows key={tenantId} tenantId={tenantId} />;
 }
 
+/**
+ * One tenant's library. Drafts a closed page left unsaved are written first, so the editor
+ * reads the last edits instead of the draft the server had before them.
+ */
 function TenantWorkflows({ tenantId }: { tenantId: string }) {
+  const [contracts] = useState(() => createHttpWorkflowContracts(tenantId));
   const [client] = useState(() =>
-    createContractsClient(createHttpWorkflowContracts(tenantId)),
+    createContractsClient(contracts, (draft) => keepDraftOnLeave(tenantId, draft)),
   );
   const [queryClient] = useState(createWorkflowQueryClient);
+  const [replaying, setReplaying] = useState(() => pendingDrafts(tenantId).length > 0);
+  useEffect(() => {
+    if (!replaying) return;
+    let live = true;
+    void replayPendingDrafts(tenantId, contracts).then((waiting) => {
+      if (!live) return;
+      if (waiting > 0) toast.error(`有 ${waiting} 个工作流上次离开时的修改还没保存到服务端，下次打开会再试`);
+      setReplaying(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, [contracts, replaying, tenantId]);
   return (
-    <I18nextProvider i18n={workflowI18n}>
-      <QueryClientProvider client={queryClient}>
-        <ContractsClientProvider client={client}>
-          <WorkflowWorkspace />
-          <WorkflowToaster />
-        </ContractsClientProvider>
-      </QueryClientProvider>
-    </I18nextProvider>
+    <>
+      {replaying ? (
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex h-12 shrink-0 items-center px-4">
+            <h1 className="text-sm font-semibold">工作流</h1>
+          </div>
+          <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            正在保存上次离开时的修改…
+          </p>
+        </div>
+      ) : (
+        <I18nextProvider i18n={workflowI18n}>
+          <QueryClientProvider client={queryClient}>
+            <ContractsClientProvider client={client}>
+              <WorkflowWorkspace />
+            </ContractsClientProvider>
+          </QueryClientProvider>
+        </I18nextProvider>
+      )}
+      <WorkflowToaster />
+    </>
   );
 }
 
