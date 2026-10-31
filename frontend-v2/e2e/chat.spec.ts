@@ -58,7 +58,8 @@ test('chat: a real Agent answers, a stopped chat turns read-only, history surviv
   const thread = page.getByRole('region', { name: '会话' }).getByRole('main')
 
   await page.goto('/chat')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  // The real-chain spec needs the email login this branch introduced, like every other spec.
+  await signIn(page)
   await expect(page.getByRole('heading', { name: '今天想构建什么？' })).toBeVisible()
 
   // A new chat in the demo project: the fixture model has the real Agent run its shell tool.
