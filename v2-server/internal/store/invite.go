@@ -56,10 +56,15 @@ func (s *Store) InviteMember(ctx context.Context, tenant, caller string, in Invi
 		if joined {
 			return ErrAlreadyMember
 		}
-		if _, e := tx.Exec(ctx, `
-			INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, $3)`,
-			tenant, userID, RoleMember); e != nil {
+		// Two owners may invite the same address at once; the loser sees the winner's row.
+		tag, e := tx.Exec(ctx, `
+			INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, $3)
+			ON CONFLICT DO NOTHING`, tenant, userID, RoleMember)
+		if e != nil {
 			return fmt.Errorf("join invited member: %w", e)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrAlreadyMember
 		}
 		if in.SquadID != "" {
 			if e := joinInvitedSquad(ctx, tx, tenant, in.SquadID, userID); e != nil {
@@ -91,10 +96,16 @@ func invitee(ctx context.Context, tx pgx.Tx, email, display string) (string, err
 		SELECT id, deleted_at IS NOT NULL FROM users
 		WHERE source = $1 AND subject = $2 FOR UPDATE`, EmailSource, email).Scan(&userID, &deleted)
 	if errors.Is(e, pgx.ErrNoRows) {
-		if e := tx.QueryRow(ctx, `
+		// FOR UPDATE cannot lock a row that does not exist yet, so a concurrent invite of the same
+		// new address falls through to the unique constraint; it then reads the created account.
+		if _, e := tx.Exec(ctx, `
 			INSERT INTO users (source, subject, display_name) VALUES ($1, $2, $3)
-			RETURNING id`, EmailSource, email, display).Scan(&userID); e != nil {
+			ON CONFLICT DO NOTHING`, EmailSource, email, display); e != nil {
 			return "", fmt.Errorf("create invited user: %w", e)
+		}
+		if e := tx.QueryRow(ctx, `SELECT id FROM users WHERE source = $1 AND subject = $2`,
+			EmailSource, email).Scan(&userID); e != nil {
+			return "", fmt.Errorf("read invited user: %w", e)
 		}
 		return userID, nil
 	}
