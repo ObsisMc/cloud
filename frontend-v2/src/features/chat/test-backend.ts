@@ -73,6 +73,10 @@ export interface ChatBackend {
   projectOrder: string[]
   /** Makes the next create or send answer this instead of taking the prompt. */
   refuse?: { status: number; data: unknown }
+  /** Projects created through the page, listed after the two the backend starts with. */
+  created: ReturnType<typeof project>[]
+  /** Makes the next project creation answer this instead of cloning. */
+  refuseProject?: { status: number; data: unknown }
   /** Requests seen, as "METHOD /path". */
   seen: string[]
   bodies: unknown[]
@@ -89,6 +93,7 @@ export function chatBackend(options: { unavailable?: boolean } = {}): ChatBacken
   const state: ChatBackend = {
     conversations: [conversation('c-main', '梳理 v2 接口缺口'), conversation('c-style', '对话页样式')],
     projectOrder: [],
+    created: [],
     seen: [],
     bodies: [],
   }
@@ -102,9 +107,17 @@ export function chatBackend(options: { unavailable?: boolean } = {}): ChatBacken
     if (url === '/api/v1/me') return { status: 200, data: demoUser }
     if (url === '/api/v1/me/tenants') return { status: 200, data: { items: [{ id: tenantId, name: '演示团队', status: 'active', role: 'owner' }], nextCursor: '' } }
     // One project per page, so the page has to follow nextCursor to see both.
+    if (url === `/api/v2/tenants/${tenantId}/projects` && method === 'POST') {
+      const refused = state.refuseProject
+      state.refuseProject = undefined
+      if (refused) return refused
+      const p = { ...project(`p-new-${state.created.length + 1}`, body.name), repositoryUrl: body.repositoryUrl, defaultBranch: body.defaultBranch }
+      state.created.push(p)
+      return { status: 201, data: p }
+    }
     if (url === `/api/v2/tenants/${tenantId}/projects`) {
       return config.params?.after === 'p-cloud'
-        ? { status: 200, data: { items: [project('p-desktop', 'ora-space/desktop')], nextCursor: '' } }
+        ? { status: 200, data: { items: [project('p-desktop', 'ora-space/desktop'), ...state.created], nextCursor: '' } }
         : { status: 200, data: { items: [project('p-cloud', 'ora-space/cloud')], nextCursor: 'p-cloud' } }
     }
     if (!url.startsWith(base)) return undefined

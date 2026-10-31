@@ -2,17 +2,18 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import type { SidebarLayout } from '@/components/sidebar-resize-handle'
 import type { ChatConversation, ChatEvent, ChatExecutor } from './api/generated'
+import type { CreateProject } from './projects-api/generated'
 import { applyEvent, isResponding } from './model/conversation'
 import { applySessionEvent, conversationOf, emptySessionView, type SessionView } from './model/history'
 import { type Attachment, type Conversation, emptyConversation, type PluginRef } from './model/types'
-import { type Failure, failureOf, remote, type RemoteState } from './remote'
+import { type Failure, failureOf, projectFailureOf, remote, type RemoteState } from './remote'
 
 /**
  * What the first version of the chat backend can do. The input and the history hide what it
  * cannot, rather than offering something that would fail. Each backend conversation runs in a
  * sandbox of its own, cloned from the project's repository, so a new chat picks only the project.
  */
-export const backendSupports = { newProject: false, attachments: false, plugins: false }
+export const backendSupports = { attachments: false, plugins: false }
 
 export interface Project {
   id: string
@@ -129,6 +130,11 @@ interface State {
   sendNewChat: (draft: Draft) => Promise<void>
   renameSession: (id: string, title: string) => void
   deleteSession: (id: string) => Promise<void>
+  /**
+   * Creates a project from a repository the backend clones, then starts the new chat in it.
+   * Resolves to why it failed, if it did.
+   */
+  createProject: (input: CreateProject) => Promise<string | undefined>
   /** Moves project `id` to where `overId` is, as a drag and drop does. */
   moveProject: (id: string, overId: string) => void
   send: (id: string, draft: Draft) => void
@@ -467,6 +473,23 @@ export const useChatStore = create<State>()(
               selectedId: s.selectedId === id ? undefined : s.selectedId,
             }
           })
+        },
+        createProject: async (input) => {
+          const tid = get().tenantId
+          if (!tid) return '还没连上后端，请稍后再试。'
+          let project: Project
+          try {
+            project = await remote.createProject(tid, input)
+          } catch (error) {
+            return projectFailureOf(error, input)
+          }
+          set((s) => ({
+            projects: [...s.projects.filter((p) => p.id !== project.id), project],
+            // The page waited only for a project to start chats in.
+            backend: s.executors.length ? 'ready' : s.backend,
+            newChat: { ...s.newChat, projectId: project.id },
+          }))
+          return undefined
         },
         moveProject: (id, overId) => {
           set((s) => {
