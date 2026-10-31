@@ -13,11 +13,27 @@ test('an owner invites an address and that address signs in', async ({ page }) =
   await page.goto('/settings/members')
   await signIn(page)
 
+  // The owner invites straight into an existing squad; the picker only offers live ones.
+  const tenants = await (await page.request.get('/api/v1/me/tenants')).json()
+  const tenantId = tenants.items[0].id
+  const squadName = `邀请小队-${email.split('@')[0].split('-')[1]}`
+  const created = await page.request.post(`/api/v2/tenants/${tenantId}/squads`, {
+    data: { name: squadName, description: '', charter: '' },
+  })
+  expect(created.ok()).toBeTruthy()
+  const squad = await created.json()
+  // The form read the squad list before this squad existed, so reload for the current choices.
+  await page.reload()
+
   const invite = page.getByRole('form', { name: '邀请成员' })
   await invite.getByLabel('邮箱').fill(email)
   await invite.getByLabel('显示名（选填）').fill(name)
+  await invite.getByLabel('小队（选填）').selectOption(squad.id)
   await invite.getByRole('button', { name: '邀请' }).click()
   await expect(invite.getByRole('status')).toContainText(`已邀请 ${name}`)
+  // The invitation joined the invitee to the chosen squad in the same write.
+  const detail = await (await page.request.get(`/api/v2/tenants/${tenantId}/squads/${squad.id}`)).json()
+  expect(detail.members.map((member: { displayName: string }) => member.displayName)).toContain(name)
   // The invitation refetches the roster, so the new member is visible before signing out.
   await expect(
     page.getByRole('row', { name: new RegExp(name) }).getByText('成员', { exact: true }),

@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { codeOf } from '@/lib/api-client'
+import { listSquads } from '@/features/collaboration/api/generated'
 import { inviteMember } from '../api/generated'
 import { membersKey } from './query'
 
@@ -18,25 +20,35 @@ const errors: Record<string, string> = {
 
 /**
  * Owner-only invitation. The address alone creates the account, so the invitee signs in with it
- * and nothing else — there is no acceptance step. A squad can be chosen through the API; the
- * form leaves that to the 协作 page rather than importing another feature's client here.
+ * and nothing else — there is no acceptance step. An optional squad joins the invitee to that
+ * squad in the same transaction; the choices come from the workspace's live squads, so an
+ * archived squad is never offered.
  */
 export function InviteForm({ tenantId }: { tenantId: string }) {
   const client = useQueryClient()
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [squadId, setSquadId] = useState('')
   const [invited, setInvited] = useState('')
+  const squads = useQuery({ queryKey: ['squads', tenantId], queryFn: () => listSquads(tenantId), enabled: tenantId !== '' })
+  const liveSquads = (squads.data?.items ?? []).filter((squad) => squad.archivedAt === null)
   const invite = useMutation({
     mutationFn: () =>
       inviteMember(tenantId, {
         email: email.trim(),
         displayName: displayName.trim() || undefined,
+        squadId: squadId || undefined,
       }),
     onSuccess: async (member) => {
       setEmail('')
       setDisplayName('')
+      setSquadId('')
       setInvited(member.displayName)
-      await client.invalidateQueries({ queryKey: membersKey(tenantId) })
+      await Promise.all([
+        client.invalidateQueries({ queryKey: membersKey(tenantId) }),
+        // The squad's version moved, so the 协作 page must not keep serving the old list.
+        client.invalidateQueries({ queryKey: ['squads', tenantId] }),
+      ])
     },
   })
   const message = errors[codeOf(invite.error) ?? ''] ?? '邀请失败，请重试。'
@@ -71,6 +83,24 @@ export function InviteForm({ tenantId }: { tenantId: string }) {
           onChange={(event) => setDisplayName(event.target.value)}
         />
       </div>
+      {liveSquads.length > 0 && (
+        <div className="flex min-w-40 flex-1 flex-col gap-2">
+          <Label htmlFor="invite-squad">小队（选填）</Label>
+          <NativeSelect
+            id="invite-squad"
+            className="w-full"
+            value={squadId}
+            onChange={(event) => setSquadId(event.target.value)}
+          >
+            <NativeSelectOption value="">不加入小队</NativeSelectOption>
+            {liveSquads.map((squad) => (
+              <NativeSelectOption key={squad.id} value={squad.id}>
+                {squad.name}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
+      )}
       <Button type="submit" disabled={invite.isPending || email.trim() === ''}>
         邀请
       </Button>
