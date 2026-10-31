@@ -1,9 +1,4 @@
 import type {
-  Invitation,
-  JoinLink,
-  JoinRequest,
-  MemberJoinEvent,
-  MemberListItem,
   ModelConnection,
   ModelDefault,
   PluginCatalogEntry,
@@ -12,9 +7,11 @@ import type {
 
 export const DEMO_TENANT = 'settings-demo-tenant'
 export const DEMO_SPACE = 'settings-demo-space'
+/** The signed-in account as the demo pages need it; only the real role decides administration. */
 export interface DemoUser {
   id: string
   displayName: string
+  role: 'owner' | 'member'
 }
 export type SkillSource =
   { kind: 'local' } | { kind: 'plugin'; pluginId: string }
@@ -28,14 +25,13 @@ export interface Skill {
   source: SkillSource
   availability: 'available' | 'unavailable'
 }
-export type DemoLink = (Invitation | JoinLink) & { kind: 'invite' | 'apply' }
+/**
+ * Browser-local demo data. It holds no people: the roster is real (`GET /tenants/{tid}/members`),
+ * and the only role that reaches these pages is the signed-in one.
+ */
 export interface Snapshot {
-  schema: 1
+  schema: 2
   revision: number
-  members: MemberListItem[]
-  history: MemberJoinEvent[]
-  links: DemoLink[]
-  requests: JoinRequest[]
   connections: ModelConnection[]
   modelDefault: ModelDefault
   catalog: PluginCatalogEntry[]

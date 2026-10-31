@@ -1,12 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { DemoRepository } from './repository'
 import {
-  createLink,
-  decideRequest,
-  revokeLink,
-  updateMember,
-} from './member-actions'
-import {
   changeConnection,
   connectionReady,
   deleteSkill,
@@ -18,7 +12,7 @@ import {
 } from './resource-actions'
 import type { ConnectionDraft } from './types'
 
-const user = { id: 'current', displayName: '当前用户' }
+const user = { id: 'current', displayName: '当前用户', role: 'owner' as const }
 let values: Map<string, string>
 const port = () => ({
   getItem: (key: string) => values.get(key) ?? null,
@@ -49,7 +43,7 @@ describe('settings demo persistence', () => {
     expect(
       (
         await new DemoRepository(
-          { id: 'other', displayName: '另一用户' },
+          { id: 'other', displayName: '另一用户', role: 'member' },
           port,
         ).read()
       ).skills.some((s) => s.name === 'custom'),
@@ -87,7 +81,7 @@ describe('settings demo persistence', () => {
   it('keeps corrupt data until an explicit reset and does not reset another user', async () => {
     const repo = repository()
     const other = new DemoRepository(
-      { id: 'other', displayName: '另一用户' },
+      { id: 'other', displayName: '另一用户', role: 'member' },
       port,
     )
     await other.read()
@@ -109,7 +103,7 @@ describe('plugins and document skills', () => {
       state.installations.find((p) => p.identifier === 'writing-kit')!.id,
     ).not.toBe(catalog.id)
     state = await repo.update(state.revision, (data) =>
-      setPluginInstalled(data, user.id, 'demo/writing-kit', false),
+      setPluginInstalled(data, user, 'demo/writing-kit', false),
     )
     expect(
       state.skills.find((s) => s.source.kind === 'plugin')?.availability,
@@ -120,7 +114,7 @@ describe('plugins and document skills', () => {
         .every((s) => s.availability === 'available'),
     ).toBe(true)
     state = await repo.update(state.revision, (data) =>
-      setPluginInstalled(data, user.id, 'demo/writing-kit', true),
+      setPluginInstalled(data, user, 'demo/writing-kit', true),
     )
     expect(state.skills.filter((s) => s.source.kind === 'plugin')).toHaveLength(
       1,
@@ -133,7 +127,7 @@ describe('plugins and document skills', () => {
     const repo = repository()
     let state = await repo.read()
     state = await repo.update(state.revision, (data) =>
-      setPluginInstalled(data, user.id, 'demo/browser-tools', true),
+      setPluginInstalled(data, user, 'demo/browser-tools', true),
     )
     expect(
       state.installations.find((p) => p.identifier === 'browser-tools'),
@@ -144,7 +138,7 @@ describe('plugins and document skills', () => {
     })
     await expect(
       repo.update(state.revision, (data) =>
-        setPluginInstalled(data, user.id, 'demo/starter-pack', true),
+        setPluginInstalled(data, user, 'demo/starter-pack', true),
       ),
     ).rejects.toThrow('不支持')
   })
@@ -186,89 +180,29 @@ describe('plugins and document skills', () => {
   })
 })
 
-describe('member administration', () => {
-  it('protects the final admin and prevents a readonly member from managing plugins or links', async () => {
+describe('demo writes follow the real workspace role', () => {
+  it('lets the owner manage plugins and refuses a member', async () => {
     const repo = repository()
     let state = await repo.read()
     state = await repo.update(state.revision, (data) =>
-      updateMember(data, user, 'demo-lin', 'member'),
+      setPluginInstalled(data, user, 'demo/review-kit', true),
     )
-    await expect(
-      repo.update(state.revision, (data) =>
-        updateMember(data, user, user.id, 'disabled'),
-      ),
-    ).rejects.toThrow('最后')
-    await expect(
-      repo.update(state.revision, (data) =>
-        updateMember(data, user, user.id, 'member'),
-      ),
-    ).rejects.toThrow('最后')
-    const memberActor = { id: 'demo-chen', displayName: '普通成员' }
-    await expect(
-      repo.update(state.revision, (data) =>
-        createLink(data, memberActor, 'invite', ''),
-      ),
-    ).rejects.toThrow('管理员')
-    await expect(
-      repo.update(state.revision, (data) =>
-        setPluginInstalled(data, memberActor.id, 'demo/review-kit', true),
-      ),
-    ).rejects.toThrow('管理员')
-  })
-  it('keeps disabled members and history and refuses direct restoration', async () => {
-    const repo = repository()
-    let state = await repo.read()
-    state = await repo.update(state.revision, (data) =>
-      updateMember(data, user, 'demo-chen', 'disabled'),
-    )
-    expect(state.members.find((m) => m.userId === 'demo-chen')?.status).toBe(
-      'disabled',
-    )
-    expect(state.history.some((h) => h.userId === 'demo-chen')).toBe(true)
-    await expect(
-      repo.update(state.revision, (data) =>
-        updateMember(data, user, 'demo-chen', 'member'),
-      ),
-    ).rejects.toThrow('重新申请')
-  })
-  it('approves once, updates roster and history, and persists link revocation', async () => {
-    const repo = repository()
-    let state = await repo.read()
-    state = await repo.update(state.revision, (data) =>
-      decideRequest(data, user, 'demo-request', true),
-    )
-    expect(state.members.find((m) => m.userId === 'demo-xu')).toMatchObject({
-      status: 'active',
-      role: 'member',
-    })
-    expect(state.history.find((h) => h.userId === 'demo-xu')?.requestId).toBe(
-      'demo-request',
-    )
-    await expect(
-      repo.update(state.revision, (data) =>
-        decideRequest(data, user, 'demo-request', true),
-      ),
-    ).rejects.toThrow('已处理')
-    let id = ''
-    state = await repo.update(state.revision, (data) => {
-      id = createLink(data, user, 'apply', '新链接')
-    })
-    state = await repo.update(state.revision, (data) =>
-      revokeLink(data, user, id),
-    )
-    expect(state.links.find((l) => l.id === id)?.revokedAt).toBeTruthy()
     expect(
-      (await repository().read()).links.find((l) => l.id === id)?.note,
-    ).toBe('新链接')
+      state.installations.find((p) => p.identifier === 'review-kit')
+        ?.desiredState,
+    ).toBe('installed')
+    const member = { ...user, role: 'member' as const }
+    await expect(
+      repo.update(state.revision, (data) =>
+        setPluginInstalled(data, member, 'demo/browser-tools', false),
+      ),
+    ).rejects.toThrow('owner')
   })
-  it('rejecting an application does not add a member', async () => {
-    const repo = repository()
-    let state = await repo.read()
-    state = await repo.update(state.revision, (data) =>
-      decideRequest(data, user, 'demo-request', false),
-    )
-    expect(state.requests[0].status).toBe('rejected')
-    expect(state.members.some((m) => m.userId === 'demo-xu')).toBe(false)
+  it('keeps no roster, invitations or join history in browser storage', async () => {
+    const state = await repository().read()
+    expect(state.schema).toBe(2)
+    for (const field of ['members', 'history', 'links', 'requests'])
+      expect(state).not.toHaveProperty(field)
   })
 })
 

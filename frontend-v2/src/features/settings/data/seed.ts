@@ -1,13 +1,8 @@
-import type {
-  MemberListItem,
-  PluginCatalogEntry,
-  SpacePlugin,
-} from '@/api/generated.schemas'
+import type { PluginCatalogEntry, SpacePlugin } from '@/api/generated.schemas'
 import {
   DEMO_SPACE,
   DEMO_TENANT,
   pluginKey,
-  type DemoUser,
   type Skill,
   type Snapshot,
 } from './types'
@@ -26,25 +21,8 @@ export const pluginSkill = (pluginId: string): Skill => ({
   availability: 'available',
 })
 
-export function seed(user: DemoUser): Snapshot {
+export function seed(): Snapshot {
   const now = new Date().toISOString()
-  const member = (
-    id: string,
-    name: string,
-    role: string,
-    status = 'active',
-  ): MemberListItem => ({
-    id: `membership-${id}`,
-    userId: id,
-    displayName: name,
-    role,
-    status,
-    version: 1,
-    tenantId: DEMO_TENANT,
-    joinMethod: 'invitation',
-    joinedAt: now,
-    actorDisplayName: user.displayName,
-  })
   const entries: [
     string,
     string,
@@ -147,52 +125,9 @@ export function seed(user: DemoUser): Snapshot {
     observedState: 'failed',
     installError: '演示安装失败：示例包暂不可用。可重试以完成本地演示。',
   })
-  const members = [
-    member(user.id, user.displayName, 'admin'),
-    member('demo-lin', '林沐 · 示例', 'admin'),
-    member('demo-chen', '陈予 · 示例', 'member'),
-    member('demo-zhou', '周宁 · 示例', 'member', 'disabled'),
-  ]
   return {
-    schema: 1,
+    schema: 2,
     revision: 1,
-    members,
-    history: members.map((m) => ({
-      id: `history-${m.userId}`,
-      tenantId: DEMO_TENANT,
-      userId: m.userId,
-      method: m.userId === user.id ? 'workspace_created' : 'invitation',
-      actorUserId: user.id,
-      actorDisplayName: user.displayName,
-      joinedAt: now,
-      invitationNote: '初始演示成员',
-    })),
-    links: [
-      {
-        id: 'demo-application-link',
-        kind: 'apply',
-        tenantId: DEMO_TENANT,
-        createdBy: user.id,
-        createdByName: user.displayName,
-        createdAt: now,
-        expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
-        note: '团队协作申请 · 示例',
-        version: 1,
-      },
-    ],
-    requests: [
-      {
-        id: 'demo-request',
-        tenantId: DEMO_TENANT,
-        userId: 'demo-xu',
-        displayName: '许安 · 示例',
-        linkId: 'demo-application-link',
-        linkNote: '团队协作申请 · 示例',
-        status: 'pending',
-        createdAt: now,
-        version: 1,
-      },
-    ],
     connections: [
       {
         id: 'demo-connection',

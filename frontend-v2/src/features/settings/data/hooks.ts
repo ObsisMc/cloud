@@ -1,17 +1,24 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { useUser } from '@/app/auth/user'
+import { useRole, useUser } from '@/app/auth/user'
 import { DemoRepository } from './repository'
 import type { Snapshot } from './types'
 
 /** Demo and HTTP caches never share keys. Mutations commit storage before updating query data. */
 export function useSettingsData() {
   const user = useUser()
+  // Demo writes follow the real workspace role; the roster itself always comes from the server.
+  const role = useRole()
   const client = useQueryClient()
   const repository = useMemo(
-    () => new DemoRepository({ id: user.id, displayName: user.displayName }),
-    [user.id, user.displayName],
+    () =>
+      new DemoRepository({
+        id: user.id,
+        displayName: user.displayName,
+        role: role ?? 'member',
+      }),
+    [user.id, user.displayName, role],
   )
   const queryKey = ['settings-demo', repository.key]
   const query = useQuery({
@@ -56,8 +63,6 @@ export function useSettingsData() {
       },
     )
   }
-  const canManage = !!query.data?.members.some(
-    (m) => m.userId === user.id && m.role === 'admin' && m.status === 'active',
-  )
-  return { user, repository, queryKey, query, mutation, reset, save, canManage }
+  const actor = { id: user.id, displayName: user.displayName, role: role ?? 'member' }
+  return { user: actor, repository, queryKey, query, mutation, reset, save, canManage: role === 'owner' }
 }

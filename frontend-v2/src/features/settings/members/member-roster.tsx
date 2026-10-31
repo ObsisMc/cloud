@@ -1,7 +1,5 @@
 import type { MemberListItem } from '@/api/generated.schemas'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
   Table,
   TableBody,
@@ -11,22 +9,23 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
+/** v2 knows two roles; Cloud's `admin` vocabulary is shown only if a roster ever carries it. */
+const roleLabels: Record<string, string> = {
+  owner: 'owner',
+  admin: '管理员',
+  member: '成员',
+}
+
+/**
+ * The workspace roster as the server reports it. It is read-only here: v2 has no role change,
+ * disable or removal endpoint, so the table never offers an action the backend cannot perform.
+ */
 export function MemberRoster({
   members,
   currentUserId,
-  canManage,
-  pending,
-  onRole,
-  onRemove,
-  onHistory,
 }: {
   members: MemberListItem[]
   currentUserId: string
-  canManage: boolean
-  pending: boolean
-  onRole: (member: MemberListItem, role: 'admin' | 'member') => void
-  onRemove: (member: MemberListItem) => void
-  onHistory: (member: MemberListItem) => void
 }) {
   return (
     <div className="overflow-hidden rounded-lg border">
@@ -36,7 +35,6 @@ export function MemberRoster({
             <TableHead>成员</TableHead>
             <TableHead>角色</TableHead>
             <TableHead>状态</TableHead>
-            {canManage && <TableHead className="text-right">管理</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -50,46 +48,22 @@ export function MemberRoster({
                   >
                     {member.displayName.slice(0, 1)}
                   </span>
-                  <div>
-                    <span className="text-sm font-medium">
-                      {member.displayName}
-                    </span>
+                  <span className="text-sm font-medium">
+                    {member.displayName}
                     {member.userId === currentUserId && (
                       <span className="ml-2 text-xs text-muted-foreground">
                         你
                       </span>
                     )}
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {member.userId === currentUserId
-                        ? '当前登录用户的演示身份'
-                        : '演示工作空间成员'}
-                    </p>
-                  </div>
+                  </span>
                 </div>
               </TableCell>
               <TableCell>
-                {canManage && member.status === 'active' ? (
-                  <NativeSelect
-                    aria-label={`调整 ${member.displayName} 的角色`}
-                    value={member.role}
-                    disabled={pending}
-                    onChange={(e) =>
-                      onRole(
-                        member,
-                        e.target.value === 'admin' ? 'admin' : 'member',
-                      )
-                    }
-                  >
-                    <NativeSelectOption value="admin">
-                      管理员
-                    </NativeSelectOption>
-                    <NativeSelectOption value="member">成员</NativeSelectOption>
-                  </NativeSelect>
-                ) : (
-                  <span className="text-sm">
-                    {member.role === 'admin' ? '管理员' : '成员'}
-                  </span>
-                )}
+                <Badge
+                  variant={member.role === 'owner' ? 'default' : 'secondary'}
+                >
+                  {roleLabels[member.role] ?? member.role}
+                </Badge>
               </TableCell>
               <TableCell>
                 <Badge
@@ -98,29 +72,6 @@ export function MemberRoster({
                   {member.status === 'active' ? '有效' : '已停用'}
                 </Badge>
               </TableCell>
-              {canManage && (
-                <TableCell>
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onHistory(member)}
-                    >
-                      加入历史
-                    </Button>
-                    {member.status === 'active' && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={pending}
-                        onClick={() => onRemove(member)}
-                      >
-                        停用
-                      </Button>
-                    )}
-                  </div>
-                </TableCell>
-              )}
             </TableRow>
           ))}
         </TableBody>

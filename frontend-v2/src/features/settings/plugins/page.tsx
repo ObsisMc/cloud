@@ -106,7 +106,7 @@ export default function PluginsPage() {
   }
   const install = (entry: PluginCatalogEntry) =>
     save(
-      (draft) => setPluginInstalled(draft, user.id, pluginKey(entry), true),
+      (draft) => setPluginInstalled(draft, user, pluginKey(entry), true),
       '已在演示中安装插件',
     )
   const remove = (entry: PluginCatalogEntry) => {
@@ -329,7 +329,7 @@ export default function PluginsPage() {
           onConfirm={() =>
             save(
               (draft) =>
-                setPluginInstalled(draft, user.id, pluginKey(removing), false),
+                setPluginInstalled(draft, user, pluginKey(removing), false),
               '已在演示中移除插件',
               () => setRemoving(undefined),
             )

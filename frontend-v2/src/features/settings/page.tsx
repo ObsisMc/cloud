@@ -16,6 +16,8 @@ export default function SettingsPage() {
   const { repository, queryKey, reset } = useSettingsData()
   const client = useQueryClient()
   const themePage = location.pathname === '/settings/theme'
+  // The members page reads and writes the real workspace, so the local-demo notice would lie there.
+  const demoPage = !themePage && location.pathname !== '/settings/members'
   const navigation = useRef<HTMLElement>(null)
   useEffect(() => {
     const keepCurrentVisible = () =>
@@ -78,11 +80,11 @@ export default function SettingsPage() {
             }
           </span>
           <span className="text-xs">
-            {themePage ? '浏览器偏好' : '演示工作空间'}
+            {themePage ? '浏览器偏好' : demoPage ? '演示工作空间' : '工作空间成员'}
           </span>
         </div>
         <div className="settings-content">
-          {!themePage && (
+          {demoPage && (
             <div className="settings-demo-notice">
               <FlaskConical
                 className="mt-0.5 size-4 shrink-0"
@@ -113,7 +115,7 @@ export default function SettingsPage() {
       {confirming && (
         <ConfirmDialog
           title="重置演示数据？"
-          description="将清除当前用户在此浏览器中的成员、模型连接、插件和技能演示修改，恢复初始示例。主题偏好不受影响。"
+          description="将清除当前用户在此浏览器中的模型连接、插件和技能演示修改，恢复初始示例。主题偏好不受影响。"
           confirmLabel="重置演示"
           pending={reset.isPending}
           error={reset.error}
