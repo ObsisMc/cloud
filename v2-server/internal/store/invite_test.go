@@ -96,6 +96,10 @@ func TestInviteMemberJoinsOneLiveSquad(t *testing.T) {
 	if !joined {
 		t.Fatalf("invitee not in squad: %+v", detail.Members)
 	}
+	// The squad's version moves with the new member, so an open edit cannot overwrite it unseen.
+	if detail.Version != squad.Version+1 {
+		t.Fatalf("squad version after invite = %d, want %d", detail.Version, squad.Version+1)
+	}
 
 	// An archived or foreign squad refuses the invitation without creating the account.
 	if _, e := f.store.ArchiveSquad(ctx, f.tenant, owner, squad.ID, detail.Version); e != nil {

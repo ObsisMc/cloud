@@ -132,11 +132,16 @@ func joinInvitedSquad(ctx context.Context, tx pgx.Tx, tenant, squad, user string
 	if !live {
 		return ErrSquadNotFound
 	}
-	if _, e := tx.Exec(ctx, `
+	tag, e := tx.Exec(ctx, `
 		INSERT INTO v2_squad_members (squad_id, member_type, user_id, role, maintainer)
 		VALUES ($1, $2, $3, '', false)
-		ON CONFLICT DO NOTHING`, squad, MemberHuman, user); e != nil {
+		ON CONFLICT DO NOTHING`, squad, MemberHuman, user)
+	if e != nil {
 		return fmt.Errorf("join invited squad: %w", e)
 	}
-	return nil
+	if tag.RowsAffected() == 0 {
+		return nil
+	}
+	// A squad edit read before this invite must see its version move, exactly like a manual add.
+	return bumpSquad(ctx, tx, squad)
 }
