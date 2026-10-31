@@ -58,7 +58,7 @@ async function twoProjects(page: Page) {
     route.fulfill({ json: { items: [{ id: 'oc-fixture', name: 'OpenCode · Fixture', agentName: 'OpenCode', modelName: 'Fixture' }] } }),
   )
   await page.goto('/chat')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   await expect(page.getByRole('heading', { name: '今天想构建什么？' })).toBeVisible()
 }
 
