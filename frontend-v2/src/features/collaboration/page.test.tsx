@@ -18,7 +18,7 @@ vi.mock('@/api/spaces/spaces', () => ({
 }))
 vi.mock('./api/generated', () => ({
   listSquads: vi.fn(), getSquad: vi.fn(), createSquad: vi.fn(), updateSquad: vi.fn(), archiveSquad: vi.fn(),
-  addSquadMember: vi.fn(), removeSquadMember: vi.fn(),
+  addSquadMember: vi.fn(), removeSquadMember: vi.fn(), updateSquadMember: vi.fn(),
 }))
 
 const me: User = { id: 'user-me', displayName: '演示用户', status: 'active', version: 1, createdAt: '2026-10-01T00:00:00Z', deletedAt: null }
@@ -174,6 +174,48 @@ it('removes a live member only after confirmation and keeps the history', async 
   await waitFor(() => expect(api.removeSquadMember).toHaveBeenCalledWith('tenant', 'squad-1', 'm2', { version: 1 }))
   expect(await screen.findByText('已移除 第二人')).toBeInTheDocument()
   expect(within(dialog).getByText('已退出 1')).toBeInTheDocument()
+})
+
+it('lets a member exit their own squad without being a maintainer', async () => {
+  const meMember = { id: 'm1', type: 'human' as const, userId: me.id, spaceAgentId: null, displayName: '演示用户', role: '', maintainer: false, joinedAt: '2026-10-01T00:00:00Z', endedAt: null }
+  const otherMaintainer = { id: 'm2', type: 'human' as const, userId: 'user-2', spaceAgentId: null, displayName: '第二人', role: '', maintainer: true, joinedAt: '2026-10-02T00:00:00Z', endedAt: null }
+  const nonMaintainer: SquadDetail = { ...detail, leaderAgentId: null, humanCount: 2, maintainerCount: 1, members: [meMember, otherMaintainer] }
+  const exited: SquadDetail = { ...nonMaintainer, version: 2, humanCount: 1, members: [otherMaintainer, { ...meMember, endedAt: '2026-10-30T00:00:00Z' }] }
+  vi.mocked(api.getSquad).mockResolvedValue(nonMaintainer)
+  vi.mocked(api.removeSquadMember).mockResolvedValue(exited)
+  renderPage()
+  await userEvent.click(await screen.findByRole('button', { name: '查看产品小队' }))
+  const dialog = await screen.findByRole('dialog')
+  // A non-maintainer cannot edit but can still leave their own membership.
+  expect(within(dialog).getByRole('button', { name: '编辑' })).toBeDisabled()
+  await userEvent.click(within(dialog).getByRole('button', { name: '退出演示用户' }))
+  await userEvent.click(within(dialog).getByRole('button', { name: '确认退出' }))
+  await waitFor(() => expect(api.removeSquadMember).toHaveBeenCalledWith('tenant', 'squad-1', 'm1', { version: 1 }))
+  expect(await screen.findByText('已退出 演示用户')).toBeInTheDocument()
+})
+
+it('lets a maintainer toggle another human maintainer mark', async () => {
+  const promoted: SquadDetail = { ...detail, version: 2, maintainerCount: 2, members: detail.members.map(m => (m.id === 'm2' ? { ...m, maintainer: true } : m)) }
+  vi.mocked(api.updateSquadMember).mockResolvedValue(promoted)
+  renderPage()
+  await userEvent.click(await screen.findByRole('button', { name: '查看产品小队' }))
+  const dialog = await screen.findByRole('dialog')
+  await userEvent.click(within(dialog).getByRole('button', { name: '设为维护者' }))
+  await waitFor(() => expect(api.updateSquadMember).toHaveBeenCalledWith('tenant', 'squad-1', 'm2', { role: '评审', maintainer: true, version: 1 }))
+  expect(await screen.findByText('已设 第二人 为维护者')).toBeInTheDocument()
+})
+
+it('lets a maintainer set an agent as leader', async () => {
+  const noLeader: SquadDetail = { ...detail, leaderAgentId: null }
+  const led: SquadDetail = { ...noLeader, version: 2, leaderAgentId: 'agent-1' }
+  vi.mocked(api.getSquad).mockResolvedValue(noLeader)
+  vi.mocked(api.updateSquad).mockResolvedValue(led)
+  renderPage()
+  await userEvent.click(await screen.findByRole('button', { name: '查看产品小队' }))
+  const dialog = await screen.findByRole('dialog')
+  await userEvent.click(within(dialog).getByRole('button', { name: '设为 leader' }))
+  await waitFor(() => expect(api.updateSquad).toHaveBeenCalledWith('tenant', 'squad-1', { name: '产品小队', description: '一起做产品', charter: '上午评审', leaderAgentId: 'agent-1', version: 1 }))
+  expect(await screen.findByText('已设 研究员 为 leader')).toBeInTheDocument()
 })
 
 it('archives only after confirmation and then shows read-only history', async () => {

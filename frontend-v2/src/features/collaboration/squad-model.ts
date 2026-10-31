@@ -15,6 +15,15 @@ export function leaderName(squad: SquadDetail): string | null {
   return activeMembers(squad).find(m => m.spaceAgentId === squad.leaderAgentId)?.displayName ?? null
 }
 
+/** Whether a live agent member currently leads the squad. */
+export const isLeader = (squad: SquadDetail, member: SquadMember): boolean =>
+  member.type === 'agent' && member.spaceAgentId !== null && member.spaceAgentId === squad.leaderAgentId
+
+/** The current user's live human membership, if they are still in the squad. */
+export function ownMembership(squad: SquadDetail, userId: string): SquadMember | undefined {
+  return activeMembers(squad).find(m => m.type === 'human' && m.userId === userId)
+}
+
 /** Workspace roles that may edit any squad; they mirror the server's administrator check. */
 export const isWorkspaceAdministrator = (role: string | undefined): boolean => role === 'owner' || role === 'admin'
 
