@@ -105,7 +105,7 @@ test('chat: creates a project from a public repository and starts the new chat i
   // The backend clones the repository before it answers; this one is small and public.
   test.setTimeout(150_000)
   await page.goto('/chat')
-  await page.getByRole('button', { name: '开发者登录' }).click()
+  await signIn(page)
   await expect(page.getByRole('heading', { name: '今天想构建什么？' })).toBeVisible()
   const name = `Hello-World ${Date.now()}`
 
