@@ -224,6 +224,43 @@ describe("useWorkflowDraftAutosave", () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
+  it("hands unsaved and in-flight edits to leave on unmount, as on a route change", async () => {
+    let finish: (value: "saved") => void = () => undefined;
+    const save = vi.fn(
+      () => new Promise<"saved">((resolve) => (finish = resolve)),
+    );
+    const leave = vi.fn();
+    const first = renderHook(() =>
+      useWorkflowDraftAutosave({ enabled: true, save, leave }),
+    );
+    act(() => {
+      first.result.current.markDirty();
+    });
+    first.unmount();
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+
+    const second = renderHook(() =>
+      useWorkflowDraftAutosave({ enabled: true, save, leave }),
+    );
+    act(() => {
+      second.result.current.markDirty();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WORKFLOW_DRAFT_AUTOSAVE_MS);
+    });
+    expect(save).toHaveBeenCalledTimes(1);
+    second.unmount();
+    expect(leave).toHaveBeenCalledTimes(2);
+    finish("saved");
+
+    const clean = renderHook(() =>
+      useWorkflowDraftAutosave({ enabled: true, save, leave }),
+    );
+    clean.unmount();
+    expect(leave).toHaveBeenCalledTimes(2);
+  });
+
   it("flush drains stale attempts before reporting success", async () => {
     const save = vi
       .fn()

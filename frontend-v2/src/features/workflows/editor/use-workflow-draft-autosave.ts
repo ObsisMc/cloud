@@ -17,8 +17,9 @@ type UseWorkflowDraftAutosaveOptions = {
    */
   save: () => Promise<"saved" | "stale" | "skipped" | "failed">;
   /**
-   * Keeps the pending edits when the page goes away (reload, tab close), synchronously, since the
-   * browser does not wait for a request. Without it the hook starts `save` and hopes it lands.
+   * Keeps the pending edits when the editor goes away (reload, tab close, route change),
+   * synchronously, since neither the browser nor an unmount waits for a request, and somewhere
+   * that outlives a failed write. Without it the hook starts `save` and hopes it lands.
    */
   leave?: () => void;
 };
@@ -40,8 +41,8 @@ type UseWorkflowDraftAutosaveResult = {
  * Coalesces draft edits into debounced backend writes while serializing overlapping saves.
  * The parent owns the actual persist call so it can read the latest React Flow snapshot.
  *
- * Dirty state survives temporary disable (version preview) and is flushed on unmount so a
- * route change does not drop the last quiet-period edits.
+ * Dirty state survives temporary disable (version preview) and is handed to `leave` on unmount,
+ * so a route change does not drop the last quiet-period edits.
  */
 export function useWorkflowDraftAutosave({
   enabled,
@@ -219,11 +220,19 @@ export function useWorkflowDraftAutosave({
     return () => window.removeEventListener("pagehide", persistOnPageHide);
   }, [clearTimer]);
 
-  // Best-effort persist on unmount so leaving the editor does not drop
-  // edits still inside the debounce window. Hard tab closes remain best-effort.
+  // A route change unmounts the editor without waiting for a write either, and the component is
+  // gone before a failure could be reported, so the edits go to `leave` as on pagehide: kept
+  // until the server has them. Without `leave` the last edits are written best-effort.
   useEffect(
     () => () => {
       clearTimer();
+      if (!dirtyRef.current && inFlightRef.current === null) {
+        return;
+      }
+      if (leaveRef.current !== undefined) {
+        leaveRef.current();
+        return;
+      }
       if (!dirtyRef.current) {
         return;
       }

@@ -158,6 +158,40 @@ describe("workflow page", () => {
     expect(stored()).toBe(2);
   });
 
+  it("keeps the edits a route change leaves when their save is refused, and writes them on return", async () => {
+    const user = userEvent.setup();
+    const first = await renderPage();
+    await createWorkflow(user, "切页");
+    const canvas = await screen.findByLabelText("工作流画布");
+    await waitFor(() => expect(canvas).toHaveAttribute("data-workflow-node-count", "1"));
+    await user.click(
+      within(screen.getByRole("toolbar", { name: "添加工作流节点" })).getByRole("button", { name: /^Agent$/ }),
+    );
+    await waitFor(() => expect(canvas).toHaveAttribute("data-workflow-node-count", "2"));
+
+    // Navigating to another page unmounts the editor: no pagehide, and the write is refused.
+    server.refuse = {
+      match: /PUT .*\/draft$/,
+      status: 503,
+      data: { code: "workflow_store_unavailable", params: {}, requestId: "r" },
+    };
+    first.unmount();
+    await waitFor(() => expect(server.keptAlive.at(-1)).toMatch(/PUT .*\/draft$/));
+    server.refuse = undefined;
+    const id = server.backend.list().workflows.find((w) => w.name === "切页")!.id;
+    const stored = () =>
+      (JSON.parse(server.backend.getDraft({ workflowId: id }).snapshot.graph) as { nodes: unknown[] })
+        .nodes.length;
+    expect(stored()).toBe(1);
+
+    await renderPage();
+    await user.click(await within(library()).findByRole("button", { name: "切页" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("工作流画布")).toHaveAttribute("data-workflow-node-count", "2"),
+    );
+    expect(stored()).toBe(2);
+  });
+
   it("asks before writing kept edits over a teammate's later change", async () => {
     const user = userEvent.setup();
     const first = await renderPage();
