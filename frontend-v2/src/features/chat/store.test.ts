@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { emptyConversation } from './model/types'
-import { emptyDraft, isEnded, newChatKey, resetChatStore, useChatStore } from './store'
+import { agentsOf, emptyDraft, isEnded, newChatKey, resetChatStore, useChatStore } from './store'
 import { type ChatBackend, chatBackend, FakeEventSource, line, tenantId } from './test-backend'
 
 const state = () => useChatStore.getState()
@@ -159,5 +159,15 @@ describe('chat store: backend that cannot run Agents', () => {
     expect(state().backend).toBe('unavailable')
     await state().sendNewChat({ ...emptyDraft, text: 'hi' })
     expect(state().notices[newChatKey]).toMatchObject({ kind: 'unavailable' })
+  })
+})
+
+describe('agentsOf', () => {
+  it('keeps agents apart when they run a model of the same name, OpenCode first as listed', () => {
+    const fixture = (id: string, agentName: string) => ({ id, name: `${agentName} · Fixture`, agentName, modelName: 'Fixture' })
+    expect(agentsOf([fixture('opencode:fixture', 'OpenCode'), fixture('claude:fixture', 'Claude Code')])).toEqual([
+      { id: 'OpenCode', name: 'OpenCode', models: ['Fixture'] },
+      { id: 'Claude Code', name: 'Claude Code', models: ['Fixture'] },
+    ])
   })
 })

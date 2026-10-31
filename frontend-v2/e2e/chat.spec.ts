@@ -42,6 +42,63 @@ test('chat: lists only the backend\'s projects, says it cannot run Agents yet, r
   await expect(column).toBeVisible()
 })
 
+/**
+ * Gives the page two projects and an executor, so it can reorder them and save the order. Only
+ * these two lists are stand-ins: the order itself is saved to and read back from v2-server.
+ */
+async function twoProjects(page: Page) {
+  const project = (id: string, name: string) => ({
+    id, tenantId: '00000000-0000-4000-8000-0000000000aa', ownerUserId: '00000000-0000-4000-8000-0000000000bb', name,
+    repositoryUrl: `https://github.com/ora-space/${name}`, defaultBranch: 'main', commitId: '0'.repeat(40), createdAt: '2026-10-31T09:00:00Z',
+  })
+  await page.route('**/api/v2/tenants/*/projects?*', (route) =>
+    route.fulfill({ json: { items: [project('00000000-0000-4000-8000-0000000000e1', 'cloud'), project('00000000-0000-4000-8000-0000000000e2', 'desktop')], nextCursor: '' } }),
+  )
+  await page.route('**/api/v2/tenants/*/chat/executors', (route) =>
+    route.fulfill({ json: { items: [{ id: 'oc-fixture', name: 'OpenCode · Fixture', agentName: 'OpenCode', modelName: 'Fixture' }] } }),
+  )
+  await page.goto('/chat')
+  await page.getByRole('button', { name: '开发者登录' }).click()
+  await expect(page.getByRole('heading', { name: '今天想构建什么？' })).toBeVisible()
+}
+
+const order = (page: Page) => projects(page).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
+
+test('chat: a dragged project order is kept by v2-server, across a reload and another browser', async ({ page, browser }) => {
+  await twoProjects(page)
+  // Start from the backend's default, whatever an earlier run saved.
+  const tenants = (await (await page.request.get('/api/v1/me/tenants')).json()) as { items: { id: string }[] }
+  expect((await page.request.put(`/api/v2/tenants/${tenants.items[0].id}/chat/project-order`, { data: { projectIds: [] } })).ok()).toBe(true)
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await expect.poll(() => order(page)).toEqual(['项目 cloud', '项目 desktop'])
+
+  // Drag desktop by its handle above cloud.
+  const handle = page.getByRole('button', { name: '拖动以调整 desktop 的顺序' })
+  const target = (await projects(page).filter({ hasText: 'cloud' }).boundingBox())!
+  const from = (await handle.boundingBox())!
+  const saved = page.waitForResponse((r) => r.url().endsWith('/chat/project-order') && r.request().method() === 'PUT')
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(from.x + from.width / 2, target.y + 4, { steps: 12 })
+  await page.mouse.up()
+  expect((await saved).ok()).toBe(true)
+  await expect.poll(() => order(page)).toEqual(['项目 desktop', '项目 cloud'])
+
+  // The browser's own copy is not what restores it: a reload without it, and another browser.
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await expect.poll(() => order(page)).toEqual(['项目 desktop', '项目 cloud'])
+  const other = await browser.newContext()
+  try {
+    const elsewhere = await other.newPage()
+    await twoProjects(elsewhere)
+    await expect.poll(() => order(elsewhere)).toEqual(['项目 desktop', '项目 cloud'])
+  } finally {
+    await other.close()
+  }
+})
+
 test('chat: a real Agent answers, a stopped chat turns read-only, history survives a reload', async ({ page }) => {
   test.skip(!realAgents, 'needs V2_NODE_ASSETS_DIR for a real Node and Agent')
   // The first conversation in a project installs the Agent plugin in the project's Node.
