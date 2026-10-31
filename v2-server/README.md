@@ -54,6 +54,8 @@ TEST_DATABASE_URL='postgres://ora:ora-local@127.0.0.1:55432/ora?sslmode=disable'
 |---|---|
 | `POST /api/v2/tenants/{tid}/members` | 只有 owner 可以邀请：`email` 必填，`displayName` 选填（默认取邮箱 @ 前面的部分），`squadId` 选填（同时加入该小队，小队必须属于本工作区且未归档）。提交即创建账号并加入"演示团队"（角色 `member`），不需要对方接受；被邀请的邮箱随后可以直接登录。写权限不足 `403 forbidden`，已在团队 `409 member_exists`，小队不存在 `404 not_found` |
 
+升级已有数据库时注意：旧开发登录建出的 `dev/demo`「演示用户」仍留在库里，但邮箱登录不再认这个身份，它再也无法登录，名下的成员记录、小队与对话却还会出现在成员页里。演示请用全新数据库，不要把旧库当成干净基线；这里不做账号清理，避免删掉别人正在引用的历史。
+
 ### 定时任务配置
 
 定时任务配置使用独立候选契约 [`schedules.openapi.json`](schedules.openapi.json)，不改变正式 Cloud 的 ScheduledTask（其 issue/agent 执行语义不能表达本次独立对话配置）。前端以独立 Orval 配置生成客户端，后续正式契约收敛时替换这一适配。
