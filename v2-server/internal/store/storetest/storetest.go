@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,14 +50,43 @@ func Open(t *testing.T) *store.Store {
 	return s
 }
 
-// Login signs in a development user and returns their ID and the demo tenant's ID.
-func Login(t *testing.T, s *store.Store, subject string) (user, tenant string) {
+// SignIn ensures one demo-team account and returns its session token. Tests call it to sign in
+// whoever they need without going through the browser's email login.
+func SignIn(t *testing.T, s *store.Store, subject, displayName, role string) string {
 	t.Helper()
 	ctx := context.Background()
-	token, e := s.Login(ctx, store.Identity{Source: "dev", Subject: subject, DisplayName: subject}, time.Hour)
+	email := Email(subject)
+	if _, e := s.UpsertUser(ctx, store.PresetUser{Email: email, DisplayName: displayName, Role: role}); e != nil {
+		t.Fatal(e)
+	}
+	u, e := s.UserByEmail(ctx, email)
 	if e != nil {
 		t.Fatal(e)
 	}
+	token, e := s.StartSession(ctx, u.ID, time.Hour)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return token
+}
+
+// Email turns a test subject into the address its account uses; the address is the identity.
+func Email(subject string) string {
+	local := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+			return r
+		}
+		return '-'
+	}, strings.ToLower(subject))
+	return local + "@demo.test"
+}
+
+// Login signs in a demo owner and returns their ID and the demo tenant's ID.
+func Login(t *testing.T, s *store.Store, subject string) (user, tenant string) {
+	t.Helper()
+	ctx := context.Background()
+	token := SignIn(t, s, subject, subject, store.RoleOwner)
 	u, e := s.SessionUser(ctx, token)
 	if e != nil {
 		t.Fatal(e)

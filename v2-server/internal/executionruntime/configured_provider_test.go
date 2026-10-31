@@ -22,6 +22,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/nodeservices"
 	"github.com/wanglongan587/cloud/v2-server/internal/projectrepos"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 const configuredMarkerName = "ora-v2-configured-provider.txt"
@@ -192,8 +193,7 @@ func configuredDatabase(t *testing.T, ctx context.Context, models map[string]Mod
 	f.config.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
 	f.db, err = store.OpenConfig(ctx, f.config.Copy())
 	configuredOK(t, "open isolated PostgreSQL store", err)
-	token, err := f.db.Login(ctx, store.Identity{Source: "test", Subject: "configured-provider", DisplayName: "Acceptance"}, time.Hour)
-	configuredOK(t, "create isolated acceptance member", err)
+	token := storetest.SignIn(t, f.db, "configured-provider", "Acceptance", store.RoleOwner)
 	user, err := f.db.SessionUser(ctx, token)
 	configuredOK(t, "read isolated acceptance member", err)
 	tenants, err := f.db.Tenants(ctx, user.ID)

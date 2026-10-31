@@ -26,6 +26,7 @@ import (
 
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 // openStore gives the test its own PostgreSQL schema on TEST_DATABASE_URL, dropped afterwards.
@@ -77,12 +78,14 @@ type client struct {
 	http *http.Client
 }
 
+// demoEmail is the address newClient presets; the email alone signs that account in.
+const demoEmail = "demo@demo.test"
+
 func newClient(t *testing.T) *client {
 	t.Helper()
-	srv := httptest.NewServer(server.New(openStore(t), server.Options{
-		SessionTTL: time.Hour,
-		DemoUser:   store.Identity{Source: "dev", Subject: "demo", DisplayName: "演示用户"},
-	}))
+	s := openStore(t)
+	storetest.SignIn(t, s, "demo", "演示用户", store.RoleOwner)
+	srv := httptest.NewServer(server.New(s, server.Options{SessionTTL: time.Hour}))
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
 	return &client{t: t, base: srv.URL, http: &http.Client{Jar: jar}}
@@ -145,10 +148,10 @@ func TestLoginSessionLogout(t *testing.T) {
 	if status, body := c.do("GET", "/api/v1/me", nil); status != 401 || body["code"] != "unauthenticated" {
 		t.Fatalf("me before login = %d %v", status, body)
 	}
-	if status, body := c.do("GET", "/auth/providers", nil); status != 200 || body["default"] != "dev" {
+	if status, body := c.do("GET", "/auth/providers", nil); status != 200 || body["default"] != "email" {
 		t.Fatalf("providers = %d %v", status, body)
 	}
-	status, body := c.do("POST", "/auth/login", map[string]string{"provider": "dev", "returnTo": "/workflows?x=1"})
+	status, body := c.do("POST", "/auth/login", map[string]string{"provider": "email", "email": demoEmail, "returnTo": "/workflows?x=1"})
 	if status != 200 || body["authorizationUrl"] != "/workflows?x=1" {
 		t.Fatalf("login = %d %v", status, body)
 	}
@@ -161,7 +164,7 @@ func TestLoginSessionLogout(t *testing.T) {
 		t.Fatalf("tenants = %d %v", status, body)
 	}
 	// A second login is the same user in the same tenant, not a duplicate.
-	c.do("POST", "/auth/login", map[string]string{})
+	c.do("POST", "/auth/login", map[string]string{"provider": "email", "email": demoEmail})
 	if _, body := c.do("GET", "/api/v1/me/tenants", nil); len(body["items"].([]any)) != 1 {
 		t.Fatalf("tenants after second login = %v", body)
 	}
@@ -179,7 +182,7 @@ func TestLoginRejectsOtherProvidersAndForeignRedirects(t *testing.T) {
 		t.Fatalf("github login = %d %v", status, body)
 	}
 	for _, target := range []string{"https://evil.example/", "//evil.example/", "/\\evil.example", "relative"} {
-		if _, body := c.do("POST", "/auth/login", map[string]string{"returnTo": target}); body["authorizationUrl"] != "/" {
+		if _, body := c.do("POST", "/auth/login", map[string]string{"provider": "email", "email": demoEmail, "returnTo": target}); body["authorizationUrl"] != "/" {
 			t.Fatalf("returnTo %q redirected to %v", target, body["authorizationUrl"])
 		}
 	}

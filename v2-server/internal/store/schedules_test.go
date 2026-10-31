@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 	"os"
 	"testing"
-	"time"
 )
 
 func TestScheduleReopenAndConcurrentEdit(t *testing.T) {
@@ -41,10 +41,7 @@ func TestScheduleReopenAndConcurrentEdit(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	token, e := s.Login(ctx, store.Identity{Source: "test", Subject: "owner", DisplayName: "Owner"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token := storetest.SignIn(t, s, "owner", "Owner", store.RoleOwner)
 	u, e := s.SessionUser(ctx, token)
 	if e != nil {
 		t.Fatal(e)

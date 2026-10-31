@@ -21,6 +21,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/nodeservices"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestExecutionCatalogHTTP(t *testing.T) {
@@ -36,7 +37,8 @@ func TestExecutionCatalogHTTP(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	options := server.Options{SessionTTL: time.Hour, DemoUser: store.Identity{Source: "dev", Subject: "catalog-owner", DisplayName: "Owner"}, Catalog: runtime}
+	storetest.SignIn(t, s, "catalog-owner", "Owner", store.RoleOwner)
+	options := server.Options{SessionTTL: time.Hour, Catalog: runtime}
 	srv := httptest.NewServer(server.New(s, options))
 	defer func() { srv.Close() }()
 	jar, _ := cookiejar.New(nil)
@@ -92,7 +94,7 @@ func TestExecutionCatalogHTTP(t *testing.T) {
 			t.Fatalf("anonymous %s=%d", kind, status)
 		}
 	}
-	call("POST", "/auth/login", map[string]string{})
+	call("POST", "/auth/login", map[string]string{"provider": "email", "email": storetest.Email("catalog-owner")})
 	_, tenants := call("GET", "/api/v1/me/tenants", nil)
 	tenant := tenants["items"].([]any)[0].(map[string]any)["id"].(string)
 	base := "/api/v2/tenants/" + tenant + "/execution/"
@@ -112,7 +114,7 @@ func TestExecutionCatalogHTTP(t *testing.T) {
 	srv.Close()
 	options.Catalog = nil
 	srv = httptest.NewServer(server.New(s, options))
-	call("POST", "/auth/login", map[string]string{})
+	call("POST", "/auth/login", map[string]string{"provider": "email", "email": storetest.Email("catalog-owner")})
 	for _, kind := range []string{"models", "executors"} {
 		if status, out := call("GET", base+kind, nil); status != 503 || out["code"] != "execution_catalog_unavailable" {
 			t.Fatalf("nil catalog %s=%d %v", kind, status, out)

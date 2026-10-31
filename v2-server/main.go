@@ -65,6 +65,23 @@ func run(addr, dbURL string, cleanup, fixture bool) (resultErr error) {
 	if e != nil {
 		return e
 	}
+	preset, e := store.LoadPreset(envOr("V2_USERS_FILE", "users.json"))
+	if e != nil {
+		db.Close()
+		return e
+	}
+	if e := db.SeedUsers(ctx, preset); e != nil {
+		db.Close()
+		return e
+	}
+	// The demo project is owned by the first preset owner; it seeds shared content, not a login.
+	bootstrap := preset.Users[0].Email
+	for _, u := range preset.Users {
+		if u.Role == store.RoleOwner {
+			bootstrap = u.Email
+			break
+		}
+	}
 	closeDatabase := true
 	defer func() {
 		if closeDatabase {
@@ -123,7 +140,7 @@ func run(addr, dbURL string, cleanup, fixture bool) (resultErr error) {
 			resultErr = errors.Join(resultErr, fmt.Errorf("execution shutdown unconfirmed: %w", err))
 		}
 	}()
-	scope, demo, e := prepareDemo(ctx, db, projects)
+	scope, demo, e := prepareDemo(ctx, db, projects, bootstrap)
 	if e != nil {
 		return e
 	}
@@ -136,7 +153,6 @@ func run(addr, dbURL string, cleanup, fixture bool) (resultErr error) {
 
 	srv := newHTTPServer(ctx, addr, server.New(db, server.Options{
 		SessionTTL: 7 * 24 * time.Hour,
-		DemoUser:   store.Identity{Source: "dev", Subject: "demo", DisplayName: "演示用户"},
 		Projects:   projects,
 		Execution:  runtime,
 		Catalog:    runtime,
@@ -193,11 +209,15 @@ func lockDirectory(root string) (*os.File, error) {
 }
 
 // prepareDemo seeds the same real project used by browser selectors and the fixture command.
-// Its temporary login only bootstraps the existing development identity; no token reaches a page.
-func prepareDemo(ctx context.Context, db *store.Store, projects *projectrepos.Service) (execution.Scope, store.Project, error) {
+// Its temporary session only acts for one preset account; no token reaches a page.
+func prepareDemo(ctx context.Context, db *store.Store, projects *projectrepos.Service, email string) (execution.Scope, store.Project, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	token, e := db.Login(ctx, store.Identity{Source: "dev", Subject: "demo", DisplayName: "演示用户"}, time.Hour)
+	user, e := db.UserByEmail(ctx, email)
+	if e != nil {
+		return execution.Scope{}, store.Project{}, e
+	}
+	token, e := db.StartSession(ctx, user.ID, time.Hour)
 	if e != nil {
 		return execution.Scope{}, store.Project{}, e
 	}
@@ -208,7 +228,7 @@ func prepareDemo(ctx context.Context, db *store.Store, projects *projectrepos.Se
 			slog.Warn("remove demo bootstrap session", "error", err)
 		}
 	}()
-	user, e := db.SessionUser(ctx, token)
+	user, e = db.SessionUser(ctx, token)
 	if e != nil {
 		return execution.Scope{}, store.Project{}, e
 	}

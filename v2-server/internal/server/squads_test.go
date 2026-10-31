@@ -25,6 +25,7 @@ import (
 
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 type squadFixture struct {
@@ -67,10 +68,8 @@ func newSquadServer(t *testing.T) *squadFixture {
 		t.Fatal(e)
 	}
 	t.Cleanup(s.Close)
-	srv := httptest.NewServer(server.New(s, server.Options{
-		SessionTTL: time.Hour,
-		DemoUser:   store.Identity{Source: "dev", Subject: "squad-demo", DisplayName: "演示用户"},
-	}))
+	storetest.SignIn(t, s, "squad-demo", "演示用户", store.RoleOwner)
+	srv := httptest.NewServer(server.New(s, server.Options{SessionTTL: time.Hour}))
 	t.Cleanup(srv.Close)
 	return &squadFixture{t: t, ctx: ctx, store: s, db: db, srv: srv}
 }
@@ -140,17 +139,14 @@ func (c *squadClient) do(method, path string, body any) (int, map[string]any) {
 
 func (c *squadClient) login() {
 	c.t.Helper()
-	if status, body := c.do("POST", "/auth/login", map[string]string{}); status != 200 {
+	if status, body := c.do("POST", "/auth/login", map[string]string{"provider": "email", "email": storetest.Email("squad-demo")}); status != 200 {
 		c.t.Fatalf("login = %d %v", status, body)
 	}
 }
 
 func (f *squadFixture) tenant(t *testing.T) string {
 	t.Helper()
-	token, e := f.store.Login(f.ctx, store.Identity{Source: "dev", Subject: "squad-demo", DisplayName: "演示用户"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token := storetest.SignIn(t, f.store, "squad-demo", "演示用户", store.RoleOwner)
 	u, e := f.store.SessionUser(f.ctx, token)
 	if e != nil {
 		t.Fatal(e)
@@ -203,10 +199,7 @@ func TestSquadHTTPLifecycle(t *testing.T) {
 	}); status != 409 || body["code"] != "member_exists" {
 		t.Fatalf("duplicate add = %d %v", status, body)
 	}
-	token, e := f.store.Login(f.ctx, store.Identity{Source: "dev", Subject: "second", DisplayName: "第二人"}, time.Hour)
-	if e != nil {
-		t.Fatal(e)
-	}
+	token := storetest.SignIn(t, f.store, "second", "第二人", store.RoleOwner)
 	second, e := f.store.SessionUser(f.ctx, token)
 	if e != nil {
 		t.Fatal(e)

@@ -78,7 +78,14 @@ func TestPrepareDemoKeepsOneRealProjectAcrossRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope, first, err := prepareDemo(ctx, db, repositories)
+	preset, err := store.ParsePreset([]byte(`{"users": [{"email": "demo@demo.test", "displayName": "演示用户", "role": "owner"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SeedUsers(ctx, preset); err != nil {
+		t.Fatal(err)
+	}
+	scope, first, err := prepareDemo(ctx, db, repositories, preset.Users[0].Email)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +119,7 @@ func TestPrepareDemoKeepsOneRealProjectAcrossRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondScope, second, err := prepareDemo(ctx, db, repositories)
+	secondScope, second, err := prepareDemo(ctx, db, repositories, preset.Users[0].Email)
 	if err != nil || secondScope != scope || second.ID != first.ID || second.Commit != first.Commit {
 		t.Fatalf("restart changed demo: %+v %+v %v", secondScope, second, err)
 	}
@@ -127,7 +134,7 @@ func TestPrepareDemoKeepsOneRealProjectAcrossRestarts(t *testing.T) {
 	if _, err := inspect.Exec(ctx, "UPDATE tenants SET status='suspended' WHERE id=$1", scope.TenantID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := prepareDemo(ctx, db, repositories); err == nil {
+	if _, _, err := prepareDemo(ctx, db, repositories, preset.Users[0].Email); err == nil {
 		t.Fatal("startup silently bypassed suspended demo tenant")
 	}
 }
