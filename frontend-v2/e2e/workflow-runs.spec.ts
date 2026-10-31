@@ -12,6 +12,12 @@ test('workflow runs: start a published workflow from chat and follow it to the r
   await page.route('**/api/v2/tenants/*/chat/executors', (route) =>
     route.fulfill({ json: { items: [{ id: 'oc-fixture', name: 'OpenCode · Fixture', agentName: 'OpenCode', modelName: 'Fixture' }] } }),
   )
+  // One conversation in the project, not started yet, for a session to take the main area back.
+  await page.route(/\/api\/v2\/tenants\/[^/]+\/chat\/conversations(\?.*)?$/, (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ json: { items: [{ id: '00000000-0000-4000-8000-0000000000d1', projectId: '00000000-0000-4000-8000-0000000000c1', executorId: 'oc-fixture', title: '梳理 v2 接口缺口', createdAt: '2026-10-30T09:00:00Z', updatedAt: '2026-10-30T09:00:00Z', session: null }], nextCursor: '' } })
+      : route.fallback(),
+  )
   await page.goto('/chat')
   await signIn(page)
   const cloud = page.getByRole('complementary', { name: '聊天记录' }).getByRole('region').filter({ hasText: 'ora-space/cloud' })
@@ -45,7 +51,7 @@ test('workflow runs: start a published workflow from chat and follow it to the r
   await expect(pane.getByRole('heading', { name: 'Mock 结论' })).toBeVisible()
 
   // A session takes the main area back; the run stays in the list.
-  await page.getByRole('complementary', { name: '聊天记录' }).getByRole('button', { name: '工具调用：读、搜、改、执行', exact: true }).click()
+  await cloud.getByRole('button', { name: '梳理 v2 接口缺口', exact: true }).click()
   await expect(pane).toBeHidden()
   await expect(cloud.getByRole('button', { name: '工作流运行 审查 e2e（成功）' })).toBeVisible()
 })
