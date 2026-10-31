@@ -113,6 +113,9 @@ func chatRuntime() (rt *executiontest.Stub, finish func(sid string)) {
 			running[sid], ended[sid] = false, true
 			return nil
 		},
+		ReadTurnsFunc: func(_ context.Context, _ execution.Scope, sid, _ string, _ int) (execution.TurnPage, error) {
+			return execution.TurnPage{Items: []execution.Turn{{Ref: execution.Ref{SessionID: sid, TurnID: "t1"}, Prompt: execution.TextPrompt("你好")}}}, nil
+		},
 		SubscribeFunc: func(_ context.Context, _ execution.Scope, sid string, after uint64) (execution.Stream, error) {
 			all := []execution.Event{
 				{Ref: execution.Ref{SessionID: sid, TurnID: "t1"}, Sequence: 1, OccurredAt: at, Kind: execution.EventHistorySnapshot,
@@ -328,6 +331,11 @@ func TestChatEventStream(t *testing.T) {
 	records := first["history"].(map[string]any)["records"].([]any)
 	if first["kind"] != "history_snapshot" || first["turnId"] != "t1" || records[0].(map[string]any)["data"].(map[string]any)["type"] != "turnEnded" {
 		t.Fatalf("first event = %v", first)
+	}
+	var ended map[string]any
+	_ = json.Unmarshal([]byte(strings.TrimPrefix(lines[3], "data: ")), &ended)
+	if ended["kind"] != "turn_ended" || ended["prompt"] != "你好" {
+		t.Fatalf("a turn_ended event must carry its turn's prompt: %v", ended)
 	}
 	if resumed := read("2"); len(resumed) != 4 || resumed[0] != "id: 3" {
 		t.Fatalf("resumed after 2 = %q", resumed)

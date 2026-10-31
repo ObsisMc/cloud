@@ -235,6 +235,7 @@ type chatEvent struct {
 	History    *execution.HistorySnapshot `json:"history,omitempty"`
 	TextDelta  string                     `json:"textDelta,omitempty"`
 	Result     *chatResult                `json:"result,omitempty"`
+	Prompt     string                     `json:"prompt,omitempty"`
 }
 
 // chatEvents relays the conversation's session events as Server-Sent Events. Each event's id is
@@ -318,6 +319,18 @@ func (h *handler) chatEvents(w http.ResponseWriter, r *http.Request, c chatReque
 			if ev.Result != nil {
 				res := resultOf(*ev.Result)
 				out.Result = &res
+			}
+			if ev.Kind == execution.EventTurnEnded {
+				prompt, e := c.svc.TurnPrompt(ctx, c.scope, ev.Ref.SessionID, ev.Ref.TurnID)
+				if e != nil {
+					if ctx.Err() == nil {
+						slog.Error("chat events", "conversation", cid, "error", e)
+						writeEvent(w, "failure", "", map[string]string{"code": eventFailure(e)})
+						flusher.Flush()
+					}
+					return
+				}
+				out.Prompt = prompt
 			}
 			writeEvent(w, "", strconv.FormatUint(ev.Sequence, 10), out)
 		}

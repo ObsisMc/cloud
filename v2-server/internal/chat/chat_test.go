@@ -360,3 +360,20 @@ func TestOtherUsersConversationsAreHidden(t *testing.T) {
 		t.Fatalf("subscribe by another user = %v", e)
 	}
 }
+
+func TestTurnPromptReadsPastTheFirstPage(t *testing.T) {
+	pages := map[string]execution.TurnPage{
+		"":   {Items: []execution.Turn{{Ref: execution.Ref{SessionID: "s1", TurnID: "t1"}, Prompt: execution.TextPrompt("一")}}, NextCursor: "c2"},
+		"c2": {Items: []execution.Turn{{Ref: execution.Ref{SessionID: "s1", TurnID: "t2"}, Prompt: execution.TextPrompt("二")}}},
+	}
+	rt := &executiontest.Stub{ReadTurnsFunc: func(_ context.Context, _ execution.Scope, _, cursor string, _ int) (execution.TurnPage, error) {
+		return pages[cursor], nil
+	}}
+	svc := chat.New(nil, rt, rt, chat.Options{})
+	if p, e := svc.TurnPrompt(context.Background(), execution.Scope{}, "s1", "t2"); e != nil || p != "二" {
+		t.Fatalf("prompt of t2 = %q %v", p, e)
+	}
+	if _, e := svc.TurnPrompt(context.Background(), execution.Scope{}, "s1", "t3"); !errors.Is(e, execution.ErrNotFound) {
+		t.Fatalf("unknown turn = %v", e)
+	}
+}

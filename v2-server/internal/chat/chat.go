@@ -288,6 +288,26 @@ func (s *Service) Delete(ctx context.Context, scope execution.Scope, conversatio
 	return s.store.DeleteChatConversation(ctx, scope.TenantID, scope.UserID, conversationID)
 }
 
+// TurnPrompt returns the text a turn of the session was asked. A turn stopped before its Agent
+// started never reaches the Node history, so this is how a page can still show what was asked.
+func (s *Service) TurnPrompt(ctx context.Context, scope execution.Scope, sessionID, turnID string) (string, error) {
+	for cursor := ""; ; {
+		page, e := s.runtime.ReadTurns(ctx, scope, sessionID, cursor, 100)
+		if e != nil {
+			return "", e
+		}
+		for _, t := range page.Items {
+			if t.Ref.TurnID == turnID {
+				return t.Prompt.Text()
+			}
+		}
+		if page.NextCursor == "" {
+			return "", execution.ErrNotFound
+		}
+		cursor = page.NextCursor
+	}
+}
+
 // Subscribe follows the conversation's session events after the cursor, so a page can only
 // observe its own conversations.
 func (s *Service) Subscribe(ctx context.Context, scope execution.Scope, conversationID string, after uint64) (execution.Stream, error) {

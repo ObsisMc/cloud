@@ -1204,6 +1204,10 @@
           },
           "result": {
             "$ref": "#/components/schemas/ChatResult"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "On turn_ended, the text the turn was asked. A turn stopped before its Agent started never appears in a history snapshot; this is how a page still shows it."
           }
         },
         "required": [
