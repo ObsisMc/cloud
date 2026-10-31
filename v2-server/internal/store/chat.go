@@ -30,6 +30,9 @@ type ChatConversation struct {
 	CreatedAt  time.Time    `json:"createdAt"`
 	UpdatedAt  time.Time    `json:"updatedAt"`
 	Session    *ChatSession `json:"session"`
+	// CreateKey is the creating request's idempotency key, which is also the first turn's
+	// attempt ID: how chat finds a first turn whose outcome it never learned.
+	CreateKey string `json:"-"`
 }
 
 // Live returns the conversation's session while it can still take turns.
@@ -66,7 +69,7 @@ func (s *Store) Member(ctx context.Context, tenant, user string) (bool, error) {
 	return s.ScheduleMember(ctx, tenant, user)
 }
 
-const conversationColumns = `id, project_id, executor_id, title, created_at, updated_at`
+const conversationColumns = `id, project_id, executor_id, title, created_at, updated_at, create_key`
 
 // CreateChatConversation inserts the conversation, or returns the one an earlier request with the
 // same key created. A key reused with different fields returns ErrKeyReused.
@@ -78,7 +81,7 @@ func (s *Store) CreateChatConversation(ctx context.Context, in NewChatConversati
 		ON CONFLICT (tenant_id, user_id, create_key) DO NOTHING
 		RETURNING `+conversationColumns,
 		in.TenantID, in.UserID, in.CreateKey, in.ProjectID, in.ExecutorID, in.Title).
-		Scan(&c.ID, &c.ProjectID, &c.ExecutorID, &c.Title, &c.CreatedAt, &c.UpdatedAt)
+		Scan(&c.ID, &c.ProjectID, &c.ExecutorID, &c.Title, &c.CreatedAt, &c.UpdatedAt, &c.CreateKey)
 	if e == nil {
 		return c, nil
 	}
@@ -116,7 +119,7 @@ func (s *Store) ChatConversations(ctx context.Context, tenant, user string) ([]C
 
 func (s *Store) chatConversations(ctx context.Context, where string, args ...any) ([]ChatConversation, error) {
 	rows, e := s.pool.Query(ctx, `
-		SELECT c.id, c.project_id, c.executor_id, c.title, c.created_at, c.updated_at,
+		SELECT c.id, c.project_id, c.executor_id, c.title, c.created_at, c.updated_at, c.create_key,
 		       s.session_id, s.started_at, s.ended_at, s.end_reason, s.last_attempt_id, s.last_turn_id
 		FROM v2_chat_conversations c LEFT JOIN v2_chat_sessions s ON s.conversation_id = c.id
 		WHERE `+where+`
@@ -130,7 +133,7 @@ func (s *Store) chatConversations(ctx context.Context, where string, args ...any
 		var c ChatConversation
 		var sid, reason, attempt, turn *string
 		var started, ended *time.Time
-		if e := rows.Scan(&c.ID, &c.ProjectID, &c.ExecutorID, &c.Title, &c.CreatedAt, &c.UpdatedAt,
+		if e := rows.Scan(&c.ID, &c.ProjectID, &c.ExecutorID, &c.Title, &c.CreatedAt, &c.UpdatedAt, &c.CreateKey,
 			&sid, &started, &ended, &reason, &attempt, &turn); e != nil {
 			return nil, fmt.Errorf("list conversations: %w", e)
 		}

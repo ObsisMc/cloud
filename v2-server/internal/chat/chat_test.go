@@ -30,6 +30,8 @@ type port struct {
 	endErr error
 	// startErr, when set, fails the next Start.
 	startErr error
+	// startLost, when set, makes the next Start admit its turn but report an unknown outcome.
+	startLost bool
 	// onCancel runs inside Cancel, before it returns.
 	onCancel func()
 }
@@ -62,7 +64,21 @@ func (p *port) runtime() *executiontest.Stub {
 			p.next++
 			sid := fmt.Sprintf("s%d", p.next)
 			p.sessions[sid] = &fakeSession{target: req.Target}
-			return p.admit(sid, req.Caller), nil
+			ref := p.admit(sid, req.Caller)
+			if p.startLost {
+				p.startLost = false
+				return execution.Ref{}, context.DeadlineExceeded
+			}
+			return ref, nil
+		},
+		ReadAttemptFunc: func(_ context.Context, _ execution.Scope, c execution.Caller) (execution.Turn, error) {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			ref, ok := p.attempts[attemptKey(c)]
+			if !ok {
+				return execution.Turn{}, execution.ErrNotFound
+			}
+			return *p.turns[ref.TurnID], nil
 		},
 		AppendFunc: func(_ context.Context, _ execution.Scope, req execution.AppendRequest) (execution.Ref, error) {
 			p.mu.Lock()
@@ -227,6 +243,33 @@ func TestUnknownOutcomeKeepsConversation(t *testing.T) {
 	c, _ := f.create(t, "k1")
 	if c.Session == nil {
 		t.Fatalf("the retry with the same key must settle the same conversation: %+v", c)
+	}
+}
+
+func TestUnknownFirstTurnNeverRetriedStartsOnce(t *testing.T) {
+	ctx := context.Background()
+	for _, accepted := range []bool{true, false} {
+		t.Run(fmt.Sprintf("accepted=%v", accepted), func(t *testing.T) {
+			f := setup(t)
+			if accepted {
+				f.port.startLost = true
+			} else {
+				f.port.startErr = context.DeadlineExceeded
+			}
+			c, _, e := f.svc.Create(ctx, f.scope, chat.CreateRequest{Key: "k1", ProjectID: "demo", ExecutorID: "fixture", Prompt: "hi"})
+			if !errors.Is(e, context.DeadlineExceeded) {
+				t.Fatal(e)
+			}
+			if accepted {
+				f.port.finish(f.port.attempts["chat/"+c.ID+"/k1"])
+			}
+			// The page gives up on k1 and sends the next prompt under a new key.
+			c, ref, e := f.svc.Send(ctx, f.scope, c.ID, "k2", "继续")
+			if e != nil || f.port.starts != 1 || len(f.port.sessions) != 1 || c.Session == nil || c.Session.ID != ref.SessionID {
+				t.Fatalf("send = %+v %+v %v; starts %d, sessions %d: the conversation must end up with exactly one session",
+					c.Session, ref, e, f.port.starts, len(f.port.sessions))
+			}
+		})
 	}
 }
 

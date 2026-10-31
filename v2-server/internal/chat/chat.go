@@ -166,25 +166,42 @@ func (s *Service) Send(ctx context.Context, scope execution.Scope, conversationI
 	case c.Ended():
 		return c, ref, execution.ErrSessionEnded
 	case !ok:
-		// The first turn's outcome was unknown and never settled; this prompt starts the session.
-		ref, e = s.start(ctx, scope, c, key, prompt)
+		// The first turn's outcome was never learned. If the port did accept it, its session is
+		// this conversation's: starting another would leave that one running unclaimed.
+		first, re := s.runtime.ReadAttempt(ctx, scope, caller(c.ID, c.CreateKey))
+		switch {
+		case errors.Is(re, execution.ErrNotFound):
+			ref, e = s.start(ctx, scope, c, key, prompt)
+		case re != nil:
+			return c, ref, fmt.Errorf("settle first turn: %w", re)
+		default:
+			if e = s.store.RecordChatTurn(ctx, c.ID, first.Ref.SessionID, c.CreateKey, first.Ref.TurnID, s.now()); e == nil {
+				ref, e = s.append(ctx, scope, c.ID, first.Ref.SessionID, key, prompt)
+			}
+		}
 	default:
-		ref, e = s.runtime.Append(ctx, scope, execution.AppendRequest{
-			SessionID: live.ID, Caller: caller(c.ID, key), Prompt: execution.TextPrompt(prompt),
-		})
-		if errors.Is(e, execution.ErrSessionEnded) {
-			// Ended outside chat (a restart): record it so the page shows the conversation as ended.
-			return c, ref, errors.Join(e, s.store.EndChatSession(ctx, live.ID, store.EndInterrupted, s.now()))
-		}
-		if e == nil {
-			e = s.store.RecordChatTurn(ctx, c.ID, ref.SessionID, key, ref.TurnID, s.now())
-		}
+		ref, e = s.append(ctx, scope, c.ID, live.ID, key, prompt)
 	}
 	if e != nil {
 		return c, ref, e
 	}
 	c, e = s.store.ChatConversation(ctx, scope.TenantID, scope.UserID, c.ID)
 	return c, ref, e
+}
+
+// append sends the next prompt to the conversation's live session. The caller holds the lock.
+func (s *Service) append(ctx context.Context, scope execution.Scope, conversationID, sessionID, key, prompt string) (execution.Ref, error) {
+	ref, e := s.runtime.Append(ctx, scope, execution.AppendRequest{
+		SessionID: sessionID, Caller: caller(conversationID, key), Prompt: execution.TextPrompt(prompt),
+	})
+	if errors.Is(e, execution.ErrSessionEnded) {
+		// Ended outside chat (a restart): record it so the page shows the conversation as ended.
+		return ref, errors.Join(e, s.store.EndChatSession(ctx, sessionID, store.EndInterrupted, s.now()))
+	}
+	if e != nil {
+		return ref, e
+	}
+	return ref, s.store.RecordChatTurn(ctx, conversationID, ref.SessionID, key, ref.TurnID, s.now())
 }
 
 // ending runs a call that may end the live session, with the reason recorded first so a page
