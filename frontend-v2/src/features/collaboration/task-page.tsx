@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router'
-import { ChevronLeft, ClipboardList, ListTree, Pencil } from 'lucide-react'
+import { ChevronLeft, ClipboardList, ListTree, PanelRight, Pencil } from 'lucide-react'
 import { useUser } from '@/app/auth/user'
 import { Button } from '@/components/ui/button'
 import { getApiV2TenantsTidProjects } from '@/lib/projects-api/generated'
 import { listSquads } from '@/lib/squads-api/generated'
 import { PanelDialog } from '@/components/panel/panel-dialog'
+import { WorkspaceNavigationProvider } from '@/components/workspace-panel/navigation'
+import type { WorkspaceSource } from '@/components/workspace-panel/source'
+import { useWorkspacePanel } from '@/components/workspace-panel/use-panel'
+import { WorkspacePanel } from '@/components/workspace-panel/workspace-panel'
+import { WorkspaceSplit } from '@/components/workspace-panel/workspace-split'
 import { RunPane } from './run-pane'
 import { TaskComposer, type CommentDraft } from './task-composer'
 import { DecomposeDialog, TaskFamily } from './task-decomposition'
@@ -44,6 +49,7 @@ export default function TaskPage() {
   const [editing, setEditing] = useState(false)
   const [decomposing, setDecomposing] = useState(false)
   const [pickedExecutor, setExecutorId] = useState('')
+  const workspace = useWorkspacePanel()
   const live = (task?: Task) => !!task?.activeRun
   const taskQuery = useQuery({
     queryKey: ['task', tenantId, taskId], queryFn: () => getTask(tenantId, taskId), enabled: !!tenantId && !!taskId,
@@ -82,6 +88,16 @@ export default function TaskPage() {
   const selected = pickedRun ? runs.find(r=>r.id===pickedRun) : runs.at(-1)
   // A link to a run the task no longer lists falls back to the list.
   const openedWorkflow = tab === 'workflows' ? decompositions.items.find(d => d.workflowRunId && d.workflowRunId === params.get('workflow')) : undefined
+  const newestRun = decompositions.items.find(d => d.workflowRunId)
+  // Every run has its own checkout, so the panel shows the run on screen, in place of the side column.
+  const workflowRunId = openedWorkflow?.workflowRunId
+  const agentRunId = tab === 'runs' ? selected?.id : undefined
+  const workspaceSource = useMemo<WorkspaceSource | undefined>(() => {
+    if (!tenantId) return undefined
+    if (workflowRunId) return { kind: 'run', tenantId, runId: workflowRunId }
+    return agentRunId ? { kind: 'task', tenantId, taskId, runId: agentRunId } : undefined
+  }, [tenantId, taskId, workflowRunId, agentRunId])
+  const workspaceShown = workspace.open && !!workspaceSource
   const refresh = async () => {
     await Promise.all([
       client.invalidateQueries({ queryKey: ['task', tenantId, taskId] }),
@@ -105,6 +121,15 @@ export default function TaskPage() {
     if (runId) p.set('workflow', runId)
     else p.delete('workflow')
     setParams(p, { replace: true })
+  }
+
+  // The button works from any tab: with no run on screen it brings one up with its workspace.
+  const toggleWorkspace = () => {
+    if (workspaceSource) { workspace.setOpen(!workspace.open); return }
+    if (tab === 'workflows' && newestRun) showWorkflows(newestRun.workflowRunId)
+    else if (selected) showRun(selected.id)
+    else if (newestRun) showWorkflows(newestRun.workflowRunId)
+    workspace.setOpen(true)
   }
 
   const settle = (updated: Task) => {
@@ -165,9 +190,15 @@ export default function TaskPage() {
       <h2>{task.title}</h2>
       {canDecompose(task) && <Button type="button" variant="outline" size="sm" onClick={() => setDecomposing(true)} disabled={splitting}
         title={splitting ? '正在拆分，跑完后才能再拆' : '用工作流把这个任务拆成子任务'}><ListTree data-icon="inline-start" />{splitting ? '拆分中…' : '拆分'}</Button>}
+      {(newestRun || selected) && <Button type="button" variant={workspaceShown ? 'secondary' : 'outline'} size="sm" aria-pressed={workspaceShown} onClick={toggleWorkspace}
+        title="查看这次运行改了哪些文件"><PanelRight data-icon="inline-start" />工作区</Button>}
       <Button type="button" variant="outline" size="sm" onClick={() => { setError(''); setEditing(true) }} disabled={save.isPending}><Pencil data-icon="inline-start" />编辑</Button>
     </header>
-    <div className="mc-task-body">
+    <WorkspaceNavigationProvider value={workspaceSource ? workspace.navigation : null}>
+    <WorkspaceSplit id="task" panel={workspaceShown && <WorkspacePanel key={workflowRunId ?? agentRunId} source={workspaceSource!}
+      caption={openedWorkflow ? openedWorkflow.workflowName : selected && `Agent 运行 ${runs.indexOf(selected) + 1}`}
+      revision={String(timeline.dataUpdatedAt)} request={workspace.request} onClose={() => workspace.setOpen(false)} />}>
+    <div className={workspaceShown ? 'mc-task-body wide' : 'mc-task-body'}>
       <section className="mc-task-main-col" aria-label="运行与讨论">
         {task.description && <p className="mc-description">{task.description}</p>}
         {task.workflowSources?.map(source=><p key={source.runId}><Link className="underline" to={`/chat?run=${source.runId}`}>查看来源巡检报告 · {source.name}{source.submittedAt ? ` · ${new Date(source.submittedAt).toLocaleString()}` : ''}</Link></p>)}
@@ -179,7 +210,7 @@ export default function TaskPage() {
         </div>
         <div className="mc-tab-body">
           {tab === 'workflows'
-            ? <TaskWorkflows tenantId={tenantId} decompositions={decompositions.items} selected={openedWorkflow} onSelect={showWorkflows} />
+            ? <TaskWorkflows tenantId={tenantId} decompositions={decompositions.items} selected={openedWorkflow} workspace={workspace} onSelect={showWorkflows} />
             : timeline.isError
             ? <p role="alert">运行与讨论加载失败，请刷新重试。</p>
             : tab === 'runs'
@@ -189,7 +220,7 @@ export default function TaskPage() {
         {!openedWorkflow && <TaskComposer tenantId={tenantId} task={task} me={me.id} inSquad={inSquad} sending={comment.isPending} error={composeError}
           onSend={async draft => { try { await comment.mutateAsync(draft); return true } catch { return false } }} />}
       </section>
-      <aside className="mc-task-side-col" aria-label="任务属性">
+      {!workspaceShown && <aside className="mc-task-side-col" aria-label="任务属性">
         <TaskDetailView task={task} me={me.id} inSquad={inSquad} canClose={canCloseTask(task, me.id, role)} projectName={projectLabel(projectList, task.projectId)} squads={squads.data?.items ?? []}
           busy={move.isPending || assign.isPending} error={error}
           run={{
@@ -200,8 +231,10 @@ export default function TaskPage() {
           }}
           onStatus={status => { setError(''); move.mutate({ status, target: task }) }}
           onAssign={next => { setError(''); assign.mutate({ assignee: next, target: task }) }} />
-      </aside>
+      </aside>}
     </div>
+    </WorkspaceSplit>
+    </WorkspaceNavigationProvider>
 
     {decomposing && <DecomposeDialog tenantId={tenantId} task={task} onClose={() => setDecomposing(false)} onStarted={created => { setDecomposing(false); showWorkflows(created.status === 'running' ? created.workflowRunId : undefined) }} />}
 

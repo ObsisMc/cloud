@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { ChevronLeft, Workflow } from 'lucide-react'
+import type { WorkspacePanelState } from '@/components/workspace-panel/use-panel'
 import { formatTime } from './task-model'
 import type { TaskDecomposition } from './tasks-api/generated'
 
@@ -35,18 +36,20 @@ function WorkflowRow({ decomposition: d }: { decomposition: TaskDecomposition })
  * page has. The view is read-only here: a run started from it would not belong to the task. A run
  * the workflow host refused has nothing to open, so its row only says why.
  */
-export function TaskWorkflows({ tenantId, decompositions, selected, onSelect }: {
+export function TaskWorkflows({ tenantId, decompositions, selected, workspace, onSelect }: {
   tenantId: string
   decompositions: TaskDecomposition[]
   /** The run opened; undefined shows the list. */
   selected: TaskDecomposition | undefined
+  /** The page's workspace panel, which the run's changed files open. */
+  workspace: WorkspacePanelState
   onSelect: (workflowRunId?: string) => void
 }) {
   if (selected) {
     const back = <button type="button" className="mc-workflow-back" aria-label="返回工作流列表" title="返回工作流列表" onClick={() => onSelect()}><ChevronLeft size={16} aria-hidden="true" /></button>
     return <section className="mc-workflow-run" aria-label="工作流运行">
       <Suspense fallback={<p role="status" className="mc-run-note">正在读取运行…</p>}>
-        <WorkflowRunView runId={selected.workflowRunId} tenantId={tenantId} readOnly leading={back} />
+        <WorkflowRunView runId={selected.workflowRunId} tenantId={tenantId} readOnly workspace={workspace} leading={back} />
       </Suspense>
     </section>
   }

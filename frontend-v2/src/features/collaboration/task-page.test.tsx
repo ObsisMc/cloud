@@ -8,6 +8,7 @@ import { UserContext } from '@/app/auth/user'
 import type { CollaborationTarget, User } from '@/api/generated.schemas'
 import { type Conversation, emptyConversation } from '@/components/agent-thread/model/types'
 import * as workflowsApi from '@/lib/workflows/api/generated'
+import * as workspaceApi from '@/lib/workspace-api/generated'
 import * as api from './tasks-api/generated'
 import type { Task, TaskDecomposition, TaskRun, TaskTimeline } from './tasks-api/generated'
 import TaskPage from './task-page'
@@ -32,6 +33,7 @@ vi.mock('./tasks-api/generated', () => ({
   listTasks: vi.fn(), listTaskDecompositions: vi.fn(), startTaskDecomposition: vi.fn(),
 }))
 vi.mock('@/lib/workflows/api/generated', () => ({ listWorkflows: vi.fn() }))
+vi.mock('@/lib/workspace-api/generated', () => ({ getTaskRunWorkspaceChanges: vi.fn(), getWorkflowRunWorkspaceChanges: vi.fn() }))
 // The run view has its own tests; here it shows which run the page opened and how.
 vi.mock('@/features/chat/workflow-run/run-pane', () => ({
   default: ({ runId, tenantId, readOnly, leading }: { runId: string; tenantId: string; readOnly: boolean; leading: ReactNode }) => <div>{leading}<p>运行视图 {runId} {tenantId} {readOnly ? '只读' : '可写'}</p></div>,
@@ -389,4 +391,47 @@ it('lets a workspace owner confirm work someone else asked for', async () => {
   renderPage()
   await userEvent.click(await screen.findByRole('button', { name: '确认完成' }))
   await waitFor(() => expect(api.setTaskStatus).toHaveBeenCalledWith('tenant', 'task-1', { status: 'done', version: 1 }))
+})
+
+it('opens the newest workflow run with its workspace from the page header', async () => {
+  localStorage.clear()
+  vi.mocked(api.getTask).mockResolvedValue(requirement)
+  vi.mocked(api.listTaskDecompositions).mockResolvedValue({ items: [decomposition({ status: 'succeeded', createdCount: 2 })] })
+  vi.mocked(workspaceApi.getWorkflowRunWorkspaceChanges).mockResolvedValue({ baseCommit: 'abc', files: [], truncated: false })
+  renderPage()
+
+  const button = await screen.findByRole('button', { name: '工作区' })
+  expect(button).toHaveAttribute('aria-pressed', 'false')
+  expect(screen.getByRole('complementary', { name: '任务属性' })).toBeInTheDocument()
+  await userEvent.click(button)
+  expect(await screen.findByText('运行视图 wr-1 tenant 只读')).toBeInTheDocument()
+  expect(button).toHaveAttribute('aria-pressed', 'true')
+  // The panel takes the side column's place, and closing it brings the column back.
+  expect(await screen.findByRole('complementary', { name: '工作区' })).toBeInTheDocument()
+  expect(screen.queryByRole('complementary', { name: '任务属性' })).not.toBeInTheDocument()
+  await waitFor(() => expect(workspaceApi.getWorkflowRunWorkspaceChanges).toHaveBeenCalledWith('tenant', 'wr-1'))
+  await userEvent.click(button)
+  expect(button).toHaveAttribute('aria-pressed', 'false')
+  expect(screen.getByRole('complementary', { name: '任务属性' })).toBeInTheDocument()
+  expect(screen.getByText('运行视图 wr-1 tenant 只读')).toBeInTheDocument()
+  localStorage.clear()
+})
+
+it('shows the workspace of the Agent run on screen', async () => {
+  localStorage.clear()
+  vi.mocked(api.getTaskTimeline).mockResolvedValue({ runs: [run({ id: 'run-1', state: 'ended' }), run({ id: 'run-2', state: 'idle' })], comments: [] })
+  vi.mocked(workspaceApi.getTaskRunWorkspaceChanges).mockResolvedValue({ baseCommit: 'abc', files: [], truncated: false })
+  renderPage('?run=run-1')
+
+  await userEvent.click(await screen.findByRole('button', { name: '工作区' }))
+  const panel = await screen.findByRole('complementary', { name: '工作区' })
+  expect(within(panel).getByText('Agent 运行 1')).toBeInTheDocument()
+  await waitFor(() => expect(workspaceApi.getTaskRunWorkspaceChanges).toHaveBeenCalledWith('tenant', 'task-1', 'run-1'))
+  localStorage.clear()
+})
+
+it('offers no workspace before anything has run', async () => {
+  renderPage()
+  await screen.findByRole('button', { name: '编辑' })
+  expect(screen.queryByRole('button', { name: '工作区' })).not.toBeInTheDocument()
 })

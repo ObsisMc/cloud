@@ -17,7 +17,7 @@ import { ContractError } from '@/lib/workflows/contracts'
 import { localizeContractError } from '@/lib/workflows/host/contract-error'
 import { isTerminalRunStatus, type GraphWorkflowRun, type WorkflowArtifact, type WorkflowNodeConversationItem } from '@/lib/workflows/runtime'
 import { WorkspaceNavigationProvider } from '@/components/workspace-panel/navigation'
-import { useWorkspacePanel } from '@/components/workspace-panel/use-panel'
+import { useWorkspacePanel, type WorkspacePanelState } from '@/components/workspace-panel/use-panel'
 import { WorkspacePanel, WorkspaceToggle } from '@/components/workspace-panel/workspace-panel'
 import { WorkspaceSplit } from '@/components/workspace-panel/workspace-split'
 import { FadeText } from '../components/fade-text'
@@ -50,10 +50,10 @@ const noArtifacts: WorkflowArtifact[] = []
  * the run; the page reads it again each time its events stream announces a change, polling as a
  * fallback, until it ends. The page brings the tenant's
  * workflow client and query cache, which the run and the inspector's Agent configuration read.
- * A page outside chat passes its tenant; `readOnly` shows the run without acting on it, and
- * `leading` puts the page's own control at the start of the header.
+ * A page outside chat passes its tenant; `readOnly` shows the run without acting on it, `workspace`
+ * hands the workspace panel to that page, and `leading` puts the page's own control at the start of the header.
  */
-export default function RunPane({ runId, tenantId: hostedTenant, readOnly = false, leading }: { runId: string; tenantId?: string; readOnly?: boolean; leading?: ReactNode }) {
+export default function RunPane({ runId, tenantId: hostedTenant, readOnly = false, workspace, leading }: { runId: string; tenantId?: string; readOnly?: boolean; workspace?: WorkspacePanelState; leading?: ReactNode }) {
   const connectedTenant = useChatStore((s) => s.tenantId)
   const tenantId = hostedTenant ?? connectedTenant ?? ''
   const client = useMemo(() => createContractsClient(createHttpWorkflowContracts(tenantId), tenantId), [tenantId])
@@ -70,7 +70,7 @@ export default function RunPane({ runId, tenantId: hostedTenant, readOnly = fals
       <QueryClientProvider client={queryClient}>
         <ContractsClientProvider client={client}>
           <RunTenantContext.Provider value={tenantId}>
-            <LoadedRun key={runId} tenantId={tenantId} runId={runId} readOnly={readOnly} leading={leading} refreshProjectRuns={refreshProjectRuns} />
+            <LoadedRun key={runId} tenantId={tenantId} runId={runId} readOnly={readOnly} workspace={workspace} leading={leading} refreshProjectRuns={refreshProjectRuns} />
           </RunTenantContext.Provider>
           <RunToaster />
         </ContractsClientProvider>
@@ -88,7 +88,7 @@ function RunToaster() {
  * Reads the run's frozen graph once, then the run itself until it ends: again whenever its events
  * stream says it changed, with polling as the fallback.
  */
-function LoadedRun({ tenantId, runId, readOnly, leading, refreshProjectRuns }: { tenantId: string; runId: string; readOnly: boolean; leading: ReactNode; refreshProjectRuns: (projectId: string) => void }) {
+function LoadedRun({ tenantId, runId, readOnly, workspace, leading, refreshProjectRuns }: { tenantId: string; runId: string; readOnly: boolean; workspace: WorkspacePanelState | undefined; leading: ReactNode; refreshProjectRuns: (projectId: string) => void }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const snapshot = useQuery({ ...runSnapshotQuery(tenantId, runId), enabled: tenantId !== '' })
@@ -103,7 +103,7 @@ function LoadedRun({ tenantId, runId, readOnly, leading, refreshProjectRuns }: {
     connected: setFollowed,
   })
   const error = snapshot.error ?? run.error
-  if (run.data) return <RunWorkspace tenantId={tenantId} run={run.data} readOnly={readOnly} leading={leading} refreshProjectRuns={refreshProjectRuns} />
+  if (run.data) return <RunWorkspace tenantId={tenantId} run={run.data} readOnly={readOnly} hostedWorkspace={workspace} leading={leading} refreshProjectRuns={refreshProjectRuns} />
   return (
     <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
       <p>{error === null ? '正在读取运行…' : isMissing(error) ? '这次运行已经不在了。' : localizeContractError(error, t)}</p>
@@ -118,7 +118,7 @@ function runConversations(run: GraphWorkflowRun): WorkflowNodeConversationItem[]
   return Object.values(run.nodeStates).flatMap((state) => state.conversation ?? [])
 }
 
-function RunWorkspace({ tenantId, run, readOnly, leading, refreshProjectRuns }: { tenantId: string; run: GraphWorkflowRun; readOnly: boolean; leading: ReactNode; refreshProjectRuns: (projectId: string) => void }) {
+function RunWorkspace({ tenantId, run, readOnly, hostedWorkspace, leading, refreshProjectRuns }: { tenantId: string; run: GraphWorkflowRun; readOnly: boolean; hostedWorkspace: WorkspacePanelState | undefined; leading: ReactNode; refreshProjectRuns: (projectId: string) => void }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const conversations = useMemo(() => runConversations(run), [run])
@@ -138,7 +138,8 @@ function RunWorkspace({ tenantId, run, readOnly, leading, refreshProjectRuns }: 
   const focusStatusSampleRef = useRef<TheaterFocusStatusSample | null>(null)
   const conversationByNodeId = useConversationByNode(conversations)
   // The checkout every Agent node of the run shares; read again whenever a node or the run moves on.
-  const workspace = useWorkspacePanel()
+  const ownWorkspace = useWorkspacePanel()
+  const workspace = hostedWorkspace ?? ownWorkspace
   const workspaceSource = useMemo(() => ({ kind: 'run' as const, tenantId, runId: run.id }), [tenantId, run.id])
   const workspaceRevision = `${run.status}:${Object.values(run.nodeStates)
     .map((state) => state.status)
@@ -346,13 +347,13 @@ function RunWorkspace({ tenantId, run, readOnly, leading, refreshProjectRuns }: 
               在对话中追问
             </Button>
           )}
-          {!readOnly && <WorkspaceToggle open={workspace.open} toggle={() => workspace.setOpen(!workspace.open)} />}
+          {!hostedWorkspace && <WorkspaceToggle open={workspace.open} toggle={() => workspace.setOpen(!workspace.open)} />}
         </div>
       </header>
       <WorkspaceSplit
         id="run"
         panel={
-          workspace.open && <WorkspacePanel source={workspaceSource} revision={workspaceRevision} request={workspace.request} onClose={() => workspace.setOpen(false)} />
+          !hostedWorkspace && workspace.open && <WorkspacePanel source={workspaceSource} revision={workspaceRevision} request={workspace.request} onClose={() => workspace.setOpen(false)} />
         }
       >
         <div ref={stageAreaRef} aria-label={viewMode === 'theater' ? '运行舞台' : undefined} className="relative flex min-h-0 min-w-0 flex-1 flex-col">

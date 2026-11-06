@@ -87,8 +87,10 @@ describe('workflow runs in chat', () => {
     cleanup()
     resetChatStore()
 
-    render(<MemoryRouter><QueryClientProvider client={new QueryClient()}><TooltipProvider><RunPane runId={runId} tenantId={tenantId} readOnly /></TooltipProvider></QueryClientProvider></MemoryRouter>)
+    const workspace = { open: false, setOpen: () => {}, request: undefined, navigation: { openDiff: () => {} } }
+    render(<MemoryRouter><QueryClientProvider client={new QueryClient()}><TooltipProvider><RunPane runId={runId} tenantId={tenantId} readOnly workspace={workspace} /></TooltipProvider></QueryClientProvider></MemoryRouter>)
     expect(await screen.findByRole('heading', { level: 2, name: '任务页的运行' })).toBeInTheDocument()
+    // The host keeps the workspace toggle, so the view has none of its own.
     for (const name of ['启动', '停止', '再跑一次', '在对话中追问', '工作区']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
     expect(screen.getByRole('group', { name: '运行视图' })).toBeInTheDocument()
   })
