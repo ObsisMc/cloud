@@ -174,6 +174,13 @@ export function RunTheater({
       : primaryNode?.data.kind === "createTasks"
         ? "tasks"
         : null;
+  /** The run's single review, used by the task stage to offer the only retry that exists. */
+  const reviewNodeId = useMemo(
+    () =>
+      run.definitionSnapshot.nodes.find((node) => node.data.kind === "form")
+        ?.id,
+    [run.definitionSnapshot.nodes],
+  );
   const primaryLoopId =
     primaryNode?.data.kind === "loop"
       ? primaryNode.id
@@ -693,11 +700,19 @@ export function RunTheater({
                   tenantId={tenantId}
                   runId={run.id}
                   runStatus={run.status}
+                  nodeError={primaryDisplayState?.errorMessage ?? undefined}
                 />
               ) : primaryStage === "tasks" ? (
                 <RunTasksStage
+                  tenantId={tenantId}
+                  runId={run.id}
                   nodeTitle={primaryNode?.data.title ?? ""}
                   state={primaryDisplayState ?? null}
+                  onOpenForm={
+                    reviewNodeId === undefined
+                      ? undefined
+                      : () => focusPathNode(reviewNodeId)
+                  }
                 />
               ) : primaryNode?.data.kind === "loop" ? (
                 <RunLoopStage
