@@ -60,3 +60,18 @@ it('offers task retry from the submitted answers despite a conflicting local rej
   expect(screen.queryByText('确认已提交，无需创建任务。')).not.toBeInTheDocument()
   expect(screen.getByLabelText('是否为问题')).toHaveValue('confirmed')
 })
+
+it('sends only the assignee identity when reusing an existing task', async () => {
+  form = {
+    ...form,
+    existingTasks: [{ key: 'disk', taskId: 'task-1', status: 'pending', assignee: { type: 'human', id: 'admin', displayName: '管理员', identifier: 'admin@example.com' } }],
+  }
+  api.submit.mockResolvedValueOnce({ version: 2 })
+  mount()
+  fireEvent.change(await screen.findByLabelText('是否为问题'), { target: { value: 'confirmed' } })
+  fireEvent.click(screen.getByRole('button', { name: '提交' }))
+  await waitFor(() => expect(api.submit).toHaveBeenCalled())
+  expect(api.submit.mock.calls[0]![2].answers).toEqual([
+    { key: 'disk', decision: 'confirmed', assignee: { type: 'human', id: 'admin' }, values: {} },
+  ])
+})

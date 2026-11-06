@@ -37,15 +37,26 @@ import { cn } from '@/lib/utils'
 type Answer = { key: string; decision: string; assignee?: TaskAssigneeRef; values: Record<string, string> }
 type FindingFilter = 'all' | 'pending' | 'confirmed' | 'rejected'
 const text = (v: unknown) => typeof v === 'string' ? v : ''
+const assigneeRef = (value: { type?: string; id?: string } | null | undefined): TaskAssigneeRef | undefined => {
+  if (value?.id === undefined || (value.type !== 'human' && value.type !== 'agent' && value.type !== 'squad')) return undefined
+  return { type: value.type, id: value.id }
+}
+const wireAnswers = (answers: Answer[]) => answers.map(answer => ({
+  key: answer.key,
+  decision: answer.decision,
+  ...(answer.assignee === undefined ? {} : { assignee: { type: answer.assignee.type, id: answer.assignee.id } }),
+  values: answer.values,
+}))
 
 function readAnswers(form: WorkflowForm): Answer[] {
   return form.findings.map(row => {
     const saved = form.answers.find(a => a.key === row.key)
+    const existing = form.existingTasks?.find(t => t.key === row.key)
     return {
       key: row.key,
       decision: saved?.decision || 'pending',
       values: saved?.values ?? {},
-      assignee: saved?.assignee ?? form.existingTasks?.find(t => t.key === row.key)?.assignee ?? undefined,
+      assignee: assigneeRef(saved?.assignee) ?? assigneeRef(existing?.assignee),
     }
   })
 }
@@ -86,8 +97,8 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
   const squads = useQuery({ queryKey: ['squads', tenantId], queryFn: () => listSquads(tenantId) })
   const mutation = useMutation({
     mutationFn: (final: boolean) => final
-      ? submitWorkflowForm(tenantId, form.runId, { version, answers }, { headers: { 'Idempotency-Key': submitKey } })
-      : saveWorkflowFormDraft(tenantId, form.runId, { version, answers }),
+      ? submitWorkflowForm(tenantId, form.runId, { version, answers: wireAnswers(answers) }, { headers: { 'Idempotency-Key': submitKey } })
+      : saveWorkflowFormDraft(tenantId, form.runId, { version, answers: wireAnswers(answers) }),
     onError: (error) => {
       if (isAxiosError(error)) {
         const data = error.response?.data as { key?: string; field?: string } | undefined
