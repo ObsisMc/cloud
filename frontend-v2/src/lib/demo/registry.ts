@@ -26,4 +26,10 @@ export const demoMocks: readonly DemoMock[] = [
     covers: 'Dashboard team progress and Agent output',
     replacedBy: 'A task aggregation endpoint: task status, Agent runs and output per squad',
   },
+  {
+    module: 'task-workflows.ts',
+    scene: 'lead',
+    covers: 'Handling a task with a workflow: the entry, the requirement, and the run belonging to the task',
+    replacedBy: 'Task-owned workflow runs: start one on a task with a requirement, list them, and move the task when they end',
+  },
 ]
