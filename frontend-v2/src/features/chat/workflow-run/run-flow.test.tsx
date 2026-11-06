@@ -33,17 +33,22 @@ const renderPage = async () => {
 const sidebar = () => screen.getByRole('complementary', { name: '聊天记录' })
 const project = () => within(sidebar()).getByRole('region', { name: '项目 ora-space/cloud' })
 
-/** Creates a run of the review sample from the project's + menu, as a person would. */
-async function createRun(user: ReturnType<typeof userEvent.setup>, name: string) {
+/** Creates a run of a published workflow from the project's + menu, as a person would. */
+async function createRunOf(user: ReturnType<typeof userEvent.setup>, workflow: RegExp, name: string) {
   await user.click(within(project()).getByRole('button', { name: '在 ora-space/cloud 新建对话' }))
   await user.click(await screen.findByRole('menuitem', { name: '运行工作流' }))
   // A pointer leaving the submenu's trigger closes the submenu in jsdom, so the item is clicked in place.
-  fireEvent.click(await screen.findByRole('menuitem', { name: /示例：代码审查/ }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: workflow }))
   const dialog = await screen.findByRole('dialog', { name: '运行工作流' })
   const field = within(dialog).getByLabelText('运行名称')
   await user.clear(field)
   await user.type(field, name)
   await user.click(within(dialog).getByRole('button', { name: '创建运行' }))
+}
+
+/** Creates a run of the review sample from the project's + menu, as a person would. */
+async function createRun(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await createRunOf(user, /示例：代码审查/, name)
 }
 
 describe('workflow runs in chat', () => {
@@ -146,6 +151,36 @@ describe('workflow runs in chat', () => {
     expect(followup).toContain(created!.detail.run.id)
     expect(followup).toContain('独立沙盒')
     expect(screen.getByRole('textbox', { name: '消息' })).toHaveValue(followup)
+  }, 30_000)
+
+  it('keeps each node on its own stage when the run contains a form node', async () => {
+    const graph = {
+      nodes: [
+        { id: 'start', data: { kind: 'start', title: '开始：巡检', description: '接收巡检输入' } },
+        { id: 'review', data: { kind: 'form', title: '确认巡检问题', description: '人工确认巡检结果' } },
+        { id: 'output', data: { kind: 'output', title: '输出处置结果', description: '', outputs: [] } },
+      ].map((node, index) => ({ ...node, type: 'workflow', position: { x: index * 340, y: 100 } })),
+      edges: [['start', 'review'], ['review', 'output']].map(([source, target]) => ({ id: `${source}-${target}`, source, target })),
+    }
+    const created = workflows.backend.create({ name: '巡检节点验收', graph: JSON.stringify(graph) })
+    workflows.backend.publish({ workflowId: created.workflow.id, version: 'v1' })
+
+    const user = userEvent.setup()
+    await renderPage()
+    await createRunOf(user, /巡检节点验收/, '巡检节点验收运行')
+    const pane = await screen.findByRole('region', { name: '工作流运行' })
+    await within(pane).findByRole('heading', { level: 2, name: '巡检节点验收运行' }, { timeout: 10_000 })
+    await user.click(within(pane).getByRole('button', { name: '启动' }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '启动' }))
+
+    // A finished run opens on its result act, not on the form node.
+    expect(await within(pane).findByText('运行完成', {}, { timeout: 15_000 })).toBeInTheDocument()
+    expect(within(pane).queryByRole('region', { name: '确认巡检问题' })).not.toBeInTheDocument()
+
+    // Clicking a non-form node opens that node's own stage and never the form.
+    await user.click(within(pane).getByRole('button', { name: '开始：巡检: 成功' }))
+    expect(within(pane).getAllByText('接收巡检输入').length).toBeGreaterThan(0)
+    expect(within(pane).queryByRole('region', { name: '确认巡检问题' })).not.toBeInTheDocument()
   }, 30_000)
 
   it('reads an executing run again whenever its events stream says it changed', async () => {

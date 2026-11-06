@@ -19,6 +19,8 @@ import {
 import { RunActInspector } from "./run-act-inspector";
 import { RunResultAct } from "./run-result-act";
 import { RunLoopStage } from "./run-loop-stage";
+import { RunForm } from "./run-form";
+import { RunTasksStage } from "./run-tasks-stage";
 import { RunTheaterActCard } from "./run-theater-act-card";
 import { RunTheaterParallelStage } from "./run-theater-parallel-stage";
 import { RunTheaterPathRail } from "./run-theater-path-rail";
@@ -50,6 +52,7 @@ const INSPECTOR_FADE_START = 120;
 const PANEL_SETTLE_DURATION = 180;
 
 interface RunTheaterProps {
+  tenantId: string;
   run: GraphWorkflowRun;
   focusNodeId: string | null;
   onFocusNode: (nodeId: string) => void;
@@ -85,6 +88,7 @@ interface RunTheaterProps {
  * Terminal + no path pin → result act. Esc (workspace) returns to Overview.
  */
 export function RunTheater({
+  tenantId,
   run,
   focusNodeId,
   onFocusNode,
@@ -164,6 +168,12 @@ export function RunTheater({
   );
   const primaryId = focus.primaryId;
   const primaryNode = primaryId === null ? undefined : nodeById.get(primaryId);
+  const primaryStage =
+    primaryNode?.data.kind === "form"
+      ? "form"
+      : primaryNode?.data.kind === "createTasks"
+        ? "tasks"
+        : null;
   const primaryLoopId =
     primaryNode?.data.kind === "loop"
       ? primaryNode.id
@@ -184,6 +194,12 @@ export function RunTheater({
         delete next[nodeId];
         return next;
       });
+    }
+    if (
+      nodeById.get(nodeId)?.data.kind === "form" ||
+      nodeById.get(nodeId)?.data.kind === "createTasks"
+    ) {
+      closeInspector();
     }
     setLoopResultId(null);
     onFocusNode(nodeId);
@@ -649,6 +665,8 @@ export function RunTheater({
                 "relative w-full",
                 primaryConversationOpen
                   ? "flex h-full min-h-0 max-w-none flex-1 flex-col"
+                  : primaryStage !== null
+                    ? "mx-auto w-full max-w-6xl shrink-0"
                   : "mx-auto my-auto max-w-xl shrink-0",
               )}
             >
@@ -669,6 +687,17 @@ export function RunTheater({
                         }
                       : undefined
                   }
+                />
+              ) : primaryStage === "form" ? (
+                <RunForm
+                  tenantId={tenantId}
+                  runId={run.id}
+                  runStatus={run.status}
+                />
+              ) : primaryStage === "tasks" ? (
+                <RunTasksStage
+                  nodeTitle={primaryNode?.data.title ?? ""}
+                  state={primaryDisplayState ?? null}
                 />
               ) : primaryNode?.data.kind === "loop" ? (
                 <RunLoopStage
