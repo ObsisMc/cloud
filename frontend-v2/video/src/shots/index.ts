@@ -2,6 +2,7 @@ import type { Shot } from '../record/shot.ts'
 import { oraOverview } from './ora-overview.ts'
 import { newcomerCdase } from './newcomer-cdase.ts'
 import { qualityScan } from './quality-scan.ts'
+import { dashboardUsage } from './dashboard-usage.ts'
 import { teamHuman } from './team-human.ts'
 import { teamReview } from './team-review.ts'
 import { teamSplit } from './team-split.ts'
@@ -14,4 +15,5 @@ export const shots: Record<string, Shot> = {
   [teamHuman.name]: teamHuman,
   [teamReview.name]: teamReview,
   [qualityScan.name]: qualityScan,
+  [dashboardUsage.name]: dashboardUsage,
 }
