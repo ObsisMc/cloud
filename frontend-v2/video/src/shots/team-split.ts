@@ -21,7 +21,7 @@ export const teamSplit: Shot = {
   },
   async play(d, page) {
     d.slide({
-      eyebrow: '团队协作',
+      eyebrow: '03 / 团队协作',
       title: '团队协同，人机共创',
       subtitle: '任务拆分、分工执行、验收闭环',
       narration: '团队协同，人机共创：复杂需求由人与 Agent 分工完成。',
