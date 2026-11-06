@@ -118,9 +118,14 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
   const artifacts = noArtifacts
   const revealedArtifactId: string | null = null
   const selectRun = useChatStore((s) => s.selectRun)
+  const formNode = run.definitionSnapshot.nodes.find((node) =>
+    node.data.kind === 'form' && ['awaiting_input', 'succeeded', 'cancelled'].includes(run.nodeStates[node.id]?.status ?? ''),
+  )
   // A live run opens on its Theater; a pending or finished one on Overview, as desktop primes it.
-  const [viewMode, setViewMode] = useState<ViewMode>(run.status === 'running' || run.status === 'awaiting_input' ? 'theater' : 'overview')
-  const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
+  // A confirmation node is the run's result surface: open it on load, but keep every other node
+  // reachable from the path rail.
+  const [viewMode, setViewMode] = useState<ViewMode>(run.status === 'running' || run.status === 'awaiting_input' || formNode !== undefined ? 'theater' : 'overview')
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(formNode?.id ?? null)
   /** Node whose conversation is open; it pins the act until closed. */
   const [conversationNodeId, setConversationNodeId] = useState<string | null>(null)
   const [openInspectorOnTheaterEnter, setOpenInspectorOnTheaterEnter] = useState(false)
@@ -151,7 +156,7 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
   if (previousStatus !== run.status) {
     setPreviousStatus(run.status)
     if (finished && !isTerminalRunStatus(previousStatus)) {
-      setFocusNodeId(null)
+      setFocusNodeId(formNode?.id ?? null)
       setConversationNodeId(null)
     }
   }
@@ -185,8 +190,10 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
   }, [freshHitl, t])
 
   // Live pin release: once the focused act itself finishes, Theater follows the run again.
+  // Form and task results stay pinned: they own the run's outcome and must remain readable.
   useEffect(() => {
-    if (focusNodeId === null || isLoopHistoryNode(run, focusNodeId)) {
+    const focusKind = focusNodeId === null ? undefined : nodes.find((node) => node.id === focusNodeId)?.data.kind
+    if (focusNodeId === null || isLoopHistoryNode(run, focusNodeId) || focusKind === 'form' || focusKind === 'createTasks') {
       focusStatusSampleRef.current = null
       return
     }
@@ -197,7 +204,7 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
       return
     }
     if (status !== undefined) focusStatusSampleRef.current = { nodeId: focusNodeId, status }
-  }, [run, focusNodeId, conversationNodeId])
+  }, [run, focusNodeId, conversationNodeId, nodes])
 
   // A new artifact moves Theater to the act that produced it, unless the reader is elsewhere on purpose.
   const [handledReveal, setHandledReveal] = useState<string | null>(null)

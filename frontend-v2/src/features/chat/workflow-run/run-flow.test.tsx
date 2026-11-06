@@ -153,14 +153,15 @@ describe('workflow runs in chat', () => {
     expect(screen.getByRole('textbox', { name: '消息' })).toHaveValue(followup)
   }, 30_000)
 
-  it('keeps each node on its own stage when the run contains a form node', async () => {
+  it('keeps every node reachable when a run contains a form node', async () => {
     const graph = {
       nodes: [
         { id: 'start', data: { kind: 'start', title: '开始：巡检', description: '接收巡检输入' } },
         { id: 'review', data: { kind: 'form', title: '确认巡检问题', description: '人工确认巡检结果' } },
+        { id: 'tasks', data: { kind: 'createTasks', title: 'tasks', description: '', createTasksConfig: { formNodeId: 'review' } } },
         { id: 'output', data: { kind: 'output', title: '输出处置结果', description: '', outputs: [] } },
       ].map((node, index) => ({ ...node, type: 'workflow', position: { x: index * 340, y: 100 } })),
-      edges: [['start', 'review'], ['review', 'output']].map(([source, target]) => ({ id: `${source}-${target}`, source, target })),
+      edges: [['start', 'review'], ['review', 'tasks'], ['tasks', 'output']].map(([source, target]) => ({ id: `${source}-${target}`, source, target })),
     }
     const created = workflows.backend.create({ name: '巡检节点验收', graph: JSON.stringify(graph) })
     workflows.backend.publish({ workflowId: created.workflow.id, version: 'v1' })
@@ -173,14 +174,18 @@ describe('workflow runs in chat', () => {
     await user.click(within(pane).getByRole('button', { name: '启动' }))
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '启动' }))
 
-    // A finished run opens on its result act, not on the form node.
-    expect(await within(pane).findByText('运行完成', {}, { timeout: 15_000 })).toBeInTheDocument()
-    expect(within(pane).queryByRole('region', { name: '确认巡检问题' })).not.toBeInTheDocument()
+    // A finished run opens on its confirmation node; the test run has no form payload,
+    // so the node shows the form's waiting state rather than a result act.
+    expect(await within(pane).findByText('表单尚未生成，运行到确认步骤后会自动显示。', {}, { timeout: 15_000 })).toBeInTheDocument()
 
-    // Clicking a non-form node opens that node's own stage and never the form.
+    // Clicking another node opens that node's own stage and leaves the form behind.
     await user.click(within(pane).getByRole('button', { name: '开始：巡检: 成功' }))
     expect(within(pane).getAllByText('接收巡检输入').length).toBeGreaterThan(0)
-    expect(within(pane).queryByRole('region', { name: '确认巡检问题' })).not.toBeInTheDocument()
+    expect(within(pane).queryByText('表单尚未生成，运行到确认步骤后会自动显示。')).not.toBeInTheDocument()
+
+    await user.click(within(pane).getByRole('button', { name: 'tasks: 成功' }))
+    expect(within(pane).getByRole('region', { name: '任务处理结果' })).toBeInTheDocument()
+    expect(within(pane).queryByText('表单尚未生成，运行到确认步骤后会自动显示。')).not.toBeInTheDocument()
   }, 30_000)
 
   it('reads an executing run again whenever its events stream says it changed', async () => {
