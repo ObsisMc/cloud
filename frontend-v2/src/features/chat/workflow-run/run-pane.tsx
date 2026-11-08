@@ -118,8 +118,10 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
   const artifacts = noArtifacts
   const revealedArtifactId: string | null = null
   const selectRun = useChatStore((s) => s.selectRun)
+  // A failed review node is the run's outcome too: land on it so the reason is on screen,
+  // instead of a generic failed result page with the cause one click away.
   const formNode = run.definitionSnapshot.nodes.find((node) =>
-    node.data.kind === 'form' && ['awaiting_input', 'succeeded', 'cancelled'].includes(run.nodeStates[node.id]?.status ?? ''),
+    node.data.kind === 'form' && ['awaiting_input', 'succeeded', 'cancelled', 'failed'].includes(run.nodeStates[node.id]?.status ?? ''),
   )
   // A live run opens on its Theater; a pending or finished one on Overview, as desktop primes it.
   // A confirmation node is the run's result surface: open it on load, but keep every other node

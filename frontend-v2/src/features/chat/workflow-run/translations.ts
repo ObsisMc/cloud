@@ -258,7 +258,7 @@ export const workflowRunTranslations = {
     "workflowRun.nodeStatus.inactive": "未激活分支",
     "workflowRun.status.pending": "未运行",
     "workflowRun.status.running": "运行中",
-    "workflowRun.status.awaiting_input": "待你处理",
+    "workflowRun.status.awaiting_input": "等待处理",
     "workflowRun.status.retry_waiting": "等待重试",
     "workflowRun.completeNode.action": "完成当前节点",
     "workflowRun.completeNode.disabledHint":
@@ -280,7 +280,7 @@ export const workflowRunTranslations = {
       "本轮没有正常结束，当前产出可能不完整。完成后工作流会进入下一步，并记录这次强制完成。",
     "workflowRun.stepCard.forceConfirm": "仍然完成",
     "workflowRun.stepCard.pausedBadge": "已暂停",
-    "workflowRun.stepCard.waitingBadge": "待你处理",
+    "workflowRun.stepCard.waitingBadge": "等待处理",
     "workflowRun.stepCard.provisional":
       "本轮仍在收尾；点完成时会按本轮重新校验，未结束会给出原因。",
     "workflowRun.stepCard.warning.empty_output":

@@ -255,6 +255,8 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
       </div>
     </header>
 
+    {form.status === 'open' && !form.canEdit && <p className="flex items-start gap-2 rounded-xl border bg-muted/25 px-3 py-2 text-sm text-muted-foreground"><Info className="mt-0.5 size-3.5 shrink-0" aria-hidden /><span>这是一份等待 {reviewer?.displayName ?? '指定确认人'} 确认的表单；只有确认人或工作区管理员可以提交，你可以先看证据。</span></p>}
+
     {total > 0 && <div className="flex flex-col gap-2 rounded-xl border bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
         {rollup.map(([severity, count]) => <span key={severity} className={cn('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium', severityChip(severity))}>
@@ -337,12 +339,11 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
         </div>}
         {retry.isError && <p role="alert" className="mt-2 text-sm text-destructive">任务当前不可重试，请查看运行状态。</p>}
 
-        {form.status === 'open' && !form.canEdit && <p className="mt-3 flex items-center gap-1.5 rounded-lg border bg-muted/25 px-3 py-2 text-sm text-muted-foreground"><Info className="size-3.5" aria-hidden />只有指定确认人或工作区管理员可以提交；你仍然可以查看证据。</p>}
         {notice && form.status === 'open' && <p role="status" className="mt-3 text-sm text-muted-foreground">{notice}</p>}
       </section>
     </div>
 
-    {form.status === 'open' && <footer className="sticky bottom-0 z-20 -mx-6 flex flex-col gap-2 border-t bg-background/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:gap-3">
+    {form.status === 'open' && form.canEdit && <footer className="sticky bottom-0 z-20 -mx-6 flex flex-col gap-2 border-t bg-background/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:gap-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{total === 0 ? '确认后继续' : remaining > 0 ? `还有 ${remaining} 项待确认` : missingOwner > 0 ? `还有 ${missingOwner} 项没指定负责人` : newTasks > 0 && reusedTasks > 0 ? `将新建 ${newTasks} 个任务、关联 ${reusedTasks} 个已有任务` : newTasks > 0 ? `将新建 ${newTasks} 个任务` : `将关联 ${reusedTasks} 个已有任务`}</p>
         {total > 0 && <p className="text-xs text-muted-foreground">保存草稿不会创建任务；提交后由后续节点统一处理。</p>}
