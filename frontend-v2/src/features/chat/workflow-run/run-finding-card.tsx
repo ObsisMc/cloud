@@ -147,7 +147,11 @@ export function RunFindingCard({
   const rejected = decision === 'rejected'
   const pending = !confirmed && !rejected
   // A rejection needs no owner: the platform keeps the evidence, not a task.
-  const showOwner = editable && confirmed
+  // Every row that already carries an owner fact shows it in the same slot — reused tasks keep
+  // theirs, new tasks let the reviewer pick — so "where is the owner field" never depends on
+  // which row happens to have a task from a previous night.
+  const showOwner = confirmed || (editable && existing !== undefined)
+  const showAssociation = existing !== undefined && result === undefined && !rejected
   const valueOf = (field: WorkflowFormField) => answer.values[text(field.name)] ?? ''
   const invalid = (field: WorkflowFormField) => Boolean(errors[`${key}:${text(field.name)}`])
   /** A submitted review is read as conclusions: values become text, not disabled inputs. */
@@ -156,7 +160,6 @@ export function RunFindingCard({
   const visible = conclusion
     ? fields.filter(field => field.type === 'readonly' || valueOf(field).length > 0)
     : fields.filter(field => !hidden.includes(field) || revealFields)
-  const owner = existing?.assignee ?? answer.assignee
 
   return <article
     aria-label={text(finding.title) || '未命名问题'}
@@ -207,21 +210,20 @@ export function RunFindingCard({
       })}
     </div>}
 
-    {(showOwner || (existing !== undefined && result === undefined && !rejected) || (conclusion && (confirmed || rejected)) || (hidden.length > 0 && !revealFields)) && <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t bg-muted/10 px-4 py-2.5">
-      {showOwner && !existing && <div className="flex min-w-0 items-center gap-2">
-        <span className="text-[11px] font-medium text-muted-foreground">负责人</span>
-        <div className="w-40"><TaskAssigneePicker tenantId={tenantId} squads={squads} value={answer.assignee ?? null} disabled={readOnly} onAssign={assignee => onPatch({ assignee: assignee ?? undefined })} /></div>
+    {(showOwner || showAssociation || (conclusion && rejected) || (hidden.length > 0 && !revealFields)) && <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t bg-muted/10 px-4 py-2.5">
+      {showOwner && <div className="flex min-w-0 items-center gap-2">
+        <span className="text-[11px] font-medium text-muted-foreground">负责人{existing !== undefined ? '（沿用）' : ''}</span>
+        {existing !== undefined
+          ? <span className="min-w-0 text-xs font-medium">{assigneeName(existing.assignee, roster, squads)}</span>
+          : <div className="w-40"><TaskAssigneePicker tenantId={tenantId} squads={squads} value={answer.assignee ?? null} disabled={readOnly} onAssign={assignee => onPatch({ assignee: assignee ?? undefined })} /></div>}
         {errors[`${key}:assignee`] && <p role="alert" className="text-xs text-destructive">请选择负责人。</p>}
       </div>}
-      {existing !== undefined && result === undefined && !rejected && <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        <span className="inline-flex items-center gap-1 rounded-md bg-info-soft px-2 py-1 font-medium text-info"><Link2 className="size-3" aria-hidden />关联到已有任务</span>
+      {showAssociation && <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground"><Link2 className="size-3" aria-hidden />关联到已有任务</span>
         <code className="font-mono text-[11px] text-muted-foreground">#{text(existing.taskId).slice(0, 8)}</code>
         {existing.status && <span className="text-muted-foreground">· {existingStatus(text(existing.status))}</span>}
-        <span className="text-muted-foreground">· 负责人</span>
-        <span className="font-medium">{assigneeName(existing.assignee, roster, squads)}</span>
         <Link className="inline-flex items-center gap-0.5 font-medium underline underline-offset-2" to={`/collaboration/tasks/${text(existing.taskId)}`}>查看任务<ArrowUpRight className="size-3" aria-hidden /></Link>
       </div>}
-      {conclusion && confirmed && <p className="flex min-w-0 items-center gap-2 text-xs"><span className="text-muted-foreground">负责人</span><span className="font-medium">{assigneeName(owner, roster, squads)}</span></p>}
       {conclusion && rejected && <p className="text-xs text-muted-foreground">已确认无需处理，不会创建任务。</p>}
       {hidden.length > 0 && !revealFields && <button type="button" disabled={readOnly} onClick={() => setRevealFields(true)} className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50"><Plus className="size-3" aria-hidden />添加{text(hidden[0]?.label) || '备注'}</button>}
     </div>}

@@ -118,6 +118,26 @@ it('marks every finding at once and can undo the batch', async () => {
   expect(screen.getByText('还有 2 项待确认')).toBeInTheDocument()
 })
 
+it('gives every row with an owner fact the same field, editable only when it creates a task', async () => {
+  form = {
+    ...form,
+    reviewerId: 'admin',
+    findings: [
+      { key: 'disk', title: '磁盘异常', description: '', evidence: '', severity: '高', module: '存储' },
+      { key: 'api', title: '接口错误率', description: '', evidence: '', severity: '中', module: 'API' },
+    ],
+    existingTasks: [{ key: 'disk', taskId: 'task-1', status: 'pending', assignee: { type: 'human', id: 'admin', displayName: '管理员' } }],
+  }
+  mount()
+  await screen.findByText('磁盘异常')
+  // The reused task owns its assignee: shown, never a dead picker.
+  expect(within(screen.getByRole('article', { name: '磁盘异常' })).getByText('负责人（沿用）')).toBeInTheDocument()
+  expect(screen.queryByText('负责人选择')).not.toBeInTheDocument()
+  fireEvent.click(within(screen.getByRole('article', { name: '接口错误率' })).getByRole('button', { name: '是问题' }))
+  expect(screen.getByText('负责人选择')).toBeInTheDocument()
+  expect(within(screen.getByRole('article', { name: '磁盘异常' })).queryByText('负责人选择')).not.toBeInTheDocument()
+})
+
 it('asks for one confirmation when the run found nothing', async () => {
   form = { ...form, findings: [] }
   api.submit.mockResolvedValueOnce({ version: 2 })
