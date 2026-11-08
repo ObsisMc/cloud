@@ -146,11 +146,10 @@ export function RunFindingCard({
   const confirmed = decision === 'confirmed'
   const rejected = decision === 'rejected'
   const pending = !confirmed && !rejected
-  // A rejection needs no owner: the platform keeps the evidence, not a task.
-  // Every row that already carries an owner fact shows it in the same slot — reused tasks keep
-  // theirs, new tasks let the reviewer pick — so "where is the owner field" never depends on
-  // which row happens to have a task from a previous night.
-  const showOwner = confirmed || (editable && existing !== undefined)
+  // A rejection needs no owner: the platform keeps the evidence, not a task. Every confirmed row
+  // gets the same control, so "where is the owner field" never depends on whether the finding
+  // happens to have a task from a previous night.
+  const showOwner = confirmed
   const showAssociation = existing !== undefined && result === undefined && !rejected
   const valueOf = (field: WorkflowFormField) => answer.values[text(field.name)] ?? ''
   const invalid = (field: WorkflowFormField) => Boolean(errors[`${key}:${text(field.name)}`])
@@ -212,9 +211,10 @@ export function RunFindingCard({
 
     {(showOwner || showAssociation || (conclusion && rejected) || (hidden.length > 0 && !revealFields)) && <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t bg-muted/10 px-4 py-2.5">
       {showOwner && <div className="flex min-w-0 items-center gap-2">
-        <span className="text-[11px] font-medium text-muted-foreground">负责人{existing !== undefined ? '（沿用）' : ''}</span>
-        {existing !== undefined
-          ? <span className="min-w-0 text-xs font-medium">{assigneeName(existing.assignee, roster, squads)}</span>
+        <span className="text-[11px] font-medium text-muted-foreground">负责人</span>
+        {/* One control for every confirmed row: a reused task pre-fills its current owner. */}
+        {conclusion
+          ? <span className="min-w-0 text-xs font-medium">{assigneeName(existing?.assignee ?? answer.assignee, roster, squads)}</span>
           : <div className="w-40"><TaskAssigneePicker tenantId={tenantId} squads={squads} value={answer.assignee ?? null} disabled={readOnly} onAssign={assignee => onPatch({ assignee: assignee ?? undefined })} /></div>}
         {errors[`${key}:assignee`] && <p role="alert" className="text-xs text-destructive">请选择负责人。</p>}
       </div>}

@@ -118,7 +118,7 @@ it('marks every finding at once and can undo the batch', async () => {
   expect(screen.getByText('还有 2 项待确认')).toBeInTheDocument()
 })
 
-it('gives every row with an owner fact the same field, editable only when it creates a task', async () => {
+it('gives every confirmed row the same owner control, reusing one where a task exists', async () => {
   form = {
     ...form,
     reviewerId: 'admin',
@@ -130,12 +130,14 @@ it('gives every row with an owner fact the same field, editable only when it cre
   }
   mount()
   await screen.findByText('磁盘异常')
-  // The reused task owns its assignee: shown, never a dead picker.
-  expect(within(screen.getByRole('article', { name: '磁盘异常' })).getByText('负责人（沿用）')).toBeInTheDocument()
+  // Nothing is decided yet, so no owner is asked for.
   expect(screen.queryByText('负责人选择')).not.toBeInTheDocument()
-  fireEvent.click(within(screen.getByRole('article', { name: '接口错误率' })).getByRole('button', { name: '是问题' }))
+  expect(screen.getByText('关联到已有任务')).toBeInTheDocument()
+  const disk = screen.getByRole('article', { name: '磁盘异常' })
+  fireEvent.click(within(disk).getByRole('button', { name: '是问题' }))
   expect(screen.getByText('负责人选择')).toBeInTheDocument()
-  expect(within(screen.getByRole('article', { name: '磁盘异常' })).queryByText('负责人选择')).not.toBeInTheDocument()
+  fireEvent.click(within(screen.getByRole('article', { name: '接口错误率' })).getByRole('button', { name: '是问题' }))
+  expect(screen.getAllByText('负责人选择')).toHaveLength(2)
 })
 
 it('asks for one confirmation when the run found nothing', async () => {
