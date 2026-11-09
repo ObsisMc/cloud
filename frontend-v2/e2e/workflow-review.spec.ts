@@ -70,6 +70,10 @@ test('review → tasks → task page, with draft, bulk, filters and reuse on the
   // Filtering hides what it should and keeps the counts.
   await form.getByRole('button', { name: '待确认 2' }).click()
   await expect(form.getByRole('heading', { name: '源码中存在硬编码令牌' })).toHaveCount(0)
+  await form.getByRole('button', { name: '排除筛选的 2 项' }).click()
+  await expect(form.getByRole('button', { name: '是问题 1' })).toBeVisible()
+  await expect(form.getByRole('button', { name: '不是问题 2' })).toBeVisible()
+  await form.getByRole('button', { name: '撤销' }).click()
   await form.getByRole('button', { name: '是问题 1' }).click()
   await expect(form.getByRole('heading', { name: '源码中存在硬编码令牌' })).toBeVisible()
   await form.getByRole('button', { name: '全部 3' }).click()

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import {
   ArrowUpRight,
   Check,
@@ -96,14 +96,14 @@ function DecisionBadge({ decision }: { decision: string }) {
   return <Badge variant="outline" className="shrink-0 gap-1 border-warning/35 bg-warning/10 text-warning">{decisionLabel(decision)}</Badge>
 }
 
-function FieldControl({ field, value, invalid, disabled, onChange }: {
+function FieldControl({ id, field, value, invalid, disabled, onChange }: {
+  id: string
   field: WorkflowFormField
   value: string
   invalid: boolean
   disabled: boolean
   onChange: (value: string) => void
 }) {
-  const id = `field-${field.name}`
   if (field.type === 'select') return <NativeSelect id={id} aria-invalid={invalid} disabled={disabled} value={value} onChange={event => onChange(event.target.value)}>
     <NativeSelectOption value="">请选择</NativeSelectOption>
     {(Array.isArray(field.options) ? field.options : []).map(option => <NativeSelectOption key={String(option)} value={String(option)}>{String(option)}</NativeSelectOption>)}
@@ -139,6 +139,7 @@ export function RunFindingCard({
   onPatch: (change: Partial<FormAnswer>) => void
 }) {
   const [revealFields, setRevealFields] = useState(false)
+  const fieldPrefix = useId()
   const key = text(finding.key)
   const severity = text(finding.severity)
   const module = text(finding.module)
@@ -155,7 +156,7 @@ export function RunFindingCard({
   const invalid = (field: WorkflowFormField) => Boolean(errors[`${key}:${text(field.name)}`])
   /** A submitted review is read as conclusions: values become text, not disabled inputs. */
   const conclusion = !editable
-  const hidden = fields.filter(field => !conclusion && field.type === 'textarea' && !valueOf(field) && !invalid(field))
+  const hidden = fields.filter(field => !conclusion && field.required !== true && field.type === 'textarea' && !valueOf(field) && !invalid(field))
   const visible = conclusion
     ? fields.filter(field => field.type === 'readonly' || valueOf(field).length > 0)
     : fields.filter(field => !hidden.includes(field) || revealFields)
@@ -179,7 +180,7 @@ export function RunFindingCard({
           {pending && editable && <span className="inline-flex items-center rounded-md border border-warning/35 bg-warning/10 px-1.5 py-0.5 text-[11px] font-medium text-warning">待确认</span>}
         </div>
         <h3 className="mt-1.5 text-sm font-semibold leading-snug">{text(finding.title) || '未命名问题'}</h3>
-        {text(finding.description) && <p className="mt-1 line-clamp-2 text-sm leading-5 text-muted-foreground">{text(finding.description)}</p>}
+        {text(finding.description) && <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-muted-foreground">{text(finding.description)}</p>}
       </div>
       {editable ? <DecisionToggle decision={decision} disabled={readOnly} onDecide={onDecide} /> : <DecisionBadge decision={decision} />}
     </div>
@@ -189,20 +190,20 @@ export function RunFindingCard({
         <ShieldCheck className="size-3.5" aria-hidden />证据
         <ChevronDown className="ml-auto size-3.5 transition-transform group-open:rotate-180" aria-hidden />
       </summary>
-      <p className="whitespace-pre-wrap border-t px-2.5 py-2 text-xs leading-5">{text(finding.evidence) || '这次没有提供可展开的证据。'}</p>
+      <p className="whitespace-pre-wrap break-words border-t px-2.5 py-2 text-xs leading-5">{text(finding.evidence) || '这次没有提供可展开的证据。'}</p>
     </details>
 
     {visible.length > 0 && <div className={cn('mx-4 mt-2.5 grid gap-2', conclusion ? 'rounded-lg border bg-muted/15 px-3 py-2.5' : 'sm:grid-cols-2')}>
       {visible.map(field => {
         const name = text(field.name)
-        if (conclusion) return <div key={name} className="min-w-0">
+        if (conclusion || field.type === 'readonly') return <div key={name} className="min-w-0">
           <p className="text-[11px] font-medium text-muted-foreground">{text(field.label)}</p>
           <p className="mt-0.5 whitespace-pre-wrap text-sm">{field.type === 'readonly' ? text((finding as unknown as Record<string, unknown>)[name]) : valueOf(field)}</p>
         </div>
         return <div key={name} className={cn('min-w-0', field.type === 'textarea' && 'sm:col-span-2')}>
-          <label htmlFor={`field-${name}`} className="text-[11px] font-medium text-muted-foreground">{text(field.label)}{field.required === true ? ' *' : ''}</label>
+          <label htmlFor={`${fieldPrefix}-${name}`} className="text-[11px] font-medium text-muted-foreground">{text(field.label)}{field.required === true ? ' *' : ''}</label>
           <div className="mt-1">
-            <FieldControl field={field} value={valueOf(field)} invalid={invalid(field)} disabled={readOnly} onChange={value => onPatch({ values: { ...answer.values, [name]: value } })} />
+            <FieldControl id={`${fieldPrefix}-${name}`} field={field} value={valueOf(field)} invalid={invalid(field)} disabled={readOnly} onChange={value => onPatch({ values: { ...answer.values, [name]: value } })} />
           </div>
           {invalid(field) && <p role="alert" className="mt-1 text-xs text-destructive">请填写这一项。</p>}
         </div>
@@ -212,12 +213,13 @@ export function RunFindingCard({
     {(showOwner || showAssociation || (conclusion && rejected) || (hidden.length > 0 && !revealFields)) && <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t bg-muted/10 px-4 py-2.5">
       {showOwner && <div className="flex min-w-0 items-center gap-2">
         <span className="text-[11px] font-medium text-muted-foreground">负责人</span>
-        {/* One control for every confirmed row: a reused task pre-fills its current owner. */}
+        {/* Reuse preserves ownership on the server; changes belong on the task itself. */}
         {conclusion
           ? <span className="min-w-0 text-xs font-medium">{assigneeName(existing?.assignee ?? answer.assignee, roster, squads)}</span>
-          : <div className="w-40"><TaskAssigneePicker tenantId={tenantId} squads={squads} value={answer.assignee ?? null} disabled={readOnly} onAssign={assignee => onPatch({ assignee: assignee ?? undefined })} /></div>}
+          : <div className="w-40"><TaskAssigneePicker tenantId={tenantId} squads={squads} value={answer.assignee ?? null} disabled={readOnly || existing !== undefined} onAssign={assignee => onPatch({ assignee: assignee ?? undefined })} /></div>}
         {errors[`${key}:assignee`] && <p role="alert" className="text-xs text-destructive">请选择负责人。</p>}
       </div>}
+      {showOwner && existing && !conclusion && <p className="text-xs text-muted-foreground">沿用已有任务负责人，可在任务详情调整。</p>}
       {showAssociation && <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground"><Link2 className="size-3" aria-hidden />关联到已有任务</span>
         <code className="font-mono text-[11px] text-muted-foreground">#{text(existing.taskId).slice(0, 8)}</code>

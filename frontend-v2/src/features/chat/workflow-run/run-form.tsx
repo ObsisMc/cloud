@@ -49,7 +49,7 @@ function readAnswers(form: WorkflowForm): FormAnswer[] {
       key: row.key,
       decision: saved?.decision || 'pending',
       values: saved?.values ?? {},
-      assignee: assigneeRef(saved?.assignee) ?? assigneeRef(existing?.assignee),
+      assignee: existing ? assigneeRef(existing.assignee) : assigneeRef(saved?.assignee),
     }
   })
 }
@@ -88,6 +88,10 @@ export function RunForm({ tenantId, runId, runStatus, nodeError }: { tenantId: s
       <p className="text-sm text-muted-foreground">{nodeError}</p>
       <p className="text-xs text-muted-foreground">这条运行停在确认步骤之前：报告或问题列表没有产出，或表单配置的取值变量对不上。修正上游节点后重新运行即可。</p>
     </section>
+    if (query.isError && !(isAxiosError(query.error) && query.error.response?.status === 404)) return <div role="alert" className="flex min-h-48 flex-col items-center justify-center gap-3 text-sm text-destructive">
+      确认表单读取失败，请检查网络或访问权限。
+      <Button variant="outline" disabled={query.isFetching} onClick={() => void query.refetch()}>{query.isFetching ? '正在重试…' : '重新读取'}</Button>
+    </div>
     return <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-sm text-muted-foreground" role="status"><CircleDashed className="size-6" />表单尚未生成，运行到确认步骤后会自动显示。<Button variant="outline" onClick={() => void query.refetch()}>刷新</Button></div>
   }
   return <FormEditor key={query.data.id} form={query.data} tenantId={tenantId} runStatus={runStatus} />
@@ -180,15 +184,16 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
   }
 
   function bulk(decision: 'confirmed' | 'rejected') {
+    const keys = new Set(visibleFindings.map(finding => finding.key))
     setUndo(answers)
     setDirty(true)
     setErrors({})
-    setAnswers(current => current.map(answer => ({
+    setAnswers(current => current.map(answer => keys.has(answer.key) ? ({
       ...answer,
       decision,
       assignee: answer.assignee ?? (decision === 'confirmed' && !existingFor(answer.key) ? defaultAssignee : undefined),
-    })))
-    setNotice(decision === 'confirmed' ? `已把 ${total} 项都标为问题，可直接调整负责人。` : `已把 ${total} 项都标为不是问题。`)
+    }) : answer))
+    setNotice(`已将当前筛选的 ${keys.size} 项标为${decision === 'confirmed' ? '问题' : '不是问题'}，可撤销。`)
   }
 
   function revertBulk() {
@@ -211,7 +216,11 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
       }
     }
     setErrors(found)
-    if (Object.keys(found).length) return
+    if (Object.keys(found).length) {
+      setFilter('all')
+      setNotice('请补齐标出的必填项后提交。')
+      return
+    }
     mutation.mutate(final)
   }
 
@@ -282,9 +291,9 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
         </div>
       </div>
       {editable && total > 1 && <div className="flex shrink-0 items-center gap-1.5">
-        {undo !== null && <Button variant="ghost" size="xs" onClick={revertBulk}><RotateCcw />撤销</Button>}
-        <Button variant="outline" size="xs" disabled={readOnly} onClick={() => bulk('confirmed')}><CheckCheck />全部标为问题</Button>
-        <Button variant="outline" size="xs" disabled={readOnly} onClick={() => bulk('rejected')}><XCircle />全部排除</Button>
+        {undo !== null && <Button variant="ghost" size="xs" disabled={readOnly} onClick={revertBulk}><RotateCcw />撤销</Button>}
+        <Button variant="outline" size="xs" disabled={readOnly || visibleFindings.length === 0} onClick={() => bulk('confirmed')}><CheckCheck />{filter === 'all' ? '全部标为问题' : `将筛选的 ${visibleFindings.length} 项标为问题`}</Button>
+        <Button variant="outline" size="xs" disabled={readOnly || visibleFindings.length === 0} onClick={() => bulk('rejected')}><XCircle />{filter === 'all' ? '全部排除' : `排除筛选的 ${visibleFindings.length} 项`}</Button>
       </div>}
     </div>}
 
@@ -326,7 +335,7 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
         </div>
 
         {dirty && form.version > version && <div role="alert" className="mt-3 rounded-xl border border-warning/35 bg-warning-soft p-3 text-sm">
-          <p className="font-medium">其他确认人已更新这份表单，保存时会以服务端版本为准。</p>
+          <p className="font-medium">其他确认人已更新这份表单。请先核对本地修改，再载入最新草稿；载入会替换本页未保存的内容。</p>
           <details className="mt-1.5"><summary className="cursor-pointer text-xs text-muted-foreground">查看未保存的本地修改</summary>{answers.map(answer => <p key={answer.key} className="mt-1 text-xs">{form.findings.find(finding => finding.key === answer.key)?.title}：{answer.decision === 'confirmed' ? '是问题' : answer.decision === 'rejected' ? '不是问题' : '待确认'} · {Object.values(answer.values).join('；')}</p>)}</details>
           {form.status === 'open' && <Button className="mt-2" variant="outline" size="sm" onClick={() => { setAnswers(readAnswers(form)); setVersion(form.version); setDirty(false); setNotice('已载入最新草稿。') }}>载入最新草稿</Button>}
         </div>}
@@ -345,7 +354,7 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
 
     {form.status === 'open' && form.canEdit && <footer className="sticky bottom-0 z-20 -mx-6 flex flex-col gap-2 border-t bg-background/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:gap-3">
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{total === 0 ? '确认后继续' : remaining > 0 ? `还有 ${remaining} 项待确认` : missingOwner > 0 ? `还有 ${missingOwner} 项没指定负责人` : newTasks > 0 && reusedTasks > 0 ? `将新建 ${newTasks} 个任务、关联 ${reusedTasks} 个已有任务` : newTasks > 0 ? `将新建 ${newTasks} 个任务` : `将关联 ${reusedTasks} 个已有任务`}</p>
+        <p className="text-sm font-medium">{total === 0 ? '确认后继续' : remaining > 0 ? `还有 ${remaining} 项待确认` : missingOwner > 0 ? `还有 ${missingOwner} 项没指定负责人` : newTasks > 0 && reusedTasks > 0 ? `将新建 ${newTasks} 个任务、关联 ${reusedTasks} 个已有任务` : newTasks > 0 ? `将新建 ${newTasks} 个任务` : reusedTasks > 0 ? `将关联 ${reusedTasks} 个已有任务` : '本次无需创建任务'}</p>
         {total > 0 && <p className="text-xs text-muted-foreground">保存草稿不会创建任务；提交后由后续节点统一处理。</p>}
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
