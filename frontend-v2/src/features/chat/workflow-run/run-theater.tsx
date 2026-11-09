@@ -659,7 +659,7 @@ export function RunTheater({
           <div
             className={cn(
               "absolute inset-0 flex flex-col p-6",
-              primaryConversationOpen ? "overflow-hidden" : "overflow-auto",
+              primaryConversationOpen || (!showResultAct && primaryStage === "form") ? "overflow-hidden" : "overflow-auto",
             )}
             style={{ right: inspectorVisualWidth }}
           >
@@ -672,6 +672,8 @@ export function RunTheater({
                 "relative w-full",
                 primaryConversationOpen
                   ? "flex h-full min-h-0 max-w-none flex-1 flex-col"
+                  : !showResultAct && primaryStage === "form"
+                    ? "mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col"
                   : primaryStage !== null
                     ? "mx-auto w-full max-w-6xl shrink-0"
                   : "mx-auto my-auto max-w-xl shrink-0",

@@ -214,3 +214,40 @@ it('offers a retry when reading the form fails', async () => {
   fireEvent.click(screen.getByRole('button', { name: '重新读取' }))
   expect(await screen.findByText('磁盘异常')).toBeInTheDocument()
 })
+
+it('waits for task receipts when the run finishes before the form query catches up', async () => {
+  form = { ...form, status: 'submitted', submittedBy: 'admin', canEdit: false,
+    answers: [{ key: 'disk', decision: 'confirmed', assignee: { type: 'human', id: 'admin' } }] }
+  const { client } = mount('succeeded')
+  await screen.findByText('磁盘异常')
+  expect(screen.queryByText(/无需处理，运行已完成/)).not.toBeInTheDocument()
+  expect(screen.getByText(/正在同步任务结果/)).toBeInTheDocument()
+  form = { ...form, results: [{ key: 'disk', taskId: 'task-1', action: 'created' }] }
+  await act(async () => { await client.invalidateQueries({ queryKey: ['workflow-form', 'tenant', 'run'] }) })
+  expect(await screen.findByText(/新建 1 个任务/)).toBeInTheDocument()
+  expect(screen.queryByText(/正在同步任务结果/)).not.toBeInTheDocument()
+})
+
+it('reports no tasks only when the submitted findings were all rejected', async () => {
+  form = { ...form, status: 'submitted', submittedBy: 'admin', canEdit: false,
+    answers: [{ key: 'disk', decision: 'rejected' }] }
+  mount('succeeded')
+  expect(await screen.findByText(/无需处理，运行已完成/)).toBeInTheDocument()
+})
+
+it('clears the failed save and batch undo when loading the latest draft after a conflict', async () => {
+  api.save.mockRejectedValueOnce(Object.assign(new AxiosError('conflict'), { response: { status: 409 } }))
+  form.findings.push({ key: 'api', title: '接口异常', description: '', evidence: '', severity: '高', module: 'API' })
+  const { client } = mount()
+  await screen.findByText('磁盘异常')
+  fireEvent.click(screen.getByRole('button', { name: '全部排除' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText('这份表单已被更新，载入最新草稿后再提交。')
+  form = { ...form, version: 2, answers: [{ key: 'disk', decision: 'rejected', values: { notes: '其他确认人的最新备注' } }] }
+  await act(async () => { await client.invalidateQueries({ queryKey: ['workflow-form', 'tenant', 'run'] }) })
+  fireEvent.click(await screen.findByRole('button', { name: '载入最新草稿' }))
+  expect(await screen.findByText('已载入最新草稿。')).toBeInTheDocument()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '撤销' })).not.toBeInTheDocument()
+  expect(screen.getByLabelText('备注')).toHaveValue('其他确认人的最新备注')
+})

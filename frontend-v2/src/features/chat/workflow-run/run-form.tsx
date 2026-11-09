@@ -167,6 +167,8 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
   const submittedBy = people.find(member => member.userId === form.submittedBy)?.displayName ?? '确认人'
   const created = form.results.filter(result => result.action === 'created').length
   const reused = form.results.filter(result => result.action === 'reused').length
+  // The run and form are separate queries: success can arrive before task receipts.
+  const awaitingTaskResults = displayAnswers.some(answer => answer.decision === 'confirmed' && !form.results.some(result => result.key === answer.key))
   const rollup = severityRollup(form)
 
   function patch(key: string, change: Partial<FormAnswer>) {
@@ -204,6 +206,16 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
     setNotice('已撤销批量判定。')
   }
 
+  function loadLatestDraft() {
+    setAnswers(readAnswers(form))
+    setVersion(form.version)
+    setDirty(false)
+    setUndo(null)
+    setErrors({})
+    mutation.reset()
+    setNotice('已载入最新草稿。')
+  }
+
   function save(final: boolean) {
     const found: Record<string, string> = {}
     if (final) {
@@ -237,7 +249,9 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
       ? runStatus === 'failed'
         ? `已由 ${submittedBy} 确认 · 任务没有建成，可在下方重试`
         : runStatus === 'succeeded'
-          ? `已由 ${submittedBy} 确认 · ${created > 0 ? `新建 ${created} 个任务` : ''}${created > 0 && reused > 0 ? '、' : ''}${reused > 0 ? `关联 ${reused} 个` : ''}${created + reused === 0 ? '无需处理，运行已完成' : ''}`
+          ? awaitingTaskResults
+            ? `已由 ${submittedBy} 确认 · 运行已完成，正在同步任务结果…`
+            : `已由 ${submittedBy} 确认 · ${created > 0 ? `新建 ${created} 个任务` : ''}${created > 0 && reused > 0 ? '、' : ''}${reused > 0 ? `关联 ${reused} 个` : ''}${created + reused === 0 ? '无需处理，运行已完成' : ''}`
           : `已由 ${submittedBy} 确认 · 正在生成任务`
       : total === 0
         ? '没有需要判定的问题。'
@@ -251,7 +265,9 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
       ? <Badge variant="outline" className="gap-1 border-muted-foreground/30 bg-muted text-muted-foreground"><XCircle className="size-3" />已取消</Badge>
       : <Badge variant="outline" className="gap-1 border-warning/35 bg-warning/10 text-warning"><CircleDashed className="size-3" />等待确认</Badge>
 
-  return <section className="flex w-full flex-col gap-4" aria-label="报告与问题确认">
+  return <section className="flex min-h-0 w-full flex-1 flex-col" aria-label="报告与问题确认">
+    {/* Reserve footer space in the layout so native focus/scroll never lands behind it. */}
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-1 pb-4">
     <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
       <div className="min-w-0">
         <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><ClipboardCheck className="size-3.5" aria-hidden />确认步骤</p>
@@ -337,7 +353,7 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
         {dirty && form.version > version && <div role="alert" className="mt-3 rounded-xl border border-warning/35 bg-warning-soft p-3 text-sm">
           <p className="font-medium">其他确认人已更新这份表单。请先核对本地修改，再载入最新草稿；载入会替换本页未保存的内容。</p>
           <details className="mt-1.5"><summary className="cursor-pointer text-xs text-muted-foreground">查看未保存的本地修改</summary>{answers.map(answer => <p key={answer.key} className="mt-1 text-xs">{form.findings.find(finding => finding.key === answer.key)?.title}：{answer.decision === 'confirmed' ? '是问题' : answer.decision === 'rejected' ? '不是问题' : '待确认'} · {Object.values(answer.values).join('；')}</p>)}</details>
-          {form.status === 'open' && <Button className="mt-2" variant="outline" size="sm" onClick={() => { setAnswers(readAnswers(form)); setVersion(form.version); setDirty(false); setNotice('已载入最新草稿。') }}>载入最新草稿</Button>}
+          {form.status === 'open' && <Button className="mt-2" variant="outline" size="sm" disabled={mutation.isPending} onClick={loadLatestDraft}>载入最新草稿</Button>}
         </div>}
 
         {mutation.isError && <p role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />{saveError}</p>}
@@ -352,7 +368,9 @@ function FormEditor({ form, tenantId, runStatus }: { form: WorkflowForm; tenantI
       </section>
     </div>
 
-    {form.status === 'open' && form.canEdit && <footer className="sticky bottom-0 z-20 -mx-6 flex flex-col gap-2 border-t bg-background/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:gap-3">
+    </div>
+
+    {form.status === 'open' && form.canEdit && <footer className="flex shrink-0 flex-col gap-2 border-t bg-background px-1 py-3 sm:flex-row sm:items-center sm:gap-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{total === 0 ? '确认后继续' : remaining > 0 ? `还有 ${remaining} 项待确认` : missingOwner > 0 ? `还有 ${missingOwner} 项没指定负责人` : newTasks > 0 && reusedTasks > 0 ? `将新建 ${newTasks} 个任务、关联 ${reusedTasks} 个已有任务` : newTasks > 0 ? `将新建 ${newTasks} 个任务` : reusedTasks > 0 ? `将关联 ${reusedTasks} 个已有任务` : '本次无需创建任务'}</p>
         {total > 0 && <p className="text-xs text-muted-foreground">保存草稿不会创建任务；提交后由后续节点统一处理。</p>}

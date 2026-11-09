@@ -312,6 +312,59 @@ test('thirty findings stay scannable and bulk-ready', async ({ page }) => {
   await expect(form.getByRole('link', { name: '打开任务' })).toHaveCount(30)
 })
 
+test('scrolling a decision into view never puts it behind the action footer', async ({ page }) => {
+  await page.goto('/chat')
+  await signIn(page)
+  const rows = findings(Date.now().toString(36)).map(row => ({ ...row, description: '长描述与证据需要滚动检查。'.repeat(40) }))
+  const { run } = await publishRun(page, '巡检滚动操作', rows)
+  await page.goto(`/chat?run=${run}`)
+  const form = page.getByRole('region', { name: '报告与问题确认' })
+  const button = form.getByRole('group', { name: '是否为问题' }).nth(1).getByRole('button', { name: '是问题', exact: true })
+  await expect(button).toBeVisible({ timeout: 30_000 })
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport)
+    // Native focus/scrolling must see the usable viewport, not space covered by the footer.
+    await expect.poll(async () => button.evaluate(element => {
+      const footer = element.closest('section[aria-label="报告与问题确认"]')!.querySelector('footer')!
+      let scroller = element.parentElement
+      while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+      return scroller !== null && scroller.getBoundingClientRect().bottom <= footer.getBoundingClientRect().top
+    })).toBe(true)
+    await button.evaluate(element => element.scrollIntoView({ block: 'end', behavior: 'instant' }))
+    await expect.poll(async () => button.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+      return hit !== null && element.contains(hit)
+    })).toBe(true)
+    await button.click({ trial: true })
+    await expect(form.getByRole('button', { name: '保存草稿' })).toBeInViewport()
+  }
+})
+
+test('a completed run waits for delayed form receipts instead of claiming no tasks', async ({ page }) => {
+  await page.goto('/chat')
+  await signIn(page)
+  const { run } = await publishRun(page, '巡检结果同步', findings(Date.now().toString(36)))
+  let delayReceipts = true
+  // Only delay the read projection; submission and task creation still hit the real backend.
+  await page.route(`**/workflow-runs/${run}/form`, async route => {
+    if (route.request().method() !== 'GET') return route.continue()
+    const response = await route.fetch()
+    const form = await response.json()
+    await route.fulfill({ response, json: delayReceipts ? { ...form, results: [] } : form })
+  })
+  await page.goto(`/chat?run=${run}`)
+  const form = page.getByRole('region', { name: '报告与问题确认' })
+  await expect(form.getByText('还有 3 项待确认')).toBeVisible({ timeout: 30_000 })
+  await form.getByRole('button', { name: '全部标为问题' }).click()
+  await form.getByRole('button', { name: '确认并生成任务' }).click()
+  await expect(form.getByText(/运行已完成，正在同步任务结果/)).toBeVisible({ timeout: 30_000 })
+  await expect(form.getByText(/无需处理，运行已完成/)).toHaveCount(0)
+  delayReceipts = false
+  await expect(form.getByText(/新建 3 个任务/)).toBeVisible({ timeout: 15_000 })
+  await expect(form.getByRole('link', { name: '打开任务', exact: true })).toHaveCount(3)
+})
+
 test('a scheduled workflow parks at the form and its history links back to it', async ({ page }) => {
   test.setTimeout(150_000)
   await page.goto('/schedules')
