@@ -34,6 +34,18 @@ type stream struct {
 }
 
 func (st *stream) Close() error { st.once.Do(st.cancel); return nil }
+
+// asNextError prefers the query context's own cancellation over the error a cancelled
+// call returned. Closing the observer (or the caller cancelling) mid-query surfaces as
+// context.Canceled rather than a wrapped database error that publicError would classify
+// as execution unavailable.
+func (st *stream) asNextError(query context.Context, err error) error {
+	if qerr := query.Err(); qerr != nil {
+		return qerr
+	}
+	return publicError(err)
+}
+
 func (st *stream) Next(ctx context.Context) (execution.Event, error) {
 	query, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -45,7 +57,7 @@ func (st *stream) Next(ctx context.Context) (execution.Event, error) {
 		}
 		events, err := st.s.db.ReadExecutionEvents(query, st.scope, st.sid, st.cursor, 1)
 		if err != nil {
-			return execution.Event{}, publicError(err)
+			return execution.Event{}, st.asNextError(query, err)
 		}
 		if len(events) > 0 {
 			st.cursor = events[0].Sequence
@@ -53,14 +65,14 @@ func (st *stream) Next(ctx context.Context) (execution.Event, error) {
 		}
 		session, err := st.s.ReadSession(query, st.scope, st.sid)
 		if err != nil {
-			return execution.Event{}, err
+			return execution.Event{}, st.asNextError(query, err)
 		}
 		if session.EndedAt != nil {
 			// End may commit between the empty event query and this session read. Recheck
 			// after observing EndedAt so the terminal event cannot be skipped as EOF.
 			events, err = st.s.db.ReadExecutionEvents(query, st.scope, st.sid, st.cursor, 1)
 			if err != nil {
-				return execution.Event{}, publicError(err)
+				return execution.Event{}, st.asNextError(query, err)
 			}
 			if len(events) > 0 {
 				st.cursor = events[0].Sequence
