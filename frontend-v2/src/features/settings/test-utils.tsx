@@ -11,6 +11,7 @@ import type {
 import type {
   MarketSource,
   MarketSourceInput,
+  SkillProgress,
 } from './market-api/generated'
 import type { Skill, SkillInput } from '@/lib/skills-api/generated'
 import { demoUser, fakeBackend } from '@/test/backend'
@@ -86,18 +87,21 @@ export function installMarketplaceBackend({
   selections = [],
   marketSources = [],
   skills = [],
+  progress = [],
 }: {
   role?: 'owner' | 'member'
   catalog?: PluginCatalogEntry[]
   selections?: SpacePlugin[]
   marketSources?: MarketSource[]
   skills?: Skill[]
+  progress?: { namespace: string; identifier: string; results: SkillProgress[] }[]
 } = {}) {
   const state = {
     catalog: [...catalog],
     selections: [...selections],
     marketSources: [...marketSources],
     skills: [...skills],
+    progress: [...progress],
   }
   const seen: string[] = []
   const bodies: unknown[] = []
@@ -256,6 +260,24 @@ export function installMarketplaceBackend({
     }
     const base = `/api/v1/tenants/${MARKET_TENANT}/spaces/${MARKET_SPACE}/plugins`
     const sourceBase = `${base}/sources`
+    const resultsBase = `${base}/results`
+    if (url.startsWith(resultsBase + '/') && method === 'GET') {
+      const [namespace, identifier] = url
+        .slice(resultsBase.length + 1)
+        .split('/')
+        .map(decodeURIComponent)
+      return {
+        status: 200,
+        data: {
+          items: state.progress
+            .filter(
+              (item) =>
+                item.namespace === namespace && item.identifier === identifier,
+            )
+            .flatMap((item) => item.results),
+        },
+      }
+    }
     if (url === sourceBase && method === 'GET')
       return { status: 200, data: { items: state.marketSources } }
     if (url === sourceBase && method === 'POST') {
