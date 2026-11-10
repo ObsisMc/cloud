@@ -1,6 +1,6 @@
 import { QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { MapIcon, MessageSquareIcon, PlayIcon, RotateCcwIcon, SquareIcon, TheaterIcon, WorkflowIcon } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { I18nextProvider, useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,7 +16,7 @@ import { ContractError } from '@/lib/workflows/contracts'
 import { localizeContractError } from '@/lib/workflows/host/contract-error'
 import { isTerminalRunStatus, type GraphWorkflowRun, type WorkflowArtifact, type WorkflowNodeConversationItem } from '@/lib/workflows/runtime'
 import { WorkspaceNavigationProvider } from '@/components/workspace-panel/navigation'
-import { useWorkspacePanel } from '@/components/workspace-panel/use-panel'
+import { useWorkspacePanel, type WorkspacePanelState } from '@/components/workspace-panel/use-panel'
 import { WorkspacePanel, WorkspaceToggle } from '@/components/workspace-panel/workspace-panel'
 import { WorkspaceSplit } from '@/components/workspace-panel/workspace-split'
 import { FadeText } from '../components/fade-text'
@@ -28,6 +28,7 @@ import { isLoopHistoryNode } from './loop-round-state'
 import { resolveStageFocusNodeId, resolveTheaterFocus, shouldReleaseLivePinToFollow, shouldStealFocusForArtifactReveal, type TheaterFocusStatusSample } from './run-focus'
 import { RunOverviewCanvas } from './run-overview-canvas'
 import { runStatusLabel, runStatusTone } from './run-status-style'
+import { RunTenantContext } from './run-tenant'
 import { RunTheater } from './run-theater'
 import { workflowRunTranslations } from './translations'
 import { WorkflowRunStartDialog } from './workflow-run-start-dialog'
@@ -48,9 +49,12 @@ const noArtifacts: WorkflowArtifact[] = []
  * the run; the page reads it again each time its events stream announces a change, polling as a
  * fallback, until it ends. The page brings the tenant's
  * workflow client and query cache, which the run and the inspector's Agent configuration read.
+ * A page outside chat passes its tenant; `readOnly` shows the run without acting on it, `workspace`
+ * hands the workspace panel to that page, and `leading` puts the page's own control at the start of the header.
  */
-export default function RunPane({ runId }: { runId: string }) {
-  const tenantId = useChatStore((s) => s.tenantId) ?? ''
+export default function RunPane({ runId, tenantId: hostedTenant, readOnly = false, workspace, leading }: { runId: string; tenantId?: string; readOnly?: boolean; workspace?: WorkspacePanelState; leading?: ReactNode }) {
+  const connectedTenant = useChatStore((s) => s.tenantId)
+  const tenantId = hostedTenant ?? connectedTenant ?? ''
   const client = useMemo(() => createContractsClient(createHttpWorkflowContracts(tenantId), tenantId), [tenantId])
   const [queryClient] = useState(createWorkflowQueryClient)
   // The sidebar's project run list lives in the page's cache, not the run page's own; a run this
@@ -64,7 +68,9 @@ export default function RunPane({ runId }: { runId: string }) {
     <I18nextProvider i18n={runI18n}>
       <QueryClientProvider client={queryClient}>
         <ContractsClientProvider client={client}>
-          <LoadedRun key={runId} tenantId={tenantId} runId={runId} refreshProjectRuns={refreshProjectRuns} />
+          <RunTenantContext.Provider value={tenantId}>
+            <LoadedRun key={runId} tenantId={tenantId} runId={runId} readOnly={readOnly} workspace={workspace} leading={leading} refreshProjectRuns={refreshProjectRuns} />
+          </RunTenantContext.Provider>
           <RunToaster />
         </ContractsClientProvider>
       </QueryClientProvider>
@@ -81,7 +87,7 @@ function RunToaster() {
  * Reads the run's frozen graph once, then the run itself until it ends: again whenever its events
  * stream says it changed, with polling as the fallback.
  */
-function LoadedRun({ tenantId, runId, refreshProjectRuns }: { tenantId: string; runId: string; refreshProjectRuns: (projectId: string) => void }) {
+function LoadedRun({ tenantId, runId, readOnly, workspace, leading, refreshProjectRuns }: { tenantId: string; runId: string; readOnly: boolean; workspace: WorkspacePanelState | undefined; leading: ReactNode; refreshProjectRuns: (projectId: string) => void }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const snapshot = useQuery({ ...runSnapshotQuery(tenantId, runId), enabled: tenantId !== '' })
@@ -96,7 +102,7 @@ function LoadedRun({ tenantId, runId, refreshProjectRuns }: { tenantId: string; 
     connected: setFollowed,
   })
   const error = snapshot.error ?? run.error
-  if (run.data) return <RunWorkspace tenantId={tenantId} run={run.data} refreshProjectRuns={refreshProjectRuns} />
+  if (run.data) return <RunWorkspace tenantId={tenantId} run={run.data} readOnly={readOnly} hostedWorkspace={workspace} leading={leading} refreshProjectRuns={refreshProjectRuns} />
   return (
     <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
       <p>{error === null ? '正在读取运行…' : isMissing(error) ? '这次运行已经不在了。' : localizeContractError(error, t)}</p>
@@ -111,7 +117,7 @@ function runConversations(run: GraphWorkflowRun): WorkflowNodeConversationItem[]
   return Object.values(run.nodeStates).flatMap((state) => state.conversation ?? [])
 }
 
-function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string; run: GraphWorkflowRun; refreshProjectRuns: (projectId: string) => void }) {
+function RunWorkspace({ tenantId, run, readOnly, hostedWorkspace, leading, refreshProjectRuns }: { tenantId: string; run: GraphWorkflowRun; readOnly: boolean; hostedWorkspace: WorkspacePanelState | undefined; leading: ReactNode; refreshProjectRuns: (projectId: string) => void }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const conversations = useMemo(() => runConversations(run), [run])
@@ -138,7 +144,8 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
   const focusStatusSampleRef = useRef<TheaterFocusStatusSample | null>(null)
   const conversationByNodeId = useConversationByNode(conversations)
   // The checkout every Agent node of the run shares; read again whenever a node or the run moves on.
-  const workspace = useWorkspacePanel()
+  const ownWorkspace = useWorkspacePanel()
+  const workspace = hostedWorkspace ?? ownWorkspace
   const workspaceSource = useMemo(() => ({ kind: 'run' as const, tenantId, runId: run.id }), [tenantId, run.id])
   const workspaceRevision = `${run.status}:${Object.values(run.nodeStates)
     .map((state) => state.status)
@@ -275,7 +282,7 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
   return (
     <WorkspaceNavigationProvider value={workspace.navigation}>
       <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:h-12 sm:flex-nowrap sm:px-4 sm:py-0">
-        <ShowSidebarButton />
+        {leading ?? (!readOnly && <ShowSidebarButton />)}
         <WorkflowIcon className="size-4 shrink-0 text-muted-foreground" />
         <h2 className="flex min-w-0 flex-1 text-sm font-medium">
           <FadeText text={run.name} />
@@ -306,19 +313,19 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
               <span className="hidden sm:inline">{t('workflowRun.viewMode.overview')}</span>
             </Button>
           </div>
-          {run.status === 'pending' && (
+          {!readOnly && run.status === 'pending' && (
             <Button size="sm" className="h-7 px-2.5 text-xs" aria-label="启动" onClick={() => setStartOpen(true)} disabled={busy}>
               <PlayIcon />
               <span className="hidden sm:inline">启动</span>
             </Button>
           )}
-          {(run.status === 'running' || run.status === 'awaiting_input') && (
+          {!readOnly && (run.status === 'running' || run.status === 'awaiting_input') && (
             <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" aria-label="停止" onClick={() => act(() => cancelRun(tenantId, run.id))} disabled={busy}>
               <SquareIcon />
               <span className="hidden sm:inline">停止</span>
             </Button>
           )}
-          {finished && (
+          {!readOnly && finished && (
             <Button
               variant="outline"
               size="sm"
@@ -337,7 +344,7 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
               <span className="hidden sm:inline">再跑一次</span>
             </Button>
           )}
-          {run.status === 'succeeded' && run.finalOutput && (
+          {!readOnly && run.status === 'succeeded' && run.finalOutput && (
             <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" aria-label="在对话中追问" onClick={() => {
               const store = useChatStore.getState()
               const draft = store.drafts[newChatKey] ?? emptyDraft
@@ -351,17 +358,17 @@ function RunWorkspace({ tenantId, run, refreshProjectRuns }: { tenantId: string;
               <span className="hidden sm:inline">在对话中追问</span>
             </Button>
           )}
-          <WorkspaceToggle open={workspace.open} toggle={() => workspace.setOpen(!workspace.open)} />
+          {!hostedWorkspace && <WorkspaceToggle open={workspace.open} toggle={() => workspace.setOpen(!workspace.open)} />}
         </div>
       </header>
       <WorkspaceSplit
         id="run"
         panel={
-          workspace.open && <WorkspacePanel source={workspaceSource} revision={workspaceRevision} request={workspace.request} onClose={() => workspace.setOpen(false)} />
+          !hostedWorkspace && workspace.open && <WorkspacePanel source={workspaceSource} revision={workspaceRevision} request={workspace.request} onClose={() => workspace.setOpen(false)} />
         }
       >
         <div ref={stageAreaRef} aria-label={viewMode === 'theater' ? '运行舞台' : undefined} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {run.status === 'pending' && viewMode === 'overview' && (
+          {!readOnly && run.status === 'pending' && viewMode === 'overview' && (
             <p className="absolute inset-x-0 top-3 z-10 mx-auto w-fit rounded-md border bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm">
               还没开始：点右上角「启动」，填写输入后运行
             </p>
