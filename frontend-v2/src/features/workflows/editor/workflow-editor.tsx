@@ -86,6 +86,7 @@ import {
 import type { EditorWorkflowVariable } from "./workflow-variable-display";
 import { usePlatform } from "@/lib/workflows/host/platform";
 import { useContractsClient } from "@/lib/workflows/data/contracts-client";
+import type { CatalogSkill } from "@/lib/workflows/data/plugin-catalog";
 import { useAgents } from "@/lib/workflows/data/catalog-hooks";
 import { availableSkills, useSkills } from "@/lib/workflows/data/catalog-hooks";
 import { useWorkflowAgentModels } from "@/lib/workflows/data/catalog-hooks";
