@@ -61,9 +61,11 @@ func reconcileSkills(ctx context.Context, db *store.Store, driver *agentruntime.
 			}
 		}
 	}
-	return db.RefreshSkillStates(ctx)
+	if err := db.RefreshSkillStates(ctx); err != nil {
+		return err
+	}
+	return db.DeleteSettledSkillRemovals(ctx)
 }
-
 func skillJobOutcome(e error) store.SkillJobOutcome {
 	switch {
 	case e == nil:

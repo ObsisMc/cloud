@@ -578,9 +578,21 @@ ALTER TABLE v2_skill_results ADD COLUMN IF NOT EXISTS retry_count integer NOT NU
 ALTER TABLE v2_skill_results ADD COLUMN IF NOT EXISTS retry_at timestamptz;
 -- A Skill selection is the Space selection itself, not a Node-confirmed install: settle rows an older
 -- version left waiting for a project Node, and drop the selections whose removal never finished.
+-- Rows without a frozen plan have no package to deliver: they must not read as installed, so they
+-- stay failed and ask for a reinstall instead.
+UPDATE v2_space_agents a SET observed_state='failed', observed_version=NULL,
+ install_error='旧版本没有保留安装包信息，请重新安装。'
+WHERE kind='skill' AND desired_state='installed'
+ AND NOT EXISTS(SELECT 1 FROM v2_skill_plans p WHERE p.selection_id=a.id);
 UPDATE v2_space_agents SET observed_state='installed', observed_version=desired_version, install_error=NULL
 WHERE kind='skill' AND desired_state='installed' AND (observed_state<>'installed' OR install_error IS NOT NULL);
-DELETE FROM v2_space_agents WHERE kind='skill' AND desired_state='removed';
+-- Settled removal rows are dropped once no project still needs to remove the package.
+DELETE FROM v2_space_agents a
+WHERE kind='skill' AND desired_state='removed'
+ AND NOT EXISTS(
+	SELECT 1 FROM v2_skill_results r
+	WHERE r.selection_id=a.id AND (r.installed_version IS NOT NULL OR r.state IN ('applying','failed'))
+ );
 
 UPDATE v2_space_agents SET observed_state='pending',observed_version=NULL
 WHERE kind NOT IN ('agent','skill','workflow','hook') AND desired_state='installed' AND observed_state='installed';
