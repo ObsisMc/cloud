@@ -183,8 +183,7 @@ export function createContractsClient(workflow: WorkflowContracts, tenantId: str
           availability: "available" as const,
         })), ...(await workflowPluginCatalog(tenantId)).skills],
       }),
-    },
-    plugin: {
+    },    plugin: {
       listInstalled: async (_request: Record<string, never>) => ({
         plugins: (await workflowPluginCatalog(tenantId)).plugins,
       }),

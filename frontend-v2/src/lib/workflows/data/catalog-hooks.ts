@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Skill } from "../contracts";
+import type { CatalogSkill } from "./plugin-catalog";
 import type { WorkflowAgentModel } from "../mock";
 import { useRoleCatalog } from "@/lib/settings-demo/role-hooks";
 import { useContractsClient } from "./contracts-client";
@@ -34,7 +35,7 @@ export function useAgents() {
 }
 
 /** Pickers only surface skills whose on-disk package is still usable. */
-export function availableSkills(skills: readonly Skill[]): Skill[] {
+export function availableSkills<T extends Skill>(skills: readonly T[]): T[] {
   return skills.filter((skill) => skill.availability === "available");
 }
 
@@ -43,7 +44,7 @@ export function useSkills() {
   const client = useContractsClient();
   return useQuery({
     queryKey: [...catalogKeys.skills, client.tenantId],
-    queryFn: () => client.skill.list({}).then((response) => response.skills),
+    queryFn: () => client.skill.list({}).then((response) => response.skills as CatalogSkill[]),
   });
 }
 
