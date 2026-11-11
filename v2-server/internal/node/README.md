@@ -2,7 +2,7 @@
 
 此包实现真实 Node v1 的 Controller 侧传输：Unix socket、四字节大端长度、`0x01` 标签、
 16 MiB 帧上限、Hello 身份/版本/能力校验、串行写入、双向 heartbeat、显式事件 ACK 和关闭。
-协议依据 desktop `cab59a3c0ecd4aa31b939f29a5fca76d03a4e64e` 的 `crates/node-protocol`。
+协议依据 desktop `dcff8afe418c19184f1c7dca45192911aa22d232` 的 `crates/node-protocol`。
 
 `Dial` 成功后由调用方持有 Client，始终有一个 Receive owner；Send/Ack/Close 可并发。
 每帧读写有截止时间；传输过程中取消或出错会关闭连接，禁止复用半帧。Close 等 heartbeat goroutine 退出。

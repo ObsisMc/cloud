@@ -51,7 +51,7 @@ type Turn struct {
 }
 
 // Reader is anchored in a trusted Workspace's Node home, outside the checkout. Execution IDs
-// come from admission, never an arbitrary user path. The fixed layout is desktop cab59a3c.
+// come from admission, never an arbitrary user path. The fixed layout is desktop dcff8afe.
 type Reader struct{ root *os.Root }
 
 // Open pins the Node home directory. OpenRoot prevents symlink/path escapes while reading.
@@ -114,7 +114,7 @@ func decodeLine(data []byte) (line, error) {
 		if json.Unmarshal(l.Update, &update) != nil || update.Kind == "" {
 			return l, ErrDamaged
 		}
-		// desktop cab59a3c's history assembler persists only these update kinds;
+		// desktop dcff8afe's history assembler persists only these update kinds;
 		// tool deltas become tool_call snapshots and session chrome is omitted.
 		switch update.Kind {
 		case "user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "tool_call", "plan":
