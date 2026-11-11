@@ -1,6 +1,6 @@
 # 固定 Node 的历史适配
 
-只读 desktop `cab59a3c0ecd4aa31b939f29a5fca76d03a4e64e` 的 Node history，将
+只读 desktop `dcff8afe418c19184f1c7dca45192911aa22d232` 的 Node history，将
 `thread_event` / `thread_preview` 适配为完整替换快照，并在指定 `turnEnded` 上恢复完整文本结果。
 不修改 Node 协议、SQLite 或 JSONL；不把截断的 `visible_text`、preview 当作最终回答。
 

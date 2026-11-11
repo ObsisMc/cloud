@@ -1,6 +1,6 @@
 # 固定 Node 执行适配
 
-`Driver` 接收已入库的 `execution.Session` / `Turn`，连接 desktop `cab59a3c0ecd4aa31b939f29a5fca76d03a4e64e` 的真实 Node。权限、接收与目录分配、事件序号、SQL 历史及页面接口由调用方负责；本包不创建内存版业务 store，也不重放重启前的 prompt。
+`Driver` 接收已入库的 `execution.Session` / `Turn`，连接 desktop `dcff8afe418c19184f1c7dca45192911aa22d232` 的真实 Node。权限、接收与目录分配、事件序号、SQL 历史及页面接口由调用方负责；本包不创建内存版业务 store，也不重放重启前的 prompt。
 
 ```go
 driver, err := agentruntime.New(agentruntime.Options{
