@@ -60,6 +60,12 @@ func testService(t *testing.T, provider Provider) *Service {
 
 func testServiceWith(t *testing.T, bindings map[string]Binding) *Service {
 	t.Helper()
+	return testServiceIssued(t, bindings, time.Now())
+}
+
+// testServiceIssued starts a service whose TLS identity was issued at the given instant.
+func testServiceIssued(t *testing.T, bindings map[string]Binding, issued time.Time) *Service {
+	t.Helper()
 	root := t.TempDir()
 	bare, _, _ := seedRepository(t, root)
 	file := filepath.Join(root, "fixture.orax")
@@ -68,7 +74,7 @@ func testServiceWith(t *testing.T, bindings map[string]Binding) *Service {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(data)
-	s, err := Start(Options{StateDirectory: root, Repository: bare, GitBackend: filepath.Join(gitCommand(t, root, "--exec-path"), "git-http-backend"), Packages: []Package{{Name: "agent", Path: file, SHA256: hex.EncodeToString(sum[:])}}, Bindings: bindings})
+	s, err := start(Options{StateDirectory: root, Repository: bare, GitBackend: filepath.Join(gitCommand(t, root, "--exec-path"), "git-http-backend"), Packages: []Package{{Name: "agent", Path: file, SHA256: hex.EncodeToString(sum[:])}}, Bindings: bindings}, issued)
 	if err != nil {
 		t.Fatal(err)
 	}

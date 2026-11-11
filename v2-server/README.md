@@ -19,8 +19,6 @@ docker compose -p cloud up -d --wait   # 在仓库根目录
 go run .                               # 监听 127.0.0.1:8090
 ```
 
-使用本地 Node 配套服务时，自签证书从服务创建起有效 24 小时，不会自动轮换。连续运行超过一天需重启后端以重新生成证书；长时间演示应在证书到期前安排重启。
-
 收到 SIGTERM 或中断信号时，进程会取消 HTTP 请求上下文，让保持打开的对话 SSE 关闭观察并等待其读取协程退出，再结束 HTTP、公共执行服务和数据库。关闭浏览器或单条 SSE 只停止对应观察者，不取消执行 worker；进程退出时的执行停止与完整终态保存仍由公共执行服务负责。
 
 | 环境变量 | 默认值 | 说明 |
@@ -591,7 +589,7 @@ npm run e2e -- e2e/workflow-runs.spec.ts e2e/workflow-containers.spec.ts e2e/sch
   [`internal/nodeservices`](internal/nodeservices/README.md)，通过项目 Agent driver 接入服务入口。
   配套服务只支持演示仓库的只读 Git、固定 OpenCode / Claude Code 包、各协议的 fixture，以及配置的 OpenAI / Anthropic 兼容 provider；
   Claude Code 的冻结配置没有个人 Settings（`settings_json` 为 `{}`、revision 为 0）；
-  本地证书有效 24 小时，关闭后撤销凭据，无正式 Cloud 的身份、Git 交付或证书轮换机制。
+  本地证书随实例创建、有效期 10 年，连续运行不会因证书到期而失效；关闭后撤销凭据，无正式 Cloud 的身份、Git 交付或证书轮换机制。
 - [`internal/nodehistory`](internal/nodehistory/README.md) 将固定 Node 的历史转换为替换快照，
   只读其本地 JSONL 恢复完整结果；历史缺失、损坏或超限明确失败。提供真实 Node + PostgreSQL
   的超长回答验证；公共执行服务在 PostgreSQL 保存历史快照与终态后才 ACK Node。
