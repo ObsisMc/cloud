@@ -468,7 +468,7 @@ V2_NODE_ASSETS_DIR=/absolute/path/to/assets TEST_DATABASE_URL='postgres://ora:or
 ```
 
 每个项目的 Node 在某个插件第一次被用到时才安装它。Claude Code 包约 190 MB，解压后约 400 MB，
-用 debug 构建的 Node 首次安装约需一分钟；安装结果留在 `V2_DATA_DIR` 的项目 Node 目录里，
+首次安装最长约需一分钟；安装结果留在 `V2_DATA_DIR` 的项目 Node 目录里，
 之后重启服务再用只需约一秒。演示前先在每个演示项目里跑一轮 Claude Code，可避开这次等待。
 
 End 和重启不自动删除目录。停止服务后 `go run . -cleanup` 只删除确认停止后的登记 Node 与对话目录，

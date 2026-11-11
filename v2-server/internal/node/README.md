@@ -24,8 +24,8 @@ V2_NODE_TEST_BIN_DIR="$HOME/.cache/ora-v2-node/bin" task v2:node:test
 ```
 
 准备命令从固定 commit 导出源码，不改原 checkout，预构建三个二进制，并按本机架构下载、校验固定 OpenCode 0.6.11 包摘要。资源目录只对准备它的架构有效。
-`V2_NODE_ASSETS_DIR` 可指定缓存；`V2_DENO_PATH` 可指定可信的本机 Deno 安装。
-assets.json 记录来源版本和所有产物摘要；本地编译结果和 Deno 的摘要是本机生成，不能当作官方发布签名。
+`V2_NODE_ASSETS_DIR` 可指定缓存；`V2_NODE_PROFILE` 选择构建方式，默认 `release`，设为 `debug` 时首次编译更快但运行更慢；`V2_DENO_PATH` 可指定可信的本机 Deno 安装。
+assets.json 记录来源版本、构建方式（`profile`）和所有产物摘要；本地编译结果和 Deno 的摘要是本机生成，不能当作官方发布签名。
 运行热路径没有编译或下载；`RuntimeOptions` 的 Asset 均要求路径和预期 SHA-256。
 
 `go test -race ./internal/node` 包含真实 Unix socket fixture：延后 ACK、心跳、身份拒绝、
