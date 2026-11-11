@@ -120,7 +120,9 @@ it('installs and removes the source plugin from the skill row and keeps the docu
   const row = await screen.findByRole('article', { name: 'writing-guide' })
   expect(within(row).getByText('来源插件未安装')).toBeInTheDocument()
   await user.click(within(row).getByRole('button', { name: '安装技能' }))
-  await waitFor(() => expect(within(row).getByText('可用')).toBeInTheDocument())
+  await waitFor(() =>
+    expect(within(row).getByText('等待下发')).toBeInTheDocument(),
+  )
   expect(
     backend.state.selections.find(
       (selection) => selection.identifier === 'writing-kit',
@@ -146,8 +148,8 @@ it('installs and removes the source plugin from the skill row and keeps the docu
   ).toHaveAttribute('href', '/settings/plugins?plugin=demo%2Fwriting-kit')
 })
 
-it('treats a selected market skill as available without a project node receipt', async () => {
-  installMarketplaceBackend({
+it('treats a selected market skill as waiting for delivery without a project node receipt', async () => {
+  const backend = installMarketplaceBackend({
     catalog: [writing],
     selections: [
       marketplaceSelection(writing, {
@@ -158,7 +160,14 @@ it('treats a selected market skill as available without a project node receipt',
   })
   renderSettingsPage(<SkillsPage />)
   const row = await screen.findByRole('article', { name: 'writing-guide' })
-  expect(within(row).getByText('可用')).toBeInTheDocument()
+  await waitFor(() => {
+    expect(backend.seen).toContain(
+      'GET /api/v1/tenants/00000000-0000-4000-8000-0000000000aa/spaces/00000000-0000-4000-8000-0000000000bb/plugins/results/demo/writing-kit',
+    )
+  })
+  await waitFor(() =>
+    expect(within(row).getByText('等待下发')).toBeInTheDocument(),
+  )
   expect(within(row).queryByText('等待节点')).not.toBeInTheDocument()
   expect(within(row).getByRole('button', { name: '移除技能' })).toBeVisible()
 })
@@ -171,9 +180,120 @@ it('shows a member the market state without market write controls', async () => 
   })
   renderSettingsPage(<SkillsPage />)
   const row = await screen.findByRole('article', { name: 'writing-guide' })
-  expect(within(row).getByText('可用')).toBeInTheDocument()
+  await waitFor(() =>
+    expect(within(row).getByText('等待下发')).toBeInTheDocument(),
+  )
   expect(
     within(row).queryByRole('button', { name: '移除技能' }),
   ).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: '新建技能' })).toBeVisible()
+})
+
+it('shows per-project delivery results on the skill row and detail panel', async () => {
+  installMarketplaceBackend({
+    catalog: [writing],
+    selections: [marketplaceSelection(writing)],
+    progress: [
+      {
+        namespace: 'demo',
+        identifier: 'writing-kit',
+        results: [
+          {
+            projectId: 'project-a',
+            name: '项目 A',
+            state: 'installed',
+            installedVersion: '1.0.0',
+            failure: '',
+          },
+          {
+            projectId: 'project-b',
+            name: '项目 B',
+            state: 'applying',
+            installedVersion: '',
+            failure: '',
+          },
+        ],
+      },
+    ],
+  })
+  const user = userEvent.setup()
+  renderSettingsPage(<SkillsPage />)
+  const row = await screen.findByRole('article', { name: 'writing-guide' })
+  await waitFor(() =>
+    expect(within(row).getByText('下发中')).toBeInTheDocument(),
+  )
+  await user.click(
+    within(row).getByRole('button', { name: '查看技能 writing-guide' }),
+  )
+  const dialog = await screen.findByRole('dialog')
+  expect(within(dialog).getByText('项目下发状态')).toBeInTheDocument()
+  expect(within(dialog).getByText('项目 A')).toBeInTheDocument()
+  expect(within(dialog).getByText('项目 B')).toBeInTheDocument()
+  const blockOf = (name: string) =>
+    within(dialog).getByText(name, { exact: false }).closest('div')
+  expect(blockOf('项目 A')).toHaveTextContent(/已下发/)
+  expect(blockOf('项目 B')).toHaveTextContent(/下发中/)
+})
+
+it('marks a failed delivery and shows the failure reason', async () => {
+  installMarketplaceBackend({
+    catalog: [writing],
+    selections: [marketplaceSelection(writing)],
+    progress: [
+      {
+        namespace: 'demo',
+        identifier: 'writing-kit',
+        results: [
+          {
+            projectId: 'project-a',
+            name: '项目 A',
+            state: 'failed',
+            installedVersion: '',
+            failure: '技能包下载失败或完整性校验未通过，请重新应用。',
+          },
+        ],
+      },
+    ],
+  })
+  const user = userEvent.setup()
+  renderSettingsPage(<SkillsPage />)
+  const row = await screen.findByRole('article', { name: 'writing-guide' })
+  await waitFor(() =>
+    expect(within(row).getByText('安装失败')).toBeInTheDocument(),
+  )
+  await user.click(
+    within(row).getByRole('button', { name: '查看技能 writing-guide' }),
+  )
+  const dialog = await screen.findByRole('dialog')
+  await waitFor(() =>
+    expect(
+      within(dialog).getAllByText(/技能包下载失败或完整性校验未通过/).length,
+    ).toBeGreaterThan(0),
+  )
+})
+
+it('prompts a reinstall for a legacy selection without a frozen package', async () => {
+  installMarketplaceBackend({
+    catalog: [writing],
+    selections: [
+      marketplaceSelection(writing, {
+        installError: '旧版本没有保留安装包信息，请重新安装。',
+      }),
+    ],
+  })
+  const user = userEvent.setup()
+  renderSettingsPage(<SkillsPage />)
+  const row = await screen.findByRole('article', { name: 'writing-guide' })
+  await waitFor(() =>
+    expect(within(row).getByText('安装失败')).toBeInTheDocument(),
+  )
+  await user.click(
+    within(row).getByRole('button', { name: '查看技能 writing-guide' }),
+  )
+  const dialog = await screen.findByRole('dialog')
+  await waitFor(() =>
+    expect(
+      within(dialog).getByText(/旧版本没有保留安装包信息，请重新安装/),
+    ).toBeInTheDocument(),
+  )
 })

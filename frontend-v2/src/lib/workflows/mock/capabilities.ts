@@ -4,6 +4,8 @@ import type { WorkflowAgentConfig, WorkflowNodeKind } from "./node-data";
 export interface WorkflowChoice {
   value: string;
   label: string;
+  /** Delivery hint shown beside a Skill candidate; kept optional so mock catalogs stay plain. */
+  deployment?: string;
 }
 
 /** Availability is descriptive: authors can save bindings before configuring the plugin. */

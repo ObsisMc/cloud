@@ -5,10 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wanglongan587/cloud/v2-server/internal/pluginmarket"
 )
 
 func TestSchemaRemovesLegacyDemoSelections(t *testing.T) {
@@ -121,5 +125,101 @@ func TestSchemaRemovesLegacyDemoSelections(t *testing.T) {
 		*hookVersion != "1.0.0" || members != 0 || mutations != 0 || assigneeType != nil || leader != nil {
 		t.Fatalf("legacy cleanup: plugins=%d hooks=%d hookState=%q hookVersion=%v members=%d mutations=%d assignee=%v leader=%v",
 			plugins, hooks, hookState, hookVersion, members, mutations, assigneeType, leader)
+	}
+}
+
+// TestSchemaKeepsLegacySkillWithoutPlanAsFailed marks a Skill selection whose frozen plan was lost
+// as failed with a reinstall prompt on restart, instead of settling it back to installed.
+func TestSchemaKeepsLegacySkillWithoutPlanAsFailed(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	admin, e := pgx.Connect(ctx, url)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { admin.Close(ctx) })
+	var random [6]byte
+	_, _ = rand.Read(random[:])
+	namespace := "schema_skill_plan_" + hex.EncodeToString(random[:])
+	if _, e := admin.Exec(ctx, "CREATE SCHEMA "+namespace); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(ctx, "DROP SCHEMA "+namespace+" CASCADE") })
+	config, e := pgxpool.ParseConfig(url)
+	if e != nil {
+		t.Fatal(e)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = namespace + ",public"
+
+	open := func() *Store {
+		t.Helper()
+		s, e := OpenConfig(ctx, config)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return s
+	}
+	s := open()
+	var user, tenant, space string
+	if e := s.pool.QueryRow(ctx, `
+		INSERT INTO users(source,subject,display_name) VALUES('test','owner','Owner') RETURNING id::text`).Scan(&user); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.pool.QueryRow(ctx, `INSERT INTO tenants(name) VALUES('Team') RETURNING id::text`).Scan(&tenant); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.pool.Exec(ctx, `
+		INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,'owner')`, tenant, user); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.pool.QueryRow(ctx, `
+		INSERT INTO v2_spaces(tenant_id,name,slug,created_by)
+		VALUES($1,'Space','demo',$2) RETURNING id::text`, tenant, user).Scan(&space); e != nil {
+		t.Fatal(e)
+	}
+	entry := pluginmarket.Entry{
+		Namespace: "official", Identifier: "legacy.skill", Title: "Legacy Skill",
+		Kind: "skill", Version: "1.0.0", URL: "https://example.org/legacy.skill",
+		SHA256:             "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		MarketplaceVisible: true, SourceURL: "https://github.com/ora-space/marketplace",
+	}
+	if e := s.ReplacePluginCatalog(ctx, []pluginmarket.Entry{entry}, time.Now()); e != nil {
+		t.Fatal(e)
+	}
+	selection, e := s.InstallSpacePlugin(ctx, tenant, space, user, "plugins", "install", PluginInstallInput{
+		Identifier: "official/legacy.skill",
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
+	// The install froze a plan; simulate an old row whose plan was lost.
+	if _, e := s.pool.Exec(ctx, `DELETE FROM v2_skill_plans WHERE selection_id=$1`, selection.ID); e != nil {
+		t.Fatal(e)
+	}
+	s.Close()
+
+	// A restart re-applies the schema: the row without a plan must stay failed with the prompt.
+	s2 := open()
+	t.Cleanup(s2.Close)
+	items, e := s2.SpacePlugins(ctx, tenant, space, user)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var got *SpacePlugin
+	for i := range items {
+		if items[i].ID == selection.ID {
+			got = &items[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("selection %s missing after restart: %+v", selection.ID, items)
+	}
+	if got.ObservedState != "failed" || got.InstallError == nil ||
+		!strings.Contains(*got.InstallError, "请重新安装") {
+		t.Fatalf("legacy skill without plan after restart = %+v", got)
 	}
 }

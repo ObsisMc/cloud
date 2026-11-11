@@ -34,7 +34,7 @@ func TestEmptyPluginCatalogKeepsThePreviousSnapshot(t *testing.T) {
 	}
 }
 
-func TestRemoveSpacePluginDeletesTheSkillSelection(t *testing.T) {
+func TestRemoveSpacePluginDeletesAnUndeliveredSkillSelection(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
 	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
@@ -62,21 +62,14 @@ func TestRemoveSpacePluginDeletesTheSkillSelection(t *testing.T) {
 		installed.ObservedVersion == nil || *installed.ObservedVersion != "1.0.0" {
 		t.Fatalf("installed = %+v", installed)
 	}
-	if _, e := f.db.Exec(f.ctx, `INSERT INTO v2_projects(id,tenant_id,data,plugin_space_id) VALUES('pending-project',$1,'{}',$2)`, f.tenant, space); e != nil {
-		t.Fatal(e)
-	}
-	if _, e := f.db.Exec(f.ctx, `INSERT INTO v2_skill_results(selection_id,project_id,revision,state,installed_version)
-		VALUES($1,'pending-project',$2,'applying','1.0.0')`, installed.ID, installed.Version); e != nil {
-		t.Fatal(e)
-	}
-
+	// No project ever received the package: removal deletes the selection row immediately and no
+	// removal job is raised.
 	removed, e := f.store.RemoveSpacePlugin(f.ctx, f.tenant, space, owner, "plugins", "remove-pending", store.PluginRemoveInput{
 		Identifier: "official/pending.skill", Version: installed.Version,
 	})
 	if e != nil {
 		t.Fatal(e)
 	}
-	// An unsettled project receipt must not keep the removal pending: the row is gone.
 	if removed.DesiredState != "removed" || removed.ObservedState != "removed" || removed.ObservedVersion != nil {
 		t.Fatalf("removed = %+v", removed)
 	}
@@ -87,9 +80,110 @@ func TestRemoveSpacePluginDeletesTheSkillSelection(t *testing.T) {
 	if _, found := findSpacePlugin(list, installed.ID); found {
 		t.Fatalf("removed selection is still listed: %+v", list)
 	}
-	var results int
-	if e := f.db.QueryRow(f.ctx, `SELECT count(*) FROM v2_skill_results WHERE selection_id=$1`, installed.ID).Scan(&results); e != nil || results != 0 {
-		t.Fatalf("project results after removal = %d %v", results, e)
+	if jobs, e := f.store.SkillJobs(f.ctx); e != nil || len(jobs) != 0 {
+		t.Fatalf("undelivered removal raised a job: %+v %v", jobs, e)
+	}
+}
+
+func TestRemoveSpacePluginNotifiesDeliveredProjectsAndReinstallWorks(t *testing.T) {
+	f := newSquadFixture(t)
+	owner := f.login(t, "owner", "owner")
+	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	if e != nil || len(spaces) != 1 {
+		t.Fatalf("spaces = %v %v", spaces, e)
+	}
+	space := spaces[0].ID
+	addProject := func(id string) {
+		t.Helper()
+		if _, e := f.db.Exec(f.ctx, `INSERT INTO v2_projects(id,tenant_id,data,plugin_space_id) VALUES($1,$2,'{}',$3)`, id, f.tenant, space); e != nil {
+			t.Fatal(e)
+		}
+	}
+	addProject("a")
+	entry := pluginmarket.Entry{
+		Namespace: "official", Identifier: "notify.skill", Title: "Notify Skill",
+		Kind: "skill", Version: "1.0.0", URL: "https://example.org/notify.skill",
+		SHA256:             "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		MarketplaceVisible: true, SourceURL: "https://github.com/ora-space/marketplace",
+	}
+	if e := f.store.ReplacePluginCatalog(f.ctx, []pluginmarket.Entry{entry}, time.Now()); e != nil {
+		t.Fatal(e)
+	}
+	installed, e := f.store.InstallSpacePlugin(f.ctx, f.tenant, space, owner, "plugins", "install-notify", store.PluginInstallInput{
+		Identifier: "official/notify.skill",
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
+	// The project confirms delivery.
+	jobs, e := f.store.SkillJobs(f.ctx)
+	if e != nil || len(jobs) != 1 || jobs[0].Project != "a" {
+		t.Fatal(jobs, e)
+	}
+	if ok, e := f.store.StartSkillJob(f.ctx, jobs[0]); !ok || e != nil {
+		t.Fatal(e)
+	}
+	if e := f.store.FinishSkillJob(f.ctx, jobs[0], store.SkillJobSucceeded, ""); e != nil {
+		t.Fatal(e)
+	}
+	// Removal keeps the selection and raises a removal job for the delivered project.
+	removed, e := f.store.RemoveSpacePlugin(f.ctx, f.tenant, space, owner, "plugins", "remove-notify", store.PluginRemoveInput{
+		Identifier: "official/notify.skill", Version: installed.Version,
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if removed.DesiredState != "removed" || removed.ObservedState != "removing" || removed.ObservedVersion == nil {
+		t.Fatalf("removed = %+v", removed)
+	}
+	if list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner); e != nil {
+		t.Fatal(e)
+	} else if _, found := findSpacePlugin(list, installed.ID); !found {
+		t.Fatalf("removal dropped the selection before the project confirmed: %+v", list)
+	}
+	jobs, e = f.store.SkillJobs(f.ctx)
+	if e != nil || len(jobs) != 1 || jobs[0].Project != "a" || jobs[0].Desired != "removed" {
+		t.Fatalf("removal jobs = %+v %v", jobs, e)
+	}
+	if ok, e := f.store.StartSkillJob(f.ctx, jobs[0]); !ok || e != nil {
+		t.Fatal(e)
+	}
+	if e := f.store.FinishSkillJob(f.ctx, jobs[0], store.SkillJobSucceeded, ""); e != nil {
+		t.Fatal(e)
+	}
+	// Once every project confirmed the removal, the settled selection row is cleaned up and no
+	// further job is raised.
+	if e := f.store.DeleteSettledSkillRemovals(f.ctx); e != nil {
+		t.Fatal(e)
+	}
+	if list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner); e != nil {
+		t.Fatal(e)
+	} else if _, found := findSpacePlugin(list, installed.ID); found {
+		t.Fatalf("settled removal left a selection: %+v", list)
+	}
+	if jobs, e := f.store.SkillJobs(f.ctx); e != nil || len(jobs) != 0 {
+		t.Fatalf("settled removal raised a job: %+v %v", jobs, e)
+	}
+	// Reinstalling on the same project re-creates the selection and delivers again.
+	reinstalled, e := f.store.InstallSpacePlugin(f.ctx, f.tenant, space, owner, "plugins", "reinstall-notify", store.PluginInstallInput{
+		Identifier: "official/notify.skill",
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if reinstalled.DesiredState != "installed" || reinstalled.ObservedState != "installed" {
+		t.Fatalf("reinstalled = %+v", reinstalled)
+	}
+	if jobs, e := f.store.SkillJobs(f.ctx); e != nil || len(jobs) != 1 || jobs[0].Project != "a" {
+		t.Fatalf("reinstall jobs = %+v %v", jobs, e)
+	} else if ok, e := f.store.StartSkillJob(f.ctx, jobs[0]); !ok || e != nil {
+		t.Fatalf("start reinstall job %+v ok=%v err=%v", jobs[0], ok, e)
+	} else if e := f.store.FinishSkillJob(f.ctx, jobs[0], store.SkillJobSucceeded, ""); e != nil {
+		t.Fatal(e)
+	}
+	result, e := f.store.SkillProgress(f.ctx, f.tenant, space, owner, "official", "notify.skill")
+	if e != nil || len(result) != 1 || result[0].State != "installed" {
+		t.Fatalf("reinstall progress = %+v %v", result, e)
 	}
 }
 

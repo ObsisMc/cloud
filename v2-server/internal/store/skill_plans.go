@@ -150,6 +150,19 @@ func (s *Store) FinishSkillJob(ctx context.Context, j SkillJob, outcome SkillJob
 	}
 }
 
+// DeleteSettledSkillRemovals drops a Skill selection whose removal every bound project confirmed.
+// The row exists only to carry the removal job (see RemoveSpacePlugin); once no project still
+// holds the package, the Skills page and workflow Agent picker must see it gone again.
+func (s *Store) DeleteSettledSkillRemovals(ctx context.Context) error {
+	_, e := s.pool.Exec(ctx, `DELETE FROM v2_space_agents a
+	 WHERE a.kind='skill' AND a.desired_state='removed'
+	 AND NOT EXISTS (
+		SELECT 1 FROM v2_skill_results r
+		WHERE r.selection_id=a.id AND (r.installed_version IS NOT NULL OR r.state IN ('applying','failed'))
+	 )`)
+	return e
+}
+
 // RefreshSkillStates re-evaluates Node-confirmed plugin selections against all bound projects,
 // including ones created while the service was offline. Skills are left out: a Skill selection is
 // usable from its record, so a project that never confirms must not move it back to pending.

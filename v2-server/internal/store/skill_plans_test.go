@@ -97,6 +97,30 @@ func TestSkillDeliveryCoversEveryBoundProjectWithoutGatingTheSelection(t *testin
 	}); e != nil {
 		t.Fatal(e)
 	}
+	// The selection stays as a removed row while every delivered project must confirm the removal,
+	// so the reconciler can raise removal jobs against it.
+	if jobs, e := f.store.SkillJobs(f.ctx); e != nil || len(jobs) != 3 {
+		t.Fatalf("removal jobs = %+v %v", jobs, e)
+	}
+	// Once every project confirmed the removal, the settled selection is dropped.
+	removalJobs, e := f.store.SkillJobs(f.ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, j := range removalJobs {
+		if j.Desired != "removed" {
+			t.Fatalf("removal job desired = %q", j.Desired)
+		}
+		if ok, e := f.store.StartSkillJob(f.ctx, j); !ok || e != nil {
+			t.Fatal(ok, e)
+		}
+		if e := f.store.FinishSkillJob(f.ctx, j, store.SkillJobSucceeded, ""); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e := f.store.DeleteSettledSkillRemovals(f.ctx); e != nil {
+		t.Fatal(e)
+	}
 	if list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner); e != nil {
 		t.Fatal(e)
 	} else if _, found := findSpacePlugin(list, selection.ID); found {

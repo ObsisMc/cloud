@@ -8,6 +8,17 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 )
 
+// projectName returns the display name of a tenant project, falling back to its id when the
+// row has no Name yet (projects are created from repository URLs).
+func (s *Store) projectName(ctx context.Context, tenant, id string) (string, error) {
+	var name string
+	err := s.pool.QueryRow(ctx, `SELECT coalesce(data->>'Name', id) FROM v2_projects WHERE id=$1 AND tenant_id=$2::uuid`, id, tenant).Scan(&name)
+	if err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
 // ResolveWorkflowSkills resolves names against the run owner's catalog and plugin IDs
 // against the target project's space. A selection never grants access to another space.
 func (s *Store) ResolveWorkflowSkills(ctx context.Context, scope execution.Scope, project string, names []string) (*execution.Skills, error) {
@@ -16,6 +27,10 @@ func (s *Store) ResolveWorkflowSkills(ctx context.Context, scope execution.Scope
 		return result, nil
 	}
 	if _, err := s.GetProject(ctx, scope, project); err != nil {
+		return nil, fmt.Errorf("could not load the project for selected Skills")
+	}
+	projectName, err := s.projectName(ctx, scope.TenantID, project)
+	if err != nil {
 		return nil, fmt.Errorf("could not load the project for selected Skills")
 	}
 	documents, err := s.ListSkills(ctx, scope.TenantID, scope.UserID)
@@ -46,7 +61,7 @@ func (s *Store) ResolveWorkflowSkills(ctx context.Context, scope execution.Scope
 			 AND r.revision=a.version AND r.state='installed' AND r.installed_version=a.desired_version`,
 				project, scope.TenantID, namespace, identifier).Scan(&version)
 			if err != nil {
-				return nil, fmt.Errorf("Skill plugin %s is not installed in this project; install it and wait for project confirmation", name)
+				return nil, fmt.Errorf("技能 %s 还没下发到项目「%s」：请先在技能页确认该技能已下发成功（或等下发中完成）后再重新运行工作流", name, projectName)
 			}
 			result.Plugins = append(result.Plugins, execution.SkillPlugin{ID: name, Version: version})
 		} else {

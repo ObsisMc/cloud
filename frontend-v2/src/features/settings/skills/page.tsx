@@ -29,6 +29,8 @@ import { DetailPanel } from '../components/detail-panel'
 import { ConfirmDialog } from '../components/confirm-dialog'
 import { MarkdownPreview } from '../components/markdown-preview'
 import type { Skill as ServerSkill, SkillInput } from '@/lib/skills-api/generated'
+import { useSkillDeployments } from '../data/skill-deployments'
+import type { SkillProgress } from '../market-api/generated'
 import { ImportSkillDialog } from './import-skill-dialog'
 import { SkillForm } from './skill-form'
 import { useUserSkills } from './use-skills'
@@ -47,18 +49,45 @@ type SkillRow = {
   content: string
   source: SkillSource
   availability: 'available' | 'unavailable'
+  /** Per-project delivery outcome for a selected market Skill; `undefined` before receipts load. */
+  deployment?: SkillRowDeployment
+  /** Per-project receipts, shown in the detail panel; only for market Skills with a selection. */
+  states?: SkillProgress[]
   updatedAt?: string
   local?: ServerSkill
   entry?: PluginCatalogEntry
   selection?: SpacePlugin
 }
 
+/** Aggregates one selection's project receipts into a single visible state. */
+type SkillRowDeployment =
+  | { state: 'installed' }
+  | { state: 'applying' }
+  | { state: 'failed'; failure: string }
+  | { state: 'waiting' }
+  | { state: 'removed' }
+
 type Removing =
   | { kind: 'local'; skill: SkillRow }
   | { kind: 'plugin'; skill: SkillRow }
 
+const deploymentLabel: Record<SkillRowDeployment['state'], string> = {
+  installed: '已下发',
+  applying: '下发中',
+  failed: '下发失败',
+  waiting: '等待下发',
+  removed: '已移除',
+}
+
 function skillStatus(skill: SkillRow, detail = false) {
-  if (skill.availability === 'available') return '可用'
+  if (skill.deployment?.state === 'failed') {
+    return detail ? `安装失败：${skill.deployment.failure}` : '安装失败'
+  }
+  if (skill.availability === 'available') {
+    return skill.deployment === undefined
+      ? '可用'
+      : deploymentLabel[skill.deployment.state]
+  }
   return detail ? '不可用，来源插件未安装' : '来源插件未安装'
 }
 
@@ -80,6 +109,7 @@ function localSkillRows(skills: ServerSkill[]): SkillRow[] {
 function pluginSkillRows(
   catalog: PluginCatalogEntry[],
   selection: (entry: PluginCatalogEntry) => SpacePlugin | undefined,
+  deployed: (entry: PluginCatalogEntry) => SkillRow['deployment'],
 ): SkillRow[] {
   return catalog
     .filter((entry) => entry.kind === 'skill')
@@ -93,6 +123,7 @@ function pluginSkillRows(
         content: entry.readme ?? '',
         source: { kind: 'plugin', pluginId: pluginKey(entry) },
         availability: chosen?.desiredState === 'installed' ? 'available' : 'unavailable',
+        deployment: chosen?.desiredState === 'installed' ? deployed(entry) : undefined,
         entry,
         selection: chosen,
       }
@@ -116,6 +147,11 @@ const updatedLabel = (value?: string) => {
 export default function SkillsPage() {
   const local = useUserSkills()
   const market = usePluginMarketplace()
+  const deployments = useSkillDeployments(
+    market.tenantId,
+    market.spaceId,
+    market.installations,
+  )
   const [search, setSearch] = useState('')
   const [source, setSource] = useState('all')
   const [status, setStatus] = useState('all')
@@ -123,10 +159,33 @@ export default function SkillsPage() {
   const [panel, setPanel] = useState<Panel>(null)
   const [removing, setRemoving] = useState<Removing>()
   const [importing, setImporting] = useState(false)
+  const deploymentOf = (entry: PluginCatalogEntry): SkillRowDeployment | undefined => {
+    const selection = market.selection(entry)
+    if (!selection) return undefined
+    if (selection.installError) {
+      return { state: 'failed', failure: selection.installError }
+    }
+    const summary = deployments.summaryOf(selection)
+    if (!summary) return undefined
+    if (summary.aggregate === 'failed') return { state: 'failed', failure: summary.failure ?? '未知原因' }
+    if (summary.aggregate === 'applying') return { state: 'applying' }
+    if (summary.aggregate === 'waiting') return { state: 'waiting' }
+    if (summary.aggregate === 'removed') return { state: 'removed' }
+    if (summary.aggregate === 'installed') return { state: 'installed' }
+    return { state: 'waiting' }
+  }
+  const statesOf = (entry: PluginCatalogEntry): SkillProgress[] | undefined => {
+    const selection = market.selection(entry)
+    return selection ? deployments.byKey.get(pluginKey(selection)) : undefined
+  }
   const skills: SkillRow[] = [
     ...localSkillRows(local.skills),
-    ...pluginSkillRows(market.catalog, market.selection),
-  ]
+    ...pluginSkillRows(market.catalog, market.selection, deploymentOf),
+  ].map((skill) =>
+    skill.entry
+      ? { ...skill, states: statesOf(skill.entry) }
+      : skill,
+  )
   const selected =
     panel && 'id' in panel
       ? skills.find((skill) => skill.id === panel.id)
@@ -138,7 +197,13 @@ export default function SkillsPage() {
           .toLowerCase()
           .includes(search.trim().toLowerCase()) &&
         (source === 'all' || skill.source.kind === source) &&
-        (status === 'all' || skill.availability === status),
+        (status === 'all' ||
+          (status === 'available'
+            ? skill.availability === 'available' &&
+              skill.deployment?.state !== 'failed'
+            : status === 'failed'
+              ? skill.deployment?.state === 'failed'
+              : skill.availability === 'unavailable')),
     )
     .sort(
       (a, b) =>
@@ -299,7 +364,8 @@ export default function SkillsPage() {
             onChange={setStatus}
             options={[
               ['all', '全部状态'],
-              ['available', '可用'],
+              ['available', '可用 / 已下发'],
+              ['failed', '安装失败'],
               ['unavailable', '不可用'],
             ]}
           />
@@ -353,7 +419,11 @@ export default function SkillsPage() {
               <div className="settings-resource-actions">
                 <Badge
                   variant={
-                    skill.availability === 'available' ? 'secondary' : 'outline'
+                    skill.deployment?.state === 'failed'
+                      ? 'destructive'
+                      : skill.availability === 'available'
+                        ? 'secondary'
+                        : 'outline'
                   }
                 >
                   {skillStatus(skill)}
@@ -492,6 +562,9 @@ export default function SkillsPage() {
               </>
             )}
           </dl>
+          {selected.entry && selected.selection && (
+            <SkillDeploymentStates states={selected.states} />
+          )}
           {selected.availability === 'unavailable' && (
             <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
               说明仍可预览。安装来源插件后，此技能会恢复可用。
@@ -541,6 +614,44 @@ export default function SkillsPage() {
           onConfirm={confirmPluginRemove}
         />
       )}
+    </section>
+  )
+}
+
+const projectStateLabel: Record<string, string> = {
+  waiting: '等待下发',
+  applying: '下发中',
+  installed: '已下发',
+  removed: '已移除',
+  failed: '下发失败',
+}
+
+/** Shows each bound project's delivery receipt for a selected market Skill. */
+function SkillDeploymentStates({ states }: { states?: SkillProgress[] }) {
+  if (!states || states.length === 0) {
+    return (
+      <p className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+        当前空间还没有关联项目；运行工作流前请先添加项目并等待技能下发。
+      </p>
+    )
+  }
+  return (
+    <section className="space-y-2" aria-label="项目下发状态">
+      <h3 className="text-sm font-medium">项目下发状态</h3>
+      <div className="space-y-2">
+        {states.map((item) => (
+          <div key={item.projectId} className="rounded border p-2 text-xs">
+            <span className="font-medium">{item.name}</span>
+            <span> · {projectStateLabel[item.state] ?? item.state}</span>
+            {item.installedVersion && <span> · v{item.installedVersion}</span>}
+            {item.failure && (
+              <p role="alert" className="mt-1 text-destructive">
+                {item.failure}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
     </section>
   )
 }

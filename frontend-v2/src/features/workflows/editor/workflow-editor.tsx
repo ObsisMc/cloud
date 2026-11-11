@@ -86,6 +86,7 @@ import {
 import type { EditorWorkflowVariable } from "./workflow-variable-display";
 import { usePlatform } from "@/lib/workflows/host/platform";
 import { useContractsClient } from "@/lib/workflows/data/contracts-client";
+import type { CatalogSkill } from "@/lib/workflows/data/plugin-catalog";
 import { useAgents } from "@/lib/workflows/data/catalog-hooks";
 import { availableSkills, useSkills } from "@/lib/workflows/data/catalog-hooks";
 import { useWorkflowAgentModels } from "@/lib/workflows/data/catalog-hooks";
@@ -338,6 +339,22 @@ function unsupportedNodesMessage(
   });
 }
 
+/** Renders a Skill's delivery state as a one-line hint for the Agent picker. */
+function deploymentHint(deployment: { state: string; failure?: string }): string {
+  switch (deployment.state) {
+    case "installed":
+      return "已下发";
+    case "applying":
+      return "下发中";
+    case "failed":
+      return deployment.failure ? `下发失败：${deployment.failure}` : "下发失败";
+    case "removed":
+      return "已移除";
+    default:
+      return "等待下发";
+  }
+}
+
 /** Provides one React Flow store to the canvas and its sibling inspector. */
 export function WorkflowEditor(props: WorkflowEditorProps = {}) {
   return (
@@ -376,10 +393,14 @@ function WorkflowEditorContent({
       value: agent.name,
       label: agent.name,
     }));
-    const skills = availableSkills(skillsQuery.data ?? []).map((skill) => ({
-      value: skill.name,
-      label: skill.name,
-    }));
+    const skills = availableSkills(skillsQuery.data ?? []).map((skill) => {
+      const deployment = (skill as CatalogSkill).deployment
+      return {
+        value: skill.name,
+        label: skill.name,
+        ...(deployment ? { deployment: deploymentHint(deployment) } : {}),
+      }
+    });
     const mcps = workflowMcpChoices(pluginsQuery.data ?? []);
     const agentModels = agentModelsCatalog.agentModels;
     const defaultExecutor = agentModels[0];

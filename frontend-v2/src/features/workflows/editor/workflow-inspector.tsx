@@ -58,6 +58,7 @@ import {
 } from "./workflow-node-details";
 import { WorkflowVariableDisplay } from "./workflow-variable-display";
 import { WorkflowVariableSelectGroups } from "./workflow-variable-list";
+import { cn } from "@/lib/utils";
 import { WorkflowPromptEditor } from "./workflow-prompt-editor";
 import {
   WorkflowStructuredOutputDialog,
@@ -871,7 +872,23 @@ function AgentConfigurationFields({
                           value={`${skill.label} ${skill.value}`}
                           onSelect={() => addSkill(skill.value)}
                         >
-                          {skill.label}
+                          <span className="min-w-0">
+                            <span className="block truncate">
+                              {skill.label}
+                            </span>
+                            {skill.deployment && (
+                              <span
+                                className={cn(
+                                  "block truncate text-[10px]",
+                                  skill.deployment.startsWith("下发失败")
+                                    ? "text-destructive"
+                                    : "text-muted-foreground",
+                                )}
+                              >
+                                {skill.deployment}
+                              </span>
+                            )}
+                          </span>
                         </CommandItem>
                       ))}
                     </CommandGroup>

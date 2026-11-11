@@ -619,8 +619,8 @@ func uniqueWorkflowPluginName(ctx context.Context, tx pgx.Tx, tenant, base strin
 }
 
 // RemoveSpacePlugin records an owner's removal and settles the simplified terminal state. A Skill
-// selection is deleted instead of settled, because the selection record is the only state the
-// Skills page and the workflow Agent picker read.
+// selection that no project ever received is deleted; one a project Node already holds is kept as a
+// removed selection so the reconciler can tell the Node to remove the package (see DeleteSettledSkillRemovals).
 func (s *Store) RemoveSpacePlugin(ctx context.Context, tenant, space, caller, path, key string, in PluginRemoveInput) (SpacePlugin, error) {
 	var out SpacePlugin
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -653,22 +653,36 @@ func (s *Store) RemoveSpacePlugin(ctx context.Context, tenant, space, caller, pa
 			return ErrPluginRuntimeManaged
 		}
 		if old.Kind == "skill" {
-			// A Skill selection is the whole install, so removal deletes the row: the Skills page and
-			// the workflow Agent picker drop it immediately instead of waiting for project Nodes to
-			// confirm a package removal. Package copies a Node already received stay local; v2 does
-			// not chase them.
-			if _, e := tx.Exec(ctx, `DELETE FROM v2_space_agents WHERE id = $1`, old.ID); e != nil {
-				return fmt.Errorf("remove skill selection: %w", e)
+			// A Skill selection is the whole install, but a project Node that already received the
+			// package must be told to remove it: keep the row as a removed selection so SkillJobs
+			// can raise a removal job and drop the market-skills.json link. When no project ever
+			// confirmed delivery there is nothing to notify, so the row is deleted immediately and
+			// the Skills page and workflow Agent picker drop it as they did before.
+			var outstanding bool
+			if e := tx.QueryRow(ctx, `
+				SELECT EXISTS(
+					SELECT 1 FROM v2_skill_results r
+					WHERE r.selection_id = $1
+						AND (r.installed_version IS NOT NULL OR r.state IN ('applying','failed'))
+				)`, old.ID).Scan(&outstanding); e != nil {
+				return fmt.Errorf("check skill delivery: %w", e)
 			}
-			out = old
-			out.DesiredState = "removed"
-			out.ObservedState = "removed"
-			out.ObservedVersion = nil
-			out.InstallError = nil
-			out.RequestedByUserID = &caller
-			out.Version++
-			out.UpdatedAt = time.Now()
-			return recordPluginMutation(ctx, tx, tenant, caller, "DELETE", path, key, pluginRemoveHash(in), out)
+			if !outstanding {
+				if _, e := tx.Exec(ctx, `DELETE FROM v2_space_agents WHERE id = $1`, old.ID); e != nil {
+					return fmt.Errorf("remove skill selection: %w", e)
+				}
+				out = old
+				out.DesiredState = "removed"
+				out.ObservedState = "removed"
+				out.ObservedVersion = nil
+				out.InstallError = nil
+				out.RequestedByUserID = &caller
+				out.Version++
+				out.UpdatedAt = time.Now()
+				return recordPluginMutation(ctx, tx, tenant, caller, "DELETE", path, key, pluginRemoveHash(in), out)
+			}
+			// A project Node still holds the package: fall through to the generic removal state and
+			// let the skill reconciler remove it, then the settled row is cleaned up.
 		}
 		if _, e := tx.Exec(ctx, `
 			WITH removal_state AS (
