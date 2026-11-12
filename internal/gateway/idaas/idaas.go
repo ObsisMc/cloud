@@ -92,6 +92,28 @@ func New(o *Options) (*Authenticator, error) {
 	return &Authenticator{authorizeURL: endpoints[0], tokenURL: endpoints[1], userInfoURL: endpoints[2], clientID: o.ClientID, clientSecret: o.ClientSecret, displayNameField: o.DisplayNameField, http: o.HTTP}, nil
 }
 
+// Endpoints is the sanitized set of provider endpoints this adapter will call. A deployment logs
+// it at startup so an override that never reached the process is visible without reproducing a
+// login. Values keep the scheme, host and path only.
+type Endpoints struct {
+	Authorize string
+	Token     string
+	UserInfo  string
+}
+
+// Endpoints returns the effective endpoints. Request parameters are added per call and are never
+// part of this view, so the values are safe to log and to compare with the deployment's own
+// configuration. This is configuration evidence: it does not prove the endpoints are reachable or
+// that the credentials are accepted.
+func (a *Authenticator) Endpoints() Endpoints {
+	view := func(u *url.URL) string {
+		safe := *u
+		safe.RawQuery, safe.ForceQuery, safe.Fragment, safe.User = "", false, "", nil
+		return safe.String()
+	}
+	return Endpoints{Authorize: view(a.authorizeURL), Token: view(a.tokenURL), UserInfo: view(a.userInfoURL)}
+}
+
 // AuthorizationURL builds the IDaaS 2.0 authorize redirect. PKCE is omitted because that mode is
 // off by default and this adapter authenticates as a confidential client with client_secret_post.
 // display is omitted so IDaaS keeps its adaptive default.

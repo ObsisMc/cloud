@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,32 @@ func TestEndpointOverridesRejectUnsafeURLs(t *testing.T) {
 			}
 			if _, err := New(o); err == nil {
 				t.Errorf("unsafe %s endpoint accepted", field)
+			}
+		}
+	}
+}
+
+func TestEndpointsExposeEffectiveTargetsWithoutRequestParameters(t *testing.T) {
+	a, err := New(&Options{
+		BaseURL: "https://uniportal-beta.huawei.com", AuthorizeURL: "https://sso.example.org/custom/authorize",
+		ClientID: "synthetic-client", ClientSecret: "synthetic-secret", HTTP: NewHTTPClient(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := a.Endpoints()
+	want := Endpoints{
+		Authorize: "https://sso.example.org/custom/authorize",
+		Token:     "https://uniportal-beta.huawei.com/saaslogin1/oauth2/v1/token",
+		UserInfo:  "https://uniportal-beta.huawei.com/saaslogin1/oauth2/v1/userinfo",
+	}
+	if got != want {
+		t.Fatalf("endpoints = %+v want %+v", got, want)
+	}
+	for _, value := range []string{got.Authorize, got.Token, got.UserInfo} {
+		for _, forbidden := range []string{"synthetic-client", "synthetic-secret", "?", "#", "@"} {
+			if strings.Contains(value, forbidden) {
+				t.Fatalf("endpoint %q exposes %q", value, forbidden)
 			}
 		}
 	}
