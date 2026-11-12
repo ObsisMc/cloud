@@ -38,11 +38,12 @@ case $profile in
   *) echo 'V2_NODE_PROFILE must be release or debug.' >&2; exit 1 ;;
 esac
 (cd "$source_dir" && cargo +1.95.0 build --locked $profile_flag -p ora-node -p ora-process-host -p ora-process-guardian)
-mkdir -p "$assets_dir/bin"
+# Fixed modes, so the result does not depend on the caller's umask.
+install -d -m 0755 "$assets_dir" "$assets_dir/bin"
 for binary in ora-node ora-process-host ora-process-guardian; do
-  cp -- "$source_dir/target/$profile/$binary" "$assets_dir/bin/$binary"
+  install -m 0755 -- "$source_dir/target/$profile/$binary" "$assets_dir/bin/$binary"
 done
-cp -- "$deno_path" "$assets_dir/bin/deno"
+install -m 0755 -- "$deno_path" "$assets_dir/bin/deno"
 # fetch_plugin <file> <url> <sha256>: download once, then verify on every run.
 fetch_plugin() {
   if [[ ! -f "$1" ]]; then
