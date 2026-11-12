@@ -417,3 +417,99 @@ it('keeps the market source list read-only for members', async () => {
     within(dialog).queryByRole('button', { name: '同步' }),
   ).not.toBeInTheDocument()
 })
+
+it('configures, replaces and clears Git credentials on a space source', async () => {
+  const backend = installMarketplaceBackend({
+    catalog: [official],
+    marketSources: [
+      {
+        namespace: 'custom-market',
+        url: 'https://github.com/ora-space/marketplace.git',
+        branch: 'main',
+        enabled: true,
+        syncedAt: null,
+        failure: '',
+        retrieval: { mode: 'direct_https', useProxy: false },
+      },
+    ],
+  })
+  const user = userEvent.setup()
+  renderSettingsPage(<PluginsPage />)
+  await user.click(screen.getByRole('button', { name: '管理市场' }))
+  const dialog = await screen.findByRole('dialog')
+  const sourceRow = (
+    await within(dialog).findByText('https://github.com/ora-space/marketplace.git', {
+      selector: 'strong',
+    })
+  ).closest('article')!
+
+  await user.click(within(sourceRow).getByRole('button', { name: '编辑' }))
+  await user.type(within(dialog).getByLabelText('用户名'), 'fixture-bot')
+  await user.type(within(dialog).getByLabelText('令牌或密码'), 'fixture-token')
+  await user.click(within(dialog).getByRole('button', { name: '保存修改' }))
+  await waitFor(() =>
+    expect(backend.bodies.at(-1)).toEqual({
+      url: 'https://github.com/ora-space/marketplace.git',
+      branch: 'main',
+      enabled: true,
+      retrieval: { mode: 'direct_https', useProxy: false },
+      gitCredentials: { username: 'fixture-bot', password: 'fixture-token' },
+    }),
+  )
+
+  backend.state.marketSources[0].gitConfigured = true
+  await user.click(within(sourceRow).getByRole('button', { name: '编辑' }))
+  await waitFor(() =>
+    expect(within(dialog).getByText(/已配置认证/)).toBeInTheDocument(),
+  )
+  await user.click(
+    within(dialog).getByLabelText('清除已保存的 Git 认证'),
+  )
+  await user.click(within(dialog).getByRole('button', { name: '保存修改' }))
+  await waitFor(() =>
+    expect(backend.bodies.at(-1)).toEqual({
+      url: 'https://github.com/ora-space/marketplace.git',
+      branch: 'main',
+      enabled: true,
+      retrieval: { mode: 'direct_https', useProxy: false },
+      clearGitCredentials: true,
+    }),
+  )
+})
+
+it('keeps Git credentials untouched when editing does not change them', async () => {
+  const backend = installMarketplaceBackend({
+    catalog: [official],
+    marketSources: [
+      {
+        namespace: 'custom-market',
+        url: 'https://github.com/ora-space/marketplace.git',
+        branch: 'main',
+        enabled: true,
+        syncedAt: null,
+        failure: '',
+        retrieval: { mode: 'direct_https', useProxy: false },
+        gitConfigured: true,
+      },
+    ],
+  })
+  const user = userEvent.setup()
+  renderSettingsPage(<PluginsPage />)
+  await user.click(screen.getByRole('button', { name: '管理市场' }))
+  const dialog = await screen.findByRole('dialog')
+  const sourceRow = (
+    await within(dialog).findByText('https://github.com/ora-space/marketplace.git', {
+      selector: 'strong',
+    })
+  ).closest('article')!
+  await user.click(within(sourceRow).getByRole('button', { name: '编辑' }))
+  await user.click(within(dialog).getByRole('button', { name: '保存修改' }))
+  await waitFor(() =>
+    expect(backend.bodies.at(-1)).toEqual({
+      url: 'https://github.com/ora-space/marketplace.git',
+      branch: 'main',
+      enabled: true,
+      retrieval: { mode: 'direct_https', useProxy: false },
+    }),
+  )
+})

@@ -44,6 +44,9 @@ export function MarketSources({
   })
   const [accessKey, setAccessKey] = useState('')
   const [secretKey, setSecretKey] = useState('')
+  const [gitUsername, setGitUsername] = useState('')
+  const [gitPassword, setGitPassword] = useState('')
+  const [clearGit, setClearGit] = useState(false)
   const reset = () => {
     setUrl('')
     setBranch('main')
@@ -51,6 +54,9 @@ export function MarketSources({
     setRetrieval({ mode: 'direct_https', useProxy: false })
     setAccessKey('')
     setSecretKey('')
+    setGitUsername('')
+    setGitPassword('')
+    setClearGit(false)
   }
   type Change =
     | { action: 'create'; data: MarketSourceInput }
@@ -142,6 +148,9 @@ export function MarketSources({
                 onClick={() => {
                   setAccessKey('')
                   setSecretKey('')
+                  setGitUsername('')
+                  setGitPassword('')
+                  setClearGit(false)
                   setRetrieval(source.retrieval ?? { mode: 'direct_https' })
                   setEditing(source)
                   setUrl(source.url)
@@ -229,6 +238,11 @@ export function MarketSources({
                     retrieval.mode === 's3_sigv4' && (accessKey || secretKey)
                       ? { accessKey, secretKey }
                       : undefined,
+                  gitCredentials:
+                    gitUsername.trim() && gitPassword.trim()
+                      ? { username: gitUsername.trim(), password: gitPassword.trim() }
+                      : undefined,
+                  clearGitCredentials: clearGit || undefined,
                 },
               },
               { onSuccess: reset },
@@ -328,6 +342,41 @@ export function MarketSources({
                   )}
                 </>
               )}
+              <fieldset className="space-y-3 rounded border p-3">
+                <legend className="text-sm font-medium">Git 认证</legend>
+                {editing?.gitConfigured && (
+                  <p className="text-sm text-muted-foreground">
+                    已配置认证；填写用户名和令牌会替换，勾选清除则移除。
+                  </p>
+                )}
+                <label className="block">
+                  用户名
+                  <Input
+                    autoComplete="new-password"
+                    value={gitUsername}
+                    onChange={(e) => setGitUsername(e.target.value)}
+                  />
+                </label>
+                <label className="block">
+                  令牌或密码
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={gitPassword}
+                    onChange={(e) => setGitPassword(e.target.value)}
+                  />
+                </label>
+                {editing?.gitConfigured && (
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={clearGit}
+                      onChange={(e) => setClearGit(e.target.checked)}
+                    />
+                    清除已保存的 Git 认证
+                  </label>
+                )}
+              </fieldset>
             </div>
           </details>
           <Button type="submit" disabled={busy || !space}>
