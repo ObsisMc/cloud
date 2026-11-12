@@ -2,8 +2,10 @@ import "@/lib/workflows/test/dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { AxiosAdapter } from "axios";
 import { beforeEach, describe, expect, it } from "vitest";
 import { UserContext } from "@/app/auth/user";
+import { http } from "@/lib/api-client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { defaultWorkflowSidebar, useUiStore } from "@/lib/workflows/host/ui-store";
 import { LocalWorkflowBackend, browserWorkflowStorage } from "@/lib/workflows/data/local-workflow-backend";
@@ -186,6 +188,32 @@ describe("workflow page", () => {
     expect(await screen.findByDisplayValue("审查流程")).toBeInTheDocument();
     const canvas = await screen.findByLabelText("工作流画布");
     expect((await within(canvas).findAllByText("开始")).length).toBeGreaterThan(0);
+  });
+
+  it("stops editing the open workflow as soon as another one is picked", async () => {
+    const user = userEvent.setup();
+    await renderPage();
+    await screen.findByDisplayValue("示例：代码审查");
+    // Hold the forced save of the draft being left, the window a fast click used to land in.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const answer = http.defaults.adapter as AxiosAdapter;
+    http.defaults.adapter = async (config) => {
+      if (config.method?.toUpperCase() === "PUT" && config.url?.endsWith("/draft")) await held;
+      return answer(config);
+    };
+
+    await user.click(within(library()).getByRole("button", { name: "示例：逐段翻译" }));
+
+    const editor = screen.getByRole("main");
+    await waitFor(() => expect(editor).toHaveAttribute("inert"));
+    expect(editor).toHaveAttribute("aria-busy", "true");
+    release();
+    expect(await screen.findByDisplayValue("示例：逐段翻译")).toBeInTheDocument();
+    expect(editor).not.toHaveAttribute("inert");
+    expect(screen.queryByDisplayValue("示例：代码审查")).not.toBeInTheDocument();
   });
 
   it("keeps workflows across a reload of the page", async () => {
