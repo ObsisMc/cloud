@@ -104,7 +104,13 @@ type Service struct {
 
 // Start binds only IPv4 loopback. Git and grant endpoints require this instance's mTLS
 // identity; Agent model calls require a renewable token. Package bytes are digest pinned.
-func Start(opts Options) (_ *Service, resultErr error) {
+func Start(opts Options) (*Service, error) {
+	return start(opts, time.Now())
+}
+
+// start issues the TLS identity as of issued, which lets a test stand at a later point in a
+// long-running instance's life without waiting for it.
+func start(opts Options, issued time.Time) (_ *Service, resultErr error) {
 	if !filepath.IsAbs(opts.StateDirectory) || !filepath.IsAbs(opts.Repository) || !filepath.IsAbs(opts.GitBackend) || len(opts.Packages) == 0 || len(opts.Bindings) == 0 {
 		return nil, errors.New("invalid local Node service options")
 	}
@@ -127,7 +133,7 @@ func Start(opts Options) (_ *Service, resultErr error) {
 			_ = s.Close()
 		}
 	}()
-	files, config, err := localTLS(dir)
+	files, config, err := localTLS(dir, issued)
 	if err != nil {
 		return nil, err
 	}

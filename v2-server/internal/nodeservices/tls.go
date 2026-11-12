@@ -23,13 +23,21 @@ type TLSFiles struct {
 	ClientKey  string `json:"client_key"`
 }
 
-func localTLS(root string) (TLSFiles, *tls.Config, error) {
+// certificateLifetime is deliberately far longer than any deployment runs without a restart. The
+// CA and both certificates are created by Start, read by Node only when it starts, and removed by
+// Close, so nothing can replace them under a running instance: an expiry inside the process
+// lifetime would break clone and model access until v2-server restarts. A short lifetime would
+// buy nothing either, since the keys never leave this instance's private directory and every
+// restart issues a new CA.
+const certificateLifetime = 10 * 365 * 24 * time.Hour
+
+// localTLS issues the instance's CA, server and Node client certificates as of issued.
+func localTLS(root string, issued time.Time) (TLSFiles, *tls.Config, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return TLSFiles{}, nil, err
 	}
-	now := time.Now()
-	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "v2 local Node services"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(24 * time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "v2 local Node services"}, NotBefore: issued.Add(-time.Minute), NotAfter: issued.Add(certificateLifetime), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
 	caDER, err := x509.CreateCertificate(rand.Reader, ca, ca, &key.PublicKey, key)
 	if err != nil {
 		return TLSFiles{}, nil, err
