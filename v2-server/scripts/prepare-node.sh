@@ -29,12 +29,21 @@ if [[ ! -f "$source_dir/.source-commit" ]]; then
   printf '%s\n' "$source_commit" > "$source_dir/.source-commit"
 fi
 [[ $(cat "$source_dir/.source-commit") == "$source_commit" ]] || { echo 'Source marker mismatch.' >&2; exit 1; }
-(cd "$source_dir" && cargo +1.95.0 build --locked -p ora-node -p ora-process-host -p ora-process-guardian)
-mkdir -p "$assets_dir/bin"
+# Release by default: every project runs its own Node, host and guardians, so idle cost matters more
+# than the one-time compile. V2_NODE_PROFILE=debug trades that for a faster first build.
+profile=${V2_NODE_PROFILE:-release}
+case $profile in
+  release) profile_flag=--release ;;
+  debug) profile_flag= ;;
+  *) echo 'V2_NODE_PROFILE must be release or debug.' >&2; exit 1 ;;
+esac
+(cd "$source_dir" && cargo +1.95.0 build --locked $profile_flag -p ora-node -p ora-process-host -p ora-process-guardian)
+# Fixed modes, so the result does not depend on the caller's umask.
+install -d -m 0755 "$assets_dir" "$assets_dir/bin"
 for binary in ora-node ora-process-host ora-process-guardian; do
-  cp -- "$source_dir/target/debug/$binary" "$assets_dir/bin/$binary"
+  install -m 0755 -- "$source_dir/target/$profile/$binary" "$assets_dir/bin/$binary"
 done
-cp -- "$deno_path" "$assets_dir/bin/deno"
+install -m 0755 -- "$deno_path" "$assets_dir/bin/deno"
 # fetch_plugin <file> <url> <sha256>: download once, then verify on every run.
 fetch_plugin() {
   if [[ ! -f "$1" ]]; then
@@ -49,7 +58,7 @@ fetch_plugin "$assets_dir/claude-0.4.5.orax" "https://github.com/ora-space/claud
 
 # Source revision and plugin digests are pinned above. Locally built executables and the trusted,
 # version-checked Deno installation are hashed here and verified again by runtime startup.
-python3 - "$assets_dir" "$source_commit" "$claude_declaration_sha" <<'PY'
+python3 - "$assets_dir" "$source_commit" "$claude_declaration_sha" "$profile" <<'PY'
 import hashlib, json, pathlib, sys, zipfile
 root = pathlib.Path(sys.argv[1])
 with zipfile.ZipFile(root/'claude-0.4.5.orax') as package:
@@ -60,7 +69,7 @@ def asset(path):
     with path.open('rb') as source:
         digest = hashlib.file_digest(source, 'sha256').hexdigest()
     return {'Path': str(path), 'SHA256': digest}
-manifest = {'version': 1, 'sourceCommit': sys.argv[2],
+manifest = {'version': 1, 'sourceCommit': sys.argv[2], 'profile': sys.argv[4],
             'node': asset(root/'bin'/'ora-node'),
             'host': asset(root/'bin'/'ora-process-host'),
             'guardian': asset(root/'bin'/'ora-process-guardian'),

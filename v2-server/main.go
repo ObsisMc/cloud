@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -124,6 +125,9 @@ func run(addr, dbURL string, cleanup, fixture, testFixtures bool) (resultErr err
 	}
 	var driver *agentruntime.Driver
 	if assets := os.Getenv("V2_NODE_ASSETS_DIR"); assets != "" && len(models) > 0 {
+		if e := checkReleaseNodeDataDirectory(assets, base); e != nil {
+			return e
+		}
 		gitDir, e := exec.CommandContext(ctx, "git", "--exec-path").Output()
 		if e != nil {
 			return errors.New("git executable unavailable")
@@ -326,6 +330,31 @@ func dataDirectory() (string, error) {
 		return "", e
 	}
 	return root, os.MkdirAll(root, 0700)
+}
+
+// A release-built process host refuses state below a directory that group or other users can write
+// (debug builds skip that check). Without this, every conversation fails with agent_prepare_failed
+// and nothing names the directory.
+func checkReleaseNodeDataDirectory(assets, root string) error {
+	var manifest struct {
+		Profile string `json:"profile"`
+	}
+	raw, e := os.ReadFile(filepath.Join(assets, "assets.json"))
+	if e != nil || json.Unmarshal(raw, &manifest) != nil || manifest.Profile != "release" {
+		return nil
+	}
+	for dir := root; ; dir = filepath.Dir(dir) {
+		info, e := os.Stat(dir)
+		if e != nil {
+			return e
+		}
+		if mode := info.Mode().Perm(); mode&0o022 != 0 {
+			return fmt.Errorf("data directory %s: %s is writable by group or others (mode %04o), which a release-built Node refuses; run chmod go-w on it or choose another V2_DATA_DIR", root, dir, mode)
+		}
+		if dir == filepath.Dir(dir) {
+			return nil
+		}
+	}
 }
 
 // One v2 process owns the data directory; cleanup cannot race an active server.
