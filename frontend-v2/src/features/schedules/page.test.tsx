@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, expect, it, vi } from 'vitest'
 import Page from './page'
 import * as tasksApi from '../collaboration/tasks-api/generated'
-import * as api from './api/generated'
+import * as api from '@/lib/schedules-api/generated'
 import * as actions from './api/actions/generated'
 import * as history from './api/history/generated'
 import { compareOccurrences, compareTimestampsDesc, emptyResources } from './runtime'
@@ -13,7 +13,7 @@ import * as workflowRuns from '@/lib/workflows/api/generated'
 
 vi.mock('@/app/auth/user',()=>({useUser:()=>({id:'user'})}))
 vi.mock('@/api/me/me',()=>({useGetApiV1MeTenants:()=>({data:{items:[{id:'tenant'}]},isLoading:false,isError:false})}))
-vi.mock('./api/generated',()=>({listScheduleConfigs:vi.fn(),createScheduleConfig:vi.fn(),updateScheduleConfig:vi.fn(),setScheduleConfigEnabled:vi.fn(),getScheduleResources:vi.fn()}))
+vi.mock('@/lib/schedules-api/generated',()=>({listScheduleConfigs:vi.fn(),createScheduleConfig:vi.fn(),updateScheduleConfig:vi.fn(),setScheduleConfigEnabled:vi.fn(),getScheduleResources:vi.fn()}))
 vi.mock('./api/actions/generated',()=>({runScheduleNow:vi.fn(),cancelScheduleRun:vi.fn()}))
 vi.mock('./api/history/generated',()=>({listScheduleHistory:vi.fn(),getScheduleHistoryItem:vi.fn(),getScheduleExecutionResult:vi.fn()}))
 vi.mock('@/lib/workflows/api/generated',()=>({getWorkflowRun:vi.fn()}))

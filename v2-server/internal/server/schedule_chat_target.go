@@ -61,8 +61,8 @@ func decodeScheduleChat(raw json.RawMessage) (ScheduleChatTarget, string) {
 	return target, ""
 }
 
-// decodeScheduleWorkflow reads a workflow target strictly: a workflow, the published snapshot of
-// it the schedule runs, and the kickoff input, which may be empty.
+// decodeScheduleWorkflow rejects ambiguous selectors: fixed requires a snapshot, while latest
+// forbids a pin. Omitted policy preserves saved fixed-version configurations.
 func decodeScheduleWorkflow(raw json.RawMessage) (scheduler.WorkflowTarget, string) {
 	var target scheduler.WorkflowTarget
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
@@ -70,7 +70,19 @@ func decodeScheduleWorkflow(raw json.RawMessage) (scheduler.WorkflowTarget, stri
 	if decoder.Decode(&target) != nil || target.Kind != "workflow" || len(target.Input) > 32000 {
 		return target, "invalid_target"
 	}
-	if !workflowUUID.MatchString(target.WorkflowID) || !workflowUUID.MatchString(target.SnapshotID) {
+	if !workflowUUID.MatchString(target.WorkflowID) {
+		return target, "invalid_target"
+	}
+	switch target.VersionPolicy {
+	case "", "fixed":
+		if !workflowUUID.MatchString(target.SnapshotID) {
+			return target, "invalid_target"
+		}
+	case "latest":
+		if target.SnapshotID != "" {
+			return target, "invalid_target"
+		}
+	default:
 		return target, "invalid_target"
 	}
 	return target, ""

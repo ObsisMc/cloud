@@ -13,20 +13,21 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
-// WorkflowTarget is a scheduled workflow: one frozen published snapshot of a workflow and the
-// kickoff input it starts with. The project is the schedule's own projectId.
+// WorkflowTarget selects a fixed published snapshot (the default) or the effective release
+// at each trigger. The run freezes the resolved snapshot. The project belongs to the schedule.
 type WorkflowTarget struct {
-	Kind       string `json:"kind"`
-	WorkflowID string `json:"workflowId"`
-	SnapshotID string `json:"snapshotId"`
-	Input      string `json:"input"`
+	Kind          string `json:"kind"`
+	WorkflowID    string `json:"workflowId"`
+	SnapshotID    string `json:"snapshotId,omitempty"`
+	VersionPolicy string `json:"versionPolicy,omitempty"`
+	Input         string `json:"input"`
 }
 
 // WorkflowRuns is the workflow run entry the pages use, as the workflow adapter needs it: the run
 // store for creating and finding a scheduled trigger's run, and the execution bridge for starting
 // and cancelling it. Everything runs in the schedule owner's scope.
 type WorkflowRuns interface {
-	// Create freezes the target's snapshot, the project and the input into a pending run whose
+	// Create freezes the resolved published snapshot, project and input into a pending run whose
 	// stable identity is triggerRef; store.ErrWorkflowRunTriggerTaken when that run exists.
 	Create(ctx context.Context, scope execution.Scope, target WorkflowTarget, projectID, triggerRef, name string) (store.WorkflowRun, error)
 	// Find returns the run triggerRef created; store.ErrWorkflowRunNotFound when there is none.
@@ -115,8 +116,20 @@ func workflowRequest(o store.Occurrence) (store.ScheduleConfig, WorkflowTarget, 
 	if strings.TrimSpace(config.ProjectID) == "" {
 		return config, target, "project_required"
 	}
-	if target.WorkflowID == "" || target.SnapshotID == "" {
+	if target.WorkflowID == "" {
 		return config, target, "workflow_required"
+	}
+	switch target.VersionPolicy {
+	case "", "fixed":
+		if target.SnapshotID == "" {
+			return config, target, "workflow_required"
+		}
+	case "latest":
+		if target.SnapshotID != "" {
+			return config, target, "invalid_snapshot"
+		}
+	default:
+		return config, target, "invalid_snapshot"
 	}
 	return config, target, ""
 }

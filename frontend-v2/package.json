@@ -15,7 +15,7 @@
     "check": "npm run api:check:dashboard && npm run api:check:market-sources && npm run api:check:members && npm run api:check:skills && npm run api:check:schedules && npm run api:check:squads && npm run api:check:tasks && npm run api:check:chat && npm run api:check:workflows && npm run api:check:workspace && npm run typecheck && npm run lint && npm run test && npm run build",
     "api:generate": "orval --config orval.config.ts",
     "api:generate:schedules": "orval --config orval.schedules.config.ts && npm run api:generate:schedule-runtime",
-    "api:check:schedules": "npm run api:generate:schedules && git diff --exit-code -- src/features/schedules/api",
+    "api:check:schedules": "npm run api:generate:schedules && git diff --exit-code -- src/lib/schedules-api src/features/schedules/api",
     "api:generate:squads": "orval --config orval.squads.config.ts",
     "api:check:squads": "npm run api:generate:squads && git diff --exit-code -- src/lib/squads-api",
     "e2e": "playwright test",

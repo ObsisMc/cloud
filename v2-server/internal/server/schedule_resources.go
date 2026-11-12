@@ -227,7 +227,7 @@ var errScheduleWorkflowsUnavailable = errors.New("schedule workflow targets unav
 
 // resolveScheduleWorkflow checks a workflow target against what the owner can run now: the project
 // is theirs, and the snapshot is a published (not draft) version of the workflow in this tenant.
-// The schedule keeps that snapshot; a newer version applies only once the schedule is edited.
+// Fixed targets keep their snapshot. Latest targets verify availability without saving a pin.
 func (h *handler) resolveScheduleWorkflow(ctx context.Context, tenant, user string, in *store.ScheduleInput, target scheduler.WorkflowTarget) error {
 	workflows, ok := h.store.(WorkflowStore)
 	if !ok || h.opts.WorkflowRuns == nil {
@@ -243,6 +243,16 @@ func (h *handler) resolveScheduleWorkflow(ctx context.Context, tenant, user stri
 	scope := execution.Scope{TenantID: tenant, UserID: user}
 	if _, err := projects.GetProject(ctx, scope, in.ProjectID); err != nil {
 		return scheduleSelectionError(err)
+	}
+	if target.VersionPolicy == "latest" {
+		w, err := workflows.Workflow(ctx, tenant, target.WorkflowID)
+		if err != nil {
+			return err
+		}
+		if w.PublishedSnapshotID == nil {
+			return store.ErrNotFound
+		}
+		target.SnapshotID = *w.PublishedSnapshotID
 	}
 	snapshot, err := workflows.WorkflowSnapshot(ctx, tenant, target.WorkflowID, target.SnapshotID)
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrWorkflowSnapshotNotFound) {

@@ -1,6 +1,6 @@
 import { isAxiosError } from 'axios'
 import type { Occurrence, ExecutionResult } from './api/history/generated'
-import type { ScheduleResources } from './api/generated'
+import type { ScheduleResources } from '@/lib/schedules-api/generated'
 import { isPersonalTarget, isWorkflowTarget, type Catalog, type Task, type Run } from './schedule-model'
 
 export const emptyResources: ScheduleResources = { projects: [], models: [], agents: [], workflows: [], available: { projects: false, models: false, agents: false, workflows: false } }

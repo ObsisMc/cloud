@@ -161,7 +161,7 @@ seed 在 [`demo/`](demo/README.md)：`env.go` 是上表和重置、准备本地 
 
 写入契约接受 chat、工作流和本人协作任务目标；缺少可执行绑定的旧 task 引用仅供读取，没有 ScheduleTargetResolver、参数字符串化或可由替身开启的引用写入通道。
 
-**工作流目标** `{kind: "workflow", workflowId, snapshotId, input}` 在配置的 `projectId`（必填）里运行一个工作流。保存时校验项目属于当前用户、`snapshotId` 是这个工作流在本租户的非草稿版本；`schedule-resources` 的 `workflows` 列出已发布的工作流和它当前生效的快照，页面保存时固定这个快照，之后发布的新版本要重新保存任务才会使用。启动变量用快照里的默认值，`input` 作为开始节点的初始输入。进程没有执行桥时（`Options.WorkflowRuns` 为空）不列出工作流，写入返回 `503 schedule_target_unavailable`。旧的、没有这些字段的 workflow 引用照旧只读，按它写入返回 `400 invalid_target`。
+**工作流目标** 在配置的 `projectId`（必填）里运行一个工作流。默认或 `versionPolicy: "fixed"` 保存 `{kind: "workflow", workflowId, snapshotId, input}`，校验项目属于当前用户、`snapshotId` 是这个工作流在本租户的非草稿版本；`schedule-resources` 列出已发布工作流及当前生效快照，固定模式保存此快照。`versionPolicy: "latest"` 不带 `snapshotId`，保存时只校验存在生效发布版本，每次触发在创建运行的事务内解析当前发布快照。两种模式的运行都保留实际使用的快照；发布不改写配置或历史。启动变量用快照里的默认值，`input` 作为开始节点的初始输入。进程没有执行桥时（`Options.WorkflowRuns` 为空）不列出工作流，写入返回 `503 schedule_target_unavailable`。旧的、没有这些字段的 workflow 引用照旧只读，按它写入返回 `400 invalid_target`。
 
 执行走页面同一个运行入口：`scheduler.WorkflowAdapter` 用任务创建者的 scope 创建运行（冻结快照、项目、输入，名称取任务名）并经执行桥启动，occurrence 的 `executionRef` 记 `{"workflowRunId"}`。运行的 `trigger_kind = 'schedule'`、`trigger_ref = <occurrence ID>`，唯一索引 `v2_workflow_runs_schedule_trigger` 保证一个触发只对应一个运行，重复派发和恢复都按这个身份找回原运行，不创建替代运行。执行桥拒绝启动（图里有还不能执行的节点、输入不满足开始节点）时记 `skipped / workflow_run_not_startable` 并取消那个未开始的运行。协调器每次 Tick 核对未释放的记录：运行结束后成功记 `succeeded`、失败记 `failed / workflow_run_failed`（重启恢复中失败的记 `interrupted`）、取消记 `cancelled`，随即释放占位；运行结束后、结算之前被用户删除的，记 `failed / workflow_run_deleted` 并释放；节点会话由执行桥自己结束，定时侧没有会话要 End。还是 pending 的运行说明启动没有提交（进程重启过），取消它并记 `execution_not_started`。工作流 occurrence 的结果就是它的运行，`…/runs/{oid}/result` 返回 `404 execution_result_not_found`，页面按 `workflowRunId` 读运行详情。
 
@@ -486,6 +486,10 @@ ConversationAdapter 按冻结配置分流：无项目文本对话用公共 Start
 协作任务目标保存原任务 ID、执行器和可选补充说明；项目继承自任务，创建和触发时均校验归属和状态。调度器以计划创建者身份通过协作运行入口启动，使用到期记录的稳定身份核对原始执行，避免重复派发。历史只保存任务和运行引用，不复制原任务的过程或回答。仅一次规则按配置时区的指定日期触发，重启不补跑。候选契约见 `schedules.openapi.json`、`tasks.openapi.json`。
 
 `server.NewScheduleCoordinator(records, options, now)` 使用页面统一的 `Options.Execution`，不另建执行服务；宿主在公共启动恢复完成后调用 Recover，再驱动 Tick/Manual。Start 与同记录的核对/取消不会并行。启动错误或本地引用未保存时只按原 Caller 读取；无引用且确定没有进行中的 Start，查询未命中可记 skipped/execution_not_started。读取错误或已有引用但缺失记录时保留占位，不重放 prompt。Agent Cancel 结束会话，model-only Cancel 只停当前轮；定时对话两路都随后确认 End，保留历史与目录。详细状态、原因及 released 含义见 [状态说明](internal/store/occurrence-states.md)。
+
+### 定时工作流版本策略
+
+`ScheduleWorkflowTarget.versionPolicy` 为 `fixed` 或 `latest`，省略仍按固定版本处理。固定版本必须有已发布的 `snapshotId`；跟随最新版本禁止传 `snapshotId`，保存时要求存在生效发布版本。每次手动或定时触发在 `CreateWorkflowRun` 的工作流行锁事务内解析当前发布指针并冻结实际快照；已有运行及同请求键的重试、恢复保持原快照。没有发布版本、快照删除或工作流不可用时按现有 `workflow_unavailable` 路径拒绝，不回退草稿。仅使用 v2 专属 schedules 契约，无 Cloud 契约变化。发布不会修改任何任务；前端发布弹窗只检查当前用户在当前租户的可见配置，因此不公开其他用户的计划。
 
 ### 工作流执行
 

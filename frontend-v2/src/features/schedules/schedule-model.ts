@@ -3,8 +3,8 @@ export type Rule = { date?:string; kind: 'once' | 'daily' | 'weekdays' | 'weekly
 export type ChatTarget = { kind: 'chat'; prompt: string; agent: string; agentId?: string; model: string; executorId?: string }
 export type AgentModel = { id: string; name: string }
 export type AgentChoice = { id: string; name: string; version: string; models: AgentModel[] }
-/** A workflow run in the schedule's project: the published snapshot frozen at save, and its kickoff input. */
-export type WorkflowTarget = { kind: 'workflow'; workflowId: string; snapshotId: string; input: string }
+/** A workflow run in the schedule project: a pinned snapshot or an explicit latest policy. */
+export type WorkflowTarget = { kind: 'workflow'; workflowId: string; snapshotId?: string; versionPolicy?: 'fixed' | 'latest'; input: string }
 export type PersonalTarget = { kind: 'task'; agentName?:string;modelName?:string;taskId: string; executorId: string; note: string }
 export function isPersonalTarget(t: Target): t is PersonalTarget {
   return t.kind === 'task' && typeof t.taskId === 'string' && !!t.taskId && typeof t.executorId === 'string' && !!t.executorId && typeof t.note === 'string'
@@ -13,11 +13,11 @@ export type LegacyTarget = { kind: 'workflow' | 'task'; [key:string]:unknown }
 export type Target = ChatTarget | WorkflowTarget | PersonalTarget | LegacyTarget
 /** A workflow target this version can run, as opposed to an older reference kept read-only. */
 export function isWorkflowTarget(target: Target): target is WorkflowTarget {
-  return target.kind === 'workflow' && typeof target.workflowId === 'string' && typeof target.snapshotId === 'string'
+  return target.kind === 'workflow' && typeof target.workflowId === 'string' && (target.versionPolicy === 'latest' || typeof target.snapshotId === 'string')
 }
 export type Run = { id: string; startedAt: string; status: 'recorded'|'starting'|'reconciling'|'running'|'cancelling'|'succeeded'|'success'|'failed'|'cancelled'|'interrupted'|'skipped'; reason?:string;released?:boolean }
 export type Task = { version?: number; id: string; name: string; projectId: string; target: Target; rule: Rule; enabled: boolean; createdAt: string; runs: Run[] }
-export type Draft = { taskId:string;note:string;name:string;kind:Target['kind'];projectId:string;prompt:string;agent:string;agentId:string;model:string;executorId?:string;workflowId:string;snapshotId:string;input:string;rule:Rule }
+export type Draft = { taskId:string;note:string;name:string;kind:Target['kind'];projectId:string;prompt:string;agent:string;agentId:string;model:string;executorId?:string;workflowId:string;snapshotId:string;versionPolicy?:'fixed'|'latest';input:string;rule:Rule }
 export type Catalog = { tenantId?:string; tasks?:{id:string;title:string;projectId:string}[]; taskDirectoryError?:boolean; projects:{id:string;name:string;description:string}[];models?:AgentModel[];agents?:AgentChoice[];workflows?:{id:string;name:string;version:string;snapshotId:string}[];available?:{projects:boolean;models:boolean;agents:boolean;workflows?:boolean} }
 export const catalog: Catalog = {projects:[]}
 export const weekdayNames = ['日', '一', '二', '三', '四', '五', '六']
@@ -27,7 +27,7 @@ export function emptyDraft(): Draft {
 export function taskDraft(task: Task): Draft {
   const d = emptyDraft()
   const t = task.target
-  const target = t.kind === 'chat' ? t : isPersonalTarget(t) ? {taskId:t.taskId,note:t.note,executorId:t.executorId} : isWorkflowTarget(t) ? { workflowId: t.workflowId, snapshotId: t.snapshotId, input: t.input ?? '' } : {}
+  const target = t.kind === 'chat' ? t : isPersonalTarget(t) ? {taskId:t.taskId,note:t.note,executorId:t.executorId} : isWorkflowTarget(t) ? { workflowId: t.workflowId, snapshotId: t.snapshotId ?? '', versionPolicy: t.versionPolicy, input: t.input ?? '' } : {}
   return { ...d, name: task.name, projectId: task.projectId, kind: t.kind, rule: structuredClone(task.rule), ...target }
 }
 /** Only older unbound references stay read-only. */
@@ -75,7 +75,7 @@ export function validateDraft(d: Draft, data: Catalog = catalog): Record<string,
   try { new Intl.DateTimeFormat('zh-CN', { timeZone: d.rule.timezone }).format() } catch { errors.timezone = '请选择有效时区' }
   return errors
 }
-/** The target to save. A workflow freezes the version published right now; a later one applies once the task is saved again. */
+/** Latest resolves at each trigger; the default keeps the existing save-time pinning behavior. */
 export function targetFromDraft(d: Draft, data: Catalog = catalog): ChatTarget | WorkflowTarget | PersonalTarget {
   if(d.kind==='task'){
     if(!d.taskId || !d.executorId) throw new Error('请选择任务和执行器')
@@ -84,7 +84,7 @@ export function targetFromDraft(d: Draft, data: Catalog = catalog): ChatTarget |
   if (d.kind === 'workflow') {
     const workflow = data.workflows?.find(w => w.id === d.workflowId)
     if (!workflow) throw new Error('所选工作流已不可用')
-    return { kind: 'workflow', workflowId: workflow.id, snapshotId: workflow.snapshotId, input: d.input }
+    return { kind: 'workflow', workflowId: workflow.id, ...(d.versionPolicy === 'latest' ? {versionPolicy: 'latest' as const} : {snapshotId: workflow.snapshotId}), input: d.input }
   }
   if(d.kind!=='chat')throw new Error('引用目标只读，等待提供方接口')
   const selected = agentChoice(d, data)
@@ -106,7 +106,7 @@ export function ruleText(rule: Rule) {
 export function summary(d:Draft,data:Catalog=catalog) {
   if(d.kind==='workflow'){
     const workflow=data.workflows?.find(w=>w.id===d.workflowId)
-    return workflow?`${ruleText(d.rule)}，在「${projectName(d.projectId,data)}」中运行工作流「${workflow.name}」（${workflow.version}）。`:'选择项目和已发布的工作流后预览。'
+    return workflow?`${ruleText(d.rule)}，在「${projectName(d.projectId,data)}」中运行工作流「${workflow.name}」（${d.versionPolicy==='latest'?'跟随最新发布版本':workflow.version}）。`:'选择项目和已发布的工作流后预览。'
   }
   if(d.kind==='task'){const t=data.tasks?.find(t=>t.id===d.taskId);return t?ruleText(d.rule)+'，处理《'+t.title+'》，过程和结果写回原任务。':'选择分配给你的协作任务。'}
   if(d.kind!=='chat')return '原引用配置已保留；此执行方式尚未接入。'
