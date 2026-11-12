@@ -106,12 +106,16 @@ type Endpoints struct {
 // configuration. This is configuration evidence: it does not prove the endpoints are reachable or
 // that the credentials are accepted.
 func (a *Authenticator) Endpoints() Endpoints {
-	view := func(u *url.URL) string {
-		safe := *u
-		safe.RawQuery, safe.ForceQuery, safe.Fragment, safe.User = "", false, "", nil
-		return safe.String()
-	}
-	return Endpoints{Authorize: view(a.authorizeURL), Token: view(a.tokenURL), UserInfo: view(a.userInfoURL)}
+	return Endpoints{Authorize: endpointView(a.authorizeURL), Token: endpointView(a.tokenURL), UserInfo: endpointView(a.userInfoURL)}
+}
+
+// endpointView renders one endpoint without the query, fragment and userinfo each request owns.
+// Resolution already rejects them; this guard keeps the logged view safe if a future default or
+// endpoint source ever carries one of those components.
+func endpointView(u *url.URL) string {
+	safe := *u
+	safe.RawQuery, safe.ForceQuery, safe.Fragment, safe.User = "", false, "", nil
+	return safe.String()
 }
 
 // AuthorizationURL builds the IDaaS 2.0 authorize redirect. PKCE is omitted because that mode is

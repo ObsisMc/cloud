@@ -109,3 +109,13 @@ func TestEndpointsExposeEffectiveTargetsWithoutRequestParameters(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointViewDropsPerRequestAndSensitiveComponents(t *testing.T) {
+	u, err := url.Parse("https://user:synthetic-secret@sso.example.org/custom/token?code=one#fragment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := endpointView(u); got != "https://sso.example.org/custom/token" {
+		t.Fatalf("endpoint view = %q", got)
+	}
+}
