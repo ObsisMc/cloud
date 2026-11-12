@@ -273,11 +273,16 @@ func (c *Config) Validate() error {
 		if c.IDaaS.Timeout <= 0 {
 			return fmt.Errorf("idaas.timeout must be positive")
 		}
-		for _, endpoint := range []string{c.IDaaS.AuthorizeURL, c.IDaaS.TokenURL, c.IDaaS.UserInfoURL} {
-			if endpoint != "" {
-				if _, e := IDaaSEndpoint(endpoint); e != nil {
-					return e
-				}
+		for _, endpoint := range []struct{ key, value string }{
+			{"idaas.authorize_url", c.IDaaS.AuthorizeURL},
+			{"idaas.token_url", c.IDaaS.TokenURL},
+			{"idaas.userinfo_url", c.IDaaS.UserInfoURL},
+		} {
+			if endpoint.value == "" {
+				continue
+			}
+			if _, e := IDaaSEndpoint(endpoint.value); e != nil {
+				return fmt.Errorf("%s: %w", endpoint.key, e)
 			}
 		}
 		if c.IDaaS.DisplayNameField != "" && (strings.TrimSpace(c.IDaaS.DisplayNameField) != c.IDaaS.DisplayNameField || len(c.IDaaS.DisplayNameField) > 128) {

@@ -225,7 +225,7 @@ github: {client_id: id, client_secret_file: /run/secret}
 		t.Fatal("IDaaS endpoint environment overrides were not loaded")
 	}
 	t.Setenv("GATEWAY_IDAAS_TOKEN_URL", "https://tokens.example.org/token?secret=redacted")
-	if _, e = LoadConfig(path); e == nil || strings.Contains(e.Error(), "redacted") {
-		t.Fatal("invalid endpoint must fail without exposing the value")
+	if _, e = LoadConfig(path); e == nil || strings.Contains(e.Error(), "redacted") || !strings.Contains(e.Error(), "idaas.token_url") {
+		t.Fatal("invalid endpoint must name the key and fail without exposing the value")
 	}
 }
