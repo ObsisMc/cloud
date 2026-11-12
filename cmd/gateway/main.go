@@ -193,7 +193,7 @@ func buildProvider(cfg *gateway.Config, log *zap.Logger) (gateway.Authenticator,
 		if e != nil {
 			return nil, e
 		}
-		logIDaaSEndpoints(log, cfg, adapter.Endpoints())
+		logIDaaSEndpoints(log, adapter.Endpoints())
 		return adapter, nil
 	default:
 		return nil, fmt.Errorf("unsupported login provider %q", cfg.Login.Provider)
@@ -203,14 +203,14 @@ func buildProvider(cfg *gateway.Config, log *zap.Logger) (gateway.Authenticator,
 // logIDaaSEndpoints records the provider endpoints this process will actually call, so a
 // deployment whose override never reached the process is visible before a login is reproduced.
 // The line carries no client ID, secret, query or request parameter and is safe to quote.
-func logIDaaSEndpoints(log *zap.Logger, cfg *gateway.Config, endpoints idaas.Endpoints) {
+func logIDaaSEndpoints(log *zap.Logger, endpoints idaas.Endpoints) {
 	log.Info("IDaaS endpoints resolved",
-		zap.String("authorize", endpoints.Authorize),
-		zap.String("token", endpoints.Token),
-		zap.String("userinfo", endpoints.UserInfo),
-		zap.Bool("authorizeOverride", cfg.IDaaS.AuthorizeURL != ""),
-		zap.Bool("tokenOverride", cfg.IDaaS.TokenURL != ""),
-		zap.Bool("userinfoOverride", cfg.IDaaS.UserInfoURL != ""),
+		zap.String("authorize", endpoints.Authorize.URL),
+		zap.String("token", endpoints.Token.URL),
+		zap.String("userinfo", endpoints.UserInfo.URL),
+		zap.Bool("authorizeOverride", endpoints.Authorize.Override),
+		zap.Bool("tokenOverride", endpoints.Token.Override),
+		zap.Bool("userinfoOverride", endpoints.UserInfo.Override),
 	)
 }
 

@@ -94,19 +94,62 @@ func TestEndpointsExposeEffectiveTargetsWithoutRequestParameters(t *testing.T) {
 	}
 	got := a.Endpoints()
 	want := Endpoints{
-		Authorize: "https://sso.example.org/custom/authorize",
-		Token:     "https://uniportal-beta.huawei.com/saaslogin1/oauth2/v1/token",
-		UserInfo:  "https://uniportal-beta.huawei.com/saaslogin1/oauth2/v1/userinfo",
+		Authorize: Endpoint{URL: "https://sso.example.org/custom/authorize", Override: true},
+		Token:     Endpoint{URL: "https://uniportal-beta.huawei.com/saaslogin1/oauth2/v1/token"},
+		UserInfo:  Endpoint{URL: "https://uniportal-beta.huawei.com/saaslogin1/oauth2/v1/userinfo"},
 	}
 	if got != want {
 		t.Fatalf("endpoints = %+v want %+v", got, want)
 	}
-	for _, value := range []string{got.Authorize, got.Token, got.UserInfo} {
+	for _, value := range []string{got.Authorize.URL, got.Token.URL, got.UserInfo.URL} {
 		for _, forbidden := range []string{"synthetic-client", "synthetic-secret", "?", "#", "@"} {
 			if strings.Contains(value, forbidden) {
 				t.Fatalf("endpoint %q exposes %q", value, forbidden)
 			}
 		}
+	}
+}
+
+func TestEndpointsReportEachOverrideIndependently(t *testing.T) {
+	cases := []struct {
+		name string
+		o    Options
+		want Endpoints
+	}{
+		{
+			name: "all endpoints overridden on different hosts",
+			o: Options{
+				AuthorizeURL: "https://authorize.example.org/one", TokenURL: "https://token.example.org/two",
+				UserInfoURL: "https://profile.example.org/three",
+			},
+			want: Endpoints{
+				Authorize: Endpoint{URL: "https://authorize.example.org/one", Override: true},
+				Token:     Endpoint{URL: "https://token.example.org/two", Override: true},
+				UserInfo:  Endpoint{URL: "https://profile.example.org/three", Override: true},
+			},
+		},
+		{
+			name: "only userinfo overridden",
+			o:    Options{UserInfoURL: "https://profile.example.org/three"},
+			want: Endpoints{
+				Authorize: Endpoint{URL: DefaultBaseURL + authorizePath},
+				Token:     Endpoint{URL: DefaultBaseURL + tokenPath},
+				UserInfo:  Endpoint{URL: "https://profile.example.org/three", Override: true},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := tc.o
+			o.ClientID, o.ClientSecret, o.HTTP = "synthetic-client", "synthetic-secret", NewHTTPClient(time.Second)
+			a, err := New(&o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := a.Endpoints(); got != tc.want {
+				t.Fatalf("endpoints = %+v want %+v", got, tc.want)
+			}
+		})
 	}
 }
 
