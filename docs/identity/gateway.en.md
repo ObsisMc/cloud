@@ -140,6 +140,12 @@ client (`client_secret_post`) without PKCE.
   [configuration reference](../operations/configuration.en.md#gateway). Overrides do not change the
   form protocol, scope, `huawei-corp` source or UUID mapping, migrate identities, revoke existing
   sessions or grant tenant permissions; targets must preserve the same corporate identity authority.
+- On startup the `IDaaS endpoints resolved` log line names the scheme+host+path each endpoint will
+  actually use and whether it came from a deployment override (`authorizeOverride`, `tokenOverride`,
+  `userinfoOverride`). A misspelled variable, or an image without the override fields, is ignored
+  silently; this line shows the addresses the process really adopted. It carries no client ID,
+  client secret or request parameter and proves configuration only, not reachability, credential
+  acceptance or a successful login.
 
 **GitHub (`internal/gateway/github`).** OAuth App Authorization Code with PKCE S256, no scopes, and
 `allow_signup=false` plus `prompt=select_account` on the authorize request. After reading
