@@ -19,11 +19,11 @@ type workspaceStore interface {
 	TaskRunWorkspace(ctx context.Context, tenant, taskID, runID string) (store.WorkspaceLocation, error)
 }
 
-// locate finds the checkout a request names, after its own authorization checks. It writes the
-// response itself and returns false when there is nothing to read.
-type locate func(http.ResponseWriter, *http.Request) (workspacefs.Workspace, bool)
+// locate finds the checkout a request names, after its own resource checks. It writes the response
+// itself and returns false when there is nothing to read.
+type locate func(http.ResponseWriter, *http.Request, access) (workspacefs.Workspace, bool)
 
-func (h *handler) workspaceRoutes(mux *http.ServeMux) {
+func (h *handler) workspaceRoutes(rt *router) {
 	for _, r := range []struct {
 		base string
 		find locate
@@ -32,16 +32,16 @@ func (h *handler) workspaceRoutes(mux *http.ServeMux) {
 		{"/api/v2/tenants/{tid}/workflow-runs/{rid}/workspace", h.workflowRunWorkspace},
 		{"/api/v2/tenants/{tid}/tasks/{taskid}/runs/{rid}/workspace", h.taskRunWorkspace},
 	} {
-		mux.HandleFunc("GET "+r.base+"/entries", workspaceRead(r.find, func(_ context.Context, w workspacefs.Workspace, p string) (any, error) { return w.List(p) }))
-		mux.HandleFunc("GET "+r.base+"/file", workspaceRead(r.find, func(_ context.Context, w workspacefs.Workspace, p string) (any, error) { return w.Read(p) }))
-		mux.HandleFunc("GET "+r.base+"/changes", workspaceRead(r.find, func(c context.Context, w workspacefs.Workspace, _ string) (any, error) { return w.Changes(c) }))
-		mux.HandleFunc("GET "+r.base+"/diff", workspaceRead(r.find, func(c context.Context, w workspacefs.Workspace, p string) (any, error) { return w.Diff(c, p) }))
+		rt.tenant("GET "+r.base+"/entries", workspaceRead(r.find, func(_ context.Context, w workspacefs.Workspace, p string) (any, error) { return w.List(p) }))
+		rt.tenant("GET "+r.base+"/file", workspaceRead(r.find, func(_ context.Context, w workspacefs.Workspace, p string) (any, error) { return w.Read(p) }))
+		rt.tenant("GET "+r.base+"/changes", workspaceRead(r.find, func(c context.Context, w workspacefs.Workspace, _ string) (any, error) { return w.Changes(c) }))
+		rt.tenant("GET "+r.base+"/diff", workspaceRead(r.find, func(c context.Context, w workspacefs.Workspace, p string) (any, error) { return w.Diff(c, p) }))
 	}
 }
 
-func workspaceRead(find locate, read func(context.Context, workspacefs.Workspace, string) (any, error)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ws, ok := find(w, r)
+func workspaceRead(find locate, read func(context.Context, workspacefs.Workspace, string) (any, error)) func(http.ResponseWriter, *http.Request, access) {
+	return func(w http.ResponseWriter, r *http.Request, a access) {
+		ws, ok := find(w, r, a)
 		if !ok {
 			return
 		}
@@ -54,7 +54,7 @@ func workspaceRead(find locate, read func(context.Context, workspacefs.Workspace
 	}
 }
 
-func (h *handler) chatWorkspace(w http.ResponseWriter, r *http.Request) (ws workspacefs.Workspace, found bool) {
+func (h *handler) chatWorkspace(w http.ResponseWriter, r *http.Request, a access) (ws workspacefs.Workspace, found bool) {
 	h.chat(func(w http.ResponseWriter, r *http.Request, c chatRequest) {
 		s, ok := h.store.(workspaceStore)
 		if !ok {
@@ -67,56 +67,50 @@ func (h *handler) chatWorkspace(w http.ResponseWriter, r *http.Request) (ws work
 		}
 		at, e := s.ChatWorkspace(r.Context(), c.scope.TenantID, c.scope.UserID, r.PathValue("cid"))
 		ws, found = workspaceAt(w, at, e)
-	})(w, r)
+	})(w, r, a)
 	return ws, found
 }
 
-func (h *handler) workflowRunWorkspace(w http.ResponseWriter, r *http.Request) (ws workspacefs.Workspace, found bool) {
-	h.authed(func(w http.ResponseWriter, r *http.Request, u store.User) {
-		runs, tenant, ok := h.workflowRunScope(w, r, u)
-		if !ok {
-			return
-		}
-		s, ok := h.store.(workspaceStore)
-		if !ok {
-			fault(w, http.StatusServiceUnavailable, "workspace_unavailable")
-			return
-		}
-		runID := r.PathValue("rid")
-		if !workflowUUID.MatchString(runID) {
-			fault(w, http.StatusNotFound, "workflow_run_not_found")
-			return
-		}
-		if _, e := runs.WorkflowRun(r.Context(), tenant, runID); e != nil {
-			workflowRunFault(w, e, "workflow run workspace")
-			return
-		}
-		at, e := s.WorkflowRunWorkspace(r.Context(), tenant, runID)
-		ws, found = workspaceAt(w, at, e)
-	})(w, r)
-	return ws, found
+func (h *handler) workflowRunWorkspace(w http.ResponseWriter, r *http.Request, a access) (workspacefs.Workspace, bool) {
+	runs, tenant, ok := h.workflowRunScope(w, a)
+	if !ok {
+		return workspacefs.Workspace{}, false
+	}
+	s, ok := h.store.(workspaceStore)
+	if !ok {
+		fault(w, http.StatusServiceUnavailable, "workspace_unavailable")
+		return workspacefs.Workspace{}, false
+	}
+	runID := r.PathValue("rid")
+	if !workflowUUID.MatchString(runID) {
+		fault(w, http.StatusNotFound, "workflow_run_not_found")
+		return workspacefs.Workspace{}, false
+	}
+	if _, e := runs.WorkflowRun(r.Context(), tenant, runID); e != nil {
+		workflowRunFault(w, e, "workflow run workspace")
+		return workspacefs.Workspace{}, false
+	}
+	at, e := s.WorkflowRunWorkspace(r.Context(), tenant, runID)
+	return workspaceAt(w, at, e)
 }
 
-func (h *handler) taskRunWorkspace(w http.ResponseWriter, r *http.Request) (ws workspacefs.Workspace, found bool) {
-	h.authed(func(w http.ResponseWriter, r *http.Request, u store.User) {
-		host, scope, id, ok := h.taskRunScope(w, r, u)
-		if !ok {
-			return
-		}
-		s, ok := h.store.(workspaceStore)
-		if !ok {
-			fault(w, http.StatusServiceUnavailable, "workspace_unavailable")
-			return
-		}
-		runID := r.PathValue("rid")
-		if _, e := host.Run(r.Context(), scope, id, runID); e != nil {
-			taskRunFault(w, "task run workspace", e)
-			return
-		}
-		at, e := s.TaskRunWorkspace(r.Context(), scope.TenantID, id, runID)
-		ws, found = workspaceAt(w, at, e)
-	})(w, r)
-	return ws, found
+func (h *handler) taskRunWorkspace(w http.ResponseWriter, r *http.Request, a access) (workspacefs.Workspace, bool) {
+	host, scope, id, ok := h.taskRunScope(w, r, a)
+	if !ok {
+		return workspacefs.Workspace{}, false
+	}
+	s, ok := h.store.(workspaceStore)
+	if !ok {
+		fault(w, http.StatusServiceUnavailable, "workspace_unavailable")
+		return workspacefs.Workspace{}, false
+	}
+	runID := r.PathValue("rid")
+	if _, e := host.Run(r.Context(), scope, id, runID); e != nil {
+		taskRunFault(w, "task run workspace", e)
+		return workspacefs.Workspace{}, false
+	}
+	at, e := s.TaskRunWorkspace(r.Context(), scope.TenantID, id, runID)
+	return workspaceAt(w, at, e)
 }
 
 // workspaceAt turns a recorded location into a Workspace, or answers that there is none yet: the

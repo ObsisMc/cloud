@@ -11,7 +11,7 @@ import (
 )
 
 // WorkflowRunScope is the authenticated caller the execution bridge must authorize against. The
-// bridge owns run execution; HTTP only proves the caller is a current member and passes this scope.
+// bridge owns run execution; the tenant route has authorized the caller and passes this scope.
 type WorkflowRunScope struct {
 	TenantID string
 	UserID   string
@@ -51,19 +51,17 @@ func (e *WorkflowRunInputInvalid) Error() string {
 	return fmt.Sprintf("workflow run input %q is invalid: %s", e.Variable, e.Reason)
 }
 
-// workflowRunHost resolves the caller's membership and requires the injected execution bridge. Both
-// the run store and the bridge are optional, so an unwired deployment answers 503 rather than
-// writing a run the process cannot execute.
-func (h *handler) workflowRunHost(w http.ResponseWriter, r *http.Request, u store.User) (WorkflowRunHost, WorkflowRunScope, bool) {
-	_, tenant, ok := h.workflowScope(w, r, u)
-	if !ok {
+// workflowRunHost requires the workflow store and the injected execution bridge. Both are optional,
+// so an unwired deployment answers 503 rather than writing a run the process cannot execute.
+func (h *handler) workflowRunHost(w http.ResponseWriter, a access) (WorkflowRunHost, WorkflowRunScope, bool) {
+	if _, _, ok := h.workflowScope(w, a); !ok {
 		return nil, WorkflowRunScope{}, false
 	}
 	if h.opts.WorkflowRuns == nil {
 		fault(w, http.StatusServiceUnavailable, "workflow_run_host_unavailable")
 		return nil, WorkflowRunScope{}, false
 	}
-	return h.opts.WorkflowRuns, WorkflowRunScope{TenantID: tenant, UserID: u.ID}, true
+	return h.opts.WorkflowRuns, WorkflowRunScope{TenantID: a.TenantID, UserID: a.UserID}, true
 }
 
 // workflowRunID reads the run id from the route and answers 404 for anything that cannot be one.
@@ -76,8 +74,8 @@ func workflowRunID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return id, true
 }
 
-func (h *handler) startWorkflowRun(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, ok := h.workflowRunHost(w, r, u)
+func (h *handler) startWorkflowRun(w http.ResponseWriter, r *http.Request, a access) {
+	host, scope, ok := h.workflowRunHost(w, a)
 	if !ok {
 		return
 	}
@@ -93,8 +91,8 @@ func (h *handler) startWorkflowRun(w http.ResponseWriter, r *http.Request, u sto
 	writeJSON(w, http.StatusOK, map[string]any{"run": toWorkflowRunView(run)})
 }
 
-func (h *handler) cancelWorkflowRun(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, ok := h.workflowRunHost(w, r, u)
+func (h *handler) cancelWorkflowRun(w http.ResponseWriter, r *http.Request, a access) {
+	host, scope, ok := h.workflowRunHost(w, a)
 	if !ok {
 		return
 	}
@@ -110,8 +108,8 @@ func (h *handler) cancelWorkflowRun(w http.ResponseWriter, r *http.Request, u st
 	writeJSON(w, http.StatusOK, map[string]any{"run": toWorkflowRunView(run)})
 }
 
-func (h *handler) updateWorkflowRunInput(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, ok := h.workflowRunHost(w, r, u)
+func (h *handler) updateWorkflowRunInput(w http.ResponseWriter, r *http.Request, a access) {
+	host, scope, ok := h.workflowRunHost(w, a)
 	if !ok {
 		return
 	}
@@ -134,8 +132,8 @@ func (h *handler) updateWorkflowRunInput(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, map[string]any{"run": toWorkflowRunView(run)})
 }
 
-func (h *handler) completeWorkflowNode(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, ok := h.workflowRunHost(w, r, u)
+func (h *handler) completeWorkflowNode(w http.ResponseWriter, r *http.Request, a access) {
+	host, scope, ok := h.workflowRunHost(w, a)
 	if !ok {
 		return
 	}

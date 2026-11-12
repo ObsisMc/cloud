@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
-	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
 // Public catalog fields are explicit so provider bindings and paths cannot reach HTTP.
@@ -24,21 +23,16 @@ type executorView struct {
 	Model         modelView `json:"model"`
 }
 
-func (h *handler) catalogScope(w http.ResponseWriter, r *http.Request, user store.User) (execution.Scope, bool) {
-	tenant := r.PathValue("tid")
-	if !scheduleUUID.MatchString(tenant) {
-		fault(w, http.StatusNotFound, "not_found")
-		return execution.Scope{}, false
-	}
+func (h *handler) catalogScope(w http.ResponseWriter, a access) (execution.Scope, bool) {
 	if h.opts.Catalog == nil {
 		fault(w, http.StatusServiceUnavailable, "execution_catalog_unavailable")
 		return execution.Scope{}, false
 	}
-	return execution.Scope{TenantID: tenant, UserID: user.ID}, true
+	return a.scope(), true
 }
 
-func (h *handler) models(w http.ResponseWriter, r *http.Request, user store.User) {
-	scope, ok := h.catalogScope(w, r, user)
+func (h *handler) models(w http.ResponseWriter, r *http.Request, a access) {
+	scope, ok := h.catalogScope(w, a)
 	if !ok {
 		return
 	}
@@ -54,8 +48,8 @@ func (h *handler) models(w http.ResponseWriter, r *http.Request, user store.User
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *handler) executors(w http.ResponseWriter, r *http.Request, user store.User) {
-	scope, ok := h.catalogScope(w, r, user)
+func (h *handler) executors(w http.ResponseWriter, r *http.Request, a access) {
+	scope, ok := h.catalogScope(w, a)
 	if !ok {
 		return
 	}

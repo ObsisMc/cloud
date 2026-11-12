@@ -22,8 +22,8 @@ func TestSpacesRoute(t *testing.T) {
 	}
 	spaceID, _ := space["id"].(string)
 
-	// A caller outside the workspace is refused rather than told the list is empty.
-	if status, body := c.do("GET", "/api/v1/tenants/00000000-0000-0000-0000-000000000001/spaces", nil); status != 403 || body["code"] != "forbidden" {
+	// A caller outside the workspace cannot tell it from a workspace that does not exist.
+	if status, body := c.do("GET", "/api/v1/tenants/00000000-0000-0000-0000-000000000001/spaces", nil); status != 404 || body["code"] != "not_found" {
 		t.Fatalf("foreign spaces = %d %v", status, body)
 	}
 	if status, body := c.do("GET", "/api/v1/tenants/not-a-uuid/spaces", nil); status != 404 || body["code"] != "not_found" {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 	"github.com/wanglongan587/cloud/v2-server/internal/workflow"
 	"github.com/wanglongan587/cloud/v2-server/internal/workflowforms"
@@ -116,12 +115,12 @@ func (h *Host) createFormTasks(ctx context.Context, runID, nodeRunID string) err
 }
 
 // ReadForm serves the durable form rather than deriving fresh evidence from the model.
-func (h *Host) ReadForm(ctx context.Context, s server.WorkflowRunScope, id string) (store.WorkflowForm, error) {
-	return h.store.WorkflowForm(ctx, s.TenantID, s.UserID, id)
+func (h *Host) ReadForm(ctx context.Context, a store.Access, id string) (store.WorkflowForm, error) {
+	return h.store.WorkflowForm(ctx, a, id)
 }
 
 // SaveForm persists a draft or completes the form; only subsequent nodes create tasks.
-func (h *Host) SaveForm(ctx context.Context, s server.WorkflowRunScope, id string, version int64, key string, answers json.RawMessage, final bool) (store.WorkflowForm, error) {
+func (h *Host) SaveForm(ctx context.Context, a store.Access, id string, version int64, key string, answers json.RawMessage, final bool) (store.WorkflowForm, error) {
 	var parsed []workflowforms.Answer
 	decoder := json.NewDecoder(strings.NewReader(string(answers)))
 	decoder.DisallowUnknownFields()
@@ -138,7 +137,7 @@ func (h *Host) SaveForm(ctx context.Context, s server.WorkflowRunScope, id strin
 		return store.WorkflowForm{}, err
 	}
 	answers = normalized
-	f, err := h.store.SaveWorkflowForm(ctx, s.TenantID, s.UserID, id, version, key, answers, final, func(f store.WorkflowForm) error {
+	f, err := h.store.SaveWorkflowForm(ctx, a, id, version, key, answers, final, func(f store.WorkflowForm) error {
 		if err := json.Unmarshal(f.Answers, &parsed); err != nil {
 			return err
 		}
@@ -199,15 +198,15 @@ func (h *Host) resumeReviewRun(ctx context.Context, id string) error {
 }
 
 // RetryForm retries task creation without collecting or confirming evidence again.
-func (h *Host) RetryForm(ctx context.Context, s server.WorkflowRunScope, id string) (store.WorkflowForm, error) {
-	if err := h.store.RetryWorkflowFormTasks(ctx, s.TenantID, s.UserID, id); err != nil {
+func (h *Host) RetryForm(ctx context.Context, a store.Access, id string) (store.WorkflowForm, error) {
+	if err := h.store.RetryWorkflowFormTasks(ctx, a, id); err != nil {
 		return store.WorkflowForm{}, err
 	}
 	if err := h.resumeReviewRun(ctx, id); err != nil {
 		return store.WorkflowForm{}, err
 	}
 	h.hub.Publish(id)
-	return h.ReadForm(ctx, s, id)
+	return h.ReadForm(ctx, a, id)
 }
 
 func (h *Host) retireReview(id string) {

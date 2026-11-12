@@ -135,14 +135,14 @@ func testPersonalTask(t *testing.T, lost bool) {
 		t.Fatalf("single shot started %d times", starts)
 	}
 	// Reassignment after save rejects the next manual trigger, and a retry has no run link.
-	current, e := f.db.Task(ctx, scope.TenantID, scope.UserID, src.ID)
+	current, e := f.db.Task(ctx, scope.TenantID, src.ID)
 	if e != nil {
 		t.Fatal(e)
 	}
 	// Wait for the asynchronous task watcher to deliver the completed turn.
 	for i := 0; i < 100 && current.Status != store.TaskReview; i++ {
 		time.Sleep(10 * time.Millisecond)
-		current, e = f.db.Task(ctx, scope.TenantID, scope.UserID, src.ID)
+		current, e = f.db.Task(ctx, scope.TenantID, src.ID)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -154,7 +154,7 @@ func testPersonalTask(t *testing.T, lost bool) {
 	if e != nil || review.Reason != "task_no_longer_actionable" || review.ExecutionRef != "" {
 		t.Fatalf("review: %+v %v", review, e)
 	}
-	_, e = f.db.SetTaskAssignee(ctx, scope.TenantID, scope.UserID, src.ID, nil, current.Version)
+	_, e = f.db.SetTaskAssignee(ctx, scope.TenantID, src.ID, nil, current.Version)
 	if e != nil {
 		t.Fatal(e)
 	}

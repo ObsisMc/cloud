@@ -51,7 +51,7 @@ func (s *Store) CreateWorkflowFormTasks(ctx context.Context, runID, nodeRunID st
 		if f.Status != "submitted" {
 			return ErrWorkflowNodeRunState
 		}
-		if _, err := tenantRole(ctx, tx, r.tenant, f.SubmittedBy); err != nil {
+		if _, err := tenantAccess(ctx, tx, r.tenant, f.SubmittedBy); err != nil {
 			return err
 		}
 		var project string

@@ -99,13 +99,10 @@ func (s *Store) RecordOccurrence(ctx context.Context, tenant, user, id string, t
 		return out, ErrIneligible
 	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var active bool
-		e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id JOIN tenants t ON t.id=m.tenant_id WHERE m.tenant_id=$1 AND m.user_id=$2 AND u.status='active' AND u.deleted_at IS NULL AND t.status='active')`, tenant, user).Scan(&active)
-		if e != nil {
+		// Every trigger, timed or manual, starts work on the creator's behalf: it is admitted only
+		// while the creator still has access to the tenant.
+		if _, e := tenantAccess(ctx, tx, tenant, user); e != nil {
 			return e
-		}
-		if !active {
-			return ErrNotFound
 		}
 		config, e := readSchedule(tx.QueryRow(ctx, `SELECT `+scheduleColumns+` FROM v2_schedule_configs WHERE tenant_id=$1 AND user_id=$2 AND id=$3 FOR UPDATE`, tenant, user, id))
 		if e != nil {
@@ -171,15 +168,8 @@ func (s *Store) Occurrences(ctx context.Context, tenant, user, id string, before
 	if !ok {
 		return nil, ErrIneligible
 	}
-	ok, e := s.ScheduleMember(ctx, tenant, user)
-	if e != nil {
-		return nil, e
-	}
-	if !ok {
-		return nil, ErrNotFound
-	}
 	var found bool
-	e = s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM v2_schedule_configs WHERE id=$1 AND tenant_id=$2 AND user_id=$3)`, id, tenant, user).Scan(&found)
+	e := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM v2_schedule_configs WHERE id=$1 AND tenant_id=$2 AND user_id=$3)`, id, tenant, user).Scan(&found)
 	if e != nil {
 		return nil, e
 	}

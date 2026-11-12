@@ -31,17 +31,17 @@ func projectResponse(scope execution.Scope, p store.Project) projectView {
 	return projectView{p.ID, scope.TenantID, p.OwnerUserID, p.Name, p.RepositoryURL, p.Branch, p.Commit, p.CreatedAt}
 }
 
-func (h *handler) projects(w http.ResponseWriter, r *http.Request, user store.User) {
+func (h *handler) projects(w http.ResponseWriter, r *http.Request, a access) {
 	if h.opts.Projects == nil {
 		fault(w, http.StatusServiceUnavailable, "projects_unavailable")
 		return
 	}
-	tenant, id := r.PathValue("tid"), r.PathValue("pid")
-	if !scheduleUUID.MatchString(tenant) || (id != "" && !scheduleUUID.MatchString(id)) {
+	tenant, id := a.TenantID, r.PathValue("pid")
+	if id != "" && !scheduleUUID.MatchString(id) {
 		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
-	scope := execution.Scope{TenantID: tenant, UserID: user.ID}
+	scope := execution.Scope{TenantID: tenant, UserID: a.UserID}
 	if r.Method == http.MethodPost {
 		var in projectrepos.Input
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))

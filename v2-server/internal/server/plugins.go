@@ -9,13 +9,13 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
-func (h *handler) pluginCatalog(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, space := r.PathValue("tid"), r.PathValue("sid")
-	if !squadUUID.MatchString(tenant) || !squadUUID.MatchString(space) {
+func (h *handler) pluginCatalog(w http.ResponseWriter, r *http.Request, a access) {
+	tenant, space := a.TenantID, r.PathValue("sid")
+	if !squadUUID.MatchString(space) {
 		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
-	items, syncedAt, e := h.store.PluginCatalog(r.Context(), tenant, space, u.ID)
+	items, syncedAt, e := h.store.PluginCatalog(r.Context(), tenant, space)
 	if e != nil {
 		pluginError(w, "plugin catalog", e)
 		return
@@ -29,13 +29,13 @@ func (h *handler) pluginCatalog(w http.ResponseWriter, r *http.Request, u store.
 	writeJSON(w, http.StatusOK, body)
 }
 
-func (h *handler) spacePlugins(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, space := r.PathValue("tid"), r.PathValue("sid")
-	if !squadUUID.MatchString(tenant) || !squadUUID.MatchString(space) {
+func (h *handler) spacePlugins(w http.ResponseWriter, r *http.Request, a access) {
+	tenant, space := a.TenantID, r.PathValue("sid")
+	if !squadUUID.MatchString(space) {
 		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
-	items, e := h.store.SpacePlugins(r.Context(), tenant, space, u.ID)
+	items, e := h.store.SpacePlugins(r.Context(), tenant, space)
 	if e != nil {
 		pluginError(w, "space plugins", e)
 		return
@@ -43,9 +43,9 @@ func (h *handler) spacePlugins(w http.ResponseWriter, r *http.Request, u store.U
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *handler) installSpacePlugin(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, space := r.PathValue("tid"), r.PathValue("sid")
-	if !squadUUID.MatchString(tenant) || !squadUUID.MatchString(space) {
+func (h *handler) installSpacePlugin(w http.ResponseWriter, r *http.Request, a access) {
+	tenant, space := a.TenantID, r.PathValue("sid")
+	if !squadUUID.MatchString(space) {
 		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
@@ -76,7 +76,7 @@ func (h *handler) installSpacePlugin(w http.ResponseWriter, r *http.Request, u s
 	in := store.PluginInstallInput{
 		Identifier: body.Identifier, PluginVersion: body.PluginVersion, Version: version,
 	}
-	source, e := h.store.PluginPackageSource(r.Context(), tenant, space, u.ID, in.Identifier)
+	source, e := h.store.PluginPackageSource(r.Context(), tenant, space, in.Identifier)
 	if e != nil {
 		pluginError(w, "install plugin", e)
 		return
@@ -107,11 +107,11 @@ func (h *handler) installSpacePlugin(w http.ResponseWriter, r *http.Request, u s
 			return
 		}
 		resource, e = h.store.InstallWorkflowPlugin(
-			r.Context(), tenant, space, u.ID, r.URL.Path, key, in, documents, h.opts.ValidateWorkflow,
+			r.Context(), tenant, space, a.UserID, r.URL.Path, key, in, documents, h.opts.ValidateWorkflow,
 		)
 	} else {
 		resource, e = h.store.InstallSpacePlugin(
-			r.Context(), tenant, space, u.ID, r.URL.Path, key, in,
+			r.Context(), tenant, space, a.UserID, r.URL.Path, key, in,
 		)
 	}
 	if e != nil {
@@ -121,9 +121,9 @@ func (h *handler) installSpacePlugin(w http.ResponseWriter, r *http.Request, u s
 	writeJSON(w, http.StatusOK, map[string]any{"resource": resource})
 }
 
-func (h *handler) removeSpacePlugin(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, space := r.PathValue("tid"), r.PathValue("sid")
-	if !squadUUID.MatchString(tenant) || !squadUUID.MatchString(space) {
+func (h *handler) removeSpacePlugin(w http.ResponseWriter, r *http.Request, a access) {
+	tenant, space := a.TenantID, r.PathValue("sid")
+	if !squadUUID.MatchString(space) {
 		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
@@ -150,7 +150,7 @@ func (h *handler) removeSpacePlugin(w http.ResponseWriter, r *http.Request, u st
 		fault(w, http.StatusBadRequest, "invalid_version")
 		return
 	}
-	resource, e := h.store.RemoveSpacePlugin(r.Context(), tenant, space, u.ID, r.URL.Path, key, store.PluginRemoveInput{
+	resource, e := h.store.RemoveSpacePlugin(r.Context(), tenant, space, a.UserID, r.URL.Path, key, store.PluginRemoveInput{
 		Identifier: body.Identifier, Version: *body.Version,
 	})
 	if e != nil {

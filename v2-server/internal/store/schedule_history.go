@@ -5,7 +5,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const historyOwner = `SELECT EXISTS(SELECT 1 FROM v2_schedule_configs c JOIN memberships m ON m.tenant_id=c.tenant_id AND m.user_id=c.user_id JOIN users u ON u.id=c.user_id JOIN tenants t ON t.id=c.tenant_id WHERE c.id=$1 AND c.tenant_id=$2 AND c.user_id=$3 AND u.status='active' AND u.deleted_at IS NULL AND t.status='active')`
+// historyOwner is the creator-ownership rule: only the configuration's creator reads its history.
+const historyOwner = `SELECT EXISTS(SELECT 1 FROM v2_schedule_configs WHERE id=$1 AND tenant_id=$2 AND user_id=$3)`
 
 // ScheduleHistory returns a stable time-descending (recorded_at DESC, id DESC) page plus one
 // lookahead row. Authorization and reads share a database snapshot. No status reconciliation

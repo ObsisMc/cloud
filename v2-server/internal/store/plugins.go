@@ -67,7 +67,7 @@ type PluginRemoveInput struct {
 }
 
 // PluginPackageSource is the frozen package location for a workflow plugin. Credentials are
-// decrypted only for an administrator who is about to install the package.
+// decrypted only on the owner-only install route, just before the package is installed.
 type PluginPackageSource struct {
 	Entry       PluginCatalogEntry
 	Locator     string
@@ -139,8 +139,8 @@ func optionalStrings(values []string) any {
 }
 
 // PluginCatalog returns the visible marketplace snapshot for a member of the caller's space.
-func (s *Store) PluginCatalog(ctx context.Context, tenant, space, caller string) ([]PluginCatalogEntry, time.Time, error) {
-	if _, e := requireSpaceAccess(ctx, s.pool, tenant, space, caller); e != nil {
+func (s *Store) PluginCatalog(ctx context.Context, tenant, space string) ([]PluginCatalogEntry, time.Time, error) {
+	if e := requireSpace(ctx, s.pool, tenant, space); e != nil {
 		return nil, time.Time{}, e
 	}
 	rows, e := s.pool.Query(ctx, `
@@ -182,22 +182,18 @@ func (s *Store) PluginCatalog(ctx context.Context, tenant, space, caller string)
 
 // SpacePlugins returns every live market selection in a space. Removed rows remain in the
 // response so the UI can distinguish "never selected" from "explicitly removed".
-func (s *Store) SpacePlugins(ctx context.Context, tenant, space, caller string) ([]SpacePlugin, error) {
-	if _, e := requireSpaceAccess(ctx, s.pool, tenant, space, caller); e != nil {
+func (s *Store) SpacePlugins(ctx context.Context, tenant, space string) ([]SpacePlugin, error) {
+	if e := requireSpace(ctx, s.pool, tenant, space); e != nil {
 		return nil, e
 	}
 	return querySpacePlugins(ctx, s.pool, space, false)
 }
 
-// PluginPackageSource returns the frozen download location for a marketplace entry. Only an
-// administrator may resolve package credentials or trigger a package download.
-func (s *Store) PluginPackageSource(ctx context.Context, tenant, space, caller, id string) (PluginPackageSource, error) {
-	role, e := requireSpaceAccess(ctx, s.pool, tenant, space, caller)
-	if e != nil {
+// PluginPackageSource returns the frozen download location for a marketplace entry. It resolves
+// package credentials, so only the owner-only install route may call it.
+func (s *Store) PluginPackageSource(ctx context.Context, tenant, space, id string) (PluginPackageSource, error) {
+	if e := requireSpace(ctx, s.pool, tenant, space); e != nil {
 		return PluginPackageSource{}, e
-	}
-	if !isAdministrator(role) {
-		return PluginPackageSource{}, ErrForbidden
 	}
 	namespace, identifier, ok := pluginIdentity(id)
 	if !ok {
@@ -290,12 +286,8 @@ func (s *Store) installSpacePlugin(
 ) (SpacePlugin, error) {
 	var out SpacePlugin
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		role, e := requireSpaceAccess(ctx, tx, tenant, space, caller)
-		if e != nil {
+		if e := requireSpace(ctx, tx, tenant, space); e != nil {
 			return e
-		}
-		if !isAdministrator(role) {
-			return ErrForbidden
 		}
 		if replay, ok, e := replayPluginMutation(ctx, tx, tenant, caller, "POST", path, key, pluginInstallHash(in)); e != nil || ok {
 			out = replay
@@ -624,12 +616,8 @@ func uniqueWorkflowPluginName(ctx context.Context, tx pgx.Tx, tenant, base strin
 func (s *Store) RemoveSpacePlugin(ctx context.Context, tenant, space, caller, path, key string, in PluginRemoveInput) (SpacePlugin, error) {
 	var out SpacePlugin
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		role, e := requireSpaceAccess(ctx, tx, tenant, space, caller)
-		if e != nil {
+		if e := requireSpace(ctx, tx, tenant, space); e != nil {
 			return e
-		}
-		if !isAdministrator(role) {
-			return ErrForbidden
 		}
 		if replay, ok, e := replayPluginMutation(ctx, tx, tenant, caller, "DELETE", path, key, pluginRemoveHash(in)); e != nil || ok {
 			out = replay
@@ -713,22 +701,20 @@ func (s *Store) RemoveSpacePlugin(ctx context.Context, tenant, space, caller, pa
 	return out, e
 }
 
-func requireSpaceAccess(ctx context.Context, q dbTX, tenant, space, caller string) (string, error) {
-	role, e := tenantRole(ctx, q, tenant, caller)
-	if e != nil {
-		return "", ErrForbidden
-	}
+// requireSpace checks that the space is a live space of the tenant. A space elsewhere answers
+// ErrForbidden, as it always has, so a caller cannot tell another tenant's space from a missing one.
+func requireSpace(ctx context.Context, q dbTX, tenant, space string) error {
 	var owned bool
 	if e := q.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM v2_spaces
 			WHERE id = $1 AND tenant_id = $2 AND archived_at IS NULL)`, space, tenant).Scan(&owned); e != nil {
-		return "", fmt.Errorf("look up space: %w", e)
+		return fmt.Errorf("look up space: %w", e)
 	}
 	if !owned {
-		return "", ErrForbidden
+		return ErrForbidden
 	}
-	return role, nil
+	return nil
 }
 
 func querySpacePlugins(ctx context.Context, q dbTX, space string, runtimeAgentsOnly bool) ([]SpacePlugin, error) {

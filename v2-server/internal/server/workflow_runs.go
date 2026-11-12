@@ -11,8 +11,8 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
-// WorkflowRunStore is what the run routes need. It extends the definition store so one membership
-// check and the same tenant scoping cover both, while the run lifecycle stays in its own interface.
+// WorkflowRunStore is what the run routes need. It extends the definition store so the same tenant
+// scoping covers both, while the run lifecycle stays in its own interface.
 type WorkflowRunStore interface {
 	WorkflowStore
 	CreateWorkflowRun(context.Context, string, string, string, store.WorkflowRunInput) (store.WorkflowRun, error)
@@ -176,9 +176,9 @@ func toWorkflowScopeView(scope store.WorkflowScope) workflowScopeView {
 	return view
 }
 
-// workflowRunScope resolves membership once and then requires the run half of the workflow store.
-func (h *handler) workflowRunScope(w http.ResponseWriter, r *http.Request, u store.User) (WorkflowRunStore, string, bool) {
-	base, tenant, ok := h.workflowScope(w, r, u)
+// workflowRunScope requires the run half of the workflow store.
+func (h *handler) workflowRunScope(w http.ResponseWriter, a access) (WorkflowRunStore, string, bool) {
+	base, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return nil, "", false
 	}
@@ -192,8 +192,8 @@ func (h *handler) workflowRunScope(w http.ResponseWriter, r *http.Request, u sto
 
 // createWorkflowRun freezes the project and one published version into a pending run. Start stays
 // with the execution bridge: HTTP only records the intent, never the graph copy or a fake status.
-func (h *handler) createWorkflowRun(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowRunScope(w, r, u)
+func (h *handler) createWorkflowRun(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowRunScope(w, a)
 	if !ok {
 		return
 	}
@@ -240,8 +240,8 @@ func (h *handler) createWorkflowRun(w http.ResponseWriter, r *http.Request, u st
 
 // listWorkflowRuns serves both the definition history and the tenant/project history, so the run
 // dialog and the workspace list share one shape.
-func (h *handler) listWorkflowRuns(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowRunScope(w, r, u)
+func (h *handler) listWorkflowRuns(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowRunScope(w, a)
 	if !ok {
 		return
 	}
@@ -269,8 +269,8 @@ func (h *handler) listWorkflowRuns(w http.ResponseWriter, r *http.Request, u sto
 	writeJSON(w, http.StatusOK, map[string]any{"runs": views})
 }
 
-func (h *handler) getWorkflowRun(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowRunScope(w, r, u)
+func (h *handler) getWorkflowRun(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowRunScope(w, a)
 	if !ok {
 		return
 	}
@@ -335,8 +335,8 @@ func payloadDecisions(payload []byte, key string) map[string]string {
 	return result
 }
 
-func (h *handler) listWorkflowRunNodes(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowRunScope(w, r, u)
+func (h *handler) listWorkflowRunNodes(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowRunScope(w, a)
 	if !ok {
 		return
 	}
@@ -363,8 +363,8 @@ func (h *handler) listWorkflowRunNodes(w http.ResponseWriter, r *http.Request, u
 
 // getWorkflowRunSnapshot serves the frozen graph a run executed, so history does not depend on the
 // definition's current published version.
-func (h *handler) getWorkflowRunSnapshot(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowRunScope(w, r, u)
+func (h *handler) getWorkflowRunSnapshot(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowRunScope(w, a)
 	if !ok {
 		return
 	}
@@ -383,8 +383,8 @@ func (h *handler) getWorkflowRunSnapshot(w http.ResponseWriter, r *http.Request,
 
 // deleteWorkflowRun removes a finished run with its node attempts. A running run or one with an
 // in-flight node is refused, so deleting a row never abandons a session the execution bridge owns.
-func (h *handler) deleteWorkflowRun(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowRunScope(w, r, u)
+func (h *handler) deleteWorkflowRun(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowRunScope(w, a)
 	if !ok {
 		return
 	}

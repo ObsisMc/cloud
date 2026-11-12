@@ -54,28 +54,14 @@ type scheduleResourceView struct {
 
 // scheduleResources projects the shared stores/catalog without exposing bindings,
 // repository paths or credentials. Empty and unavailable catalogs are distinct.
-func (h *handler) scheduleResources(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) scheduleResources(w http.ResponseWriter, r *http.Request, a access) {
 	w.Header().Set("Cache-Control", "no-store")
-	tid := r.PathValue("tid")
-	if !scheduleUUID.MatchString(tid) {
-		fault(w, 404, "not_found")
-		return
-	}
-	s, ok := h.store.(scheduleStore)
-	if !ok {
+	tid := a.TenantID
+	if _, ok := h.store.(scheduleStore); !ok {
 		fault(w, 503, "schedule_resources_unavailable")
 		return
 	}
-	member, err := s.ScheduleMember(r.Context(), tid, u.ID)
-	if err != nil {
-		internal(w, "schedule resource membership", err)
-		return
-	}
-	if !member {
-		fault(w, 404, "not_found")
-		return
-	}
-	scope := execution.Scope{TenantID: tid, UserID: u.ID}
+	scope := a.scope()
 	out := scheduleResourceView{Projects: []scheduleProjectView{}, Models: []scheduleModelView{}, Agents: []scheduleAgentView{}, Workflows: []scheduleWorkflowView{}}
 	if projects, ok := h.store.(scheduleProjects); ok {
 		items, err := projects.ListProjects(r.Context(), scope)

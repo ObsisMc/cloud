@@ -89,7 +89,7 @@ func seedWorkflow(ctx context.Context, seed WorkflowSeed, name, graph string) (S
 	if seed.Store == nil {
 		return SeededWorkflow{}, fmt.Errorf("demo workflow requires a store")
 	}
-	if err := seed.Store.CheckExecutionScope(ctx, seed.Scope); err != nil {
+	if _, err := seed.Store.TenantAccess(ctx, seed.Scope.TenantID, seed.Scope.UserID); err != nil {
 		return SeededWorkflow{}, err
 	}
 	project, err := seed.Store.GetProject(ctx, seed.Scope, seed.ProjectID)

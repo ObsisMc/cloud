@@ -276,7 +276,7 @@ func TestExecutionCallerIdentityAndScope(t *testing.T) {
 	if _, err := f.admin.Exec(ctx, `UPDATE users SET status='inactive' WHERE id=$1`, f.scope.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.s.CheckExecutionScope(ctx, f.scope); !errors.Is(err, execution.ErrNotFound) {
+	if _, err := f.s.TenantAccess(ctx, f.scope.TenantID, f.scope.UserID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("inactive user=%v", err)
 	}
 }

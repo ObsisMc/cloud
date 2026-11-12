@@ -27,9 +27,9 @@ import (
 // ErrRepositoryUnavailable covers inaccessible repositories and branches without exposing Git output.
 var ErrRepositoryUnavailable = errors.New("project repository unavailable")
 
-// Store owns project records and membership checks; preparation completes before CreateProject.
+// Store owns project records; preparation completes before CreateProject. Callers have already
+// authorized the scope's tenant access.
 type Store interface {
-	CheckExecutionScope(context.Context, execution.Scope) error
 	CreateProject(context.Context, execution.Scope, store.Project) (store.Project, error)
 	GetProject(context.Context, execution.Scope, string) (store.Project, error)
 	ListProjects(context.Context, execution.Scope) ([]store.Project, error)
@@ -93,12 +93,9 @@ func SnapshotRef(projectID, commit string) string {
 	return "refs/ora/upstreams/" + projectID + "/snapshots/" + commit
 }
 
-// Create checks membership, clones once and fixes the requested branch before saving a project.
-// A failed clone or missing branch creates no project. There is no background sync or retry.
+// Create clones once and fixes the requested branch before saving a project. A failed clone or
+// missing branch creates no project. There is no background sync or retry.
 func (s *Service) Create(ctx context.Context, scope execution.Scope, in Input) (store.Project, error) {
-	if err := s.store.CheckExecutionScope(ctx, scope); err != nil {
-		return store.Project{}, err
-	}
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || len(in.Name) > 200 || !utf8.ValidString(in.Name) || !s.validURL(in.RepositoryURL) ||
 		in.DefaultBranch == "" || in.DefaultBranch == "HEAD" || len(in.DefaultBranch) > 255 {

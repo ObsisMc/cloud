@@ -23,7 +23,7 @@ func (s *Store) ApplyOccurrenceEvidence(ctx context.Context, tenant, user, id st
 	var out Occurrence
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var scheduleID string
-		e := tx.QueryRow(ctx, `SELECT c.id FROM v2_schedule_configs c JOIN v2_schedule_occurrences o ON o.schedule_id=c.id JOIN memberships m ON m.tenant_id=c.tenant_id AND m.user_id=c.user_id JOIN users u ON u.id=c.user_id JOIN tenants t ON t.id=c.tenant_id WHERE o.id=$1 AND c.tenant_id=$2 AND c.user_id=$3 AND u.status='active' AND u.deleted_at IS NULL AND t.status='active' FOR UPDATE OF c`, id, tenant, user).Scan(&scheduleID)
+		e := tx.QueryRow(ctx, `SELECT c.id FROM v2_schedule_configs c JOIN v2_schedule_occurrences o ON o.schedule_id=c.id WHERE o.id=$1 AND c.tenant_id=$2 AND c.user_id=$3 FOR UPDATE OF c`, id, tenant, user).Scan(&scheduleID)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrNotFound
 		}

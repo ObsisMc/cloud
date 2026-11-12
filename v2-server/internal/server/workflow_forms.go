@@ -11,13 +11,13 @@ import (
 )
 
 type workflowFormHost interface {
-	RetryForm(context.Context, WorkflowRunScope, string) (store.WorkflowForm, error)
-	ReadForm(context.Context, WorkflowRunScope, string) (store.WorkflowForm, error)
-	SaveForm(context.Context, WorkflowRunScope, string, int64, string, json.RawMessage, bool) (store.WorkflowForm, error)
+	RetryForm(context.Context, store.Access, string) (store.WorkflowForm, error)
+	ReadForm(context.Context, store.Access, string) (store.WorkflowForm, error)
+	SaveForm(context.Context, store.Access, string, int64, string, json.RawMessage, bool) (store.WorkflowForm, error)
 }
 
-func (h *handler) workflowForm(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, ok := h.workflowRunHost(w, r, u)
+func (h *handler) workflowForm(w http.ResponseWriter, r *http.Request, a access) {
+	host, _, ok := h.workflowRunHost(w, a)
 	if !ok {
 		return
 	}
@@ -33,9 +33,9 @@ func (h *handler) workflowForm(w http.ResponseWriter, r *http.Request, u store.U
 	var f store.WorkflowForm
 	var err error
 	if strings.HasSuffix(r.URL.Path, "/retry") {
-		f, err = forms.RetryForm(r.Context(), scope, id)
+		f, err = forms.RetryForm(r.Context(), a.Access, id)
 	} else if r.Method == http.MethodGet {
-		f, err = forms.ReadForm(r.Context(), scope, id)
+		f, err = forms.ReadForm(r.Context(), a.Access, id)
 	} else {
 		var in struct {
 			Version int64           `json:"version"`
@@ -54,7 +54,7 @@ func (h *handler) workflowForm(w http.ResponseWriter, r *http.Request, u store.U
 			fault(w, 400, "idempotency_key_required")
 			return
 		}
-		f, err = forms.SaveForm(r.Context(), scope, id, in.Version, key, in.Answers, final)
+		f, err = forms.SaveForm(r.Context(), a.Access, id, in.Version, key, in.Answers, final)
 	}
 	if err != nil {
 		var field *workflowforms.FieldError

@@ -64,11 +64,6 @@ type NewChatConversation struct {
 	Title                       string
 }
 
-// Member reports whether the user actively belongs to the active tenant.
-func (s *Store) Member(ctx context.Context, tenant, user string) (bool, error) {
-	return s.ScheduleMember(ctx, tenant, user)
-}
-
 const conversationColumns = `id, project_id, executor_id, title, created_at, updated_at, create_key`
 
 // CreateChatConversation inserts the conversation, or returns the one an earlier request with the

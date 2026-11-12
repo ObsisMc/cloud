@@ -121,7 +121,7 @@ func (f *fixture) await(t *testing.T, taskID string) store.TaskDecomposition {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		items, e := f.store.TaskDecompositions(f.ctx, f.tenant, f.owner, taskID)
+		items, e := f.store.TaskDecompositions(f.ctx, f.tenant, taskID)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -137,7 +137,7 @@ func (f *fixture) await(t *testing.T, taskID string) store.TaskDecomposition {
 
 func (f *fixture) subtasks(t *testing.T, parent string) []store.Task {
 	t.Helper()
-	all, e := f.store.Tasks(f.ctx, f.tenant, f.owner)
+	all, e := f.store.Tasks(f.ctx, f.tenant)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -187,7 +187,7 @@ func TestDecompositionWritesSubtasksOnce(t *testing.T) {
 		}
 	}
 	// Reading the run's end again, as a page read or a restart does, writes nothing more.
-	if items, e := f.host.List(f.ctx, f.tenant, f.owner, parent.ID); e != nil || len(items) != 1 || items[0].CreatedCount != 3 {
+	if items, e := f.host.List(f.ctx, f.tenant, parent.ID); e != nil || len(items) != 1 || items[0].CreatedCount != 3 {
 		t.Fatalf("list = %+v %v", items, e)
 	}
 	if _, settled, e := f.store.SettleTaskDecomposition(f.ctx, d.ID, []store.Subtask{{Title: "多余"}}, ""); e != nil || settled {
@@ -205,7 +205,7 @@ func TestDecompositionWritesSubtasksOnce(t *testing.T) {
 		t.Fatalf("subtask = %v", e)
 	}
 	closed := f.task(t, "已取消的需求")
-	if _, e := f.store.SetTaskStatus(f.ctx, f.tenant, f.owner, closed.ID, store.TaskCancelled, closed.Version); e != nil {
+	if _, e := f.store.SetTaskStatus(f.ctx, storetest.Access(t, f.store, f.tenant, f.owner), closed.ID, store.TaskCancelled, closed.Version); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := f.host.Start(f.ctx, f.tenant, f.owner, closed.ID, f.workflow, "key-4"); !errors.Is(e, taskdecomp.ErrTaskClosed) {

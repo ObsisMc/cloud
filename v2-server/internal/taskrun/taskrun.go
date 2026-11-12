@@ -43,7 +43,7 @@ var (
 
 // Store is the persistence a Host needs; *store.Store implements it.
 type Store interface {
-	Task(ctx context.Context, tenant, caller, id string) (store.Task, error)
+	Task(ctx context.Context, tenant, id string) (store.Task, error)
 	InSquad(ctx context.Context, tenant, squad, user string) (bool, error)
 	TransitionTaskStatus(ctx context.Context, tenant, id, from, to string) (store.Task, error)
 	TaskRun(ctx context.Context, tenant, taskID, runID string) (store.TaskRun, error)
@@ -128,7 +128,7 @@ func (h *Host) lock(taskID string) func() {
 // its plugin, for a person's or squad's task every executor the caller can run, since they pick
 // the Agent.
 func (h *Host) Executors(ctx context.Context, scope execution.Scope, taskID string) ([]execution.Executor, error) {
-	task, e := h.store.Task(ctx, scope.TenantID, scope.UserID, taskID)
+	task, e := h.store.Task(ctx, scope.TenantID, taskID)
 	if e != nil {
 		return nil, e
 	}
@@ -216,7 +216,7 @@ var ErrScheduleTaskChanged = errors.New("schedule task changed")
 var ErrScheduledStartUnknown = errors.New("scheduled task start needs lookup")
 
 func (h *Host) scheduledTask(ctx context.Context, scope execution.Scope, target ScheduledTarget, project string) (store.Task, error) {
-	task, err := h.store.Task(ctx, scope.TenantID, scope.UserID, target.TaskID)
+	task, err := h.store.Task(ctx, scope.TenantID, target.TaskID)
 	if err != nil {
 		return task, err
 	}
@@ -269,7 +269,7 @@ type StartInput struct {
 // turn returns store.ErrRunActive.
 func (h *Host) Start(ctx context.Context, scope execution.Scope, taskID, key string, in StartInput) (store.TaskRun, error) {
 	defer h.lock(taskID)()
-	task, e := h.store.Task(ctx, scope.TenantID, scope.UserID, taskID)
+	task, e := h.store.Task(ctx, scope.TenantID, taskID)
 	if e != nil {
 		return store.TaskRun{}, e
 	}
@@ -350,7 +350,7 @@ func (h *Host) Comment(ctx context.Context, scope execution.Scope, taskID, key s
 	if c, e := h.store.TaskCommentByKey(ctx, scope.TenantID, taskID, scope.UserID, key); e == nil {
 		return c, nil
 	}
-	task, e := h.store.Task(ctx, scope.TenantID, scope.UserID, taskID)
+	task, e := h.store.Task(ctx, scope.TenantID, taskID)
 	if e != nil {
 		return store.TaskComment{}, e
 	}
@@ -417,7 +417,7 @@ func (h *Host) followUp(ctx context.Context, scope execution.Scope, task store.T
 // and an idle session is ended. Any member can stop a run; it spends nobody's identity.
 func (h *Host) Stop(ctx context.Context, scope execution.Scope, taskID, runID string) (store.TaskRun, error) {
 	defer h.lock(taskID)()
-	if _, e := h.store.Task(ctx, scope.TenantID, scope.UserID, taskID); e != nil {
+	if _, e := h.store.Task(ctx, scope.TenantID, taskID); e != nil {
 		return store.TaskRun{}, e
 	}
 	run, e := h.store.TaskRun(ctx, scope.TenantID, taskID, runID)
@@ -607,7 +607,7 @@ func (h *Host) moveTask(ctx context.Context, tenant, taskID, from, to string) {
 // Events follows a run's session for any member of the task's workspace. The session belongs to
 // the person who started the run, so it is read under their scope after the reader's check.
 func (h *Host) Events(ctx context.Context, scope execution.Scope, taskID, runID string, after uint64) (execution.Stream, store.TaskRun, error) {
-	if _, e := h.store.Task(ctx, scope.TenantID, scope.UserID, taskID); e != nil {
+	if _, e := h.store.Task(ctx, scope.TenantID, taskID); e != nil {
 		return nil, store.TaskRun{}, e
 	}
 	run, e := h.store.TaskRun(ctx, scope.TenantID, taskID, runID)
@@ -623,7 +623,7 @@ func (h *Host) Events(ctx context.Context, scope execution.Scope, taskID, runID 
 
 // Run reads one run of a task the caller can see.
 func (h *Host) Run(ctx context.Context, scope execution.Scope, taskID, runID string) (store.TaskRun, error) {
-	if _, e := h.store.Task(ctx, scope.TenantID, scope.UserID, taskID); e != nil {
+	if _, e := h.store.Task(ctx, scope.TenantID, taskID); e != nil {
 		return store.TaskRun{}, e
 	}
 	return h.store.TaskRun(ctx, scope.TenantID, taskID, runID)

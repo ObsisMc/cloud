@@ -97,3 +97,14 @@ func Login(t *testing.T, s *store.Store, subject string) (user, tenant string) {
 	}
 	return u.ID, tenants[0].ID
 }
+
+// Access authorizes user in tenant the way a tenant route does and fails the test when the user
+// has no access, for store calls that take a verified store.Access.
+func Access(t testing.TB, s *store.Store, tenant, user string) store.Access {
+	t.Helper()
+	a, e := s.TenantAccess(context.Background(), tenant, user)
+	if e != nil {
+		t.Fatalf("tenant access for %s in %s: %v", user, tenant, e)
+	}
+	return a
+}

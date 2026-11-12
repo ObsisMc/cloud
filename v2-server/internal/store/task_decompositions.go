@@ -93,8 +93,8 @@ func decompositions(ctx context.Context, q dbTX, where string, args ...any) ([]T
 }
 
 // TaskDecompositions lists a task's decompositions to a current workspace member, newest first.
-func (s *Store) TaskDecompositions(ctx context.Context, tenant, caller, taskID string) ([]TaskDecomposition, error) {
-	if _, e := s.Task(ctx, tenant, caller, taskID); e != nil {
+func (s *Store) TaskDecompositions(ctx context.Context, tenant, taskID string) ([]TaskDecomposition, error) {
+	if _, e := s.Task(ctx, tenant, taskID); e != nil {
 		return nil, e
 	}
 	return decompositions(ctx, s.pool, `d.tenant_id = $1 AND d.task_id = $2`, tenant, taskID)

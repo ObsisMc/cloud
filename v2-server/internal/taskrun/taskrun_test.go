@@ -248,7 +248,7 @@ func newFixture(t *testing.T) *fixture {
 		Commit: "abc", MirrorPath: "/tmp/mirror"}); e != nil {
 		t.Fatal(e)
 	}
-	agents, e := s.CollaborationAgents(ctx, tenant, owner)
+	agents, e := s.CollaborationAgents(ctx, tenant)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -276,7 +276,7 @@ func (f *fixture) task(t *testing.T, plugin string) store.Task {
 
 func (f *fixture) read(t *testing.T, id string) store.Task {
 	t.Helper()
-	task, e := f.store.Task(f.ctx, f.tenant, f.owner.UserID, id)
+	task, e := f.store.Task(f.ctx, f.tenant, id)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -321,7 +321,7 @@ func TestStartRunsTheAgentAndHandsTheTaskToReview(t *testing.T) {
 		t.Fatalf("prompt = %q %v", prompt, e)
 	}
 	// Nobody moves the task by hand while the Agent works.
-	if _, e := f.store.SetTaskStatus(f.ctx, f.tenant, f.owner.UserID, task.ID, store.TaskReview, f.read(t, task.ID).Version); !errors.Is(e, store.ErrRunActive) {
+	if _, e := f.store.SetTaskStatus(f.ctx, storetest.Access(t, f.store, f.tenant, f.owner.UserID), task.ID, store.TaskReview, f.read(t, task.ID).Version); !errors.Is(e, store.ErrRunActive) {
 		t.Fatalf("manual move while running = %v", e)
 	}
 	// A retry with the same key returns the same run instead of starting the Agent again.
@@ -372,7 +372,7 @@ func TestOnlyTheStarterFollowsUp(t *testing.T) {
 	if got := f.read(t, task.ID); got.Status != store.TaskRunning || got.ActiveRun.ID != run.ID {
 		t.Fatalf("task after follow-up = %+v", got)
 	}
-	runs, comments, e := f.store.TaskTimeline(f.ctx, f.tenant, f.member.UserID, task.ID)
+	runs, comments, e := f.store.TaskTimeline(f.ctx, f.tenant, task.ID)
 	if e != nil || len(runs) != 1 || len(comments) != 2 {
 		t.Fatalf("timeline = %d runs, %d comments, %v", len(runs), len(comments), e)
 	}
@@ -434,7 +434,7 @@ func TestClosingTheTaskEndsTheIdleRun(t *testing.T) {
 	}
 	f.port.finish(t, run.LastTurnID, execution.StatusCompleted)
 	got := f.await(t, task.ID, store.TaskReview)
-	if _, e := f.store.SetTaskStatus(f.ctx, f.tenant, f.owner.UserID, task.ID, store.TaskDone, got.Version); e != nil {
+	if _, e := f.store.SetTaskStatus(f.ctx, storetest.Access(t, f.store, f.tenant, f.owner.UserID), task.ID, store.TaskDone, got.Version); e != nil {
 		t.Fatal(e)
 	}
 	f.host.Release(f.ctx, f.tenant, task.ID)
@@ -486,7 +486,7 @@ func TestSquadMembersRunTheAgentTheyPickOnTheSquadsTask(t *testing.T) {
 	}
 
 	// A member picks from every executor they can run and works under their own identity.
-	if _, e := f.store.AddSquadMember(f.ctx, f.tenant, f.owner.UserID, squad.ID, store.SquadMemberInput{Type: "human", UserID: f.member.UserID, Version: squad.Version}); e != nil {
+	if _, e := f.store.AddSquadMember(f.ctx, storetest.Access(t, f.store, f.tenant, f.owner.UserID), squad.ID, store.SquadMemberInput{Type: "human", UserID: f.member.UserID, Version: squad.Version}); e != nil {
 		t.Fatal(e)
 	}
 	list, e := f.host.Executors(f.ctx, f.member, task.ID)
