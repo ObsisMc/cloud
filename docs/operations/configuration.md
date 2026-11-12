@@ -96,7 +96,7 @@ Store、Git Server），不发起任何网络请求。
 每个未配置的端点沿用 `GATEWAY_IDAAS_BASE_URL` 加 `/saaslogin1/oauth2/v1/authorize`、`token` 或 `userinfo` 路径。
 这些值由部署管理员设置，不能由浏览器选择；认证协议与身份映射见 [Gateway](../identity/gateway.md)。
 Gateway 启动时在日志里输出 `IDaaS endpoints resolved`，列出三个端点实际生效的地址和是否来自覆盖变量；
-覆盖变量名写错或镜像不含该字段时，环境变量会被静默忽略，这条日志就是核对依据。日志不含凭据和请求参数。
+覆盖变量名写错或镜像不含该字段时，环境变量会被静默忽略，这条日志就是核对依据；运行中的进程没有这条日志，说明它没有启用 `huawei-idaas`。日志不含凭据和请求参数。
 更改配置和轮换 secret 的操作见 [部署与运维](deployment.md#华为-idaas-现场配置)。
 
 ## model-gateway
