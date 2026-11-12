@@ -105,10 +105,11 @@ respectively. Each omitted endpoint retains `GATEWAY_IDAAS_BASE_URL` plus its `/
 or `userinfo` path. These values are deployment-owned, never selected by the browser; see
 [Gateway](../identity/gateway.en.md) for the authentication protocol and identity mapping. On
 startup the Gateway logs `IDaaS endpoints resolved` with the address in effect for each endpoint and
-whether it came from an override; a misspelled variable or an image without the override field is
-ignored silently, so this line is the check; a running process without it is not using `huawei-idaas`. It carries no credentials or request parameters. For
-configuration changes and secret rotation, see
-[Deployment and operations](deployment.en.md#huawei-idaas-site-configuration).
+whether it came from a deployment override; a misspelled variable is ignored silently, so this line
+is how its effect is checked. It carries no credentials or request parameters. When the line is
+missing, first confirm the image contains it, `logger.level` allows `info` (`debug` or `info`) and a
+log output is configured, before judging the provider. For configuration changes and secret
+rotation, see [Deployment and operations](deployment.en.md#huawei-idaas-site-configuration).
 
 ## model-gateway
 

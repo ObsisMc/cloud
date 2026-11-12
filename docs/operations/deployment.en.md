@@ -61,6 +61,8 @@ read-only mounted file named by `GATEWAY_IDAAS_CLIENT_SECRET_FILE`. See the
    rebuild is required. All replicas use the same client configuration.
 3. After atomically replacing the Client Secret file, recreate every Gateway container to refresh the file mount and
    read the new secret; replacing the file alone does not update a running process.
+4. Check `IDaaS endpoints resolved` in each replica's latest startup log, confirm the three endpoints and keep the
+   record; it proves the configuration the process adopted, nothing more.
 
 ## Networks
 

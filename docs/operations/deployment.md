@@ -52,6 +52,7 @@ cluster 的 Compose 让 Repo Executor 与 Credential Store 都以只读根文件
    并在 IDaaS 平台登记完全一致的 `<public origin>/auth/callback/huawei-idaas`。
 2. 更换端点或 Client ID 后，用更新后的配置重新创建 Gateway 容器；不需要重新构建镜像。所有副本使用一致的客户端配置。
 3. 原子替换 Client Secret 文件后，重新创建所有 Gateway 容器以刷新文件挂载并读取新 secret；仅替换文件不代表运行进程已生效。
+4. 逐个副本查看最近一次启动的 `IDaaS endpoints resolved`，确认三个端点与预期一致并留档；它只证明进程采用的配置。
 
 ## 网络
 

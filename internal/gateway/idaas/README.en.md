@@ -17,10 +17,10 @@ Operators may override each full authorize/token/userinfo HTTPS URL. Omitted val
 and the original paths. URL credentials, query and fragment components are rejected without reflecting
 the configured value. Credentials still come from files. Browser requests cannot select endpoints.
 Changes must retain the same corporate identity authority, source, scope and UUID semantics.
-`Endpoints()` reports the resolved scheme+host+path of each endpoint before per-request parameters
-(query, fragment and credentials are added per call) and
-`cmd/gateway` logs it as `IDaaS endpoints resolved` at startup, so an override that never reached the
-process is visible. See
+`Endpoints()` reports the scheme+host+path of each endpoint. The authorize query string and the
+token/userinfo form bodies are built per request, and credentials never enter a URL, so none of them
+appear in the view. `cmd/gateway` logs it as `IDaaS endpoints resolved` at startup, so an override that
+never reached the process is visible. See
 [Deployment and operations](../../../docs/operations/deployment.en.md#huawei-idaas-site-configuration)
 for applying configuration and rotating secrets.
 

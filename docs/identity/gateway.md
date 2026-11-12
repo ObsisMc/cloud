@@ -116,9 +116,9 @@ access token 和 PKCE verifier 只存在于单次请求的内存里，不持久�
   [配置参考](../operations/configuration.md#gateway)。覆盖地址不改变表单协议、scope、`huawei-corp` 来源或 UUID 映射，
   不迁移身份、撤销已有会话或授予租户权限；目标必须维持同一企业身份权威。
 - 启动时 `IDaaS endpoints resolved` 日志给出三个端点实际使用的 scheme+host+path，以及每项是否来自部署覆盖
-  （`authorizeOverride`、`tokenOverride`、`userinfoOverride`）。覆盖变量写错名字、或换了不含该字段的镜像时，
-  覆盖会被静默忽略，这条日志会直接显示进程实际采用的地址。日志不含 client ID、client secret 和请求参数；
-  它只证明进程采用的配置，不证明端点可达、凭据有效或登录成功。
+  （`authorizeOverride`、`tokenOverride`、`userinfoOverride`）。覆盖变量名写错时，日志会给出默认地址和 `false`，
+  直接看出覆盖没生效；镜像本身不含端点覆盖或这条日志时，整行不会出现，需要先核对镜像版本。日志不含
+  client ID、client secret 和请求参数；它只证明进程采用的配置，不证明端点可达、凭据有效或登录成功。
 
 **GitHub（`internal/gateway/github`）。** OAuth App Authorization Code 加 PKCE S256，不请求任何 scope，
 authorize 请求带 `allow_signup=false` 和 `prompt=select_account`。读取 `GET /user` 后立即丢弃 access token，
