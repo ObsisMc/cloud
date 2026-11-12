@@ -1,7 +1,7 @@
 # 项目仓库文件夹
 
 `projectrepos.New(store, Options{Root: absolutePath})` 创建仓库服务，交给 `server.Options.Projects`。
-Root 是后端配置，不接浏览器目录。`Create(ctx, scope, Input)` 检查成员关系后同步执行一次
+Root 是后端配置，不接浏览器目录。`Create(ctx, scope, Input)`（租户授权由 HTTP 路由完成）同步执行一次
 `git clone --mirror`，验证指定分支，创建固定 snapshot ref，最后写入 Project。
 `SnapshotRef(projectID, commit)` 与固定 Node 的 clone 协议匹配；镜像路径、snapshot ref 和 commit
 供执行装配读取，本模块不创建 Node 或对话目录。`main` 将本服务注入 Projects；显式未配置时 HTTP 返回

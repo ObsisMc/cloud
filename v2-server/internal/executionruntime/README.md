@@ -1,7 +1,7 @@
 # 公共执行服务装配
 
 本包将 `execution.Service` / `Catalog` 连接 PostgreSQL、`modelturn` 和项目 Agent driver。
-调用方传入可信配置；接收和公共读取检查当前成员关系，已经接收的 worker 按原归属保存终态。
+调用方传入可信配置；接收（开始执行）时用 `store.TenantAccess` 检查当前租户授权，已经接收的 worker 按原归属保存终态。
 页面 HTTP 接口由领域服务接入。
 
 ## 接收、事件与结束
@@ -10,7 +10,7 @@
 同一数据库和数据目录只能有一个服务实例。它不重建旧 worker、不重放 prompt，也不恢复旧 Agent 上下文。
 `main` 持有数据目录锁，先构造项目 driver，再构造本服务，最后开放 HTTP。
 
-Start/StartModel/Append 以当前成员关系和 Caller attempt 接收，记录原始 prompt 后启动服务自有 worker。
+Start/StartModel/Append 以当前租户授权（`TenantAccess`，store 在记录会话或轮次的事务内再查一次）和 Caller attempt 接收，记录原始 prompt 后启动服务自有 worker。
 同一个 attempt 同参数返回同一 Ref，参数改变返回 Conflict；同一 Caller 的轮次串行，忙时拒绝。
 观察者已收到持久化的 turn_ended、但原 worker 尚在 ACK/收尾时，Append 等待该 worker 退出后
 重新检查授权、会话和 attempt，再接收下一轮；等待遵从请求 context，不提前释放目录或重叠派发。
@@ -18,7 +18,7 @@ Start/StartModel/Append 以当前成员关系和 Caller attempt 接收，记录�
 不同对话、定时触发各有自己的 checkout；同一 workflow run 复用一个 checkout，换节点前先 End 旧会话。
 只支持文本 prompt；附件、权限询问、运行中切换模型尚不支持。
 
-公共读取、Cancel 和 End 每次检查当前用户、租户与成员关系；执行中撤权后这些入口返回 NotFound。
+公共读取、Cancel 和 End 只按原归属（租户与用户）定位，不再检查租户授权：页面请求已由 HTTP 租户路由授权。执行中撤权后不能再接收新轮次。
 已经接收的 worker 按数据库保留的原始归属继续写入事件和终态，内部 ownership-only 写入方法不暴露给页面。
 有序事件、完整结果和最终停止原因由 PostgreSQL 保留；Node 的历史快照/轮次终态先写库再 ACK。
 Subscribe 从持久 cursor 轮询，关闭观察者不停止 worker；会话结束后仍可按原序号读完再 EOF。

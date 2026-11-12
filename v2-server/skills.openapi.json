@@ -27,7 +27,7 @@
             }
           },
           "401": { "$ref": "#/components/responses/SkillError" },
-          "403": { "$ref": "#/components/responses/SkillError" },
+          "404": { "$ref": "#/components/responses/SkillError" },
           "500": { "$ref": "#/components/responses/SkillError" }
         }
       },
@@ -61,7 +61,7 @@
           },
           "400": { "$ref": "#/components/responses/SkillError" },
           "401": { "$ref": "#/components/responses/SkillError" },
-          "403": { "$ref": "#/components/responses/SkillError" },
+          "404": { "$ref": "#/components/responses/SkillError" },
           "409": { "$ref": "#/components/responses/SkillError" },
           "500": { "$ref": "#/components/responses/SkillError" }
         }
@@ -98,7 +98,7 @@
           },
           "400": { "$ref": "#/components/responses/SkillError" },
           "401": { "$ref": "#/components/responses/SkillError" },
-          "403": { "$ref": "#/components/responses/SkillError" },
+          "404": { "$ref": "#/components/responses/SkillError" },
           "409": { "$ref": "#/components/responses/SkillError" },
           "500": { "$ref": "#/components/responses/SkillError" }
         }
@@ -132,7 +132,6 @@
             }
           },
           "401": { "$ref": "#/components/responses/SkillError" },
-          "403": { "$ref": "#/components/responses/SkillError" },
           "404": { "$ref": "#/components/responses/SkillError" },
           "500": { "$ref": "#/components/responses/SkillError" }
         }
@@ -173,7 +172,6 @@
           },
           "400": { "$ref": "#/components/responses/SkillError" },
           "401": { "$ref": "#/components/responses/SkillError" },
-          "403": { "$ref": "#/components/responses/SkillError" },
           "404": { "$ref": "#/components/responses/SkillError" },
           "409": { "$ref": "#/components/responses/SkillError" },
           "500": { "$ref": "#/components/responses/SkillError" }
@@ -199,7 +197,6 @@
         "responses": {
           "204": { "description": "No Content" },
           "401": { "$ref": "#/components/responses/SkillError" },
-          "403": { "$ref": "#/components/responses/SkillError" },
           "404": { "$ref": "#/components/responses/SkillError" },
           "500": { "$ref": "#/components/responses/SkillError" }
         }
