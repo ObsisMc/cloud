@@ -425,6 +425,36 @@ func TestRerunReplacesTheIdleRun(t *testing.T) {
 	}
 }
 
+// A starter who has lost tenant access is refused before the start changes anything: the idle
+// run someone else left keeps its session instead of being replaced on the way to the refusal.
+func TestRevokedStarterLeavesTheIdleRunInPlace(t *testing.T) {
+	f := newFixture(t)
+	task := f.task(t, opencode)
+	first, e := f.host.Start(f.ctx, f.owner, task.ID, "first", taskrun.StartInput{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.port.finish(t, first.LastTurnID, execution.StatusCompleted)
+	f.await(t, task.ID, store.TaskReview)
+	// Retiring the account is how a person leaves the team today; either way access is gone.
+	if e := f.store.RetireUsers(f.ctx, []store.RetiredUser{{Email: storetest.Email("task-member")}}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := f.store.TenantAccess(f.ctx, f.tenant, f.member.UserID); !errors.Is(e, store.ErrNotFound) {
+		t.Fatalf("retired member access = %v", e)
+	}
+	if _, e := f.host.Start(f.ctx, f.member, task.ID, "revoked", taskrun.StartInput{}); !errors.Is(e, store.ErrNotFound) {
+		t.Fatalf("revoked start = %v", e)
+	}
+	old, e := f.store.TaskRun(f.ctx, f.tenant, task.ID, first.ID)
+	if e != nil || old.EndReason != "" {
+		t.Fatalf("idle run after a refused start = %+v %v", old, e)
+	}
+	if got := f.read(t, task.ID); got.ActiveRun == nil || got.ActiveRun.ID != first.ID {
+		t.Fatalf("task after a refused start = %+v", got)
+	}
+}
+
 func TestClosingTheTaskEndsTheIdleRun(t *testing.T) {
 	f := newFixture(t)
 	task := f.task(t, opencode)

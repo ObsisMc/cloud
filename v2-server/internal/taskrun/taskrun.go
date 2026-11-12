@@ -43,6 +43,7 @@ var (
 
 // Store is the persistence a Host needs; *store.Store implements it.
 type Store interface {
+	TenantAccess(ctx context.Context, tenant, user string) (store.Access, error)
 	Task(ctx context.Context, tenant, id string) (store.Task, error)
 	InSquad(ctx context.Context, tenant, squad, user string) (bool, error)
 	TransitionTaskStatus(ctx context.Context, tenant, id, from, to string) (store.Task, error)
@@ -281,6 +282,12 @@ func (h *Host) Start(ctx context.Context, scope execution.Scope, taskID, key str
 
 // start runs the task's Agent in a new session. The caller holds the task's lock.
 func (h *Host) start(ctx context.Context, scope execution.Scope, task store.Task, key, executorID, prompt string, expectedVersion int64) (store.TaskRun, error) {
+	// Starting is where work begins on the caller's behalf, scheduled or not, so tenant
+	// authorization comes before anything changes: a revoked starter must not replace another
+	// person's idle run on the way to being refused.
+	if _, e := h.store.TenantAccess(ctx, scope.TenantID, scope.UserID); e != nil {
+		return store.TaskRun{}, e
+	}
 	if task.Status == store.TaskDone || task.Status == store.TaskCancelled {
 		return store.TaskRun{}, ErrTaskClosed
 	}
