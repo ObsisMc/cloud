@@ -31,7 +31,7 @@ go run .                               # 监听 127.0.0.1:8090
 | `V2_PLUGIN_MARKETPLACE_BRANCH` | `main` | 市场同步分支；启动时浅克隆并拉取，之后按间隔快进工作副本 |
 | `V2_PLUGIN_MARKETPLACE_INTERVAL` | `5m` | 市场刷新间隔；必须为正 duration。失败时保留上一版 PostgreSQL 快照 |
 | `V2_MARKET_SOCKS_PROXY` | 未设置 | 自定义来源启用代理时使用的部署级 SOCKS5 地址；Git 与 Skill 包下载都使用，客户端只把已校验的公网 IP 交给代理 |
-| `V2_MARKET_CREDENTIAL_KEY` | 未设置 | S3 来源凭据的 AES-256-GCM 密钥（Base64 编码的 32 字节）；启用 S3 来源时必须持久提供 |
+| `V2_MARKET_CREDENTIAL_KEY` | 未设置 | 来源凭据的 AES-256-GCM 密钥（Base64 编码的 32 字节）；启用 S3 来源或自定义来源的 Git 认证时必须持久提供 |
 | `V2_NODE_ASSETS_DIR` | 未设置 | `task v2:node:prepare` 生成的固定 Node、host、guardian、Deno、OpenCode 和 Claude Code 资源；未设置时只启用纯模型路径 |
 | `V2_MODEL_BASE_URL` / `V2_MODEL_API_KEY` / `V2_MODEL_NAME` | 未设置 | 可选的一组 HTTPS OpenAI 兼容 provider；必须同时设置，OpenCode 与纯模型共用，清单只公开模型名称与版本 |
 | `V2_ANTHROPIC_MODEL_BASE_URL` / `V2_ANTHROPIC_MODEL_API_KEY` / `V2_ANTHROPIC_MODEL_NAME` | 未设置 | 可选的一组 HTTPS Anthropic 兼容 provider（Messages API，base URL 写到 `/v1`，如 `https://api.anthropic.com/v1`）；必须同时提供地址、凭据和模型名，只供 Claude Code 使用。使用 Bearer 网关时以 `V2_ANTHROPIC_MODEL_AUTH_TOKEN` 代替 `V2_ANTHROPIC_MODEL_API_KEY`，二者不能同时配置；Claude Code 的 base URL 若以 `/compatible` 结尾，这里填 `/compatible/v1` |
@@ -600,7 +600,7 @@ npm run e2e -- e2e/workflow-runs.spec.ts e2e/workflow-containers.spec.ts e2e/sch
 
 设置 → 插件保留共享官方市场，允许 owner 添加空间私有的公共 HTTPS Git 仓库。来源管理接口见 `market-sources.openapi.json`；目录和安装选择继续使用原 Cloud 客户端。自定义来源按仓库分配命名空间。同仓库的不同 URL 写法共享身份；改到另一仓库会更换命名空间并清空旧目录，改到已配置的仓库返回冲突。官方市场在后台启动首次同步，手动同步每分钟最多触发一次（超出返回 429）。每次同步只提交该来源的完整快照，失败保留上次成功内容。停用或移除来源不会删除空间选择。
 
-自定义来源的 Git 连接和 Skill 包下载只允许访问本次解析并固定的公网地址；禁止二次请求连接其他主机、私网、保留地址和 Git 重定向。本地透明代理常用 `198.18.0.0/15` 作为 fake-IP 应答，此时只对 DNS 域名固定该代理地址，字面量同一网段地址仍拒绝。来源启用代理时，可选 `V2_MARKET_SOCKS_PROXY` 为部署信任的 SOCKS5 代理；客户端先解析并校验公网 IP，再把数字地址交给代理，避免代理重新解析到其他端点。空间不能指定代理地址。S3 凭据以 AES-256-GCM 加密，S3 来源需要部署持久提供 `V2_MARKET_CREDENTIAL_KEY`（Base64 格式的 32 字节随机密钥），备份数据库时单独保管密钥。凭据绑定到空间、来源、端点和桶，不通过读取接口返回；删除来源时会在同一事务中清空对应安装计划保存的加密凭据。
+自定义来源的 Git 连接和 Skill 包下载只允许访问本次解析并固定的公网地址；禁止二次请求连接其他主机、私网、保留地址和 Git 重定向。本地透明代理常用 `198.18.0.0/15` 作为 fake-IP 应答，此时只对 DNS 域名固定该代理地址，字面量同一网段地址仍拒绝。来源启用代理时，可选 `V2_MARKET_SOCKS_PROXY` 为部署信任的 SOCKS5 代理；客户端先解析并校验公网 IP，再把数字地址交给代理，避免代理重新解析到其他端点。空间不能指定代理地址。S3 凭据以 AES-256-GCM 加密，S3 来源需要部署持久提供 `V2_MARKET_CREDENTIAL_KEY`（Base64 格式的 32 字节随机密钥），备份数据库时单独保管密钥。凭据绑定到空间、来源、端点和桶，不通过读取接口返回；删除来源时会在同一事务中清空对应安装计划保存的加密凭据。自定义来源还支持 HTTPS Git 认证（用户名加令牌或密码），同样加密存库、绑定到空间和来源、读取接口只返回是否已配置（`gitConfigured`）而不返回凭据。同步时凭据以 `http.extraHeader` 的形式通过 git 环境注入（经 `GIT_CONFIG_COUNT` 环境变量配置），不进入仓库地址、命令行参数、日志或工作目录的 git 配置；认证失败会与网络失败区分，在来源上显示"同步失败：仓库认证失败，请检查 Git 用户名和令牌。"。
 
 ### 项目 Skill 安装
 

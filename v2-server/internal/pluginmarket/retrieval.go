@@ -25,6 +25,10 @@ type Credentials struct {
 	AccessKey string `json:"accessKey"`
 	SecretKey string `json:"secretKey"`
 }
+type GitCredentials struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
 
 var ErrCredentials = errors.New("market credential configuration unavailable")
 
@@ -94,6 +98,43 @@ func OpenCredentials(ciphertext []byte, binding string) (Credentials, error) {
 	var c Credentials
 	if e != nil || json.Unmarshal(raw, &c) != nil {
 		return Credentials{}, ErrCredentials
+	}
+	return c, nil
+}
+
+// SealGitCredentials encrypts the HTTPS username/password pair a space source needs to clone its
+// repository. The binding ties the ciphertext to the space and source, so credentials from one
+// space can never be opened against another.
+func SealGitCredentials(c GitCredentials, binding string) ([]byte, error) {
+	if strings.TrimSpace(c.Username) == "" || strings.TrimSpace(c.Password) == "" {
+		return nil, ErrCredentials
+	}
+	a, e := marketCipher()
+	if e != nil {
+		return nil, e
+	}
+	raw, e := json.Marshal(c)
+	if e != nil {
+		return nil, ErrCredentials
+	}
+	nonce := make([]byte, a.NonceSize())
+	if _, e := rand.Read(nonce); e != nil {
+		return nil, ErrCredentials
+	}
+	return a.Seal(nonce, nonce, raw, []byte(binding)), nil
+}
+
+// OpenGitCredentials decrypts a source's Git credentials or returns ErrCredentials when the
+// ciphertext is absent, malformed, or bound to a different space/source.
+func OpenGitCredentials(ciphertext []byte, binding string) (GitCredentials, error) {
+	a, e := marketCipher()
+	if e != nil || len(ciphertext) < a.NonceSize() {
+		return GitCredentials{}, ErrCredentials
+	}
+	raw, e := a.Open(nil, ciphertext[:a.NonceSize()], ciphertext[a.NonceSize():], []byte(binding))
+	var c GitCredentials
+	if e != nil || json.Unmarshal(raw, &c) != nil {
+		return GitCredentials{}, ErrCredentials
 	}
 	return c, nil
 }

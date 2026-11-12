@@ -298,6 +298,25 @@
                 "type": "string"
               }
             }
+          },
+          "gitCredentials": {
+            "type": "object",
+            "writeOnly": true,
+            "required": [
+              "username",
+              "password"
+            ],
+            "properties": {
+              "username": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              }
+            }
+          },
+          "clearGitCredentials": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -330,6 +349,9 @@
           },
           "retrieval": {
             "$ref": "#/components/schemas/Retrieval"
+          },
+          "gitConfigured": {
+            "type": "boolean"
           }
         },
         "required": [

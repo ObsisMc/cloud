@@ -12,8 +12,14 @@ import (
 
 type MarketSource struct {
 	Retrieval pluginmarket.Retrieval `json:"retrieval"`
-	// Only input structs ever carry credentials. MarketSources never selects the encrypted column.
+	// Only input structs ever carry credentials. MarketSources never selects the encrypted columns.
 	Credentials *pluginmarket.Credentials `json:"credentials,omitempty"`
+	// GitCredentials is write-only: the HTTPS username/token pair used to clone the repository.
+	GitCredentials *pluginmarket.GitCredentials `json:"gitCredentials,omitempty"`
+	// ClearGitCredentials asks an edit to drop the saved Git credentials.
+	ClearGitCredentials bool `json:"clearGitCredentials,omitempty"`
+	// GitConfigured reports whether a source has saved Git credentials; the secret is never read out.
+	GitConfigured bool `json:"gitConfigured,omitempty"`
 
 	Namespace string     `json:"namespace"`
 	URL       string     `json:"url"`
@@ -27,7 +33,7 @@ func (s *Store) MarketSources(ctx context.Context, tenant, space, user string) (
 	if _, e := requireSpaceAccess(ctx, s.pool, tenant, space, user); e != nil {
 		return nil, e
 	}
-	rows, e := s.pool.Query(ctx, `select namespace,url,branch,enabled,synced_at,failure,retrieval from v2_market_sources where space_id=$1 order by namespace`, space)
+	rows, e := s.pool.Query(ctx, `select namespace,url,branch,enabled,synced_at,failure,retrieval,git_credentials is not null from v2_market_sources where space_id=$1 order by namespace`, space)
 	if e != nil {
 		return nil, e
 	}
@@ -35,7 +41,7 @@ func (s *Store) MarketSources(ctx context.Context, tenant, space, user string) (
 	out := []MarketSource{}
 	for rows.Next() {
 		var m MarketSource
-		if e := rows.Scan(&m.Namespace, &m.URL, &m.Branch, &m.Enabled, &m.SyncedAt, &m.Failure, &m.Retrieval); e != nil {
+		if e := rows.Scan(&m.Namespace, &m.URL, &m.Branch, &m.Enabled, &m.SyncedAt, &m.Failure, &m.Retrieval, &m.GitConfigured); e != nil {
 			return nil, e
 		}
 		out = append(out, m)
@@ -82,8 +88,15 @@ func (s *Store) ChangeMarket(ctx context.Context, tenant, space, user, id, actio
 		} else if in.Retrieval.Mode == "s3_sigv4" && action == "POST" {
 			return pluginmarket.ErrCredentials
 		}
+		var gitSealed []byte
+		if in.GitCredentials != nil {
+			gitSealed, e = pluginmarket.SealGitCredentials(*in.GitCredentials, space+"/"+newID)
+			if e != nil {
+				return e
+			}
+		}
 		if action == "POST" {
-			tag, e := s.pool.Exec(ctx, `insert into v2_market_sources(space_id,namespace,url,branch,enabled,retrieval,credentials) values($1,$2,$3,$4,$5,$6,$7) on conflict do nothing`, space, newID, in.URL, in.Branch, in.Enabled, config, sealed)
+			tag, e := s.pool.Exec(ctx, `insert into v2_market_sources(space_id,namespace,url,branch,enabled,retrieval,credentials,git_credentials) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict do nothing`, space, newID, in.URL, in.Branch, in.Enabled, config, sealed, gitSealed)
 			if e == nil && tag.RowsAffected() == 0 {
 				return ErrConflict
 			}
@@ -107,10 +120,11 @@ func (s *Store) ChangeMarket(ctx context.Context, tenant, space, user, id, actio
 		}
 		_, e = tx.Exec(ctx, `update v2_market_sources set namespace=$8,url=$3,branch=$4,enabled=$5,retrieval=$6,
 			credentials=case when ($6::jsonb)->>'mode'='s3_sigv4' then coalesce($7,credentials) end,
+			git_credentials=case when $9 then null when $10::bytea is not null then $10 else git_credentials end,
 			snapshot=case when namespace=$8 then snapshot else '[]'::jsonb end,
 			synced_at=case when namespace=$8 then synced_at end,
 			failure=case when namespace=$8 then failure else '' end,
-			revision=revision+1 where space_id=$1 and namespace=$2`, space, id, in.URL, in.Branch, in.Enabled, config, sealed, newID)
+			revision=revision+1 where space_id=$1 and namespace=$2`, space, id, in.URL, in.Branch, in.Enabled, config, sealed, newID, in.ClearGitCredentials, gitSealed)
 		var pgErr *pgconn.PgError
 		if errors.As(e, &pgErr) && pgErr.Code == "23505" {
 			return ErrConflict
@@ -139,16 +153,29 @@ func (s *Store) ChangeMarket(ctx context.Context, tenant, space, user, id, actio
 	case "sync":
 		var m MarketSource
 		var revision int64
-		e = s.pool.QueryRow(ctx, `update v2_market_sources set revision=revision+1 where space_id=$1 and namespace=$2 and enabled returning url,branch,revision,retrieval`, space, id).Scan(&m.URL, &m.Branch, &revision, &m.Retrieval)
+		var gitSealed []byte
+		e = s.pool.QueryRow(ctx, `update v2_market_sources set revision=revision+1 where space_id=$1 and namespace=$2 and enabled returning url,branch,revision,retrieval,git_credentials`, space, id).Scan(&m.URL, &m.Branch, &revision, &m.Retrieval, &gitSealed)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		if e != nil {
 			return e
 		}
-		entries, fetchErr := pluginmarket.ReadPublic(ctx, pluginmarket.Source{Namespace: id, URL: m.URL, Branch: m.Branch}, m.Retrieval.UseProxy)
+		var gitCredentials *pluginmarket.GitCredentials
+		if len(gitSealed) > 0 {
+			creds, e := pluginmarket.OpenGitCredentials(gitSealed, space+"/"+id)
+			if e != nil {
+				return e
+			}
+			gitCredentials = &creds
+		}
+		entries, fetchErr := pluginmarket.ReadPublic(ctx, pluginmarket.Source{Namespace: id, URL: m.URL, Branch: m.Branch}, m.Retrieval.UseProxy, gitCredentials)
 		if fetchErr != nil {
-			_, e = s.pool.Exec(ctx, `update v2_market_sources set failure='同步失败，请检查仓库地址和分支。' where space_id=$1 and namespace=$2 and revision=$3`, space, id, revision)
+			failure := "同步失败，请检查仓库地址和分支。"
+			if errors.Is(fetchErr, pluginmarket.ErrGitAuth) {
+				failure = "同步失败：仓库认证失败，请检查 Git 用户名和令牌。"
+			}
+			_, e = s.pool.Exec(ctx, `update v2_market_sources set failure=$4 where space_id=$1 and namespace=$2 and revision=$3`, space, id, revision, failure)
 			if e != nil {
 				return e
 			}
