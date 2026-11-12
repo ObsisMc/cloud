@@ -29,7 +29,7 @@ export function ScheduleForm({task,onSave,onCancel,data=catalog,saving=false,blo
  const workflows=data.workflows??[]
  const chosen=workflows.find(w=>w.id===draft.workflowId)
  // The version a save freezes is the one published now, which may differ from the one frozen before.
- const workflowHint=!chosen?'只列出已发布的工作流。':draft.snapshotId&&draft.snapshotId!==chosen.snapshotId?`当前固定的是旧版本，保存后改为生效版本 ${chosen.version}。`:`保存时固定生效版本 ${chosen.version}；之后发布的新版本要重新保存任务才会使用。`
+ const workflowHint=draft.versionPolicy==='latest'?'每次触发时使用最新发布版本；历史运行始终保留当次实际使用的快照。':!chosen?'只列出已发布的工作流。':draft.snapshotId&&draft.snapshotId!==chosen.snapshotId?`当前固定的是旧版本，保存后改为生效版本 ${chosen.version}。`:`保存时固定生效版本 ${chosen.version}；之后发布的新版本要重新保存任务才会使用。`
  function submit(event:FormEvent<HTMLFormElement>){
   event.preventDefault()
   if(saving||blocked||resourcesLoading||!editable)return
@@ -77,6 +77,12 @@ export function ScheduleForm({task,onSave,onCancel,data=catalog,saving=false,blo
         {draft.workflowId&&!chosen&&<NativeSelectOption value={draft.workflowId} disabled>原工作流暂不可用</NativeSelectOption>}
         {workflows.map(w=><NativeSelectOption key={w.id} value={w.id}>{w.name}（{w.version}）</NativeSelectOption>)}
        </NativeSelect>
+      </ScheduleField>
+      <ScheduleField name="versionPolicy" label="版本策略" hint="发布新版本不会自动修改固定版本任务。">
+       <ToggleGroup id="schedule-versionPolicy" aria-label="版本策略" value={[draft.versionPolicy??'fixed']} onValueChange={values=>{const value=values.at(-1);if(value==='fixed'||value==='latest')patch({versionPolicy:value})}} variant="outline" spacing={2}>
+        <ToggleGroupItem value="fixed">固定版本</ToggleGroupItem>
+        <ToggleGroupItem value="latest">跟随最新发布版本</ToggleGroupItem>
+       </ToggleGroup>
       </ScheduleField>
       <ScheduleField name="input" label="初始输入" hint="可选。每次运行都作为开始节点的输入；开始节点的变量使用工作流里的默认值。"><Textarea className="min-h-24" rows={3} placeholder="例如：整理本周合并的改动" value={draft.input} onChange={e=>patch({input:e.target.value})} {...control('input')}/></ScheduleField>
      </>:<p role="status">此执行方式尚未接入真实目录，已有配置保留，暂不能编辑。</p>}

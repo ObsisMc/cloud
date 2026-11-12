@@ -23,8 +23,8 @@ import type {
   UseQueryResult
 } from '@tanstack/react-query';
 
-import { customInstance } from '../../../lib/api-client';
-import type { ErrorType , BodyType } from '../../../lib/api-client';
+import { customInstance } from '../api-client';
+import type { ErrorType , BodyType } from '../api-client';
 export type ScheduleChatTargetKind = typeof ScheduleChatTargetKind[keyof typeof ScheduleChatTargetKind];
 
 
@@ -67,14 +67,27 @@ export const ScheduleWorkflowTargetKind = {
 } as const;
 
 /**
- * A workflow run in the schedule's project: one published snapshot of the workflow, frozen when the schedule is saved, and the kickoff input (may be empty). Each trigger creates and starts one run whose stable identity is the occurrence.
+ * Omitted means fixed. Fixed requires snapshotId; latest forbids it and resolves the effective published snapshot atomically on every trigger.
+ */
+export type ScheduleWorkflowTargetVersionPolicy = typeof ScheduleWorkflowTargetVersionPolicy[keyof typeof ScheduleWorkflowTargetVersionPolicy];
+
+
+export const ScheduleWorkflowTargetVersionPolicy = {
+  fixed: 'fixed',
+  latest: 'latest',
+} as const;
+
+/**
+ * Workflow target: fixed (default) pins snapshotId; latest resolves the effective release for each trigger. The resulting run permanently freezes the resolved snapshot.
  */
 export interface ScheduleWorkflowTarget {
   kind: ScheduleWorkflowTargetKind;
   workflowId: string;
-  snapshotId: string;
+  snapshotId?: string;
   /** @maxLength 32000 */
   input: string;
+  /** Omitted means fixed. Fixed requires snapshotId; latest forbids it and resolves the effective published snapshot atomically on every trigger. */
+  versionPolicy?: ScheduleWorkflowTargetVersionPolicy;
 }
 
 export type ScheduleLegacyTargetKind = typeof ScheduleLegacyTargetKind[keyof typeof ScheduleLegacyTargetKind];
