@@ -34,7 +34,13 @@ func (r scheduleWorkflowRuns) Create(ctx context.Context, scope execution.Scope,
 	if target.Input != "" {
 		in.Input = &target.Input
 	}
-	return r.store.CreateWorkflowRun(ctx, scope.TenantID, target.WorkflowID, target.SnapshotID, in)
+	// An empty snapshot asks the run store to resolve the effective release under its
+	// workflow row lock, atomically with freezing the run. Recovery only finds this run.
+	snapshotID := target.SnapshotID
+	if target.VersionPolicy == "latest" {
+		snapshotID = ""
+	}
+	return r.store.CreateWorkflowRun(ctx, scope.TenantID, target.WorkflowID, snapshotID, in)
 }
 
 func (r scheduleWorkflowRuns) Find(ctx context.Context, scope execution.Scope, triggerRef string) (store.WorkflowRun, error) {
