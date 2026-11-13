@@ -172,15 +172,9 @@ func TestPluginMarketHTTP(t *testing.T) {
 		"pluginVersion": "0.3.14",
 		"version":       0,
 	}, map[string]string{"Idempotency-Key": "install-codex"})
-	if status != 200 {
-		t.Fatalf("install codex = %d %v", status, body)
+	if status != 400 || body["code"] != "plugin_kind_not_installable" {
+		t.Fatalf("install market agent = %d %v", status, body)
 	}
-	codex := body["resource"].(map[string]any)
-	if codex["kind"] != "agent" || codex["desiredState"] != "installed" ||
-		codex["observedState"] != "installed" || codex["observedVersion"] != "0.3.14" {
-		t.Fatalf("installed codex = %v", codex)
-	}
-	codexVersion := codex["version"].(float64)
 	status, body = c.doHeaders("POST", base, map[string]any{
 		"identifier": "official/ora-space.opencode",
 		"version":    0,
@@ -194,18 +188,6 @@ func TestPluginMarketHTTP(t *testing.T) {
 	}, map[string]string{"Idempotency-Key": "remove-runtime-agent"})
 	if status != 409 || body["code"] != "plugin_runtime_managed" {
 		t.Fatalf("preinstalled removal = %d %v", status, body)
-	}
-	status, body = c.doHeaders("DELETE", base, map[string]any{
-		"identifier": "official/ora-space.codex",
-		"version":    int64(codexVersion),
-	}, map[string]string{"Idempotency-Key": "remove-codex"})
-	if status != 200 {
-		t.Fatalf("remove codex = %d %v", status, body)
-	}
-	removedCodex := body["resource"].(map[string]any)
-	if removedCodex["desiredState"] != "removed" || removedCodex["observedState"] != "removed" ||
-		removedCodex["observedVersion"] != nil {
-		t.Fatalf("removed codex = %v", removedCodex)
 	}
 
 	status, body = c.doHeaders("DELETE", base, map[string]any{
@@ -231,13 +213,13 @@ func TestPluginMarketHTTP(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("plugins after remove = %d %v", status, body)
 	}
-	// The removed Skill row is gone; the removed Agent stays as a settled selection.
-	if items, _ := body["items"].([]any); len(items) != 3 {
+	// The removed Skill row is gone; only the two preinstalled Agents remain.
+	if items, _ := body["items"].([]any); len(items) != 2 {
 		t.Fatalf("plugins after remove = %v", body)
 	}
 }
 
-func TestHookPluginHTTPDemoSelection(t *testing.T) {
+func TestHookPluginIsReadOnly(t *testing.T) {
 	f := newSquadServer(t)
 	c := newContractClient(t, f.srv.URL)
 	c.login()
@@ -252,7 +234,10 @@ func TestHookPluginHTTPDemoSelection(t *testing.T) {
 	}
 	space := spaces[0].(map[string]any)["id"].(string)
 	base := "/api/v1/tenants/" + tenant + "/spaces/" + space + "/plugins"
-	if e := f.store.ReplacePluginCatalog(context.Background(), []pluginmarket.Entry{pluginmarket.DemoHookEntry()}, time.Now()); e != nil {
+	if e := f.store.ReplacePluginCatalog(context.Background(), []pluginmarket.Entry{{
+		Namespace: "official", Identifier: "acme.hooks", Title: "Acme Hooks", Kind: "hook", Version: "1.0.0",
+		Description: "Hooks", MarketplaceVisible: true, SourceURL: "https://example.org",
+	}}, time.Now()); e != nil {
 		t.Fatal(e)
 	}
 
@@ -264,57 +249,14 @@ func TestHookPluginHTTPDemoSelection(t *testing.T) {
 	if len(catalog) != 1 {
 		t.Fatalf("hook catalog = %v", body)
 	}
-	entry := catalog[0].(map[string]any)
-	if entry["id"] != "demo/sample-hooks" || entry["kind"] != "hook" ||
-		entry["url"] != nil || entry["sha256"] != nil {
-		t.Fatalf("hook catalog entry = %v", entry)
-	}
 
 	status, body = c.doHeaders("POST", base, map[string]any{
-		"identifier":    "demo/sample-hooks",
+		"identifier":    "official/acme.hooks",
 		"pluginVersion": "1.0.0",
 		"version":       0,
-	}, map[string]string{"Idempotency-Key": "install-demo-hook"})
-	if status != 200 {
+	}, map[string]string{"Idempotency-Key": "install-hook"})
+	if status != 400 || body["code"] != "plugin_kind_not_installable" {
 		t.Fatalf("install hook = %d %v", status, body)
-	}
-	resource := body["resource"].(map[string]any)
-	if resource["kind"] != "hook" || resource["desiredState"] != "installed" ||
-		resource["observedState"] != "installed" || resource["observedVersion"] != "1.0.0" {
-		t.Fatalf("installed hook = %v", resource)
-	}
-	version := resource["version"].(float64)
-
-	status, body = c.do("GET", base, nil)
-	if status != 200 {
-		t.Fatalf("plugins = %d %v", status, body)
-	}
-	items, _ := body["items"].([]any)
-	found := false
-	for _, raw := range items {
-		item := raw.(map[string]any)
-		if item["identifier"] == "sample-hooks" {
-			found = true
-			if item["kind"] != "hook" || item["observedState"] != "installed" {
-				t.Fatalf("hook selection = %v", item)
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("hook selection missing: %v", body)
-	}
-
-	status, body = c.doHeaders("DELETE", base, map[string]any{
-		"identifier": "demo/sample-hooks",
-		"version":    int64(version),
-	}, map[string]string{"Idempotency-Key": "remove-demo-hook"})
-	if status != 200 {
-		t.Fatalf("remove hook = %d %v", status, body)
-	}
-	removed := body["resource"].(map[string]any)
-	if removed["desiredState"] != "removed" || removed["observedState"] != "removed" ||
-		removed["observedVersion"] != nil {
-		t.Fatalf("removed hook = %v", removed)
 	}
 }
 
