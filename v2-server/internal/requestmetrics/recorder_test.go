@@ -120,3 +120,30 @@ func TestRecorderRejectsHTTP200Diagnostics(t *testing.T) {
 		t.Fatal("terminal marker hid provider error")
 	}
 }
+
+// The provider reaches the route's response through observerWriter to mark a cut-off stream.
+var _ interface{ Unwrap() http.ResponseWriter } = (*observerWriter)(nil)
+
+// A response cut off mid-stream is recorded as interrupted; aborting it is the route's job.
+func TestRecorderRecordsCutOffAsInterrupted(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer upstream.Close()
+	remote, err := nodeservices.NewRemoteProvider(upstream.URL, "test-key", upstream.Client().Transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.SetLimits(200*time.Millisecond, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	recorder := &memoryRecorder{}
+	p := Wrap(recorder, execution.Ref{SessionID: "trusted", TurnID: "turn"}, nodeservices.Binding{Protocol: nodeservices.OpenAICompletions, Provider: remote})
+	p.Complete(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(`{"stream":true}`)), nodeservices.Model{ID: "test"})
+	if len(recorder.finished) != 1 || recorder.finished[0].Outcome != "interrupted" || recorder.finished[0].ErrorCode != "model_response_interrupted" {
+		t.Fatalf("finished=%+v", recorder.finished)
+	}
+}

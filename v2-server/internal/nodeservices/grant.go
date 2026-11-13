@@ -142,5 +142,9 @@ func (s *Service) model(w http.ResponseWriter, r *http.Request, protocol Protoco
 			return
 		}
 	}
-	provider.Complete(w, r, binding.Model)
+	out := &abortableWriter{ResponseWriter: w}
+	provider.Complete(out, r, binding.Model)
+	if out.cut {
+		panic(http.ErrAbortHandler)
+	}
 }

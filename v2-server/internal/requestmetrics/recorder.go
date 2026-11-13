@@ -81,8 +81,10 @@ func (p *provider) Complete(w http.ResponseWriter, r *http.Request, m nodeservic
 	}
 
 	var upstreamStatus *int
+	cut := false
 	if remote, ok := p.binding.Provider.(*nodeservices.RemoteProvider); ok {
-		status := remote.CompleteObserved(out, r, m, begin)
+		var status int
+		status, cut = remote.CompleteObserved(out, r, m, begin)
 		if a.ID == "" || err != nil {
 			return
 		}
@@ -113,7 +115,7 @@ func (p *provider) Complete(w http.ResponseWriter, r *http.Request, m nodeservic
 	}
 	a.Outcome = "incomplete"
 	switch {
-	case a.TerminalObserved && status < 400 && !out.failed:
+	case a.TerminalObserved && status < 400 && !out.failed && !cut:
 		a.Outcome = "succeeded"
 	case r.Context().Err() != nil:
 		a.Outcome = "cancelled"
@@ -121,7 +123,7 @@ func (p *provider) Complete(w http.ResponseWriter, r *http.Request, m nodeservic
 	case status >= 400 || out.observer.providerError:
 		a.Outcome = "failed"
 		a.ErrorCode = "model_provider_failed"
-	case out.failed:
+	case out.failed || cut:
 		a.Outcome = "interrupted"
 		a.ErrorCode = "model_response_interrupted"
 	case a.TerminalObserved:
@@ -151,6 +153,9 @@ type observerWriter struct {
 	streamed, failed, overflow bool
 	buffer                     []byte
 }
+
+// Unwrap lets the provider reach the route's response, which aborts a cut-off stream.
+func (w *observerWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *observerWriter) WriteHeader(status int) {
 	if w.status != 0 {

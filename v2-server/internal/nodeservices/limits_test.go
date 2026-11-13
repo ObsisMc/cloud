@@ -1,7 +1,11 @@
 package nodeservices
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -53,3 +57,113 @@ func TestRenewedGrantKeepsInFlightCallPastOriginalExpiry(t *testing.T) {
 	}
 }
 
+// unwrapping stands for a provider wrapper such as request metrics: it hides the route's
+// response behind its own writer and exposes it only through Unwrap.
+type unwrapping struct{ Provider }
+
+type unwrappingWriter struct{ http.ResponseWriter }
+
+func (w unwrappingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w unwrappingWriter) Flush()                      { w.ResponseWriter.(http.Flusher).Flush() }
+
+func (p unwrapping) Complete(w http.ResponseWriter, r *http.Request, m Model) {
+	p.Provider.Complete(unwrappingWriter{w}, r, m)
+}
+
+// readCutOff calls the Agent model route, which must fail mid-body rather than end normally.
+func readCutOff(t *testing.T, p Provider) (string, time.Duration) {
+	t.Helper()
+	s := testService(t, p)
+	c := serviceClient(t, s, true)
+	token, _ := issueToken(t, s, c, "execution")
+	req, _ := http.NewRequest("POST", s.URL+"/runtime/openai/v1/chat/completions", strings.NewReader(`{"stream":true}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	began := time.Now()
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || err == nil || errors.Is(err, io.EOF) {
+		t.Fatalf("want a broken 200 stream, got %d err=%v body=%q", resp.StatusCode, err, data)
+	}
+	return string(data), time.Since(began)
+}
+
+func TestRemoteProviderIdleTimeoutAbortsResponse(t *testing.T) {
+	stopped := make(chan struct{}, 2)
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for i := range 3 {
+			_, _ = fmt.Fprintf(flushWriter{w}, "data: {\"n\":%d}\n\n", i)
+			time.Sleep(100 * time.Millisecond)
+		}
+		<-r.Context().Done()
+		stopped <- struct{}{}
+	}))
+	defer upstream.Close()
+	p, err := NewRemoteProvider(upstream.URL, "backend-key", upstream.Client().Transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Chunks 100ms apart stay under the idle limit; the stall after them does not.
+	if err := p.SetLimits(300*time.Millisecond, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	for name, provider := range map[string]Provider{"direct": p, "wrapped": unwrapping{p}} {
+		data, elapsed := readCutOff(t, provider)
+		if !strings.Contains(data, `{"n":2}`) || elapsed > 5*time.Second {
+			t.Fatalf("%s: idle cut after %s with %q", name, elapsed, data)
+		}
+		select {
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: upstream call not cancelled", name)
+		}
+	}
+}
+
+func TestRemoteProviderMaxDurationAbortsActiveStream(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for {
+			if _, err := (flushWriter{w}).Write([]byte("data: {}\n\n")); err != nil {
+				return
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}))
+	defer upstream.Close()
+	p, err := NewRemoteProvider(upstream.URL, "backend-key", upstream.Client().Transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stream never goes idle; only the total limit can end it.
+	if err := p.SetLimits(300*time.Millisecond, 800*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	data, elapsed := readCutOff(t, p)
+	if elapsed < 800*time.Millisecond || elapsed > 5*time.Second || strings.Count(data, "data: {}") < 5 {
+		t.Fatalf("total cut after %s with %d chunks", elapsed, strings.Count(data, "data: {}"))
+	}
+}
+
+func TestRemoteProviderLimitsValidation(t *testing.T) {
+	p, err := NewRemoteProvider("https://example.test/v1", "key", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idle, total := p.Limits(); idle != DefaultIdleTimeout || total != DefaultMaxDuration {
+		t.Fatalf("defaults=%s %s", idle, total)
+	}
+	for _, l := range [][2]time.Duration{{0, time.Minute}, {time.Minute, 0}, {2 * time.Minute, time.Minute}} {
+		if p.SetLimits(l[0], l[1]) == nil {
+			t.Fatalf("accepted %v", l)
+		}
+	}
+}
