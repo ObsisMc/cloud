@@ -129,9 +129,10 @@ client (`client_secret_post`) without PKCE.
   is called the same way.
 - The normalized identity is `source=huawei-corp`, `subject=<the trimmed uuid>`, plus the verified
   `globalUserId` (the `globalUserID` spelling is accepted) and the display name from
-  `idaas.display_name_field`, falling back to the uuid. Without a `globalUserId` the user can still
-  log in, but cannot be linked automatically to a person an administrator pre-added from the employee
-  directory.
+  `idaas.display_name_field`, falling back to the uuid when the name field is absent. A userinfo
+  response without `globalUserId` (or `globalUserID`) is a provider rejection, so the browser only
+  sees `401 login_failed`: the field is also the employee-directory link key, and the v1 Gateway
+  does not accept an identity without it.
 - The token and userinfo clients have their own total timeout and a 64 KiB response cap, propagate
   cancellation and never follow redirects.
 - Deployments can independently override the complete HTTPS authorize, token and userinfo URLs;
@@ -192,8 +193,8 @@ and `/healthz` to the Gateway and never exposes `/internal`.
 
 1. Register a separate Authorization Code application with an exact callback per environment, and
    request `base.profile`, `uuid`, `globalUserId` and the name fields you need; beta and production
-   never share an origin. If the default userinfo lacks `uuid`, request it in the console first —
-   never fall back to `globalUserId` or the employee number as the login subject.
+   never share an origin. If the default userinfo lacks `uuid` or `globalUserId`, request them in the
+   console first — never fall back to `globalUserId` or the employee number as the login subject.
 2. Set `idaas.display_name_field` to the top-level name field actually returned (for example
    `userName` or `cn`).
 3. Mount the client secret and a PKCE key of at least 32 bytes as read-only files with identical

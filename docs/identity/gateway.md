@@ -108,8 +108,9 @@ access token 和 PKCE verifier 只存在于单次请求的内存里，不持久�
 - 以表单 `POST` 调用 `/saaslogin1/oauth2/v1/token`，`client_id`、`client_secret`、`code` 放在请求体里，
   不放进 URL，避免进入访问日志；再以同样方式调用 `/saaslogin1/oauth2/v1/userinfo`。
 - 规范化出的身份为 `source=huawei-corp`、`subject=<去首尾空白的 uuid>`，另带经验证的 `globalUserId`（兼容
-  `globalUserID` 拼写）和 `idaas.display_name_field` 指定的显示名，缺失时回退为 uuid。`globalUserId` 缺失时
-  仍可登录，只是不能自动关联管理员按员工目录预先添加的人员。
+  `globalUserID` 拼写）和 `idaas.display_name_field` 指定的显示名，显示名缺失时回退为 uuid。userinfo 未返回
+  `globalUserId`（或 `globalUserID`）时按 provider 拒绝处理，浏览器只看到 `401 login_failed`：这个字段同时是
+  人员目录关联键，v1 Gateway 不接受缺失它的身份。
 - 令牌和 userinfo 客户端有独立的总超时、64 KiB 响应上限，传播取消，不跟随重定向。
 - 部署可独立覆盖 authorize、token、userinfo 完整 HTTPS 地址；省略的端点仍使用上述默认路径。
   覆盖值不得包含 URL 用户凭据、query 或 fragment，也不从浏览器请求读取。配置项见
@@ -155,8 +156,8 @@ GitHub 完全相同。因为它能以任何身份登录，配置校验要求显�
 **IDaaS 上线检查。**
 
 1. 每个环境单独登记 Authorization Code 应用和精确的 callback，申请 `base.profile`、`uuid`、`globalUserId`
-   和所需的姓名字段；beta 与生产不复用 origin。默认 userinfo 不含 `uuid` 时必须先在控制台申请，不能改用
-   `globalUserId` 或工号作为登录 subject。
+   和所需的姓名字段；beta 与生产不复用 origin。默认 userinfo 不含 `uuid` 或 `globalUserId` 时必须先在控制台
+   申请，不能改用 `globalUserId` 或工号作为登录 subject。
 2. 把实际返回的顶层姓名字段（例如 `userName` 或 `cn`）配置为 `idaas.display_name_field`。
 3. 以只读文件挂载 client secret 和至少 32 字节的 PKCE 密钥，所有副本内容相同。
 4. 预置首位管理员时，`cloudctl bootstrap -subject` 必须是该员工在 IDaaS 返回的 `uuid`。其他人员由管理员通过
