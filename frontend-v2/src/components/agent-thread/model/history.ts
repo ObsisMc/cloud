@@ -214,8 +214,15 @@ function markFailures(conversation: Conversation, from: number, results: ChatRes
   return changed ? { ...conversation, turns } : conversation
 }
 
+/** Model limits that v2-server enforces on one call; the Agent itself only reports a cancel. */
+const limitTexts: Record<string, string> = {
+  model_max_duration: '模型请求超过时长上限被切断，这一轮已停止。',
+  model_idle_timeout: '模型长时间没有输出被切断，这一轮已停止。',
+}
+
 function failureText(result: ChatResult): string {
   if (result.status === 'interrupted') return '服务重启，这一轮被中断。'
+  if (limitTexts[result.failureCode]) return limitTexts[result.failureCode]
   if (!result.answerComplete) return `回答没能完整读取${result.failureCode ? `（${result.failureCode}）` : ''}，这一轮按失败处理。`
   return `这一轮失败了${result.failureCode ? `（${result.failureCode}）` : ''}。`
 }

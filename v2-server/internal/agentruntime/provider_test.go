@@ -31,8 +31,9 @@ func TestProviderForCurrentObservedTurnAndPassthrough(t *testing.T) {
 	}
 	for _, turn := range []string{"one", "two"} {
 		a.active = &activeTurn{id: turn}
-		if got := p.providerFor("execution", binding); !reflect.DeepEqual(got, observed) {
-			t.Fatal("observer not wired")
+		got, ok := p.providerFor("execution", binding).(guardedProvider)
+		if !ok || !reflect.DeepEqual(got.next, observed) || got.guard != &a.active.guard {
+			t.Fatal("observer not wired behind the turn's retry guard")
 		}
 	}
 	if !reflect.DeepEqual(refs, []execution.Ref{{SessionID: "session", TurnID: "one"}, {SessionID: "session", TurnID: "two"}}) {

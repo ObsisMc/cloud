@@ -32,8 +32,8 @@ const (
 )
 
 var (
-	errIdleTimeout = errors.New("model_idle_timeout")
-	errMaxDuration = errors.New("model_max_duration")
+	errIdleTimeout = errors.New(CutIdle)
+	errMaxDuration = errors.New(CutMaxDuration)
 )
 
 // Limits returns the idle and total limits of one call.
@@ -141,6 +141,11 @@ func (p *RemoteProvider) CompleteObserved(w http.ResponseWriter, r *http.Request
 	defer idle.Stop()
 	resp, err := p.client.Do(req)
 	if err != nil {
+		// A limit reached before the header is still a limit: the answer keeps its fixed error
+		// code and is not aborted, but the route learns why (see Outcome).
+		if cause := context.Cause(ctx); errors.Is(cause, errIdleTimeout) || errors.Is(cause, errMaxDuration) {
+			markLimit(w, cause.Error())
+		}
 		fault(w, 502, "provider_unavailable")
 		return 0, false
 	}
@@ -167,7 +172,7 @@ func (p *RemoteProvider) CompleteObserved(w http.ResponseWriter, r *http.Request
 			reason = "cancelled"
 		}
 		slog.WarnContext(r.Context(), "model response cut off", "reason", reason)
-		markCut(w)
+		markCut(w, reason)
 		return resp.StatusCode, true
 	}
 	return resp.StatusCode, false
@@ -268,6 +273,25 @@ func (FixtureProvider) Complete(w http.ResponseWriter, r *http.Request, model Mo
 type abortableWriter struct {
 	http.ResponseWriter
 	cut bool
+	// status is the status the route answered with; 0 until a header or body is written.
+	status int
+	// limit is the model limit that stopped the call, before or after its header:
+	// model_idle_timeout or model_max_duration. Other cuts leave it empty.
+	limit string
+}
+
+func (w *abortableWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *abortableWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(p)
 }
 
 func (w *abortableWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
@@ -280,16 +304,75 @@ func (w *abortableWriter) Flush() {
 
 // markCut finds the route's abortableWriter through wrappers that expose Unwrap, as
 // http.ResponseController does; without one there is nothing to abort.
-func markCut(w http.ResponseWriter) {
+func markCut(w http.ResponseWriter, reason string) {
+	if a := routeWriter(w); a != nil {
+		a.cut = true
+		if reason == CutIdle || reason == CutMaxDuration {
+			a.limit = reason
+		}
+	}
+}
+
+// markLimit records a limit reached before the response header; the response is not aborted.
+func markLimit(w http.ResponseWriter, reason string) {
+	if a := routeWriter(w); a != nil {
+		a.limit = reason
+	}
+}
+
+func routeWriter(w http.ResponseWriter) *abortableWriter {
 	for {
 		if a, ok := w.(*abortableWriter); ok {
-			a.cut = true
-			return
+			return a
 		}
 		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
 		if !ok {
-			return
+			return nil
 		}
 		w = u.Unwrap()
 	}
+}
+
+// Outcome reports how an Agent model call on this response ended: completed is true only when
+// the provider answered 2xx and nothing cut the response; limit names the model limit that
+// stopped it (CutIdle or CutMaxDuration), before or after the header, or is "". It asks the
+// first writer in the Unwrap chain that knows, which on the Agent model route is the route's
+// own response.
+func Outcome(w http.ResponseWriter) (completed bool, limit string) {
+	for {
+		if o, ok := w.(interface{ Outcome() (bool, string) }); ok {
+			return o.Outcome()
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return false, ""
+		}
+		w = u.Unwrap()
+	}
+}
+
+// Outcome implements the lookup used by the exported Outcome.
+func (w *abortableWriter) Outcome() (bool, string) {
+	return w.status >= 200 && w.status < 300 && !w.cut && w.limit == "", w.limit
+}
+
+// Cut reasons that end a model response at a limit.
+const (
+	CutIdle        = "model_idle_timeout"
+	CutMaxDuration = "model_max_duration"
+)
+
+// RefuseCall answers an Agent model call before any upstream work with a final, protocol-shaped
+// error. Agents retry 408, 409, 429, 5xx and errors whose text reads like a network failure or a
+// timeout, so the status is 422 and the message avoids those words: the Agent stops and reports
+// the message instead of re-sending the same request.
+func RefuseCall(w http.ResponseWriter, protocol Protocol, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	text := message + "（" + code + "）"
+	if protocol == AnthropicMessages {
+		_ = json.NewEncoder(w).Encode(map[string]any{"type": "error", "error": map[string]string{"type": "invalid_request_error", "message": text}})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": text, "type": "invalid_request_error", "code": code}})
 }

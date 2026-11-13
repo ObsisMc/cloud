@@ -30,6 +30,8 @@ type turnOutcome struct {
 type activeTurn struct {
 	id   string
 	done chan turnOutcome
+	// guard limits the Agent's re-sends of model calls cut off at a limit during this turn.
+	guard retryGuard
 }
 
 type agentSession struct {
@@ -418,7 +420,7 @@ func (a *agentSession) observe(message node.Message) (*turnOutcome, bool) {
 		a.requestEnd()
 		return nil, false
 	}
-	result := turnResult(observation.Turn)
+	result := turnResult(observation.Turn, call.guard.failure())
 	if a.publish(execution.Event{Ref: execution.Ref{TurnID: turnID}, Kind: execution.EventTurnEnded, Result: &result}) != nil {
 		a.fail("agent_event_write_failed", errEventStore)
 		a.requestEnd()
@@ -489,13 +491,18 @@ func (a *agentSession) flushPreview() {
 	}
 }
 
-func turnResult(turn *nodehistory.Turn) execution.Result {
+// turnResult maps Node's stop reason. Node records every failed turn as cancelled, so a turn
+// whose last model call was cut at a limit (cut) fails with that limit as its reason instead.
+func turnResult(turn *nodehistory.Turn, cut string) execution.Result {
 	result := execution.Result{Answer: turn.Answer, StopReason: turn.StopReason}
 	switch turn.StopReason {
 	case "end_turn":
 		result.Status, result.AnswerComplete = execution.StatusCompleted, true
 	case "cancelled":
 		result.Status = execution.StatusCancelled
+		if cut != "" {
+			result.Status, result.FailureCode = execution.StatusFailed, cut
+		}
 	case "max_tokens", "max_turn_requests", "refusal":
 		result.Status, result.FailureCode = execution.StatusFailed, "agent_turn_incomplete"
 	default:

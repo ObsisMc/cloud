@@ -33,7 +33,7 @@ func TestIncompleteOrForeignTerminalCannotConfirmStop(t *testing.T) {
 
 func TestOnlyNormalTurnEndCanComplete(t *testing.T) {
 	for _, reason := range []string{"cancelled", "max_tokens", "max_turn_requests", "refusal", "unknown private provider error"} {
-		result := turnResult(&nodehistory.Turn{Answer: "partial", StopReason: reason})
+		result := turnResult(&nodehistory.Turn{Answer: "partial", StopReason: reason}, "")
 		if result.Status == execution.StatusCompleted || result.AnswerComplete {
 			t.Fatalf("incomplete turn reported complete: %+v", result)
 		}
@@ -41,7 +41,7 @@ func TestOnlyNormalTurnEndCanComplete(t *testing.T) {
 			t.Fatal("unknown reason leaked")
 		}
 	}
-	result := turnResult(&nodehistory.Turn{Answer: "complete", StopReason: "end_turn"})
+	result := turnResult(&nodehistory.Turn{Answer: "complete", StopReason: "end_turn"}, "")
 	if result.Status != execution.StatusCompleted || !result.AnswerComplete || result.Usage != nil {
 		t.Fatalf("normal result: %+v", result)
 	}

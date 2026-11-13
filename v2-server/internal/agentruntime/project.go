@@ -235,26 +235,31 @@ func (p *projectRuntime) start() error {
 
 // providerFor binds each observed HTTP request to the current admitted turn, not a browser ID.
 // Returning nil denies a request when its execution or active turn is no longer present.
+// Every call of an active turn also passes the turn's retry guard.
 func (p *projectRuntime) providerFor(id string, binding nodeservices.Binding) nodeservices.Provider {
 	observe := p.driver.opts.ObserveProvider
-	if observe == nil {
-		return binding.Provider
-	}
 	p.mu.Lock()
 	a := p.agents[id]
 	p.mu.Unlock()
 	if a == nil {
+		if observe == nil {
+			return binding.Provider
+		}
 		return nil
-	}
-	if !a.observeRequests {
-		return binding.Provider
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.active == nil {
+		if observe == nil || !a.observeRequests {
+			return binding.Provider
+		}
 		return nil
 	}
-	return observe(execution.Ref{SessionID: a.frozen.ID, TurnID: a.active.id}, binding)
+	provider := binding.Provider
+	if observe != nil && a.observeRequests {
+		provider = observe(execution.Ref{SessionID: a.frozen.ID, TurnID: a.active.id}, binding)
+	}
+	return a.active.guard.provider(provider, binding.Protocol)
 }
 
 func (p *projectRuntime) ipc() nodeClient {
