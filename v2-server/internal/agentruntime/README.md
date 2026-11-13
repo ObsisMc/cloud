@@ -38,6 +38,10 @@ err = driver.Close(ctx)
 
 End 等待当前 Node incarnation 的有效 `agent_session_ended`；缺字段、未知原因、错 Node / incarnation 或传输断开不能当成停止确认。项目已 dead/fatal 时，End 使用调用方 context 走 supervisor 清理；确认旧进程树停止并完成关闭后移除原项目条目，不需要另一个 Run 触发回收。停止失败或超时返回 `ErrStopUnconfirmed`，保留原项目，供后续 End 重试；上层不能释放目录或派发后继。Close 最后通过已有 Node supervisor 确认所有自有进程退出；失败可重试。目录和工具写入在正常 End/Close 后保留。
 
+## 被切断后的重发
+
+Agent 把被切断的模型请求当成网络失败原样重发（OpenCode 0.6.11 最多 5 次，Claude Code 0.4.5 十次以上），每次都把半截回答再流一遍。每个模型请求都套上所在轮的守卫：总上限切断后，这一轮之后的请求都在响应头前用 `RefuseCall` 拒绝；空闲超时切断后放行 1 次重发，再被空闲超时切断就同样拒绝。同时在跑、一起被切断的请求（例如标题请求）只算一次；切断之后开始并正常结束的请求清零。Node 把失败的轮次记成 `cancelled`、不带错误文字，所以这一轮最后的请求是被限值切断的时候，结果改为失败，`FailureCode` 就是切断原因，供页面显示。
+
 ## 首次输出前的等待
 
 会话第一轮到首个可见输出之前的等待按五段计时：`runtime`（启动项目 Node）、`workspace`（准备工作目录和技能，用上预热副本时标 `reused`）、`plugin`（等插件安装剩余部分，安装与 clone 并行，这里只算 clone 之后还要等的时间）、`agent`（从发出 `start_agent_session` 到 Node 记录会话）、`response`（从会话记录到首个思考、回答或工具调用）。每段接着上一段开始，加起来就是这段等待。
