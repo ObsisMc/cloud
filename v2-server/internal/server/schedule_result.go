@@ -8,7 +8,6 @@ import (
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/scheduler"
-	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
 type scheduleResultResponse struct {
@@ -33,10 +32,10 @@ type scheduleResult struct {
 
 // Results are separate from occurrence pagination: an unavailable execution backend must
 // not hide the recorded trigger, and list requests never fan out into public history reads.
-func (h *handler) scheduleResult(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) scheduleResult(w http.ResponseWriter, r *http.Request, a access) {
 	w.Header().Set("Cache-Control", "no-store")
-	tenant, id, oid := r.PathValue("tid"), r.PathValue("id"), r.PathValue("oid")
-	if !scheduleUUID.MatchString(tenant) || !scheduleUUID.MatchString(id) || !scheduleUUID.MatchString(oid) {
+	tenant, id, oid := a.TenantID, r.PathValue("id"), r.PathValue("oid")
+	if !scheduleUUID.MatchString(id) || !scheduleUUID.MatchString(oid) {
 		fault(w, 404, "not_found")
 		return
 	}
@@ -49,7 +48,7 @@ func (h *handler) scheduleResult(w http.ResponseWriter, r *http.Request, u store
 		fault(w, 503, "schedule_history_unavailable")
 		return
 	}
-	o, err := s.ScheduleHistoryItem(r.Context(), tenant, u.ID, id, oid)
+	o, err := s.ScheduleHistoryItem(r.Context(), tenant, a.UserID, id, oid)
 	if historyError(w, err) {
 		return
 	}
@@ -69,7 +68,7 @@ func (h *handler) scheduleResult(w http.ResponseWriter, r *http.Request, u store
 		fault(w, 503, "execution_unavailable")
 		return
 	}
-	scope := execution.Scope{TenantID: tenant, UserID: u.ID}
+	scope := execution.Scope{TenantID: tenant, UserID: a.UserID}
 	caller := execution.Caller{Kind: execution.CallerSchedule, ID: o.ID, AttemptID: o.ID}
 	turn, err := h.opts.Execution.ReadAttempt(r.Context(), scope, caller)
 	if executionReadError(w, err) {

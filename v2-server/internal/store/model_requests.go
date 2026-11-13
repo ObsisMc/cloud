@@ -37,7 +37,7 @@ func (s *Store) FinishModelRequest(ctx context.Context, a requestmetrics.Attempt
 	return err
 }
 
-// DashboardRequests reads one bounded request page; membership and parent visibility are checked twice.
+// DashboardRequests reads one bounded request page after checking the parent session is visible.
 func (s *Store) DashboardRequests(ctx context.Context, scope execution.Scope, id, after string) ([]requestmetrics.Attempt, string, error) {
 	if _, err := s.dashboardSession(ctx, scope, id); err != nil {
 		return nil, "", err

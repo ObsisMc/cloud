@@ -14,8 +14,8 @@ import (
 
 // taskRunStore is the part of the database the task timeline and the collaboration targets need.
 type taskRunStore interface {
-	TaskTimeline(ctx context.Context, tenant, caller, taskID string) ([]store.TaskRun, []store.TaskComment, error)
-	CollaborationAgents(ctx context.Context, tenant, caller string) ([]store.TaskAssignee, error)
+	TaskTimeline(ctx context.Context, tenant, taskID string) ([]store.TaskRun, []store.TaskComment, error)
+	CollaborationAgents(ctx context.Context, tenant string) ([]store.TaskAssignee, error)
 	PendingMentions(ctx context.Context, tenant, caller string) ([]store.PendingMention, error)
 	MySquadTasks(ctx context.Context, tenant, caller string) ([]store.MySquadTask, error)
 }
@@ -23,36 +23,28 @@ type taskRunStore interface {
 // maxCommentBody bounds a comment like a task description: a prompt-sized brief, not a document.
 const maxCommentBody = 4000
 
-func (h *handler) taskRunRoutes(mux *http.ServeMux) {
+func (h *handler) taskRunRoutes(rt *router) {
 	base := "/api/v2/tenants/{tid}/tasks/{taskid}"
-	mux.HandleFunc("GET "+base+"/timeline", h.authed(h.taskTimeline))
-	mux.HandleFunc("GET "+base+"/executors", h.authed(h.taskExecutors))
-	mux.HandleFunc("POST "+base+"/runs", h.authed(h.startTaskRun))
-	mux.HandleFunc("POST "+base+"/runs/{rid}/stop", h.authed(h.stopTaskRun))
-	mux.HandleFunc("GET "+base+"/runs/{rid}/events", h.authed(h.taskRunEvents))
-	mux.HandleFunc("POST "+base+"/comments", h.authed(h.createTaskComment))
-	mux.HandleFunc("GET /api/v1/tenants/{tid}/collaboration/targets", h.authed(h.collaborationTargets))
-	mux.HandleFunc("GET /api/v2/tenants/{tid}/task-mentions", h.authed(h.pendingMentions))
-	mux.HandleFunc("GET /api/v2/tenants/{tid}/my-squad-tasks", h.authed(h.mySquadTasks))
+	rt.tenant("GET "+base+"/timeline", h.taskTimeline)
+	rt.tenant("GET "+base+"/executors", h.taskExecutors)
+	rt.tenant("POST "+base+"/runs", h.startTaskRun)
+	rt.tenant("POST "+base+"/runs/{rid}/stop", h.stopTaskRun)
+	rt.tenant("GET "+base+"/runs/{rid}/events", h.taskRunEvents)
+	rt.tenant("POST "+base+"/comments", h.createTaskComment)
+	rt.tenant("GET /api/v1/tenants/{tid}/collaboration/targets", h.collaborationTargets)
+	rt.tenant("GET /api/v2/tenants/{tid}/task-mentions", h.pendingMentions)
+	rt.tenant("GET /api/v2/tenants/{tid}/my-squad-tasks", h.mySquadTasks)
 }
 
 // pendingMentions lists the caller's mentions still waiting on their reply, one per open task.
-func (h *handler) pendingMentions(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) pendingMentions(w http.ResponseWriter, r *http.Request, a access) {
 	s, ok := h.store.(taskRunStore)
-	tenant := r.PathValue("tid")
+	tenant := a.TenantID
 	if !ok {
 		fault(w, http.StatusServiceUnavailable, "task_unavailable")
 		return
 	}
-	if !taskUUID.MatchString(tenant) {
-		fault(w, http.StatusNotFound, "not_found")
-		return
-	}
-	items, e := s.PendingMentions(r.Context(), tenant, u.ID)
-	if errors.Is(e, store.ErrNotFound) {
-		fault(w, http.StatusForbidden, "forbidden")
-		return
-	}
+	items, e := s.PendingMentions(r.Context(), tenant, a.UserID)
 	if e != nil {
 		internal(w, "pending mentions", e)
 		return
@@ -61,22 +53,14 @@ func (h *handler) pendingMentions(w http.ResponseWriter, r *http.Request, u stor
 }
 
 // mySquadTasks lists the tasks of the caller's squads and which of them still wait on the caller.
-func (h *handler) mySquadTasks(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) mySquadTasks(w http.ResponseWriter, r *http.Request, a access) {
 	s, ok := h.store.(taskRunStore)
-	tenant := r.PathValue("tid")
+	tenant := a.TenantID
 	if !ok {
 		fault(w, http.StatusServiceUnavailable, "task_unavailable")
 		return
 	}
-	if !taskUUID.MatchString(tenant) {
-		fault(w, http.StatusNotFound, "not_found")
-		return
-	}
-	items, e := s.MySquadTasks(r.Context(), tenant, u.ID)
-	if errors.Is(e, store.ErrNotFound) {
-		fault(w, http.StatusForbidden, "forbidden")
-		return
-	}
+	items, e := s.MySquadTasks(r.Context(), tenant, a.UserID)
 	if e != nil {
 		internal(w, "my squad tasks", e)
 		return
@@ -84,18 +68,18 @@ func (h *handler) mySquadTasks(w http.ResponseWriter, r *http.Request, u store.U
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-// taskRunScope checks the path ids and that task runs are wired; the host checks membership.
-func (h *handler) taskRunScope(w http.ResponseWriter, r *http.Request, u store.User) (*taskrun.Host, execution.Scope, string, bool) {
+// taskRunScope checks the path ids and that task runs are wired.
+func (h *handler) taskRunScope(w http.ResponseWriter, r *http.Request, a access) (*taskrun.Host, execution.Scope, string, bool) {
 	if h.opts.TaskRuns == nil {
 		fault(w, http.StatusServiceUnavailable, "execution_unavailable")
 		return nil, execution.Scope{}, "", false
 	}
-	tenant, id, run := r.PathValue("tid"), r.PathValue("taskid"), r.PathValue("rid")
-	if !taskUUID.MatchString(tenant) || !taskUUID.MatchString(id) || (run != "" && !taskUUID.MatchString(run)) {
+	id, run := r.PathValue("taskid"), r.PathValue("rid")
+	if !taskUUID.MatchString(id) || (run != "" && !taskUUID.MatchString(run)) {
 		fault(w, http.StatusNotFound, "not_found")
 		return nil, execution.Scope{}, "", false
 	}
-	return h.opts.TaskRuns, execution.Scope{TenantID: tenant, UserID: u.ID}, id, true
+	return h.opts.TaskRuns, a.scope(), id, true
 }
 
 // taskRunFault maps the run host's, the task store's and the execution port's errors.
@@ -124,18 +108,18 @@ func taskRunFault(w http.ResponseWriter, op string, e error) {
 	}
 }
 
-func (h *handler) taskTimeline(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) taskTimeline(w http.ResponseWriter, r *http.Request, a access) {
 	s, ok := h.store.(taskRunStore)
-	tenant, id := r.PathValue("tid"), r.PathValue("taskid")
+	tenant, id := a.TenantID, r.PathValue("taskid")
 	if !ok {
 		fault(w, http.StatusServiceUnavailable, "task_unavailable")
 		return
 	}
-	if !taskUUID.MatchString(tenant) || !taskUUID.MatchString(id) {
+	if !taskUUID.MatchString(id) {
 		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
-	runs, comments, e := s.TaskTimeline(r.Context(), tenant, u.ID, id)
+	runs, comments, e := s.TaskTimeline(r.Context(), tenant, id)
 	if e != nil {
 		taskRunFault(w, "task timeline", e)
 		return
@@ -143,8 +127,8 @@ func (h *handler) taskTimeline(w http.ResponseWriter, r *http.Request, u store.U
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs, "comments": comments})
 }
 
-func (h *handler) taskExecutors(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, id, ok := h.taskRunScope(w, r, u)
+func (h *handler) taskExecutors(w http.ResponseWriter, r *http.Request, a access) {
+	host, scope, id, ok := h.taskRunScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -160,8 +144,8 @@ func (h *handler) taskExecutors(w http.ResponseWriter, r *http.Request, u store.
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *handler) startTaskRun(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, id, ok := h.taskRunScope(w, r, u)
+func (h *handler) startTaskRun(w http.ResponseWriter, r *http.Request, a access) {
+	host, scope, id, ok := h.taskRunScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -188,8 +172,8 @@ func (h *handler) startTaskRun(w http.ResponseWriter, r *http.Request, u store.U
 	writeJSON(w, http.StatusCreated, run)
 }
 
-func (h *handler) stopTaskRun(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, id, ok := h.taskRunScope(w, r, u)
+func (h *handler) stopTaskRun(w http.ResponseWriter, r *http.Request, a access) {
+	host, scope, id, ok := h.taskRunScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -202,8 +186,8 @@ func (h *handler) stopTaskRun(w http.ResponseWriter, r *http.Request, u store.Us
 }
 
 // taskRunEvents relays a run's session to any member of the workspace, in the chat stream's shape.
-func (h *handler) taskRunEvents(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, id, ok := h.taskRunScope(w, r, u)
+func (h *handler) taskRunEvents(w http.ResponseWriter, r *http.Request, a access) {
+	host, scope, id, ok := h.taskRunScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -228,8 +212,8 @@ type taskMentionRequest struct {
 	ID   string `json:"id"`
 }
 
-func (h *handler) createTaskComment(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, scope, id, ok := h.taskRunScope(w, r, u)
+func (h *handler) createTaskComment(w http.ResponseWriter, r *http.Request, a access) {
+	host, scope, id, ok := h.taskRunScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -289,27 +273,19 @@ type interactionDescriptor struct {
 // collaborationTargets implements the contract's @ directory for the subset v2 routes: workspace
 // members are mentioned, installed Space Agents take the message as a task. Squads and workflows
 // are not offered: v2 does not dispatch to a squad, and workflows run from their own page.
-func (h *handler) collaborationTargets(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) collaborationTargets(w http.ResponseWriter, r *http.Request, a access) {
 	s, ok := h.store.(taskRunStore)
-	tenant := r.PathValue("tid")
+	tenant := a.TenantID
 	if !ok {
 		fault(w, http.StatusServiceUnavailable, "task_unavailable")
 		return
 	}
-	if !taskUUID.MatchString(tenant) {
-		fault(w, http.StatusNotFound, "not_found")
-		return
-	}
-	members, e := h.store.TenantMembers(r.Context(), tenant, u.ID)
-	if errors.Is(e, store.ErrNotFound) {
-		fault(w, http.StatusForbidden, "forbidden")
-		return
-	}
+	members, e := h.store.TenantMembers(r.Context(), tenant)
 	if e != nil {
 		internal(w, "collaboration members", e)
 		return
 	}
-	agents, e := s.CollaborationAgents(r.Context(), tenant, u.ID)
+	agents, e := s.CollaborationAgents(r.Context(), tenant)
 	if e != nil {
 		internal(w, "collaboration agents", e)
 		return
@@ -319,8 +295,8 @@ func (h *handler) collaborationTargets(w http.ResponseWriter, r *http.Request, u
 		items = append(items, collaborationTarget{Type: "user", ID: m.UserID, DisplayName: m.DisplayName, Description: "工作区成员",
 			InteractionDescriptor: interactionDescriptor{Mode: "mention"}})
 	}
-	for _, a := range agents {
-		items = append(items, collaborationTarget{Type: "agent", ID: a.ID, DisplayName: a.DisplayName, Description: a.Identifier,
+	for _, agent := range agents {
+		items = append(items, collaborationTarget{Type: "agent", ID: agent.ID, DisplayName: agent.DisplayName, Description: agent.Identifier,
 			InteractionDescriptor: interactionDescriptor{Mode: "task", RequiresTask: true}})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": ""})

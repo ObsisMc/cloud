@@ -93,25 +93,6 @@ func TestSkillsAreUserScopedAndImportOverwriteKeepsIdentity(t *testing.T) {
 	}
 }
 
-func TestSkillsRejectCallersOutsideTheWorkspace(t *testing.T) {
-	s := storetest.Open(t)
-	storetest.Login(t, s, "skills-scope-owner")
-	token := storetest.SignIn(t, s, "skills-outsider", "outsider", store.RoleMember)
-	outsider, err := s.SessionUser(t.Context(), token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tenant := "00000000-0000-0000-0000-000000000001"
-	if _, err := s.ListSkills(t.Context(), tenant, outsider.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("list error = %v", err)
-	}
-	if _, err := s.CreateSkill(t.Context(), tenant, outsider.ID, store.SkillInput{
-		Name: "review", Description: "检查", Content: "body",
-	}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("create error = %v", err)
-	}
-}
-
 func TestSkillUpdatesUseServerTimeAndNamesRemainCaseInsensitive(t *testing.T) {
 	s := storetest.Open(t)
 	owner, tenant := storetest.Login(t, s, "skills-time-owner")

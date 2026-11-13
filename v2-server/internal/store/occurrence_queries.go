@@ -2,27 +2,13 @@ package store
 
 import "context"
 
-// GetOccurrence reloads a single record through current membership and creator ownership.
+// GetOccurrence reloads a single record through creator ownership.
 func (s *Store) GetOccurrence(ctx context.Context, tenant, user, id string) (Occurrence, error) {
-	ok, e := s.ScheduleMember(ctx, tenant, user)
-	if e != nil {
-		return Occurrence{}, e
-	}
-	if !ok {
-		return Occurrence{}, ErrNotFound
-	}
 	return scanOccurrence(s.pool.QueryRow(ctx, `SELECT `+occurrenceColumns+` FROM v2_schedule_occurrences WHERE id=$1 AND schedule_id IN (SELECT id FROM v2_schedule_configs WHERE tenant_id=$2 AND user_id=$3)`, id, tenant, user))
 }
 
 // FindManualOccurrence retrieves the immutable request timestamp before a retry creates one.
 func (s *Store) FindManualOccurrence(ctx context.Context, tenant, user, scheduleID, key string) (Occurrence, error) {
-	ok, e := s.ScheduleMember(ctx, tenant, user)
-	if e != nil {
-		return Occurrence{}, e
-	}
-	if !ok {
-		return Occurrence{}, ErrNotFound
-	}
 	return scanOccurrence(s.pool.QueryRow(ctx, `SELECT `+occurrenceColumns+` FROM v2_schedule_occurrences WHERE schedule_id=$1 AND kind='manual' AND trigger_key=$2 AND schedule_id IN (SELECT id FROM v2_schedule_configs WHERE tenant_id=$3 AND user_id=$4)`, scheduleID, key, tenant, user))
 }
 
@@ -38,13 +24,6 @@ func (s *Store) ActiveOccurrences(ctx context.Context, tenant, user string) ([]O
 }
 
 func (s *Store) pendingOccurrences(ctx context.Context, tenant, user string, includeUnsent bool) ([]Occurrence, error) {
-	ok, e := s.ScheduleMember(ctx, tenant, user)
-	if e != nil {
-		return nil, e
-	}
-	if !ok {
-		return nil, ErrNotFound
-	}
 	rows, e := s.pool.Query(ctx, `SELECT `+occurrenceColumns+` FROM v2_schedule_occurrences WHERE (NOT released OR ($3 AND status='recorded')) AND schedule_id IN (SELECT id FROM v2_schedule_configs WHERE tenant_id=$1 AND user_id=$2) ORDER BY recorded_at,id`, tenant, user, includeUnsent)
 	if e != nil {
 		return nil, e

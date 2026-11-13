@@ -23,8 +23,8 @@ type MarketSource struct {
 	Failure   string     `json:"failure"`
 }
 
-func (s *Store) MarketSources(ctx context.Context, tenant, space, user string) ([]MarketSource, error) {
-	if _, e := requireSpaceAccess(ctx, s.pool, tenant, space, user); e != nil {
+func (s *Store) MarketSources(ctx context.Context, tenant, space string) ([]MarketSource, error) {
+	if e := requireSpace(ctx, s.pool, tenant, space); e != nil {
 		return nil, e
 	}
 	rows, e := s.pool.Query(ctx, `select namespace,url,branch,enabled,synced_at,failure,retrieval from v2_market_sources where space_id=$1 order by namespace`, space)
@@ -42,13 +42,9 @@ func (s *Store) MarketSources(ctx context.Context, tenant, space, user string) (
 	}
 	return out, rows.Err()
 }
-func (s *Store) ChangeMarket(ctx context.Context, tenant, space, user, id, action string, in MarketSource) error {
-	role, e := requireSpaceAccess(ctx, s.pool, tenant, space, user)
-	if e != nil {
+func (s *Store) ChangeMarket(ctx context.Context, tenant, space, id, action string, in MarketSource) error {
+	if e := requireSpace(ctx, s.pool, tenant, space); e != nil {
 		return e
-	}
-	if !isAdministrator(role) {
-		return ErrForbidden
 	}
 	if id == "official" {
 		if action == "sync" {
@@ -139,7 +135,7 @@ func (s *Store) ChangeMarket(ctx context.Context, tenant, space, user, id, actio
 	case "sync":
 		var m MarketSource
 		var revision int64
-		e = s.pool.QueryRow(ctx, `update v2_market_sources set revision=revision+1 where space_id=$1 and namespace=$2 and enabled returning url,branch,revision,retrieval`, space, id).Scan(&m.URL, &m.Branch, &revision, &m.Retrieval)
+		e := s.pool.QueryRow(ctx, `update v2_market_sources set revision=revision+1 where space_id=$1 and namespace=$2 and enabled returning url,branch,revision,retrieval`, space, id).Scan(&m.URL, &m.Branch, &revision, &m.Retrieval)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrNotFound
 		}

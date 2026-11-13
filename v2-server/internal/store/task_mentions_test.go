@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestPendingMentions(t *testing.T) {
@@ -62,14 +63,14 @@ func TestPendingMentions(t *testing.T) {
 	}
 
 	// A finished task waits on nobody.
-	if _, e := f.store.SetTaskStatus(ctx, f.tenant, owner, other.ID, store.TaskCancelled, other.Version); e != nil {
+	if _, e := f.store.SetTaskStatus(ctx, storetest.Access(t, f.store, f.tenant, owner), other.ID, store.TaskCancelled, other.Version); e != nil {
 		t.Fatal(e)
 	}
 	if got := pending(alice); len(got) != 1 || got[0].TaskID != task.ID {
 		t.Fatalf("after cancel = %+v", got)
 	}
-	if _, e := f.store.PendingMentions(ctx, f.tenant, "00000000-0000-4000-8000-0000000000ff"); e == nil {
-		t.Fatal("a stranger read mentions")
+	if got, e := f.store.PendingMentions(ctx, f.tenant, "00000000-0000-4000-8000-0000000000ff"); e != nil || len(got) != 0 {
+		t.Fatalf("a stranger's mentions = %+v %v", got, e)
 	}
 }
 
@@ -84,7 +85,7 @@ func TestMySquadTasks(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	squad, e = f.store.AddSquadMember(ctx, f.tenant, owner, squad.ID, store.SquadMemberInput{Type: "human", UserID: alice, Version: squad.Version})
+	squad, e = f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), squad.ID, store.SquadMemberInput{Type: "human", UserID: alice, Version: squad.Version})
 	if e != nil {
 		t.Fatal(e)
 	}

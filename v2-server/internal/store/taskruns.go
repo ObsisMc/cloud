@@ -143,8 +143,8 @@ func taskRuns(ctx context.Context, q dbTX, where string, args ...any) ([]TaskRun
 }
 
 // TaskTimeline returns a task's runs and comments, oldest first, to a current workspace member.
-func (s *Store) TaskTimeline(ctx context.Context, tenant, caller, taskID string) ([]TaskRun, []TaskComment, error) {
-	if _, e := s.Task(ctx, tenant, caller, taskID); e != nil {
+func (s *Store) TaskTimeline(ctx context.Context, tenant, taskID string) ([]TaskRun, []TaskComment, error) {
+	if _, e := s.Task(ctx, tenant, taskID); e != nil {
 		return nil, nil, e
 	}
 	runs, e := taskRuns(ctx, s.pool, `r.tenant_id = $1 AND r.task_id = $2`, tenant, taskID)
@@ -410,10 +410,7 @@ func (s *Store) TaskAgentIdentifier(ctx context.Context, tenant, agentID string)
 }
 
 // CollaborationAgents lists the workspace's installed, system-provided Space Agents.
-func (s *Store) CollaborationAgents(ctx context.Context, tenant, caller string) ([]TaskAssignee, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return nil, e
-	}
+func (s *Store) CollaborationAgents(ctx context.Context, tenant string) ([]TaskAssignee, error) {
 	rows, e := s.pool.Query(ctx, `
 		SELECT id::text, name, source_namespace || '/' || identifier FROM v2_space_agents
 		WHERE tenant_id = $1 AND kind = 'agent' AND status = 'active' AND observed_state = 'installed'
@@ -447,9 +444,6 @@ type PendingMention struct {
 // PendingMentions lists, one per task, the mentions of the caller still waiting on their reply.
 // A mention of oneself, and mentions on done or cancelled tasks, wait on nobody.
 func (s *Store) PendingMentions(ctx context.Context, tenant, caller string) ([]PendingMention, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return nil, e
-	}
 	rows, e := s.pool.Query(ctx, `
 		SELECT DISTINCT ON (c.task_id) c.task_id, c.id, c.author_id::text, u.display_name, c.created_at
 		FROM v2_task_comments c
@@ -500,9 +494,6 @@ type MySquadTask struct {
 
 // MySquadTasks lists the tasks of the caller's squads, each with whether it still waits on them.
 func (s *Store) MySquadTasks(ctx context.Context, tenant, caller string) ([]MySquadTask, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return nil, e
-	}
 	rows, e := s.pool.Query(ctx, `
 		SELECT t.id, q.id, q.name,
 			t.status NOT IN ('done', 'cancelled') AND t.created_by <> $2::uuid

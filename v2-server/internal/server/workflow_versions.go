@@ -44,8 +44,8 @@ const maxWorkflowVersionBytes = 128
 // maxAutomaticVersionRetries bounds how often an automatic publish retries a colliding version.
 const maxAutomaticVersionRetries = 100
 
-func (h *handler) publishWorkflow(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) publishWorkflow(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -96,8 +96,8 @@ func (h *handler) publishWorkflow(w http.ResponseWriter, r *http.Request, u stor
 	}
 }
 
-func (h *handler) listWorkflowVersions(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) listWorkflowVersions(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -117,8 +117,8 @@ func (h *handler) listWorkflowVersions(w http.ResponseWriter, r *http.Request, u
 	writeJSON(w, http.StatusOK, map[string]any{"versions": views})
 }
 
-func (h *handler) getWorkflowVersion(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) getWorkflowVersion(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -134,8 +134,8 @@ func (h *handler) getWorkflowVersion(w http.ResponseWriter, r *http.Request, u s
 	writeJSON(w, http.StatusOK, map[string]any{"snapshot": toWorkflowSnapshotView(snapshot)})
 }
 
-func (h *handler) getWorkflowSnapshot(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) getWorkflowSnapshot(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -156,8 +156,8 @@ func (h *handler) getWorkflowSnapshot(w http.ResponseWriter, r *http.Request, u 
 	writeJSON(w, http.StatusOK, map[string]any{"snapshot": toWorkflowSnapshotView(snapshot)})
 }
 
-func (h *handler) deleteWorkflowVersion(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) deleteWorkflowVersion(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -173,8 +173,8 @@ func (h *handler) deleteWorkflowVersion(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusOK, map[string]any{"snapshotId": deleted.ID, "version": deleted.Version})
 }
 
-func (h *handler) rollbackWorkflow(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) rollbackWorkflow(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -200,8 +200,8 @@ func (h *handler) rollbackWorkflow(w http.ResponseWriter, r *http.Request, u sto
 	writeJSON(w, http.StatusOK, map[string]any{"snapshot": toWorkflowSnapshotView(draft)})
 }
 
-func (h *handler) activateWorkflow(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) activateWorkflow(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -227,8 +227,8 @@ func (h *handler) activateWorkflow(w http.ResponseWriter, r *http.Request, u sto
 	writeJSON(w, http.StatusOK, map[string]any{"snapshot": toWorkflowSnapshotView(draft)})
 }
 
-func (h *handler) analyzeWorkflowGraph(w http.ResponseWriter, r *http.Request, u store.User) {
-	if _, _, ok := h.workflowScope(w, r, u); !ok {
+func (h *handler) analyzeWorkflowGraph(w http.ResponseWriter, r *http.Request, a access) {
+	if _, _, ok := h.workflowScope(w, a); !ok {
 		return
 	}
 	var in struct {

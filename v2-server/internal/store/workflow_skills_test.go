@@ -7,6 +7,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/pluginmarket"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestWorkflowSkillRequiresMatchingProjectReceiptAndUser(t *testing.T) {
@@ -14,7 +15,7 @@ func TestWorkflowSkillRequiresMatchingProjectReceiptAndUser(t *testing.T) {
 	owner := f.login(t, "owner", "owner")
 	member := f.login(t, "member", "member")
 	scope := execution.Scope{TenantID: f.tenant, UserID: owner}
-	spaces, err := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, err := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if err != nil {
 		t.Fatal(err)
 	}

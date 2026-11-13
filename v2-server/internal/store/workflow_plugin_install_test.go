@@ -8,13 +8,13 @@ import (
 
 	"github.com/wanglongan587/cloud/v2-server/internal/pluginmarket"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestWorkflowPluginImportsAndKeepsWorkflowsOnRemoval(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	member := f.login(t, "member", "member")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
@@ -30,12 +30,9 @@ func TestWorkflowPluginImportsAndKeepsWorkflowsOnRemoval(t *testing.T) {
 	if e := f.store.ReplacePluginCatalog(f.ctx, []pluginmarket.Entry{entry}, time.Now()); e != nil {
 		t.Fatal(e)
 	}
-	source, e := f.store.PluginPackageSource(f.ctx, f.tenant, space, owner, "official/ora-space.requirement-development")
+	source, e := f.store.PluginPackageSource(f.ctx, f.tenant, space, "official/ora-space.requirement-development")
 	if e != nil || source.Entry.Kind != "workflow" || source.Locator != entry.URL || source.Digest != entry.SHA256 {
 		t.Fatalf("package source = %+v %v", source, e)
-	}
-	if _, e := f.store.PluginPackageSource(f.ctx, f.tenant, space, member, "official/ora-space.requirement-development"); !errors.Is(e, store.ErrForbidden) {
-		t.Fatalf("member package source = %v", e)
 	}
 
 	documents := []pluginmarket.WorkflowDocument{{
@@ -113,7 +110,7 @@ func TestWorkflowPluginImportsAndKeepsWorkflowsOnRemoval(t *testing.T) {
 func TestWorkflowPluginRejectsInvalidDocument(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
@@ -139,7 +136,7 @@ func TestWorkflowPluginRejectsInvalidDocument(t *testing.T) {
 func TestWorkflowPluginUpgradeRefreshesUntouchedImport(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
@@ -227,7 +224,7 @@ func TestWorkflowPluginUpgradeRefreshesUntouchedImport(t *testing.T) {
 func TestWorkflowPluginUpgradeKeepsEditedImport(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
@@ -298,7 +295,7 @@ func TestWorkflowPluginUpgradeKeepsEditedImport(t *testing.T) {
 func TestWorkflowPluginAutoNamesConflictsAndKeepsSpacesIndependent(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}

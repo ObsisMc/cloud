@@ -74,6 +74,17 @@ key 放在仓库外的 `~/ora-demo/.env`，一台机器配一次，主目录和�
 
 seed 在 [`demo/`](demo/README.md)：`env.go` 是上表和重置、准备本地 Git 项目、合并用户文件的公共部分，`scenes.go` 接上三段，`lead.go` 是 B 段，`users/<段>.json` 是各段的账号（合成时合并）。同一项目第一次执行 Agent 要多等约一分钟在 Node 上安装 Agent，录屏前先在本段的项目里跑一次热身。
 
+## 租户授权
+
+所有 `/tenants/{tid}` 路由经同一个入口判定成员身份（`internal/server/routes.go`）：
+
+- **一个判定函数**：`store.TenantAccess(tenant, user)` 返回调用者在该租户的角色（`owner` / `member`）。条件只写在这一处：有成员关系、用户 active 且未删除、租户 active。
+- **一个路由中间件**：路由只能经路由表的 `public` / `session` / `tenant` / `owner` 四种方式注册。`tenant` 级先判会话（`401 unauthenticated`），再判 `TenantAccess`：非成员、被移出的成员、停用的用户或租户、格式不对的租户 id，一律 `404 not_found`，看不出租户是否存在。通过后把 `{tenant, user, role}` 交给 handler，handler 不再读 `tid`、不再判成员。
+- **owner 操作在路由表上声明**：用 `owner` 注册的路由，成员访问得到 `403 forbidden`。现在是邀请成员、插件来源的增改删与同步、空间插件的安装与移除。「owner 或任务创建人 / 表单审核人 / 小队维护者」这类业务规则仍在 store 里判断，角色由路由传入。
+- **业务 SQL 只按 `tenant_id` 过滤**，不再各自核对成员关系；读写成员关系本身的查询（成员名单、我所在的团队、登录、邀请）除外。
+- **后台工作开始执行时用同一个判定**：执行会话创建与追加一轮、定时任务每次触发、扫描定时任务所属的人、工作流表单提交后续跑。被移出租户的人，已排好的定时任务不再以他的身份执行；已经开始的工作照常收尾。
+- **路由表测试**（`routes_test.go`）遍历全部路由，断言非成员一律 404、未登录 401、owner 路由对成员 403，并禁止绕过路由表直接注册路由。
+
 ## 已实现
 
 | 路由 | 来源 | 说明 |
@@ -84,10 +95,10 @@ seed 在 [`demo/`](demo/README.md)：`env.go` 是上表和重置、准备本地 
 | `POST /auth/logout` | Gateway | 吊销会话，`204` |
 | `GET /api/v1/me` | 契约 | 当前用户；无会话 `401 unauthenticated`。契约禁止额外字段，当前用户的角色从 `GET /api/v1/me/tenants` 的 `role` 读取 |
 | `GET /api/v1/me/tenants` | 契约 | 当前用户所在租户，一页返回全部，`nextCursor` 为空 |
-| `GET /api/v1/tenants/{tid}/members` | 契约 | 当前用户所在工作区成员，一页返回全部，按显示名排序；非成员 `403 forbidden`，非法租户 id `404 not_found` |
-| `GET /api/v1/tenants/{tid}/spaces` | 契约 | 当前用户所在工作区的空间，一页返回全部；v2 每个租户一个「演示空间」，`role` 取调用者的工作区角色；非成员 `403 forbidden` |
+| `GET /api/v1/tenants/{tid}/members` | 契约 | 当前用户所在工作区成员，一页返回全部，按显示名排序；非成员与非法租户 id 都是 `404 not_found` |
+| `GET /api/v1/tenants/{tid}/spaces` | 契约 | 当前用户所在工作区的空间，一页返回全部；v2 每个租户一个「演示空间」，`role` 取调用者的工作区角色；非成员 `404 not_found` |
 | `GET /api/v1/tenants/{tid}/spaces/{sid}/plugins/catalog` | 契约 | 从 `ora-space/marketplace` 的 `registry/**/orax.toml` 同步的真实市场快照，包含 Agent；启动时先同步，之后每 5 分钟刷新并原子替换 PostgreSQL 目录。成员可读 |
-| `GET /api/v1/tenants/{tid}/spaces/{sid}/plugins` | 契约 | 当前空间的全部活动插件选择，包括显式移除的行；空间不属于调用者的工作区时 `403 forbidden` |
+| `GET /api/v1/tenants/{tid}/spaces/{sid}/plugins` | 契约 | 当前空间的全部活动插件选择，包括显式移除的行；空间不属于该工作区时 `403 forbidden` |
 | `POST /api/v1/tenants/{tid}/spaces/{sid}/plugins` | 契约 | owner 安装目录中的 Skill、市场 Agent 或工作流插件。工作流包由服务端下载并校验 `.orax`，导入其中的工作流并发布 `v1`；已有同名工作流时自动改名为「名称（插件）」并递增序号，不改动已有定义。重复安装幂等，卸载不删除已导入工作流。升级工作流包时，仍保持导入原样（草稿和生效版本都未改动）的工作流会更新草稿并发布新的顺序版本；用户已保存或发布过编辑的定义保持原样。Skill 与 Agent 立即记录为空间选择，不等项目 Node 确认；预装 Agent 返回 `409 plugin_runtime_managed`。支持版本保护与 `Idempotency-Key` 重放 |
 | `DELETE /api/v1/tenants/{tid}/spaces/{sid}/plugins` | 契约 | owner 移除 Skill、市场 Agent 或工作流选择。Skill 删除整条选择行，立即不再出现在设置页和工作流节点的技能候选里；市场 Agent 和工作流选择保留 `desiredState=removed` 行；工作流及其历史保留为用户数据。预装 Agent 返回 `409 plugin_runtime_managed`；要求版本与幂等键 |
 

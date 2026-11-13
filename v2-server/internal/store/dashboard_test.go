@@ -187,10 +187,4 @@ func TestDashboardPaginationHistoryStatisticsAndPrivacy(t *testing.T) {
 	if got.Counts.Total != 27 || got.Counts.Started != 1 || got.Usage.Input.Value == nil || *got.Usage.Input.Value != 0 || got.Usage.Input.KnownCount != 26 || got.Usage.Input.Availability != "partial" {
 		t.Fatalf("statistics=%s", raw)
 	}
-	if _, err := f.admin.Exec(ctx, `DELETE FROM memberships WHERE user_id=$1`, f.scope.UserID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.s.DashboardStatistics(ctx, f.scope, ref.SessionID); !errors.Is(err, execution.ErrNotFound) {
-		t.Fatalf("revoked read: %v", err)
-	}
 }

@@ -46,13 +46,6 @@ func readSchedule(row pgx.Row) (ScheduleConfig, error) {
 	return v, e
 }
 
-// ScheduleMember checks current active membership, including disabled users and tenants.
-func (s *Store) ScheduleMember(ctx context.Context, tenant, user string) (bool, error) {
-	var ok bool
-	e := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id JOIN tenants t ON t.id=m.tenant_id WHERE m.tenant_id=$1 AND m.user_id=$2 AND u.status='active' AND u.deleted_at IS NULL AND t.status='active')`, tenant, user).Scan(&ok)
-	return ok, e
-}
-
 // ScheduleConfigs returns only the caller's saved configurations in the tenant.
 func (s *Store) ScheduleConfigs(ctx context.Context, tenant, user string) ([]ScheduleConfig, error) {
 	rows, e := s.pool.Query(ctx, `SELECT `+scheduleColumns+` FROM v2_schedule_configs WHERE tenant_id=$1 AND user_id=$2 ORDER BY created_at DESC,id DESC`, tenant, user)

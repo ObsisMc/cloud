@@ -15,30 +15,15 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 )
 
-type executionQuerier interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}
-
-// CheckExecutionScope requires a current membership and active tenant and user.
-// Missing and inaccessible identities deliberately share ErrNotFound.
-func (s *Store) CheckExecutionScope(ctx context.Context, scope execution.Scope) error {
-	return checkExecutionScope(ctx, s.pool, scope)
-}
-
-func checkExecutionScope(ctx context.Context, q executionQuerier, scope execution.Scope) error {
-	if err := validateExecutionScope(scope); err != nil {
+// requireExecutionAccess is tenant authorization at the moment execution starts: a session or a
+// new turn is admitted only while its user still has access to its tenant. It runs inside the
+// admitting transaction so a revoked membership cannot race the insert.
+func requireExecutionAccess(ctx context.Context, q dbTX, scope execution.Scope) error {
+	if _, err := tenantAccess(ctx, q, scope.TenantID, scope.UserID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return execution.ErrNotFound
+		}
 		return err
-	}
-	var allowed bool
-	err := q.QueryRow(ctx, `SELECT EXISTS (
-	 SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id JOIN tenants t ON t.id=m.tenant_id
-	 WHERE m.tenant_id=$1::uuid AND m.user_id=$2::uuid
-	 AND u.status='active' AND u.deleted_at IS NULL AND t.status='active')`, scope.TenantID, scope.UserID).Scan(&allowed)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return execution.ErrNotFound
 	}
 	return nil
 }
@@ -95,7 +80,7 @@ func (s *Store) CreateExecutionSession(ctx context.Context, scope execution.Scop
 		return execution.ErrInvalidRequest
 	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := checkExecutionScope(ctx, tx, scope); err != nil {
+		if err := requireExecutionAccess(ctx, tx, scope); err != nil {
 			return err
 		}
 		if session.Target != nil {
@@ -155,7 +140,7 @@ func insertExecutionTurn(ctx context.Context, tx pgx.Tx, scope execution.Scope, 
 // TurnID must be a fresh server-generated random identity.
 func (s *Store) AppendExecutionTurn(ctx context.Context, scope execution.Scope, sid string, turn execution.Turn) error {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := checkExecutionScope(ctx, tx, scope); err != nil {
+		if err := requireExecutionAccess(ctx, tx, scope); err != nil {
 			return err
 		}
 		session, err := lockExecutionSession(ctx, tx, scope, sid)
@@ -172,7 +157,7 @@ func (s *Store) AppendExecutionTurn(ctx context.Context, scope execution.Scope, 
 
 // Only runtime updates to admitted work use this boundary. Revoking access must not
 // prevent persisting its final events or confirming shutdown; stored ownership still binds it.
-// Admission and public reads separately require current membership.
+// Admission separately requires current tenant access (requireExecutionAccess).
 func (s *Store) executionRuntimeTransaction(ctx context.Context, scope execution.Scope, sid string, fn func(pgx.Tx, execution.Session) error) error {
 	if err := validateExecutionScope(scope); err != nil {
 		return err
@@ -199,9 +184,6 @@ func lockExecutionSession(ctx context.Context, tx pgx.Tx, scope execution.Scope,
 
 // ReadExecutionSession returns only the authenticated owner's retained metadata.
 func (s *Store) ReadExecutionSession(ctx context.Context, scope execution.Scope, sid string) (execution.Session, error) {
-	if err := s.CheckExecutionScope(ctx, scope); err != nil {
-		return execution.Session{}, err
-	}
 	var raw []byte
 	err := s.pool.QueryRow(ctx, `SELECT data FROM v2_execution_sessions WHERE id=$1 AND tenant_id=$2::uuid AND user_id=$3::uuid`, sid, scope.TenantID, scope.UserID).Scan(&raw)
 	if err != nil {
@@ -263,9 +245,6 @@ func (s *Store) ReadExecutionTurns(ctx context.Context, scope execution.Scope, s
 
 // ReadExecutionAttempt resolves the complete Caller identity within the authenticated scope.
 func (s *Store) ReadExecutionAttempt(ctx context.Context, scope execution.Scope, caller execution.Caller) (execution.Turn, error) {
-	if err := s.CheckExecutionScope(ctx, scope); err != nil {
-		return execution.Turn{}, err
-	}
 	key, err := executionCaller(caller)
 	if err != nil {
 		return execution.Turn{}, err

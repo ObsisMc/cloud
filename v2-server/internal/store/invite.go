@@ -23,9 +23,10 @@ type Invite struct {
 }
 
 // InviteMember creates the account when the address is new, joins it to the workspace as a
-// member, and optionally to one live squad. Only an owner may invite; anyone else is ErrForbidden.
-// The account is created in the same transaction as the membership so a failure leaves neither.
-func (s *Store) InviteMember(ctx context.Context, tenant, caller string, in Invite) (Member, error) {
+// member, and optionally to one live squad. Only an owner may invite; the route declares that, so
+// the store does not check it again. The account is created in the same transaction as the
+// membership so a failure leaves neither.
+func (s *Store) InviteMember(ctx context.Context, tenant string, in Invite) (Member, error) {
 	email, e := NormalizeEmail(in.Email)
 	if e != nil {
 		return Member{}, e
@@ -36,13 +37,6 @@ func (s *Store) InviteMember(ctx context.Context, tenant, caller string, in Invi
 	}
 	var m Member
 	e = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		role, e := tenantRole(ctx, tx, tenant, caller)
-		if e != nil {
-			return e
-		}
-		if role != RoleOwner {
-			return ErrForbidden
-		}
 		userID, e := invitee(ctx, tx, email, display)
 		if e != nil {
 			return e

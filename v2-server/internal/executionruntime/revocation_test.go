@@ -26,6 +26,8 @@ func (p *revocationProvider) Complete(w http.ResponseWriter, r *http.Request, mo
 	}
 }
 
+// Revoking tenant access refuses new execution (StartModel, Append) but lets the accepted turn
+// publish its result. Reads, cancel and end are authorized by the HTTP tenant route, not here.
 func TestAcceptedModelTurnFinishesAfterPermissionRevocation(t *testing.T) {
 	for _, tc := range []struct{ name, revoke, restore string }{
 		{"membership_removed", "DELETE FROM memberships WHERE tenant_id=$1 AND user_id=$2", "INSERT INTO memberships(tenant_id,user_id,role) VALUES ($1,$2,'owner')"},
@@ -57,20 +59,11 @@ func TestAcceptedModelTurnFinishesAfterPermissionRevocation(t *testing.T) {
 			if _, err := inspect.Exec(f.ctx, tc.revoke, f.scope.TenantID, f.scope.UserID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.service.ReadSession(f.ctx, f.scope, ref.SessionID); !errors.Is(err, execution.ErrNotFound) {
-				t.Fatalf("revoked read: %v", err)
-			}
 			if _, err := f.service.StartModel(f.ctx, f.scope, modelRequest("new-chat", "new", "rejected")); !errors.Is(err, execution.ErrNotFound) {
 				t.Fatalf("revoked admission: %v", err)
 			}
 			if _, err := f.service.Append(f.ctx, f.scope, execution.AppendRequest{SessionID: ref.SessionID, Caller: execution.Caller{Kind: execution.CallerChat, ID: "chat", AttemptID: "next"}, Prompt: execution.TextPrompt("rejected")}); !errors.Is(err, execution.ErrNotFound) {
 				t.Fatalf("revoked Append: %v", err)
-			}
-			if _, err := f.service.Cancel(f.ctx, f.scope, ref); !errors.Is(err, execution.ErrNotFound) {
-				t.Fatalf("revoked public Cancel: %v", err)
-			}
-			if err := f.service.End(f.ctx, f.scope, ref.SessionID); !errors.Is(err, execution.ErrNotFound) {
-				t.Fatalf("revoked public End: %v", err)
 			}
 			provider.resume()
 			select {
@@ -80,9 +73,6 @@ func TestAcceptedModelTurnFinishesAfterPermissionRevocation(t *testing.T) {
 			}
 			if worker.err != nil {
 				t.Fatalf("revocation prevented durable terminal publication: %v", worker.err)
-			}
-			if _, err := f.service.ReadAttempt(f.ctx, f.scope, request.Caller); !errors.Is(err, execution.ErrNotFound) {
-				t.Fatalf("revoked history: %v", err)
 			}
 			if _, err := inspect.Exec(f.ctx, tc.restore, f.scope.TenantID, f.scope.UserID); err != nil {
 				t.Fatal(err)

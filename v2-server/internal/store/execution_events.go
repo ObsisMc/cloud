@@ -13,9 +13,6 @@ import (
 // ReadExecutionCursor returns the latest committed event position after scope/owner checks.
 // A concurrent event may advance it immediately; callers reject only cursors ahead of this value.
 func (s *Store) ReadExecutionCursor(ctx context.Context, scope execution.Scope, sid string) (uint64, error) {
-	if err := s.CheckExecutionScope(ctx, scope); err != nil {
-		return 0, err
-	}
 	var sequence uint64
 	err := s.pool.QueryRow(ctx, `SELECT event_sequence FROM v2_execution_sessions WHERE id=$1 AND tenant_id=$2::uuid AND user_id=$3::uuid`, sid, scope.TenantID, scope.UserID).Scan(&sequence)
 	return sequence, executionError(err)
@@ -31,9 +28,6 @@ func (s *Store) ReadExecutionEvents(ctx context.Context, scope execution.Scope, 
 	// A read-only snapshot keeps cursor validation and event rows consistent without
 	// taking the session lock needed by writers and terminal result commits.
 	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
-		if err := checkExecutionScope(ctx, tx, scope); err != nil {
-			return err
-		}
 		var current uint64
 		if err := tx.QueryRow(ctx, `SELECT event_sequence FROM v2_execution_sessions WHERE id=$1 AND tenant_id=$2::uuid AND user_id=$3::uuid`, sid, scope.TenantID, scope.UserID).Scan(&current); err != nil {
 			return err

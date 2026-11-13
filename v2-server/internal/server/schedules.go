@@ -18,7 +18,6 @@ import (
 )
 
 type scheduleStore interface {
-	ScheduleMember(context.Context, string, string) (bool, error)
 	ScheduleConfigs(context.Context, string, string) ([]store.ScheduleConfig, error)
 	CreateScheduleConfig(context.Context, string, string, store.ScheduleInput) (store.ScheduleConfig, error)
 	UpdateScheduleConfig(context.Context, string, string, string, store.ScheduleInput, *bool) (store.ScheduleConfig, error)
@@ -132,29 +131,20 @@ func validateSchedule(in *store.ScheduleInput) string {
 	return ""
 }
 
-func (h *handler) scheduleConfigs(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) scheduleConfigs(w http.ResponseWriter, r *http.Request, a access) {
 	s, ok := h.store.(scheduleStore)
 	if !ok {
 		fault(w, 503, "schedule_config_unavailable")
 		return
 	}
-	tenant := r.PathValue("tid")
+	tenant := a.TenantID
 	id := r.PathValue("id")
-	if !scheduleUUID.MatchString(tenant) || (id != "" && !scheduleUUID.MatchString(id)) {
-		fault(w, 404, "not_found")
-		return
-	}
-	member, e := s.ScheduleMember(r.Context(), tenant, u.ID)
-	if e != nil {
-		internal(w, "schedule membership", e)
-		return
-	}
-	if !member {
+	if id != "" && !scheduleUUID.MatchString(id) {
 		fault(w, 404, "not_found")
 		return
 	}
 	if r.Method == "GET" {
-		items, e := s.ScheduleConfigs(r.Context(), tenant, u.ID)
+		items, e := s.ScheduleConfigs(r.Context(), tenant, a.UserID)
 		if e != nil {
 			internal(w, "schedule list", e)
 			return
@@ -202,7 +192,7 @@ func (h *handler) scheduleConfigs(w http.ResponseWriter, r *http.Request, u stor
 				fault(w, 400, "invalid_target")
 				return
 			}
-			t, err = h.opts.TaskRuns.ResolveScheduled(r.Context(), execution.Scope{TenantID: tenant, UserID: u.ID}, t, in.ProjectID)
+			t, err = h.opts.TaskRuns.ResolveScheduled(r.Context(), execution.Scope{TenantID: tenant, UserID: a.UserID}, t, in.ProjectID)
 			if err == nil {
 				in.Target, err = json.Marshal(t)
 			}
@@ -212,9 +202,9 @@ func (h *handler) scheduleConfigs(w http.ResponseWriter, r *http.Request, u stor
 			}
 		} else if target.Kind == "workflow" {
 			workflow, _ := decodeScheduleWorkflow(in.Target)
-			err = h.resolveScheduleWorkflow(r.Context(), tenant, u.ID, &in, workflow)
+			err = h.resolveScheduleWorkflow(r.Context(), tenant, a.UserID, &in, workflow)
 		} else {
-			err = h.resolveScheduleChat(r.Context(), tenant, u.ID, &in, target)
+			err = h.resolveScheduleChat(r.Context(), tenant, a.UserID, &in, target)
 		}
 		if err != nil {
 			switch {
@@ -235,14 +225,15 @@ func (h *handler) scheduleConfigs(w http.ResponseWriter, r *http.Request, u stor
 		return
 	}
 	var out store.ScheduleConfig
+	var e error
 	if r.Method == "POST" {
 		if in.Version != 0 {
 			fault(w, 400, "invalid_version")
 			return
 		}
-		out, e = s.CreateScheduleConfig(r.Context(), tenant, u.ID, in)
+		out, e = s.CreateScheduleConfig(r.Context(), tenant, a.UserID, in)
 	} else {
-		out, e = s.UpdateScheduleConfig(r.Context(), tenant, u.ID, id, in, enabled)
+		out, e = s.UpdateScheduleConfig(r.Context(), tenant, a.UserID, id, in, enabled)
 	}
 	switch {
 	case errors.Is(e, store.ErrNotFound):

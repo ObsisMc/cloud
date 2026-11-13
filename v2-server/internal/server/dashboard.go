@@ -19,26 +19,22 @@ type dashboardStore interface {
 	DashboardStatistics(context.Context, execution.Scope, string) (map[string]any, error)
 }
 
-func (h *handler) dashboardRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v2/tenants/{tid}/dashboard/sessions", h.authed(h.dashboard))
-	mux.HandleFunc("GET /api/v2/tenants/{tid}/dashboard/sessions/{sid}", h.authed(h.dashboard))
+func (h *handler) dashboardRoutes(rt *router) {
+	rt.tenant("GET /api/v2/tenants/{tid}/dashboard/sessions", h.dashboard)
+	rt.tenant("GET /api/v2/tenants/{tid}/dashboard/sessions/{sid}", h.dashboard)
 	for _, part := range []string{"history", "statistics", "model-calls"} {
-		mux.HandleFunc("GET /api/v2/tenants/{tid}/dashboard/sessions/{sid}/"+part, h.authed(h.dashboard))
+		rt.tenant("GET /api/v2/tenants/{tid}/dashboard/sessions/{sid}/"+part, h.dashboard)
 	}
 }
 
-func (h *handler) dashboard(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) dashboard(w http.ResponseWriter, r *http.Request, a access) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	s, ok := h.store.(dashboardStore)
 	if !ok {
 		fault(w, 503, "dashboard_unavailable")
 		return
 	}
-	scope := execution.Scope{TenantID: r.PathValue("tid"), UserID: u.ID}
-	if !taskUUID.MatchString(scope.TenantID) {
-		fault(w, 404, "not_found")
-		return
-	}
+	scope := a.scope()
 	q := r.URL.Query()
 	id := r.PathValue("sid")
 	part := ""

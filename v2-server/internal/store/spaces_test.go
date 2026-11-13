@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestTenantSpaces(t *testing.T) {
@@ -14,7 +15,7 @@ func TestTenantSpaces(t *testing.T) {
 	// Logging in again must not add a second space or a second plugin row.
 	f.login(t, "owner", "owner")
 
-	items, e := f.store.TenantSpaces(ctx, f.tenant, owner)
+	items, e := f.store.TenantSpaces(ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -32,9 +33,10 @@ func TestTenantSpaces(t *testing.T) {
 		t.Fatalf("space times = %+v", space)
 	}
 
-	// A caller outside the workspace learns nothing about its spaces.
-	if _, e := f.store.TenantSpaces(ctx, "00000000-0000-0000-0000-000000000001", owner); !errors.Is(e, store.ErrNotFound) {
-		t.Fatalf("non-member spaces = %v", e)
+	// Spaces are filtered by tenant; tenant access is the route's decision.
+	other := store.Access{TenantID: "00000000-0000-0000-0000-000000000001", UserID: owner, Role: store.RoleOwner}
+	if items, e := f.store.TenantSpaces(ctx, other); e != nil || len(items) != 0 {
+		t.Fatalf("another tenant's spaces = %+v %v", items, e)
 	}
 }
 
@@ -42,13 +44,13 @@ func TestSpaceAgentPlugins(t *testing.T) {
 	f := newSquadFixture(t)
 	ctx := f.ctx
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
 	space := spaces[0].ID
 
-	items, e := f.store.SpaceAgentPlugins(ctx, f.tenant, space, owner)
+	items, e := f.store.SpaceAgentPlugins(ctx, f.tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -85,12 +87,12 @@ func TestSpaceAgentPlugins(t *testing.T) {
 		f.tenant, space, owner); e != nil {
 		t.Fatal(e)
 	}
-	if items, e = f.store.SpaceAgentPlugins(ctx, f.tenant, space, owner); e != nil || len(items) != 2 {
+	if items, e = f.store.SpaceAgentPlugins(ctx, f.tenant, space); e != nil || len(items) != 2 {
 		t.Fatalf("plugins after failed install = %+v %v", items, e)
 	}
 
 	// A space outside the caller's workspace answers not found, not an empty list.
-	if _, e := f.store.SpaceAgentPlugins(ctx, f.tenant, "00000000-0000-0000-0000-000000000001", owner); !errors.Is(e, store.ErrNotFound) {
+	if _, e := f.store.SpaceAgentPlugins(ctx, f.tenant, "00000000-0000-0000-0000-000000000001"); !errors.Is(e, store.ErrNotFound) {
 		t.Fatalf("foreign space plugins = %v", e)
 	}
 }

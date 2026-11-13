@@ -55,10 +55,10 @@ func decodeHistoryCursor(raw, tenant, user, schedule string) (store.OccurrenceCu
 	return store.OccurrenceCursor{RecordedAt: recordedAt, ID: strings.ToLower(cursor.ID)}, true
 }
 
-func (h *handler) scheduleHistory(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) scheduleHistory(w http.ResponseWriter, r *http.Request, a access) {
 	w.Header().Set("Cache-Control", "no-store")
-	tenant, id, occ := r.PathValue("tid"), r.PathValue("id"), r.PathValue("oid")
-	if !scheduleUUID.MatchString(tenant) || !scheduleUUID.MatchString(id) || (occ != "" && !scheduleUUID.MatchString(occ)) {
+	tenant, id, occ := a.TenantID, r.PathValue("id"), r.PathValue("oid")
+	if !scheduleUUID.MatchString(id) || (occ != "" && !scheduleUUID.MatchString(occ)) {
 		fault(w, 404, "not_found")
 		return
 	}
@@ -84,7 +84,7 @@ func (h *handler) scheduleHistory(w http.ResponseWriter, r *http.Request, u stor
 	}
 	if raw := query.Get("cursor"); raw != "" {
 		var ok bool
-		before, ok = decodeHistoryCursor(raw, tenant, u.ID, id)
+		before, ok = decodeHistoryCursor(raw, tenant, a.UserID, id)
 		if !ok {
 			fault(w, 400, "invalid_pagination")
 			return
@@ -96,14 +96,14 @@ func (h *handler) scheduleHistory(w http.ResponseWriter, r *http.Request, u stor
 		return
 	}
 	if occ != "" {
-		item, e := s.ScheduleHistoryItem(r.Context(), tenant, u.ID, id, occ)
+		item, e := s.ScheduleHistoryItem(r.Context(), tenant, a.UserID, id, occ)
 		if historyError(w, e) {
 			return
 		}
 		writeJSON(w, 200, item)
 		return
 	}
-	items, e := s.ScheduleHistory(r.Context(), tenant, u.ID, id, before, limit)
+	items, e := s.ScheduleHistory(r.Context(), tenant, a.UserID, id, before, limit)
 	if historyError(w, e) {
 		return
 	}
@@ -113,7 +113,7 @@ func (h *handler) scheduleHistory(w http.ResponseWriter, r *http.Request, u stor
 		last := items[len(items)-1]
 		data, _ := json.Marshal(historyCursor{
 			Tenant:     tenant,
-			User:       u.ID,
+			User:       a.UserID,
 			Schedule:   id,
 			RecordedAt: last.RecordedAt.UTC().Truncate(time.Microsecond),
 			ID:         strings.ToLower(last.ID),

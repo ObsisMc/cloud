@@ -18,7 +18,7 @@ function codeOf(error: unknown): string | undefined {
 }
 
 const messages: Record<string, string> = {
-  forbidden: '你没有权限管理这个工作区的技能。',
+  not_found: '你已不在这个工作区，请刷新页面。',
   skill_not_found: '技能已不存在，请刷新列表。',
   skill_name_conflict: '已有同名技能，请改用其他名称或选择覆盖。',
   skill_file_type: '请选择 Markdown 格式的 SKILL.md 文件。',

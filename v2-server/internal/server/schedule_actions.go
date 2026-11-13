@@ -40,26 +40,26 @@ func receipt(o store.Occurrence) actionReceipt {
 	return actionReceipt{o.ID, o.ScheduleID, o.Kind, o.Status, o.Reason, o.Released, o.Version, o.ScheduledAt}
 }
 
-func (h *handler) scheduleAction(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) scheduleAction(w http.ResponseWriter, r *http.Request, a access) {
 	s, ok := h.store.(scheduleActionStore)
 	if !ok {
 		fault(w, 503, "schedule_execution_unavailable")
 		return
 	}
-	tid, id, oid := r.PathValue("tid"), r.PathValue("id"), r.PathValue("oid")
-	if !scheduleUUID.MatchString(tid) || !scheduleUUID.MatchString(id) || (oid != "" && !scheduleUUID.MatchString(oid)) {
+	tid, id, oid := a.TenantID, r.PathValue("id"), r.PathValue("oid")
+	if !scheduleUUID.MatchString(id) || (oid != "" && !scheduleUUID.MatchString(oid)) {
 		fault(w, 404, "not_found")
 		return
 	}
 	// Authorize the exact configuration before exposing execution readiness or attempting a stop.
-	if _, err := s.GetScheduleConfig(r.Context(), tid, u.ID, id); err != nil {
+	if _, err := s.GetScheduleConfig(r.Context(), tid, a.UserID, id); err != nil {
 		scheduleActionError(w, "schedule action config", err, "")
 		return
 	}
 	var old store.Occurrence
 	if oid != "" {
 		var err error
-		old, err = s.GetOccurrence(r.Context(), tid, u.ID, oid)
+		old, err = s.GetOccurrence(r.Context(), tid, a.UserID, oid)
 		if err != nil {
 			scheduleActionError(w, "schedule action occurrence", err, "")
 			return
@@ -96,7 +96,7 @@ func (h *handler) scheduleAction(w http.ResponseWriter, r *http.Request, u store
 		fault(w, 503, "schedule_execution_unavailable")
 		return
 	}
-	scope := execution.Scope{TenantID: tid, UserID: u.ID}
+	scope := execution.Scope{TenantID: tid, UserID: a.UserID}
 	if oid == "" {
 		o, err := h.opts.Schedules.Manual(r.Context(), scope, id, key)
 		if err != nil {
@@ -110,7 +110,7 @@ func (h *handler) scheduleAction(w http.ResponseWriter, r *http.Request, u store
 		scheduleActionError(w, "schedule cancel run", err, old.ID)
 		return
 	}
-	o, err := s.GetOccurrence(r.Context(), tid, u.ID, old.ID)
+	o, err := s.GetOccurrence(r.Context(), tid, a.UserID, old.ID)
 	if err != nil {
 		scheduleActionError(w, "schedule reload occurrence", err, old.ID)
 		return

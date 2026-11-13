@@ -16,12 +16,12 @@ import (
 // taskStore is the part of the database the task routes need. It lives beside the handlers so the
 // rest of the server can run against a store that does not implement tasks yet.
 type taskStore interface {
-	Tasks(context.Context, string, string) ([]store.Task, error)
-	Task(context.Context, string, string, string) (store.Task, error)
+	Tasks(context.Context, string) ([]store.Task, error)
+	Task(context.Context, string, string) (store.Task, error)
 	CreateTask(context.Context, string, string, store.TaskInput) (store.Task, error)
-	UpdateTask(context.Context, string, string, string, store.TaskInput) (store.Task, error)
-	SetTaskStatus(context.Context, string, string, string, string, int64) (store.Task, error)
-	SetTaskAssignee(context.Context, string, string, string, *store.TaskAssigneeRef, int64) (store.Task, error)
+	UpdateTask(context.Context, string, string, store.TaskInput) (store.Task, error)
+	SetTaskStatus(context.Context, store.Access, string, string, int64) (store.Task, error)
+	SetTaskAssignee(context.Context, string, string, *store.TaskAssigneeRef, int64) (store.Task, error)
 }
 
 // taskUUID matches the ids this server mints for tasks; anything else cannot exist.
@@ -81,20 +81,19 @@ func taskFault(w http.ResponseWriter, e error) bool {
 	return true
 }
 
-// taskScope keeps tenant and task ids trustworthy and answers 404 to anything that cannot exist,
-// so another workspace cannot be enumerated.
-func (h *handler) taskScope(w http.ResponseWriter, r *http.Request) (taskStore, string, string, bool) {
+// taskScope keeps the task id trustworthy and answers 404 to anything that cannot exist.
+func (h *handler) taskScope(w http.ResponseWriter, r *http.Request, a access) (taskStore, string, string, bool) {
 	s, ok := h.store.(taskStore)
 	if !ok {
 		fault(w, http.StatusServiceUnavailable, "task_unavailable")
 		return nil, "", "", false
 	}
-	tenant, id := r.PathValue("tid"), r.PathValue("taskid")
-	if !taskUUID.MatchString(tenant) || (id != "" && !taskUUID.MatchString(id)) {
+	id := r.PathValue("taskid")
+	if id != "" && !taskUUID.MatchString(id) {
 		fault(w, http.StatusNotFound, "not_found")
 		return nil, "", "", false
 	}
-	return s, tenant, id, true
+	return s, a.TenantID, id, true
 }
 
 // validTaskText checks the request's lengths; an empty title is the one thing a task cannot lose.
@@ -124,12 +123,12 @@ func validAssigneeRef(in *taskAssigneeRequest) *store.TaskAssigneeRef {
 	return &store.TaskAssigneeRef{Type: in.Type, ID: in.ID}
 }
 
-func (h *handler) listTasks(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, _, ok := h.taskScope(w, r)
+func (h *handler) listTasks(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, _, ok := h.taskScope(w, r, a)
 	if !ok {
 		return
 	}
-	items, e := s.Tasks(r.Context(), tenant, u.ID)
+	items, e := s.Tasks(r.Context(), tenant)
 	if e != nil {
 		if taskFault(w, e) {
 			return
@@ -140,8 +139,8 @@ func (h *handler) listTasks(w http.ResponseWriter, r *http.Request, u store.User
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": ""})
 }
 
-func (h *handler) createTask(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, _, ok := h.taskScope(w, r)
+func (h *handler) createTask(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, _, ok := h.taskScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -171,7 +170,7 @@ func (h *handler) createTask(w http.ResponseWriter, r *http.Request, u store.Use
 		ProjectID:   req.ProjectID,
 		Assignee:    validAssigneeRef(req.Assignee),
 	}
-	task, e := s.CreateTask(r.Context(), tenant, u.ID, in)
+	task, e := s.CreateTask(r.Context(), tenant, a.UserID, in)
 	if e != nil {
 		if taskFault(w, e) {
 			return
@@ -182,12 +181,12 @@ func (h *handler) createTask(w http.ResponseWriter, r *http.Request, u store.Use
 	writeJSON(w, http.StatusCreated, task)
 }
 
-func (h *handler) getTask(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, id, ok := h.taskScope(w, r)
+func (h *handler) getTask(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, id, ok := h.taskScope(w, r, a)
 	if !ok {
 		return
 	}
-	task, e := s.Task(r.Context(), tenant, u.ID, id)
+	task, e := s.Task(r.Context(), tenant, id)
 	if e != nil {
 		if taskFault(w, e) {
 			return
@@ -198,8 +197,8 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request, u store.User) 
 	writeJSON(w, http.StatusOK, task)
 }
 
-func (h *handler) updateTask(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, id, ok := h.taskScope(w, r)
+func (h *handler) updateTask(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, id, ok := h.taskScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -221,7 +220,7 @@ func (h *handler) updateTask(w http.ResponseWriter, r *http.Request, u store.Use
 		ProjectID:   req.ProjectID,
 		Version:     req.Version,
 	}
-	task, e := s.UpdateTask(r.Context(), tenant, u.ID, id, in)
+	task, e := s.UpdateTask(r.Context(), tenant, id, in)
 	if e != nil {
 		if taskFault(w, e) {
 			return
@@ -234,8 +233,8 @@ func (h *handler) updateTask(w http.ResponseWriter, r *http.Request, u store.Use
 
 // setTaskStatus moves a task by hand. The lifecycle check lives in the store, which also refuses a
 // move while the task's Agent turn runs.
-func (h *handler) setTaskStatus(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, id, ok := h.taskScope(w, r)
+func (h *handler) setTaskStatus(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, id, ok := h.taskScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -247,7 +246,7 @@ func (h *handler) setTaskStatus(w http.ResponseWriter, r *http.Request, u store.
 		fault(w, http.StatusPreconditionRequired, "version_required")
 		return
 	}
-	task, e := s.SetTaskStatus(r.Context(), tenant, u.ID, id, strings.TrimSpace(req.Status), req.Version)
+	task, e := s.SetTaskStatus(r.Context(), a.Access, id, strings.TrimSpace(req.Status), req.Version)
 	if e != nil {
 		if taskFault(w, e) {
 			return
@@ -264,8 +263,8 @@ func (h *handler) setTaskStatus(w http.ResponseWriter, r *http.Request, u store.
 
 // setTaskAssignee replaces or clears the assignee. An explicit null clears it; a missing field is
 // a malformed request, so a client bug cannot silently unassign work.
-func (h *handler) setTaskAssignee(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, id, ok := h.taskScope(w, r)
+func (h *handler) setTaskAssignee(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, id, ok := h.taskScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -290,7 +289,7 @@ func (h *handler) setTaskAssignee(w http.ResponseWriter, r *http.Request, u stor
 		}
 		ref = validAssigneeRef(&in)
 	}
-	task, e := s.SetTaskAssignee(r.Context(), tenant, u.ID, id, ref, req.Version)
+	task, e := s.SetTaskAssignee(r.Context(), tenant, id, ref, req.Version)
 	if e != nil {
 		if taskFault(w, e) {
 			return

@@ -3,6 +3,7 @@ package store_test
 import (
 	"github.com/wanglongan587/cloud/v2-server/internal/pluginmarket"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 	"testing"
 	"time"
 )
@@ -10,7 +11,7 @@ import (
 func TestSkillDeliveryCoversEveryBoundProjectWithoutGatingTheSelection(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -63,7 +64,7 @@ func TestSkillDeliveryCoversEveryBoundProjectWithoutGatingTheSelection(t *testin
 		if e := f.store.RefreshSkillStates(f.ctx); e != nil {
 			t.Fatal(e)
 		}
-		list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner)
+		list, e := f.store.SpacePlugins(f.ctx, f.tenant, space)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -81,7 +82,7 @@ func TestSkillDeliveryCoversEveryBoundProjectWithoutGatingTheSelection(t *testin
 	run(jobs[1], store.SkillJobFailed)
 	// Project results stay delivery records: they never move the selection back to pending or failed.
 	state("installed")
-	result, e := f.store.SkillProgress(f.ctx, f.tenant, space, owner, "official", "fixture")
+	result, e := f.store.SkillProgress(f.ctx, f.tenant, space, "official", "fixture")
 	if e != nil || len(result) != 2 {
 		t.Fatal(e, result)
 	}
@@ -121,7 +122,7 @@ func TestSkillDeliveryCoversEveryBoundProjectWithoutGatingTheSelection(t *testin
 	if e := f.store.DeleteSettledSkillRemovals(f.ctx); e != nil {
 		t.Fatal(e)
 	}
-	if list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner); e != nil {
+	if list, e := f.store.SpacePlugins(f.ctx, f.tenant, space); e != nil {
 		t.Fatal(e)
 	} else if _, found := findSpacePlugin(list, selection.ID); found {
 		t.Fatalf("removal left a selection: %+v", list)
@@ -131,7 +132,7 @@ func TestSkillDeliveryCoversEveryBoundProjectWithoutGatingTheSelection(t *testin
 func TestTransientSkillFailureRetriesWithBackoff(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -162,7 +163,7 @@ func TestTransientSkillFailureRetriesWithBackoff(t *testing.T) {
 		t.Fatal(e)
 	}
 	// A retrying delivery is a project receipt, not a selection failure.
-	list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner)
+	list, e := f.store.SpacePlugins(f.ctx, f.tenant, space)
 	selected, found := findSpacePlugin(list, selection.ID)
 	if e != nil || !found || selected.ObservedState != "installed" || selected.InstallError != nil {
 		t.Fatalf("retrying delivery changed the selection: %+v %v", selected, e)
@@ -194,7 +195,7 @@ func TestTransientSkillFailureRetriesWithBackoff(t *testing.T) {
 	if e := f.store.RefreshSkillStates(f.ctx); e != nil {
 		t.Fatal(e)
 	}
-	list, e = f.store.SpacePlugins(f.ctx, f.tenant, space, owner)
+	list, e = f.store.SpacePlugins(f.ctx, f.tenant, space)
 	selected, found = findSpacePlugin(list, selection.ID)
 	if e != nil || !found || selected.ObservedState != "installed" || selected.InstallError != nil {
 		t.Fatal(list, e)

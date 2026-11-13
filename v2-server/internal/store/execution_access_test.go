@@ -11,13 +11,16 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
+// Revoking tenant access stops new execution (admission re-checks TenantAccess inside its
+// transaction) but never strands admitted work: runtime writes still settle it. Reads do not
+// re-check access; the HTTP tenant route authorizes them.
 func TestExecutionRuntimeWritesSurviveAccessRevocation(t *testing.T) {
 	for _, tc := range []struct {
-		name, disable, restore string
+		name, disable string
 	}{
-		{"membership", `DELETE FROM memberships WHERE user_id=$1`, `INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,'member')`},
-		{"user", `UPDATE users SET status='inactive' WHERE id=$1`, `UPDATE users SET status='active' WHERE id=$2 AND EXISTS(SELECT 1 FROM tenants WHERE id=$1)`},
-		{"tenant", `UPDATE tenants SET status='paused' WHERE id=$1`, `UPDATE tenants SET status='active' WHERE id=$1 AND EXISTS(SELECT 1 FROM users WHERE id=$2)`},
+		{"membership", `DELETE FROM memberships WHERE user_id=$1`},
+		{"user", `UPDATE users SET status='inactive' WHERE id=$1`},
+		{"tenant", `UPDATE tenants SET status='paused' WHERE id=$1`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := executionDatabase(t)
@@ -50,24 +53,20 @@ func TestExecutionRuntimeWritesSurviveAccessRevocation(t *testing.T) {
 					t.Fatalf("wrong scope ended session: %v", err)
 				}
 			}
-			checks := map[string]func() error{
-				"scope":   func() error { return f.s.CheckExecutionScope(ctx, f.scope) },
-				"session": func() error { _, err := f.s.ReadExecutionSession(ctx, f.scope, "accepted"); return err },
-				"turns":   func() error { _, err := f.s.ReadExecutionTurns(ctx, f.scope, "accepted", "", 10); return err },
-				"attempt": func() error { _, err := f.s.ReadExecutionAttempt(ctx, f.scope, turn.Caller); return err },
-				"cursor":  func() error { _, err := f.s.ReadExecutionCursor(ctx, f.scope, "accepted"); return err },
-				"events":  func() error { _, err := f.s.ReadExecutionEvents(ctx, f.scope, "accepted", 0, 10); return err },
+			if _, err := f.s.TenantAccess(ctx, f.scope.TenantID, f.scope.UserID); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("revoked access still granted: %v", err)
+			}
+			admissions := map[string]func() error{
 				"create": func() error {
 					return f.s.CreateExecutionSession(ctx, f.scope, execution.Session{ID: "new"}, executionTurn("new", "new"))
 				},
 				"append": func() error {
 					return f.s.AppendExecutionTurn(ctx, f.scope, "accepted", executionTurn("accepted", "new"))
 				},
-				"projects": func() error { _, err := f.s.ListProjects(ctx, f.scope); return err },
 			}
-			for name, check := range checks {
-				if err := check(); !errors.Is(err, execution.ErrNotFound) {
-					t.Fatalf("revoked access accepted %s: %v", name, err)
+			for name, admit := range admissions {
+				if err := admit(); !errors.Is(err, execution.ErrNotFound) {
+					t.Fatalf("revoked access admitted %s: %v", name, err)
 				}
 			}
 			event, err := f.s.AppendExecutionEvent(ctx, f.scope, execution.Event{Ref: turn.Ref, Kind: execution.EventTextDelta, TextDelta: result.Answer})
@@ -82,14 +81,8 @@ func TestExecutionRuntimeWritesSurviveAccessRevocation(t *testing.T) {
 					t.Fatalf("runtime end=%v", err)
 				}
 			}
-			if _, err := f.s.ReadExecutionEvents(ctx, f.scope, "accepted", 0, 10); !errors.Is(err, execution.ErrNotFound) {
-				t.Fatalf("terminal history exposed to revoked owner: %v", err)
-			}
 
-			// Restored public access observes the complete retained terminal sequence, once.
-			if _, err := f.admin.Exec(ctx, tc.restore, f.scope.TenantID, f.scope.UserID); err != nil {
-				t.Fatal(err)
-			}
+			// The retained terminal sequence is complete, once.
 			events, err := f.s.ReadExecutionEvents(ctx, f.scope, "accepted", 0, 10)
 			if err != nil || len(events) != 3 {
 				t.Fatalf("retained events=%+v err=%v", events, err)
@@ -115,8 +108,11 @@ func TestExecutionScopeUUIDValidation(t *testing.T) {
 	createExecution(t, f, "uuid", turn)
 	for i, invalid := range []string{"", "not-a-uuid", "00000000000000000000000000000000000000", "zzzzzzzz-0000-0000-0000-000000000000", "--000000-0000-0000-0000-000000000000"} {
 		for _, scope := range []execution.Scope{{TenantID: invalid, UserID: f.scope.UserID}, {TenantID: f.scope.TenantID, UserID: invalid}} {
-			if err := f.s.CheckExecutionScope(ctx, scope); !errors.Is(err, execution.ErrInvalidRequest) {
-				t.Fatalf("invalid scope %d check=%v", i, err)
+			if _, err := f.s.TenantAccess(ctx, scope.TenantID, scope.UserID); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("invalid scope %d access=%v", i, err)
+			}
+			if err := f.s.CreateExecutionSession(ctx, scope, execution.Session{ID: "invalid"}, executionTurn("invalid", "invalid")); !errors.Is(err, execution.ErrNotFound) {
+				t.Fatalf("invalid scope %d admission=%v", i, err)
 			}
 			if err := f.s.EndExecutionSession(ctx, scope, "uuid"); !errors.Is(err, execution.ErrInvalidRequest) {
 				t.Fatalf("invalid scope %d runtime=%v", i, err)

@@ -1,10 +1,7 @@
 package store_test
 
 import (
-	"errors"
 	"testing"
-
-	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
 func TestTenantMembers(t *testing.T) {
@@ -18,7 +15,7 @@ func TestTenantMembers(t *testing.T) {
 		t.Fatal(e)
 	}
 
-	items, e := f.store.TenantMembers(ctx, f.tenant, owner)
+	items, e := f.store.TenantMembers(ctx, f.tenant)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -45,8 +42,8 @@ func TestTenantMembers(t *testing.T) {
 		}
 	}
 
-	// A caller outside the workspace learns nothing about its roster.
-	if _, e := f.store.TenantMembers(ctx, "00000000-0000-0000-0000-000000000001", owner); !errors.Is(e, store.ErrNotFound) {
-		t.Fatalf("non-member roster = %v", e)
+	// The roster is filtered by tenant; tenant access is the route's decision.
+	if items, e := f.store.TenantMembers(ctx, "00000000-0000-0000-0000-000000000001"); e != nil || len(items) != 0 {
+		t.Fatalf("another tenant's roster = %+v %v", items, e)
 	}
 }

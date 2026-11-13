@@ -120,47 +120,19 @@ func scanSquad(row pgx.Row) (SquadSummary, error) {
 	return s, e
 }
 
-// TenantMemberRole returns the caller's role when they are an active member of an active tenant.
-func (s *Store) TenantMemberRole(ctx context.Context, tenant, user string) (string, error) {
-	return tenantRole(ctx, s.pool, tenant, user)
-}
-
-func tenantRole(ctx context.Context, q dbTX, tenant, user string) (string, error) {
-	var role string
-	e := q.QueryRow(ctx, `
-		SELECT m.role FROM memberships m
-		JOIN users u ON u.id = m.user_id
-		JOIN tenants t ON t.id = m.tenant_id
-		WHERE m.tenant_id = $1 AND m.user_id = $2
-			AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'`, tenant, user).Scan(&role)
-	if errors.Is(e, pgx.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	if e != nil {
-		return "", fmt.Errorf("look up tenant role: %w", e)
-	}
-	return role, nil
-}
-
-// isAdministrator follows Cloud's role vocabulary; v2's development login uses "owner".
-func isAdministrator(role string) bool { return role == "admin" || role == "owner" }
-
-// requireManager checks current tenant membership and squad-level authority. Callers lock the
-// squad row first so archived state and a concurrent maintainer change cannot race this check.
-func requireManager(ctx context.Context, q dbTX, tenant, user, squadID string) error {
-	role, e := tenantRole(ctx, q, tenant, user)
-	if e != nil {
-		return e
-	}
-	if isAdministrator(role) {
+// requireManager checks squad-level authority: the tenant's owner, or a live human maintainer of
+// the squad. Callers lock the squad row first so archived state and a concurrent maintainer
+// change cannot race this check.
+func requireManager(ctx context.Context, q dbTX, a Access, squadID string) error {
+	if a.Owner() {
 		return nil
 	}
 	var maintainer bool
-	e = q.QueryRow(ctx, `
+	e := q.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM v2_squad_members
 			WHERE squad_id = $1 AND user_id = $2 AND member_type = 'human'
-				AND maintainer AND ended_at IS NULL)`, squadID, user).Scan(&maintainer)
+				AND maintainer AND ended_at IS NULL)`, squadID, a.UserID).Scan(&maintainer)
 	if e != nil {
 		return fmt.Errorf("look up maintainer: %w", e)
 	}
@@ -174,12 +146,12 @@ func requireManager(ctx context.Context, q dbTX, tenant, user, squadID string) e
 // versions before any write and requires manager authority, so revocation, archiving and edits
 // serialize on one row. Callers that let a member act on their own record (self-exit) use
 // lockSquadBase and check authority themselves.
-func lockSquad(ctx context.Context, tx pgx.Tx, tenant, user, id string, version int64) (SquadSummary, error) {
-	s, e := lockSquadBase(ctx, tx, tenant, id, version)
+func lockSquad(ctx context.Context, tx pgx.Tx, a Access, id string, version int64) (SquadSummary, error) {
+	s, e := lockSquadBase(ctx, tx, a.TenantID, id, version)
 	if e != nil {
 		return s, e
 	}
-	if e := requireManager(ctx, tx, tenant, user, id); e != nil {
+	if e := requireManager(ctx, tx, a, id); e != nil {
 		return s, e
 	}
 	return s, nil
@@ -275,13 +247,6 @@ func (s *Store) Squad(ctx context.Context, tenant, id string) (SquadDetail, erro
 func (s *Store) CreateSquad(ctx context.Context, tenant, user string, in SquadInput) (SquadDetail, error) {
 	var out SquadDetail
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		role, e := tenantRole(ctx, tx, tenant, user)
-		if e != nil {
-			return e
-		}
-		if !isAdministrator(role) && role != "member" {
-			return ErrForbidden
-		}
 		var id string
 		if e := tx.QueryRow(ctx, `
 			INSERT INTO v2_squads (tenant_id, name, description, charter, leader_agent_id, created_by)
@@ -308,14 +273,14 @@ func (s *Store) CreateSquad(ctx context.Context, tenant, user string, in SquadIn
 
 // UpdateSquad replaces editable fields under a version check. Setting a leader who is not yet a
 // member adds the agent membership in the same transaction, as the ADR requires.
-func (s *Store) UpdateSquad(ctx context.Context, tenant, user, id string, in SquadInput) (SquadDetail, error) {
+func (s *Store) UpdateSquad(ctx context.Context, a Access, id string, in SquadInput) (SquadDetail, error) {
 	var out SquadDetail
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, e := lockSquad(ctx, tx, tenant, user, id, in.Version); e != nil {
+		if _, e := lockSquad(ctx, tx, a, id, in.Version); e != nil {
 			return e
 		}
 		if in.LeaderAgentID != nil {
-			if e := ensureLeaderMember(ctx, tx, tenant, id, *in.LeaderAgentID); e != nil {
+			if e := ensureLeaderMember(ctx, tx, a.TenantID, id, *in.LeaderAgentID); e != nil {
 				return e
 			}
 		}
@@ -325,7 +290,7 @@ func (s *Store) UpdateSquad(ctx context.Context, tenant, user, id string, in Squ
 			WHERE id = $1`, id, in.Name, in.Description, in.Charter, in.LeaderAgentID); e != nil {
 			return fmt.Errorf("update squad: %w", e)
 		}
-		detail, e := squadDetail(ctx, tx, tenant, id)
+		detail, e := squadDetail(ctx, tx, a.TenantID, id)
 		out = detail
 		return e
 	})
@@ -374,30 +339,21 @@ func requireActiveAgent(ctx context.Context, q dbTX, tenant, id string) error {
 }
 
 func requireActiveUser(ctx context.Context, q dbTX, tenant, id string) error {
-	var active bool
-	e := q.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM memberships m
-			JOIN users u ON u.id = m.user_id
-			JOIN tenants t ON t.id = m.tenant_id
-			WHERE m.tenant_id = $1 AND m.user_id = $2
-				AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active')`,
-		tenant, id).Scan(&active)
-	if e != nil {
-		return fmt.Errorf("look up user membership: %w", e)
-	}
-	if !active {
-		return ErrUserUnavailable
+	if _, e := tenantAccess(ctx, q, tenant, id); e != nil {
+		if errors.Is(e, ErrNotFound) {
+			return ErrUserUnavailable
+		}
+		return e
 	}
 	return nil
 }
 
 // ArchiveSquad makes the squad read-only and ends every live membership, keeping the rows and the
 // leader column cleared as history. Archived squads cannot be restored in this phase.
-func (s *Store) ArchiveSquad(ctx context.Context, tenant, user, id string, version int64) (SquadDetail, error) {
+func (s *Store) ArchiveSquad(ctx context.Context, a Access, id string, version int64) (SquadDetail, error) {
 	var out SquadDetail
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, e := lockSquad(ctx, tx, tenant, user, id, version); e != nil {
+		if _, e := lockSquad(ctx, tx, a, id, version); e != nil {
 			return e
 		}
 		if _, e := tx.Exec(ctx, `
@@ -410,7 +366,7 @@ func (s *Store) ArchiveSquad(ctx context.Context, tenant, user, id string, versi
 			UPDATE v2_squad_members SET ended_at = now() WHERE squad_id = $1 AND ended_at IS NULL`, id); e != nil {
 			return fmt.Errorf("end squad memberships: %w", e)
 		}
-		detail, e := squadDetail(ctx, tx, tenant, id)
+		detail, e := squadDetail(ctx, tx, a.TenantID, id)
 		out = detail
 		return e
 	})
@@ -419,10 +375,10 @@ func (s *Store) ArchiveSquad(ctx context.Context, tenant, user, id string, versi
 
 // AddSquadMember adds a typed member after checking current tenant/space eligibility. Rejoining
 // after an ended grant inserts a new row; the old grant stays as history.
-func (s *Store) AddSquadMember(ctx context.Context, tenant, user, id string, in SquadMemberInput) (SquadDetail, error) {
+func (s *Store) AddSquadMember(ctx context.Context, a Access, id string, in SquadMemberInput) (SquadDetail, error) {
 	var out SquadDetail
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, e := lockSquad(ctx, tx, tenant, user, id, in.Version); e != nil {
+		if _, e := lockSquad(ctx, tx, a, id, in.Version); e != nil {
 			return e
 		}
 		var userID, agentID *string
@@ -431,7 +387,7 @@ func (s *Store) AddSquadMember(ctx context.Context, tenant, user, id string, in 
 			if in.SpaceAgentID != "" || in.UserID == "" {
 				return ErrInvalidMember
 			}
-			if e := requireActiveUser(ctx, tx, tenant, in.UserID); e != nil {
+			if e := requireActiveUser(ctx, tx, a.TenantID, in.UserID); e != nil {
 				return e
 			}
 			userID = &in.UserID
@@ -439,7 +395,7 @@ func (s *Store) AddSquadMember(ctx context.Context, tenant, user, id string, in 
 			if in.UserID != "" || in.SpaceAgentID == "" || in.Maintainer {
 				return ErrInvalidMember
 			}
-			if e := requireActiveAgent(ctx, tx, tenant, in.SpaceAgentID); e != nil {
+			if e := requireActiveAgent(ctx, tx, a.TenantID, in.SpaceAgentID); e != nil {
 				return e
 			}
 			agentID = &in.SpaceAgentID
@@ -468,7 +424,7 @@ func (s *Store) AddSquadMember(ctx context.Context, tenant, user, id string, in 
 		if e := bumpSquad(ctx, tx, id); e != nil {
 			return fmt.Errorf("bump squad version: %w", e)
 		}
-		detail, e := squadDetail(ctx, tx, tenant, id)
+		detail, e := squadDetail(ctx, tx, a.TenantID, id)
 		out = detail
 		return e
 	})
@@ -476,10 +432,10 @@ func (s *Store) AddSquadMember(ctx context.Context, tenant, user, id string, in 
 }
 
 // UpdateSquadMember edits a live membership. Only humans can hold squad maintenance authority.
-func (s *Store) UpdateSquadMember(ctx context.Context, tenant, user, id, memberID string, in SquadMemberUpdate) (SquadDetail, error) {
+func (s *Store) UpdateSquadMember(ctx context.Context, a Access, id, memberID string, in SquadMemberUpdate) (SquadDetail, error) {
 	var out SquadDetail
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, e := lockSquad(ctx, tx, tenant, user, id, in.Version); e != nil {
+		if _, e := lockSquad(ctx, tx, a, id, in.Version); e != nil {
 			return e
 		}
 		var memberType string
@@ -504,7 +460,7 @@ func (s *Store) UpdateSquadMember(ctx context.Context, tenant, user, id, memberI
 		if e := bumpSquad(ctx, tx, id); e != nil {
 			return fmt.Errorf("bump squad version: %w", e)
 		}
-		detail, e := squadDetail(ctx, tx, tenant, id)
+		detail, e := squadDetail(ctx, tx, a.TenantID, id)
 		out = detail
 		return e
 	})
@@ -515,10 +471,10 @@ func (s *Store) UpdateSquadMember(ctx context.Context, tenant, user, id, memberI
 // same transaction so no squad keeps a leader who is no longer a member. A human removing their
 // own record is a self-exit: the ADR lets every active member leave, so the manager check is
 // skipped for them and the membership keeps its history like any other removal.
-func (s *Store) RemoveSquadMember(ctx context.Context, tenant, user, id, memberID string, version int64) (SquadDetail, error) {
+func (s *Store) RemoveSquadMember(ctx context.Context, a Access, id, memberID string, version int64) (SquadDetail, error) {
 	var out SquadDetail
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		leader, e := lockSquadBase(ctx, tx, tenant, id, version)
+		leader, e := lockSquadBase(ctx, tx, a.TenantID, id, version)
 		if e != nil {
 			return e
 		}
@@ -534,9 +490,9 @@ func (s *Store) RemoveSquadMember(ctx context.Context, tenant, user, id, memberI
 		if e != nil {
 			return fmt.Errorf("look up squad member: %w", e)
 		}
-		selfExit := memberType == MemberHuman && userID != nil && *userID == user
+		selfExit := memberType == MemberHuman && userID != nil && *userID == a.UserID
 		if !selfExit {
-			if e := requireManager(ctx, tx, tenant, user, id); e != nil {
+			if e := requireManager(ctx, tx, a, id); e != nil {
 				return e
 			}
 		}
@@ -551,7 +507,7 @@ func (s *Store) RemoveSquadMember(ctx context.Context, tenant, user, id, memberI
 		if e := bumpSquad(ctx, tx, id); e != nil {
 			return fmt.Errorf("bump squad version: %w", e)
 		}
-		detail, e := squadDetail(ctx, tx, tenant, id)
+		detail, e := squadDetail(ctx, tx, a.TenantID, id)
 		out = detail
 		return e
 	})

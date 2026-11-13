@@ -116,7 +116,7 @@ func seed(t *testing.T, s *Seeder, scenes ...string) seedSummary {
 		}
 		out.squads = append(out.squads, entry)
 	}
-	tasks, err := s.Store.Tasks(ctx, scope.TenantID, scope.UserID)
+	tasks, err := s.Store.Tasks(ctx, scope.TenantID)
 	if err != nil {
 		t.Fatal(err)
 	}

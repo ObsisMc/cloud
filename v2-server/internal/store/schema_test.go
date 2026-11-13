@@ -204,7 +204,7 @@ func TestSchemaKeepsLegacySkillWithoutPlanAsFailed(t *testing.T) {
 	// A restart re-applies the schema: the row without a plan must stay failed with the prompt.
 	s2 := open()
 	t.Cleanup(s2.Close)
-	items, e := s2.SpacePlugins(ctx, tenant, space, user)
+	items, e := s2.SpacePlugins(ctx, tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}

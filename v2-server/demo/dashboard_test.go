@@ -25,13 +25,13 @@ func TestDashboardSeedAndTaskSessionShareAgentFilter(t *testing.T) {
 				t.Fatalf("seeded sessions = %v, error = %v", items, err)
 			}
 			seeded := items[0]
-			tasks, err := s.Store.Tasks(ctx, scope.TenantID, scope.UserID)
+			tasks, err := s.Store.Tasks(ctx, scope.TenantID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			seedCount := 0
 			for _, task := range tasks {
-				runs, _, err := s.Store.TaskTimeline(ctx, scope.TenantID, scope.UserID, task.ID)
+				runs, _, err := s.Store.TaskTimeline(ctx, scope.TenantID, task.ID)
 				if err != nil {
 					t.Fatal(err)
 				}

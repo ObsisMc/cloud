@@ -346,3 +346,13 @@ func (s *Seeder) Project(ctx context.Context, scope execution.Scope, name, fixtu
 func (s *Seeder) WorkflowSeed(scope execution.Scope, project store.Project) WorkflowSeed {
 	return WorkflowSeed{Store: s.Store, Pool: s.Pool, Scope: scope, ProjectID: project.ID, AgentCLI: demoAgentCLI, ModelID: demoModelID, Now: s.Now}
 }
+
+// seedAccess authorizes a seeded user the way a request would, so store calls that apply business
+// rules by role receive the same verified Access the HTTP routes hand them.
+func seedAccess(ctx context.Context, s *store.Store, scope execution.Scope) (store.Access, error) {
+	a, err := s.TenantAccess(ctx, scope.TenantID, scope.UserID)
+	if err != nil {
+		return store.Access{}, fmt.Errorf("seed access: %w", err)
+	}
+	return a, nil
+}

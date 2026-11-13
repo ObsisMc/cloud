@@ -111,8 +111,8 @@ func CanTransitionTask(from, to string) bool {
 // canCloseTask reports whether the caller may end the task, by confirming it done or cancelling it.
 // That is the decision of whoever asked for the work or a workspace administrator; doing the work
 // does not grant it.
-func canCloseTask(role, user string, task Task) bool {
-	return isAdministrator(role) || task.CreatedBy == user
+func canCloseTask(a Access, task Task) bool {
+	return a.Owner() || task.CreatedBy == a.UserID
 }
 
 // CanRunTransitionTask reports the moves a task's Agent run makes: starting or following up a run
@@ -221,12 +221,8 @@ func requireAssignee(ctx context.Context, q dbTX, tenant string, ref TaskAssigne
 	return ErrInvalidAssignee
 }
 
-// lockTask opens a mutation: it checks the caller's current workspace membership, locks the task
-// row and rejects a stale version before any write.
-func lockTask(ctx context.Context, tx pgx.Tx, tenant, user, id string, version int64) (Task, error) {
-	if _, e := tenantRole(ctx, tx, tenant, user); e != nil {
-		return Task{}, e
-	}
+// lockTask opens a mutation: it locks the task row and rejects a stale version before any write.
+func lockTask(ctx context.Context, tx pgx.Tx, tenant, id string, version int64) (Task, error) {
 	task, e := scanTask(tx.QueryRow(ctx, `SELECT `+taskColumns+` `+taskJoins+`
 		WHERE t.tenant_id = $1 AND t.id = $2 FOR UPDATE OF t`, tenant, id))
 	if e != nil {
@@ -248,10 +244,7 @@ func writeTaskStatus(ctx context.Context, tx pgx.Tx, id, status string) (Task, e
 }
 
 // Tasks lists the workspace's tasks, most recently changed first.
-func (s *Store) Tasks(ctx context.Context, tenant, caller string) ([]Task, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return nil, e
-	}
+func (s *Store) Tasks(ctx context.Context, tenant string) ([]Task, error) {
 	rows, e := s.pool.Query(ctx, `SELECT `+taskColumns+` `+taskJoins+`
 		WHERE t.tenant_id = $1 ORDER BY t.updated_at DESC, t.id DESC`, tenant)
 	if e != nil {
@@ -270,10 +263,7 @@ func (s *Store) Tasks(ctx context.Context, tenant, caller string) ([]Task, error
 }
 
 // Task returns one task to a current workspace member.
-func (s *Store) Task(ctx context.Context, tenant, caller, id string) (Task, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return Task{}, e
-	}
+func (s *Store) Task(ctx context.Context, tenant, id string) (Task, error) {
 	task, err := scanTask(s.pool.QueryRow(ctx, `SELECT `+taskColumns+` `+taskJoins+`
         WHERE t.tenant_id = $1 AND t.id = $2`, tenant, id))
 	if err != nil {
@@ -301,9 +291,6 @@ func (s *Store) Task(ctx context.Context, tenant, caller, id string) (Task, erro
 func (s *Store) CreateTask(ctx context.Context, tenant, user string, in TaskInput) (Task, error) {
 	var out Task
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, e := tenantRole(ctx, tx, tenant, user); e != nil {
-			return e
-		}
 		if e := requireProject(ctx, tx, tenant, in.ProjectID); e != nil {
 			return e
 		}
@@ -331,10 +318,10 @@ func (s *Store) CreateTask(ctx context.Context, tenant, user string, in TaskInpu
 
 // UpdateTask replaces the title, description and project under a version check. The status and
 // assignee have their own writes so a stale form cannot silently undo them.
-func (s *Store) UpdateTask(ctx context.Context, tenant, user, id string, in TaskInput) (Task, error) {
+func (s *Store) UpdateTask(ctx context.Context, tenant, id string, in TaskInput) (Task, error) {
 	var out Task
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, e := lockTask(ctx, tx, tenant, user, id, in.Version); e != nil {
+		if _, e := lockTask(ctx, tx, tenant, id, in.Version); e != nil {
 			return e
 		}
 		if e := requireProject(ctx, tx, tenant, in.ProjectID); e != nil {
@@ -357,10 +344,10 @@ func (s *Store) UpdateTask(ctx context.Context, tenant, user, id string, in Task
 // accepted, so 待验收 cannot be skipped and a finished task cannot silently reopen. Ending the task
 // is limited by canCloseTask; anyone else gets ErrForbidden. While an Agent turn runs the run owns
 // the status, and a manual move returns ErrRunActive.
-func (s *Store) SetTaskStatus(ctx context.Context, tenant, user, id, status string, version int64) (Task, error) {
+func (s *Store) SetTaskStatus(ctx context.Context, a Access, id, status string, version int64) (Task, error) {
 	var out Task
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		task, e := lockTask(ctx, tx, tenant, user, id, version)
+		task, e := lockTask(ctx, tx, a.TenantID, id, version)
 		if e != nil {
 			return e
 		}
@@ -368,11 +355,7 @@ func (s *Store) SetTaskStatus(ctx context.Context, tenant, user, id, status stri
 			return ErrInvalidTransition
 		}
 		if status == TaskDone || status == TaskCancelled {
-			role, e := tenantRole(ctx, tx, tenant, user)
-			if e != nil {
-				return e
-			}
-			if !canCloseTask(role, user, task) {
+			if !canCloseTask(a, task) {
 				return ErrForbidden
 			}
 		}
@@ -411,10 +394,10 @@ func (s *Store) TransitionTaskStatus(ctx context.Context, tenant, id, from, to s
 
 // SetTaskAssignee replaces or clears the typed assignee under a version check. Assigning a squad
 // puts the task in front of every member; none of them is picked for it.
-func (s *Store) SetTaskAssignee(ctx context.Context, tenant, user, id string, ref *TaskAssigneeRef, version int64) (Task, error) {
+func (s *Store) SetTaskAssignee(ctx context.Context, tenant, id string, ref *TaskAssigneeRef, version int64) (Task, error) {
 	var out Task
 	e := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, e := lockTask(ctx, tx, tenant, user, id, version); e != nil {
+		if _, e := lockTask(ctx, tx, tenant, id, version); e != nil {
 			return e
 		}
 		var kind, assignee string

@@ -85,7 +85,11 @@ func seedOpsReviewHistory(ctx context.Context, seed WorkflowSeed, w SeededWorkfl
 		}
 	}
 	answerJSON, _ := json.Marshal(answers)
-	_, err = seed.Store.SaveWorkflowForm(ctx, seed.Scope.TenantID, seed.Scope.UserID, runID, form.Version, "demo-seed", answerJSON, true, func(store.WorkflowForm) error { return nil }, func(raw []byte, f store.WorkflowForm) ([]byte, error) {
+	a, err := seedAccess(ctx, seed.Store, seed.Scope)
+	if err != nil {
+		return err
+	}
+	_, err = seed.Store.SaveWorkflowForm(ctx, a, runID, form.Version, "demo-seed", answerJSON, true, func(store.WorkflowForm) error { return nil }, func(raw []byte, f store.WorkflowForm) ([]byte, error) {
 		p, _, err := workflow.DecodeRunPayload(raw)
 		if err != nil {
 			return nil, err
