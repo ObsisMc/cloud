@@ -78,9 +78,10 @@ func newRemoteProvider(protocol Protocol, baseURL, path, apiKey string, transpor
 		return nil, errors.New("invalid model provider configuration")
 	}
 	if transport == nil {
-		transport = &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, MaxIdleConns: 16, MaxIdleConnsPerHost: 8, IdleConnTimeout: time.Minute, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second}
+		transport = &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, MaxIdleConns: 16, MaxIdleConnsPerHost: 8, IdleConnTimeout: time.Minute, TLSHandshakeTimeout: 10 * time.Second}
 	}
-	// No client Timeout: it would bound the whole streamed body. The idle and total limits do.
+	// No client Timeout (it would bound the whole streamed body) and no ResponseHeaderTimeout:
+	// the idle limit covers the wait for the header, and the idle and total limits bound the rest.
 	return &RemoteProvider{endpoint: strings.TrimRight(baseURL, "/") + path, key: apiKey, protocol: protocol, idle: DefaultIdleTimeout, total: DefaultMaxDuration, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 

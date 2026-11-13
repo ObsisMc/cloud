@@ -248,3 +248,41 @@ func TestExpiredGrantKeepsRunningCallsUntilRevoked(t *testing.T) {
 		t.Fatalf("End did not cancel the call of an expired grant: err=%v body=%q", r.err, r.body)
 	}
 }
+
+// Only the idle limit bounds the wait for the response header; there is no separate header timeout.
+func TestRemoteProviderHeaderWaitBoundedOnlyByIdleLimit(t *testing.T) {
+	p, err := NewRemoteProvider("https://example.test/v1", "key", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport := p.client.Transport.(*http.Transport); transport.ResponseHeaderTimeout != 0 || p.client.Timeout != 0 {
+		t.Fatalf("default client still has fixed timeouts: header=%s client=%s", transport.ResponseHeaderTimeout, p.client.Timeout)
+	}
+	for _, c := range []struct {
+		delay, idle time.Duration
+		status      int
+	}{{400 * time.Millisecond, time.Second, 200}, {time.Second, 300 * time.Millisecond, 502}} {
+		upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-time.After(c.delay):
+			case <-r.Context().Done():
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"choices":[]}`)
+		}))
+		p, err := NewRemoteProvider(upstream.URL, "backend-key", upstream.Client().Transport)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := p.SetLimits(c.idle, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		p.Complete(w, httptest.NewRequest("POST", "/", strings.NewReader(`{}`)), testModel)
+		upstream.Close()
+		if w.Code != c.status {
+			t.Fatalf("header after %s with idle %s: %d %s", c.delay, c.idle, w.Code, w.Body)
+		}
+	}
+}
