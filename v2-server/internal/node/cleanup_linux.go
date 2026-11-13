@@ -16,10 +16,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// ownedExecutables are the short names of the executables copied into a runtime root: Node,
+// the reaper Node starts, and the retired process host and guardian that a root prepared before
+// the upgrade may still be running.
+var ownedExecutables = []string{"nb", "rb", "hb", "gb"}
+
 // cleanOwned signals only executables copied into this private root. pidfds prevent PID-reuse
 // signals; remaining unclassified processes in the root block cleanup instead of being killed.
 func cleanOwned(ctx context.Context, paths Paths, grace time.Duration) error {
-	for _, name := range []string{"nb", "hb", "gb"} {
+	for _, name := range ownedExecutables {
 		entries, err := os.ReadDir("/proc")
 		if err != nil {
 			return err
@@ -61,7 +66,7 @@ func cleanOwned(ctx context.Context, paths Paths, grace time.Duration) error {
 			}
 		}
 	}
-	// A process escaping a guardian must not be silently called cleaned. Do not kill by cwd:
+	// A process escaping the reaper must not be silently called cleaned. Do not kill by cwd:
 	// it could be a user's shell; keep the Workspace unavailable for explicit investigation.
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -73,7 +78,7 @@ func cleanOwned(ctx context.Context, paths Paths, grace time.Duration) error {
 		}
 		cwd, cwdErr := os.Readlink(filepath.Join("/proc", entry.Name(), "cwd"))
 		exe, exeErr := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
-		if (cwdErr == nil && within(paths.Root, cwd)) || (exeErr == nil && (exe == filepath.Join(paths.Root, "nb") || exe == filepath.Join(paths.Root, "hb") || exe == filepath.Join(paths.Root, "gb"))) {
+		if (cwdErr == nil && within(paths.Root, cwd)) || (exeErr == nil && ownedExecutable(paths.Root, exe)) {
 			return fmt.Errorf("runtime cleanup unconfirmed: process %s remains in workspace", entry.Name())
 		}
 	}
@@ -95,6 +100,15 @@ func cleanOwned(ctx context.Context, paths Paths, grace time.Duration) error {
 		}
 	}
 	return nil
+}
+
+func ownedExecutable(root, exe string) bool {
+	for _, name := range ownedExecutables {
+		if exe == filepath.Join(root, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func within(root, path string) bool {
