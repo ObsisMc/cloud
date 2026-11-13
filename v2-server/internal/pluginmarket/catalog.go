@@ -33,11 +33,6 @@ type Entry struct {
 	SourceURL          string
 }
 
-// DemoHookEntry returns the package-less Hook listing used by the v2 plugin demo. The entry
-// deliberately has no URL or digest: installing it only records a Space selection, and no Hook
-// package or lifecycle command is ever downloaded or run.
-// DemoHookEntry is no longer injected: Hooks are read-only in the plugin page and a selection
-// would pretend to install a package the server never runs.
 type logoCandidate struct {
 	Role      string `json:"role"`
 	Extension string `json:"extension"`
