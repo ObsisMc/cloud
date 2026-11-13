@@ -38,7 +38,7 @@ renew 必须匹配原 execution，过期后不能续期。binding 和 Model 快�
 `NewRemoteProvider` 转发 OpenAI chat completions，`NewRemoteMessagesProvider` 转发 Anthropic
 Messages（后端 API key 放在 `x-api-key`，或将配置的 auth token 放在 `Authorization: Bearer …`，只透传 `anthropic-version` / `anthropic-beta`）；两者都支持 JSON/SSE，强制使用已选模型，保留成功响应的
 usage 等字段。真实 API key 留在后端内存，不转发 Agent token、调用者自定义 header 或上游错误正文；
-禁止 HTTP 和重定向。Agent 断开、grant 撤销（`End`、删除授权、`Close`）会取消进行中的上游请求；grant 到期只拒绝新请求和续期，不取消已经开始的请求。单次远端请求有空闲超时（默认 2 分钟，每收到一段上游数据重新计时，也覆盖等待响应头）和总上限（默认 30 分钟），由 `SetLimits` 设置。响应头发出后因上述任一原因中途停止时，provider 只标记这个响应（经 `Unwrap` 穿过包装它的 writer），由 Agent 模型路由在 `Complete` 返回后以 `http.ErrAbortHandler` 中止，Agent 读到的是失败而不是正常结束的流；不经这条路由的进程内调用方（纯模型轮次）只看到被截断的正文。`CompleteObserved` 另返回 `cut` 供调用方记账。标记里带着原因（`model_idle_timeout`、`model_max_duration`、`cancelled`、`interrupted`），包装 provider 的调用方在 `Complete` 返回后用 `CutReason(w)` 读取；`RefuseCall` 在响应头前按协议回一个 422 错误，文字不含 Agent 会据以重发的字样（网络失败、超时、5xx 状态码），Agent 收到后不再重发。
+禁止 HTTP 和重定向。Agent 断开、grant 撤销（`End`、删除授权、`Close`）会取消进行中的上游请求；grant 到期只拒绝新请求和续期，不取消已经开始的请求。单次远端请求有空闲超时（默认 2 分钟，每收到一段上游数据重新计时，也覆盖等待响应头）和总上限（默认 30 分钟），由 `SetLimits` 设置。响应头发出后因上述任一原因中途停止时，provider 只标记这个响应（经 `Unwrap` 穿过包装它的 writer），由 Agent 模型路由在 `Complete` 返回后以 `http.ErrAbortHandler` 中止，Agent 读到的是失败而不是正常结束的流；不经这条路由的进程内调用方（纯模型轮次）只看到被截断的正文。`CompleteObserved` 另返回 `cut` 供调用方记账。路由的响应还记下答复的状态和停止它的模型限值：空闲超时或总上限在响应头之前到时，照旧回固定的 `502 provider_unavailable`、不中止连接，但同样记下限值。包装 provider 的调用方在 `Complete` 返回后用 `Outcome(w)` 读取：`completed` 只在上游 2xx 且没被切断时为真，`limit` 是 `model_idle_timeout` / `model_max_duration` 或空；`RefuseCall` 在响应头前按协议回一个 422 错误，文字不含 Agent 会据以重发的字样（网络失败、超时、5xx 状态码），Agent 收到后不再重发。
 不支持运行时模型切换或任何隐式环境变量凭据读取。
 
 ## 验证

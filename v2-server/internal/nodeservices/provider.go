@@ -141,6 +141,11 @@ func (p *RemoteProvider) CompleteObserved(w http.ResponseWriter, r *http.Request
 	defer idle.Stop()
 	resp, err := p.client.Do(req)
 	if err != nil {
+		// A limit reached before the header is still a limit: the answer keeps its fixed error
+		// code and is not aborted, but the route learns why (see Outcome).
+		if cause := context.Cause(ctx); errors.Is(cause, errIdleTimeout) || errors.Is(cause, errMaxDuration) {
+			markLimit(w, cause.Error())
+		}
 		fault(w, 502, "provider_unavailable")
 		return 0, false
 	}
@@ -268,9 +273,25 @@ func (FixtureProvider) Complete(w http.ResponseWriter, r *http.Request, model Mo
 type abortableWriter struct {
 	http.ResponseWriter
 	cut bool
-	// reason is why the provider stopped the response: model_idle_timeout, model_max_duration,
-	// cancelled or interrupted.
-	reason string
+	// status is the status the route answered with; 0 until a header or body is written.
+	status int
+	// limit is the model limit that stopped the call, before or after its header:
+	// model_idle_timeout or model_max_duration. Other cuts leave it empty.
+	limit string
+}
+
+func (w *abortableWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *abortableWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(p)
 }
 
 func (w *abortableWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
@@ -285,7 +306,17 @@ func (w *abortableWriter) Flush() {
 // http.ResponseController does; without one there is nothing to abort.
 func markCut(w http.ResponseWriter, reason string) {
 	if a := routeWriter(w); a != nil {
-		a.cut, a.reason = true, reason
+		a.cut = true
+		if reason == CutIdle || reason == CutMaxDuration {
+			a.limit = reason
+		}
+	}
+}
+
+// markLimit records a limit reached before the response header; the response is not aborted.
+func markLimit(w http.ResponseWriter, reason string) {
+	if a := routeWriter(w); a != nil {
+		a.limit = reason
 	}
 }
 
@@ -302,29 +333,27 @@ func routeWriter(w http.ResponseWriter) *abortableWriter {
 	}
 }
 
-// CutReason reports why a provider stopped this Agent model response after its header was sent,
-// or "" when it was not cut. Only the two limits are reported by name (CutIdle, CutMaxDuration);
-// any other cut is "interrupted" or "cancelled". It asks the first writer in the Unwrap chain
-// that knows, which on the Agent model route is the route's own response.
-func CutReason(w http.ResponseWriter) string {
+// Outcome reports how an Agent model call on this response ended: completed is true only when
+// the provider answered 2xx and nothing cut the response; limit names the model limit that
+// stopped it (CutIdle or CutMaxDuration), before or after the header, or is "". It asks the
+// first writer in the Unwrap chain that knows, which on the Agent model route is the route's
+// own response.
+func Outcome(w http.ResponseWriter) (completed bool, limit string) {
 	for {
-		if c, ok := w.(interface{ CutReason() string }); ok {
-			return c.CutReason()
+		if o, ok := w.(interface{ Outcome() (bool, string) }); ok {
+			return o.Outcome()
 		}
 		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
 		if !ok {
-			return ""
+			return false, ""
 		}
 		w = u.Unwrap()
 	}
 }
 
-// CutReason implements the lookup used by the exported CutReason.
-func (w *abortableWriter) CutReason() string {
-	if !w.cut {
-		return ""
-	}
-	return w.reason
+// Outcome implements the lookup used by the exported Outcome.
+func (w *abortableWriter) Outcome() (bool, string) {
+	return w.status >= 200 && w.status < 300 && !w.cut && w.limit == "", w.limit
 }
 
 // Cut reasons that end a model response at a limit.
