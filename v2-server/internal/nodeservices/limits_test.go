@@ -167,3 +167,84 @@ func TestRemoteProviderLimitsValidation(t *testing.T) {
 		}
 	}
 }
+
+// Expiry never cancels an admitted call: neither the expired-grant sweep run by another
+// execution's grant request nor a refused renewal stops it, while End still does.
+func TestExpiredGrantKeepsRunningCallsUntilRevoked(t *testing.T) {
+	s := testService(t, streamingProvider{interval: 50 * time.Millisecond, length: 1500 * time.Millisecond})
+	c := serviceClient(t, s, true)
+	token, id := issueToken(t, s, c, "execution")
+	expire := func() {
+		s.mu.Lock()
+		s.grants[id].expires = time.Now().Add(-time.Second)
+		s.mu.Unlock()
+	}
+	type result struct {
+		body []byte
+		err  error
+	}
+	call := func() chan result {
+		done := make(chan result, 1)
+		go func() {
+			req, _ := http.NewRequest("POST", s.URL+"/runtime/openai/v1/chat/completions", strings.NewReader(`{}`))
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := c.Do(req)
+			if err != nil {
+				done <- result{nil, err}
+				return
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			done <- result{body, err}
+		}()
+		return done
+	}
+	running := func() int {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if g := s.grants[id]; g != nil {
+			return g.calls
+		}
+		return 0
+	}
+	waitRunning := func() {
+		for deadline := time.Now().Add(5 * time.Second); running() == 0; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("call did not start")
+			}
+		}
+	}
+
+	done := call()
+	waitRunning()
+	expire()
+	if status, _ := request(t, c, "POST", s.URL+"/internal/v1/model-grants/"+id+"/renew", "", `{"executionId":"execution"}`); status != 403 {
+		t.Fatalf("expired renew=%d", status)
+	}
+	issueToken(t, s, c, "other") // sweeps expired grants of every execution
+	if status, _ := request(t, c, "POST", s.URL+"/runtime/openai/v1/chat/completions", token, `{}`); status != 401 {
+		t.Fatalf("expired token started a new call: %d", status)
+	}
+	r := <-done
+	if r.err != nil || !strings.HasSuffix(string(r.body), "data: [DONE]\n\n") {
+		t.Fatalf("expiry cut an admitted call: err=%v body=%q", r.err, r.body)
+	}
+	s.mu.Lock()
+	_, kept := s.grants[id]
+	s.mu.Unlock()
+	if kept {
+		t.Fatal("expired grant not removed after its last call")
+	}
+
+	token, id = issueToken(t, s, c, "execution")
+	done = call()
+	waitRunning()
+	expire()
+	issueToken(t, s, c, "other")
+	began := time.Now()
+	s.End("execution")
+	r = <-done
+	if strings.HasSuffix(string(r.body), "data: [DONE]\n\n") || time.Since(began) > time.Second {
+		t.Fatalf("End did not cancel the call of an expired grant: err=%v body=%q", r.err, r.body)
+	}
+}

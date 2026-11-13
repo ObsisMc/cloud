@@ -376,4 +376,7 @@ type grant struct {
 	expires                   time.Time
 	ctx                       context.Context
 	cancel                    context.CancelFunc
+	// calls counts in-flight model calls. An expired grant with calls stays registered, so
+	// revocation can still cancel them, until the last one finishes.
+	calls int
 }

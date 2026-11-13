@@ -42,9 +42,11 @@ func (s *Service) issue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Duplicate grant requests invalidate the previous token, and expired entries never grow
-	// without bound. Only the active execution's binding decides the model/provider.
+	// without bound. Only the active execution's binding decides the model/provider. An expired
+	// grant whose calls are still running is left for its last call to remove: expiry never
+	// cancels an admitted call.
 	for existing, g := range s.grants {
-		if g.execution == req.ExecutionID || !time.Now().Before(g.expires) {
+		if g.execution == req.ExecutionID || (!time.Now().Before(g.expires) && g.calls == 0) {
 			g.cancel()
 			delete(s.grants, existing)
 		}
@@ -89,9 +91,18 @@ func (s *Service) changeGrant(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{})
 		return
 	}
-	if s.permits[g.execution] != g.binding || !time.Now().Before(g.expires) {
+	if s.permits[g.execution] != g.binding {
 		g.cancel()
 		delete(s.grants, parts[0])
+		fault(w, 403, "model_access_revoked")
+		return
+	}
+	if !time.Now().Before(g.expires) {
+		// An expired grant cannot be renewed, but its running calls are not revoked by expiry.
+		if g.calls == 0 {
+			g.cancel()
+			delete(s.grants, parts[0])
+		}
 		fault(w, 403, "model_access_revoked")
 		return
 	}
@@ -129,7 +140,9 @@ func (s *Service) model(w http.ResponseWriter, r *http.Request, protocol Protoco
 	// call admitted with a live token runs to completion, bounded by the provider's own limits.
 	ctx, cancel := context.WithCancel(r.Context())
 	stop := context.AfterFunc(selected.ctx, cancel)
+	selected.calls++
 	s.mu.Unlock()
+	defer s.finishCall(selected)
 	defer cancel()
 	defer stop()
 	r = r.Clone(ctx)
@@ -146,5 +159,21 @@ func (s *Service) model(w http.ResponseWriter, r *http.Request, protocol Protoco
 	provider.Complete(out, r, binding.Model)
 	if out.cut {
 		panic(http.ErrAbortHandler)
+	}
+}
+
+// finishCall ends one call of g; the last call of an expired grant removes it.
+func (s *Service) finishCall(g *grant) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g.calls--
+	if g.calls > 0 || time.Now().Before(g.expires) {
+		return
+	}
+	for id, registered := range s.grants {
+		if registered == g {
+			g.cancel()
+			delete(s.grants, id)
+		}
 	}
 }
