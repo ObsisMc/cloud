@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'vitest'
 import { http } from '@/lib/api-client'
 import { fakeBackend } from '@/test/backend'
-import { demoMcpEntry } from '@/lib/settings-demo/plugin-catalog'
+import { demoMcpEntry } from '@/lib/demo/plugin-installs'
 import { workflowDemoMcps } from './demo-mcp-catalog'
 
 const demoHookEntry = {

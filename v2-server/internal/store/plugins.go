@@ -305,7 +305,11 @@ func (s *Store) installSpacePlugin(
 		if e != nil {
 			return e
 		}
-		if kind != "skill" && kind != "agent" && kind != "workflow" && kind != "hook" {
+		// Only Skill and workflow plugins have a server-backed install in v2. Agents, Hooks and any
+		// other kind have no package to deliver or run, so a new selection would only pretend to
+		// install them; the page shows those kinds read-only instead. A preinstalled Agent is still
+		// handled below so its runtime-managed guard stays the recognizable error.
+		if kind != "skill" && kind != "workflow" && kind != "agent" {
 			return ErrPluginKindNotInstallable
 		}
 		if kind == "workflow" && (len(workflowDocuments) == 0 || validate == nil) {
@@ -325,8 +329,14 @@ func (s *Store) installSpacePlugin(
 		old, oldErr := querySpacePlugin(ctx, tx, space, namespace, identifier, true)
 		switch {
 		case oldErr == nil:
-			if old.Kind == "agent" && old.RequestedByUserID == nil {
-				return ErrPluginRuntimeManaged
+			// Agents never get a server-backed install here: a preinstalled Agent is managed by the
+			// runtime, and an existing market Agent selection (requested_by_user_id set) is only
+			// browsed, so an update is rejected instead of quietly refreshing it.
+			if old.Kind == "agent" {
+				if old.RequestedByUserID == nil {
+					return ErrPluginRuntimeManaged
+				}
+				return ErrPluginKindNotInstallable
 			}
 			if in.Version != old.Version {
 				return ErrConflict
@@ -349,6 +359,11 @@ func (s *Store) installSpacePlugin(
 				return fmt.Errorf("update plugin selection: %w", e)
 			}
 		case errors.Is(oldErr, ErrNotFound):
+			// A new Agent selection would only pretend to install a runnable Agent; preinstalled
+			// Agents always exist already, so they never reach this branch.
+			if kind != "skill" && kind != "workflow" {
+				return ErrPluginKindNotInstallable
+			}
 			if in.Version != 0 {
 				return ErrConflict
 			}

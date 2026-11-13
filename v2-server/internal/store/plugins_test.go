@@ -285,42 +285,15 @@ func TestPluginMarketLifecycle(t *testing.T) {
 	}); !errors.Is(e, store.ErrPluginRuntimeManaged) {
 		t.Fatalf("preinstalled agent removal = %v", e)
 	}
-	codex, e := f.store.InstallSpacePlugin(ctx, f.tenant, space, owner, path, "install-codex", store.PluginInstallInput{
+	// A market Agent has no runtime package to deliver, so the server rejects a new selection
+	// instead of pretending to install it.
+	if _, e := f.store.InstallSpacePlugin(ctx, f.tenant, space, owner, path, "install-codex", store.PluginInstallInput{
 		Identifier: "official/ora-space.codex", PluginVersion: "0.3.14", Version: 0,
-	})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if codex.Kind != "agent" || codex.DesiredState != "installed" ||
-		codex.ObservedState != "installed" || codex.ObservedVersion == nil ||
-		*codex.ObservedVersion != "0.3.14" || codex.RequestedByUserID == nil ||
-		*codex.RequestedByUserID != owner {
-		t.Fatalf("codex install = %+v", codex)
+	}); !errors.Is(e, store.ErrPluginKindNotInstallable) {
+		t.Fatalf("market agent install = %v", e)
 	}
 	if agents, e := f.store.SpaceAgentPlugins(ctx, f.tenant, space); e != nil || len(agents) != 2 {
-		t.Fatalf("runnable agents after codex install = %+v %v", agents, e)
-	}
-	if _, e := f.store.CreateSquad(ctx, f.tenant, owner, store.SquadInput{
-		Name: "market agent", LeaderAgentID: &codex.ID,
-	}); !errors.Is(e, store.ErrAgentUnavailable) {
-		t.Fatalf("market agent as squad leader = %v", e)
-	}
-	removedCodex, e := f.store.RemoveSpacePlugin(ctx, f.tenant, space, owner, path, "remove-codex", store.PluginRemoveInput{
-		Identifier: "official/ora-space.codex", Version: codex.Version,
-	})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if removedCodex.DesiredState != "removed" || removedCodex.ObservedState != "removed" ||
-		removedCodex.ObservedVersion != nil {
-		t.Fatalf("removed codex = %+v", removedCodex)
-	}
-	reinstalledCodex, e := f.store.InstallSpacePlugin(ctx, f.tenant, space, owner, path, "reinstall-codex", store.PluginInstallInput{
-		Identifier: "official/ora-space.codex", PluginVersion: "0.3.14", Version: removedCodex.Version,
-	})
-	if e != nil || reinstalledCodex.DesiredState != "installed" ||
-		reinstalledCodex.ObservedState != "installed" {
-		t.Fatalf("reinstalled codex = %+v %v", reinstalledCodex, e)
+		t.Fatalf("runnable agents after market agent rejection = %+v %v", agents, e)
 	}
 
 	removed, e := f.store.RemoveSpacePlugin(ctx, f.tenant, space, owner, path, "remove-skill", store.PluginRemoveInput{
@@ -346,7 +319,7 @@ func TestPluginMarketLifecycle(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(selections) != 3 {
+	if len(selections) != 2 {
 		t.Fatalf("selections after removal = %+v", selections)
 	}
 	agents, e := f.store.SpaceAgentPlugins(ctx, f.tenant, space)
@@ -355,7 +328,7 @@ func TestPluginMarketLifecycle(t *testing.T) {
 	}
 }
 
-func TestHookSelectionIsDatabaseBackedWithoutExecuting(t *testing.T) {
+func TestMarketAgentSelectionUpdateIsRejected(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
 	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
@@ -364,79 +337,76 @@ func TestHookSelectionIsDatabaseBackedWithoutExecuting(t *testing.T) {
 	}
 	space := spaces[0].ID
 	path := "/api/v1/tenants/" + f.tenant + "/spaces/" + space + "/plugins"
-	if e := f.store.ReplacePluginCatalog(f.ctx, []pluginmarket.Entry{pluginmarket.DemoHookEntry()}, time.Now()); e != nil {
+	if e := f.store.ReplacePluginCatalog(f.ctx, []pluginmarket.Entry{
+		{Namespace: "official", Identifier: "ora-space.codex", Title: "Codex", Kind: "agent", Version: "0.3.14", Description: "Agent", Readme: "# Codex", MarketplaceVisible: true, SourceURL: "https://github.com/ora-space/marketplace"},
+	}, time.Now()); e != nil {
+		t.Fatal(e)
+	}
+	// Simulate a market Agent selection recorded before the read-only change: the row exists with
+	// a user as the requester. The update must be rejected, not silently refreshed.
+	if _, e := f.db.Exec(f.ctx, `
+		INSERT INTO v2_space_agents
+			(tenant_id, space_id, name, status, source_namespace, identifier, kind,
+			 desired_state, desired_version, observed_state, observed_version, requested_by_user_id)
+		VALUES ($1, $2, 'Codex', 'active', 'official', 'ora-space.codex', 'agent',
+			'installed', '0.3.14', 'installed', '0.3.14', $3)`,
+		f.tenant, space, owner); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := f.store.InstallSpacePlugin(f.ctx, f.tenant, space, owner, path, "update-market-agent", store.PluginInstallInput{
+		Identifier: "official/ora-space.codex", PluginVersion: "0.3.14", Version: 1,
+	}); !errors.Is(e, store.ErrPluginKindNotInstallable) {
+		t.Fatalf("market agent update = %v", e)
+	}
+	agents, e := f.store.SpaceAgentPlugins(f.ctx, f.tenant, space)
+	if e != nil || len(agents) != 2 {
+		t.Fatalf("market agent leaked into executable Agents: %+v %v", agents, e)
+	}
+	for _, agent := range agents {
+		if agent.Identifier == "ora-space.codex" {
+			t.Fatalf("market agent leaked into executable Agents: %+v", agent)
+		}
+	}
+}
+
+func TestHookInstallIsRejected(t *testing.T) {
+	f := newSquadFixture(t)
+	owner := f.login(t, "owner", "owner")
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
+	if e != nil || len(spaces) != 1 {
+		t.Fatalf("spaces = %v %v", spaces, e)
+	}
+	space := spaces[0].ID
+	path := "/api/v1/tenants/" + f.tenant + "/spaces/" + space + "/plugins"
+	if e := f.store.ReplacePluginCatalog(f.ctx, []pluginmarket.Entry{{
+		Namespace: "official", Identifier: "acme.hooks", Title: "Acme Hooks", Kind: "hook", Version: "1.0.0",
+		Description: "Hooks", MarketplaceVisible: true, SourceURL: "https://example.org",
+	}}, time.Now()); e != nil {
 		t.Fatal(e)
 	}
 
-	installed, e := f.store.InstallSpacePlugin(f.ctx, f.tenant, space, owner, path, "install-hook", store.PluginInstallInput{
-		Identifier: "demo/sample-hooks", PluginVersion: "1.0.0", Version: 0,
-	})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if installed.Kind != "hook" || installed.DesiredState != "installed" ||
-		installed.ObservedState != "installed" || installed.ObservedVersion == nil ||
-		*installed.ObservedVersion != "1.0.0" || installed.RequestedByUserID == nil ||
-		*installed.RequestedByUserID != owner {
-		t.Fatalf("installed hook = %+v", installed)
-	}
-
-	var kind, desired, observed string
-	var observedVersion *string
-	if e := f.db.QueryRow(f.ctx, `
-		SELECT kind, desired_state, observed_state, observed_version
-		FROM v2_space_agents WHERE id = $1`, installed.ID).
-		Scan(&kind, &desired, &observed, &observedVersion); e != nil {
-		t.Fatal(e)
-	}
-	if kind != "hook" || desired != "installed" || observed != "installed" ||
-		observedVersion == nil || *observedVersion != "1.0.0" {
-		t.Fatalf("hook row = kind=%q desired=%q observed=%q version=%v", kind, desired, observed, observedVersion)
+	if _, e := f.store.InstallSpacePlugin(f.ctx, f.tenant, space, owner, path, "install-hook", store.PluginInstallInput{
+		Identifier: "official/acme.hooks", PluginVersion: "1.0.0", Version: 0,
+	}); !errors.Is(e, store.ErrPluginKindNotInstallable) {
+		t.Fatalf("hook install accepted = %v", e)
 	}
 
 	selections, e := f.store.SpacePlugins(f.ctx, f.tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}
-	found := false
 	for _, selection := range selections {
-		if selection.Identifier == "sample-hooks" {
-			found = true
-			if selection.Kind != "hook" || selection.ObservedState != "installed" {
-				t.Fatalf("member view of hook = %+v", selection)
-			}
+		if selection.Identifier == "acme.hooks" {
+			t.Fatalf("hook leaked into selections: %+v", selection)
 		}
-	}
-	if !found {
-		t.Fatalf("member cannot read hook selection: %+v", selections)
 	}
 	agents, e := f.store.SpaceAgentPlugins(f.ctx, f.tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}
 	for _, agent := range agents {
-		if agent.Identifier == "sample-hooks" {
+		if agent.Identifier == "acme.hooks" {
 			t.Fatalf("hook leaked into executable Agents: %+v", agent)
-		}
-	}
-
-	removed, e := f.store.RemoveSpacePlugin(f.ctx, f.tenant, space, owner, path, "remove-hook", store.PluginRemoveInput{
-		Identifier: "demo/sample-hooks", Version: installed.Version,
-	})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if removed.DesiredState != "removed" || removed.ObservedState != "removed" ||
-		removed.ObservedVersion != nil {
-		t.Fatalf("removed hook = %+v", removed)
-	}
-	after, e := f.store.SpacePlugins(f.ctx, f.tenant, space)
-	if e != nil {
-		t.Fatal(e)
-	}
-	for _, selection := range after {
-		if selection.Identifier == "sample-hooks" && selection.ObservedState != "removed" {
-			t.Fatalf("hook after removal = %+v", selection)
 		}
 	}
 }

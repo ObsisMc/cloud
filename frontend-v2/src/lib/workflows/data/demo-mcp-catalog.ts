@@ -1,5 +1,5 @@
 import { getApiV1TenantsTidSpaces, getApiV1TenantsTidSpacesSpaceIdPluginsCatalog } from '@/api/spaces/spaces'
-import { withDemoCatalog } from '@/lib/settings-demo/plugin-catalog'
+import { withDemoCatalog } from '@/lib/demo/plugin-installs'
 import type { InstalledPlugin } from '../contracts'
 
 /** Reuses Settings' user/tenant/space selections for authoring only; no MCP is started. */

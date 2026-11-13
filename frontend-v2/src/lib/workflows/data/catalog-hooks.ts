@@ -7,7 +7,7 @@ import { useRoleCatalog } from "@/lib/settings-demo/role-hooks";
 import { useContractsClient } from "./contracts-client";
 import { useAgentCatalog, type AgentEntry } from "./use-agent-catalog";
 import { useUser } from "@/app/auth/user";
-import { useDemoPluginSelections } from "@/lib/settings-demo/plugin-selections";
+import { useDemoPluginSelections } from "@/lib/demo/plugin-installs";
 import { workflowDemoMcps } from "./demo-mcp-catalog";
 
 // Desktop's catalog hooks (`state/hooks/use-agents`, `use-skills`, `use-installed-plugins`,

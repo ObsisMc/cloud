@@ -2,8 +2,14 @@ package server_test
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,15 +178,9 @@ func TestPluginMarketHTTP(t *testing.T) {
 		"pluginVersion": "0.3.14",
 		"version":       0,
 	}, map[string]string{"Idempotency-Key": "install-codex"})
-	if status != 200 {
-		t.Fatalf("install codex = %d %v", status, body)
+	if status != 400 || body["code"] != "plugin_kind_not_installable" {
+		t.Fatalf("install market agent = %d %v", status, body)
 	}
-	codex := body["resource"].(map[string]any)
-	if codex["kind"] != "agent" || codex["desiredState"] != "installed" ||
-		codex["observedState"] != "installed" || codex["observedVersion"] != "0.3.14" {
-		t.Fatalf("installed codex = %v", codex)
-	}
-	codexVersion := codex["version"].(float64)
 	status, body = c.doHeaders("POST", base, map[string]any{
 		"identifier": "official/ora-space.opencode",
 		"version":    0,
@@ -194,18 +194,6 @@ func TestPluginMarketHTTP(t *testing.T) {
 	}, map[string]string{"Idempotency-Key": "remove-runtime-agent"})
 	if status != 409 || body["code"] != "plugin_runtime_managed" {
 		t.Fatalf("preinstalled removal = %d %v", status, body)
-	}
-	status, body = c.doHeaders("DELETE", base, map[string]any{
-		"identifier": "official/ora-space.codex",
-		"version":    int64(codexVersion),
-	}, map[string]string{"Idempotency-Key": "remove-codex"})
-	if status != 200 {
-		t.Fatalf("remove codex = %d %v", status, body)
-	}
-	removedCodex := body["resource"].(map[string]any)
-	if removedCodex["desiredState"] != "removed" || removedCodex["observedState"] != "removed" ||
-		removedCodex["observedVersion"] != nil {
-		t.Fatalf("removed codex = %v", removedCodex)
 	}
 
 	status, body = c.doHeaders("DELETE", base, map[string]any{
@@ -231,13 +219,13 @@ func TestPluginMarketHTTP(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("plugins after remove = %d %v", status, body)
 	}
-	// The removed Skill row is gone; the removed Agent stays as a settled selection.
-	if items, _ := body["items"].([]any); len(items) != 3 {
+	// The removed Skill row is gone; only the two preinstalled Agents remain.
+	if items, _ := body["items"].([]any); len(items) != 2 {
 		t.Fatalf("plugins after remove = %v", body)
 	}
 }
 
-func TestHookPluginHTTPDemoSelection(t *testing.T) {
+func TestHookPluginIsReadOnly(t *testing.T) {
 	f := newSquadServer(t)
 	c := newContractClient(t, f.srv.URL)
 	c.login()
@@ -252,7 +240,10 @@ func TestHookPluginHTTPDemoSelection(t *testing.T) {
 	}
 	space := spaces[0].(map[string]any)["id"].(string)
 	base := "/api/v1/tenants/" + tenant + "/spaces/" + space + "/plugins"
-	if e := f.store.ReplacePluginCatalog(context.Background(), []pluginmarket.Entry{pluginmarket.DemoHookEntry()}, time.Now()); e != nil {
+	if e := f.store.ReplacePluginCatalog(context.Background(), []pluginmarket.Entry{{
+		Namespace: "official", Identifier: "acme.hooks", Title: "Acme Hooks", Kind: "hook", Version: "1.0.0",
+		Description: "Hooks", MarketplaceVisible: true, SourceURL: "https://example.org",
+	}}, time.Now()); e != nil {
 		t.Fatal(e)
 	}
 
@@ -264,57 +255,147 @@ func TestHookPluginHTTPDemoSelection(t *testing.T) {
 	if len(catalog) != 1 {
 		t.Fatalf("hook catalog = %v", body)
 	}
-	entry := catalog[0].(map[string]any)
-	if entry["id"] != "demo/sample-hooks" || entry["kind"] != "hook" ||
-		entry["url"] != nil || entry["sha256"] != nil {
-		t.Fatalf("hook catalog entry = %v", entry)
+
+	status, body = c.doHeaders("POST", base, map[string]any{
+		"identifier":    "official/acme.hooks",
+		"pluginVersion": "1.0.0",
+		"version":       0,
+	}, map[string]string{"Idempotency-Key": "install-hook"})
+	if status != 400 || body["code"] != "plugin_kind_not_installable" {
+		t.Fatalf("install hook = %d %v", status, body)
+	}
+}
+
+func customWorkflowArchive(t *testing.T, identifier string) string {
+	t.Helper()
+	f, e := os.CreateTemp(t.TempDir(), "workflow-*.orax")
+	if e != nil {
+		t.Fatal(e)
+	}
+	z := zip.NewWriter(f)
+	manifest, e := z.Create("orax.toml")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, _ = manifest.Write([]byte(`resolver = 1
+title = "Acme Custom Workflow"
+identifier = "` + identifier + `"
+namespace = "acme"
+kind = "workflow"
+version = "0.1.0"
+description = "A workflow from a custom source."
+`))
+	document, e := z.Create("assets/workflows/acme-custom.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, _ = document.Write([]byte(`{"name":"Acme Custom","nodes":[{"id":"start","data":{"kind":"start"}},{"id":"output","data":{"kind":"output"}}],"edges":[{"source":"start","target":"output"}]}`))
+	if e := z.Close(); e != nil {
+		t.Fatal(e)
+	}
+	if e := f.Close(); e != nil {
+		t.Fatal(e)
+	}
+	return f.Name()
+}
+
+// A custom (non-official) market source with sealed S3 credentials installs a workflow end to
+// end: the package source resolves retrieval and credentials for the namespace, the download
+// receives them, and verification plus import still complete.
+func TestWorkflowInstallFromCustomCredentialedSource(t *testing.T) {
+	t.Setenv("V2_MARKET_CREDENTIAL_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	archive := customWorkflowArchive(t, "acme.test-workflow")
+	raw, e := os.ReadFile(archive)
+	if e != nil {
+		t.Fatal(e)
+	}
+	digest := sha256.Sum256(raw)
+	digestHex := hex.EncodeToString(digest[:])
+
+	var gotRetrieval pluginmarket.Retrieval
+	var gotCredentials pluginmarket.Credentials
+	f := newSquadServerWith(t, server.Options{
+		SessionTTL:       time.Hour,
+		ValidateWorkflow: func(string) error { return nil },
+		DownloadPluginPackage: func(_ context.Context, _ string, _ string, r pluginmarket.Retrieval, c pluginmarket.Credentials) (string, error) {
+			gotRetrieval, gotCredentials = r, c
+			file, e := os.CreateTemp(t.TempDir(), "download-*.orax")
+			if e != nil {
+				return "", e
+			}
+			if _, e := file.Write(raw); e != nil {
+				_ = file.Close()
+				return "", e
+			}
+			if e := file.Close(); e != nil {
+				return "", e
+			}
+			return file.Name(), nil
+		},
+	})
+	c := newContractClient(t, f.srv.URL)
+	c.login()
+	tenant := c.tenant()
+	status, body := c.do("GET", "/api/v1/tenants/"+tenant+"/spaces", nil)
+	if status != 200 {
+		t.Fatalf("spaces = %d %v", status, body)
+	}
+	spaces, _ := body["items"].([]any)
+	if len(spaces) != 1 {
+		t.Fatalf("spaces = %v", body)
+	}
+	space := spaces[0].(map[string]any)["id"].(string)
+	base := "/api/v1/tenants/" + tenant + "/spaces/" + space + "/plugins"
+
+	retrieval := pluginmarket.Retrieval{
+		Mode: "s3_sigv4", Endpoint: "https://objects.example.org", Bucket: "custom-market", Region: "test",
+	}
+	creds := pluginmarket.Credentials{AccessKey: "AKIATESTCUSTOM", SecretKey: "custom-secret"}
+	binding := strings.Join([]string{space, "acme", retrieval.Endpoint, retrieval.Bucket}, "/")
+	sealed, e := pluginmarket.SealCredentials(creds, binding)
+	if e != nil {
+		t.Fatal(e)
+	}
+	config, e := json.Marshal(retrieval)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e := f.db.Exec(f.ctx, `
+		INSERT INTO v2_market_sources(space_id, namespace, url, branch, enabled, retrieval, credentials)
+		VALUES ($1, 'acme', 'https://github.com/acme/custom-market.git', 'main', true, $2, $3)`,
+		space, config, sealed); e != nil {
+		t.Fatal(e)
+	}
+	if e := f.store.ReplacePluginCatalog(context.Background(), []pluginmarket.Entry{{
+		Namespace: "acme", Identifier: "acme.test-workflow", Title: "Acme Custom",
+		Kind: "workflow", Version: "0.1.0", Description: "A custom workflow",
+		URL: "custom-workflow.orax", SHA256: digestHex,
+		MarketplaceVisible: true, SourceURL: "https://github.com/acme/custom-market",
+	}}, time.Now()); e != nil {
+		t.Fatal(e)
 	}
 
 	status, body = c.doHeaders("POST", base, map[string]any{
-		"identifier":    "demo/sample-hooks",
-		"pluginVersion": "1.0.0",
-		"version":       0,
-	}, map[string]string{"Idempotency-Key": "install-demo-hook"})
+		"identifier": "acme/acme.test-workflow", "pluginVersion": "0.1.0", "version": 0,
+	}, map[string]string{"Idempotency-Key": "install-custom-workflow"})
 	if status != 200 {
-		t.Fatalf("install hook = %d %v", status, body)
+		t.Fatalf("custom workflow install = %d %v", status, body)
 	}
 	resource := body["resource"].(map[string]any)
-	if resource["kind"] != "hook" || resource["desiredState"] != "installed" ||
-		resource["observedState"] != "installed" || resource["observedVersion"] != "1.0.0" {
-		t.Fatalf("installed hook = %v", resource)
+	if resource["kind"] != "workflow" || resource["observedState"] != "installed" ||
+		resource["observedVersion"] != "0.1.0" {
+		t.Fatalf("installed custom workflow = %v", resource)
 	}
-	version := resource["version"].(float64)
-
-	status, body = c.do("GET", base, nil)
-	if status != 200 {
-		t.Fatalf("plugins = %d %v", status, body)
+	if gotRetrieval.Mode != "s3_sigv4" || gotCredentials.AccessKey != creds.AccessKey ||
+		gotCredentials.SecretKey != creds.SecretKey {
+		t.Fatalf("credentials not passed to download: %+v %+v", gotRetrieval, gotCredentials)
 	}
-	items, _ := body["items"].([]any)
-	found := false
-	for _, raw := range items {
-		item := raw.(map[string]any)
-		if item["identifier"] == "sample-hooks" {
-			found = true
-			if item["kind"] != "hook" || item["observedState"] != "installed" {
-				t.Fatalf("hook selection = %v", item)
-			}
-		}
+	workflows, e := f.store.Workflows(context.Background(), tenant)
+	if e != nil || len(workflows) != 1 {
+		t.Fatalf("imported custom workflows = %+v %v", workflows, e)
 	}
-	if !found {
-		t.Fatalf("hook selection missing: %v", body)
-	}
-
-	status, body = c.doHeaders("DELETE", base, map[string]any{
-		"identifier": "demo/sample-hooks",
-		"version":    int64(version),
-	}, map[string]string{"Idempotency-Key": "remove-demo-hook"})
-	if status != 200 {
-		t.Fatalf("remove hook = %d %v", status, body)
-	}
-	removed := body["resource"].(map[string]any)
-	if removed["desiredState"] != "removed" || removed["observedState"] != "removed" ||
-		removed["observedVersion"] != nil {
-		t.Fatalf("removed hook = %v", removed)
+	if workflows[0].Name != "Acme Custom" {
+		t.Fatalf("imported workflow name = %+v", workflows[0])
 	}
 }
 
