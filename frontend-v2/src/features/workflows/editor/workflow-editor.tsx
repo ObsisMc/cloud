@@ -473,6 +473,12 @@ function WorkflowEditorContent({
   const deleteSnapshotMutation = useDeleteWorkflowSnapshot();
 
   const [workflow, setWorkflow] = useState<DemoWorkflow | null>(null);
+  /**
+   * True while the open draft is flushed before switching to another workflow. The canvas
+   * stays mounted for that write (it reads React Flow's live geometry) but takes no edits,
+   * so a fast click cannot land on the workflow the user just left.
+   */
+  const [switchingWorkflow, setSwitchingWorkflow] = useState(false);
   /** Selected workflow id whose draft is currently mounted in the editor. */
   const [hydratedWorkflowId, setHydratedWorkflowId] = useState<string | null>(
     null,
@@ -1107,6 +1113,7 @@ function WorkflowEditorContent({
         event.isComposing ||
         (!event.ctrlKey && !event.metaKey) ||
         previewedVersion !== null ||
+        switchingWorkflow ||
         workflowRef.current === null
       ) {
         return;
@@ -1126,20 +1133,27 @@ function WorkflowEditorContent({
     }
     window.addEventListener("keydown", handleHistoryShortcut);
     return () => window.removeEventListener("keydown", handleHistoryShortcut);
-  }, [previewedVersion, redoWorkflow, undoWorkflow]);
+  }, [previewedVersion, redoWorkflow, switchingWorkflow, undoWorkflow]);
 
   /** Switches the active workflow after flushing any pending draft write. */
   async function selectWorkflow(workflowId: string): Promise<void> {
     if (workflowId === resolvedWorkflowId) {
       return;
     }
-    const saved = await autosave.flush({ force: true });
+    setSwitchingWorkflow(true);
+    const saved = await autosave.flush({ force: true }).catch(() => false);
     if (!saved) {
       // Stay on the current draft so a failed write cannot drop unsaved edits.
+      setSwitchingWorkflow(false);
       return;
     }
+    // Unmount the left draft now rather than when the next one hydrates, so the canvas
+    // never shows (and edits) the previous workflow under the new selection.
     setPreviewedVersion(null);
+    setHydratedWorkflowId(null);
+    setWorkflow(null);
     setSelectedWorkflowId(workflowId);
+    setSwitchingWorkflow(false);
     setManagerError(null);
   }
 
@@ -2526,6 +2540,8 @@ function WorkflowEditorContent({
     <main
       id="main-content"
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
+      inert={switchingWorkflow}
+      aria-busy={switchingWorkflow}
       onKeyDown={(event) => {
         if (
           event.key === "Escape" &&
