@@ -119,7 +119,7 @@ test('settings pages avoid global demo labels and the reset control', async ({ p
   }
 })
 
-test('Workflow Examples persists locally across reload and never writes to the server', async ({ page }) => {
+test('Workflow Examples is read-only and never writes to the server', async ({ page }) => {
   await login(page, '/settings/plugins')
   const writes: string[] = []
   page.on('request', (req) => {
@@ -127,12 +127,10 @@ test('Workflow Examples persists locally across reload and never writes to the s
       !['GET', 'HEAD', 'OPTIONS'].includes(req.method())) writes.push(req.url())
   })
   const row = page.getByRole('article', { name: 'Workflow Examples' })
-  await row.getByRole('button', { name: '安装', exact: true }).click()
-  await expect(row.getByText('已安装', { exact: true })).toBeVisible({ timeout: 10_000 })
-  await page.reload()
-  await row.getByRole('button', { name: '卸载' }).click()
-  await page.getByRole('alertdialog').getByRole('button', { name: '卸载' }).click()
-  await expect(row.getByText('未安装', { exact: true })).toBeVisible()
+  await expect(row.getByText('暂不支持安装')).toBeVisible()
+  expect(
+    await row.getByRole('button', { name: '安装' }).count(),
+  ).toBe(0)
   expect(writes).toEqual([])
 })
 
@@ -140,7 +138,7 @@ test('server-backed plugin and skill install lifecycle survives reload and a new
   page,
   browser,
 }) => {
-  // Four plugin installs each wait 3-5 seconds before reaching the server.
+  // Skill installs settle through the server; read-only kinds stay visible without an install entry.
   test.setTimeout(120_000)
   await login(page, '/settings/plugins')
   const row = page.getByRole('article', { name: 'Matt Pocock Skills' })
@@ -218,51 +216,8 @@ test('server-backed plugin and skill install lifecycle survives reload and a new
 
   await page.goto('/settings/plugins')
   const tavily = page.getByRole('article', { name: 'Tavily' })
-  await tavily.getByRole('button', { name: '安装' }).click()
-  await expect(tavily.getByText('已安装', { exact: true })).toBeVisible({
-    timeout: 15_000,
-  })
-  await page.reload()
-  await expect(tavily.getByText('已安装', { exact: true })).toBeVisible()
-  await tavily.getByRole('button', { name: '移除' }).click()
-  await page
-    .getByRole('alertdialog')
-    .getByRole('button', { name: '移除' })
-    .click()
-  await expect(tavily.getByText('未安装', { exact: true })).toBeVisible()
-
-  const hooks = page.getByRole('article', { name: '示例 Hooks' })
-  await expect(page.getByRole('heading', { name: 'Hooks' })).toBeVisible()
-  const hookInstall = hooks.getByRole('button', { name: '安装' })
-  if (await hookInstall.count()) await hookInstall.click()
-  await expect(
-    hooks.getByText('已安装（演示）', { exact: true }),
-  ).toBeVisible({ timeout: 15_000 })
-  await page.reload()
-  await expect(
-    hooks.getByText('已安装（演示）', { exact: true }),
-  ).toBeVisible()
-
-  const hookContext = await browser.newContext({
-    baseURL: new URL(page.url()).origin,
-  })
-  const hookPage = await hookContext.newPage()
-  await login(hookPage, '/settings/plugins')
-  await expect(
-    hookPage
-      .getByRole('article', { name: '示例 Hooks' })
-      .getByText('已安装（演示）', { exact: true }),
-  ).toBeVisible()
-  await hookContext.close()
-
-  await hooks.getByRole('button', { name: '移除' }).click()
-  await page
-    .getByRole('alertdialog')
-    .getByRole('button', { name: '移除' })
-    .click()
-  await expect(hooks.getByText('未安装', { exact: true })).toBeVisible()
-  await page.reload()
-  await expect(hooks.getByText('未安装', { exact: true })).toBeVisible()
+  await expect(tavily.getByText('暂不支持安装')).toBeVisible()
+  expect(await tavily.getByRole('button', { name: '安装' }).count()).toBe(0)
 })
 
 test('server-backed user skills create, import, overwrite, reload and isolate by browser context', async ({
@@ -328,75 +283,23 @@ test('server-backed user skills create, import, overwrite, reload and isolate by
   }
 })
 
-test('Agent cards install and remove while preinstalled Agents run the demo install', async ({
-  page,
-  browser,
-}) => {
-  test.setTimeout(120_000)
+test('preinstalled and market Agents are read-only', async ({ page }) => {
   await login(page, '/settings/plugins')
   const opencode = page.getByRole('article', { name: 'OpenCode' })
   const codex = page.getByRole('article', { name: 'Codex' })
   await expect(opencode.getByText('运行时预装')).toBeVisible()
-  await expect(
-    opencode.getByText('已安装', { exact: true }),
-  ).toHaveCount(0)
-  await expect(opencode.getByRole('button', { name: '移除' })).toHaveCount(0)
-  await opencode.getByRole('button', { name: '安装' }).click()
-  await expect(opencode.getByText('安装中', { exact: true })).toBeVisible()
-  await expect(opencode.getByText('安装中', { exact: true })).toHaveCount(0, {
-    timeout: 15_000,
-  })
-  await expect(
-    opencode.getByText('已安装', { exact: true }),
-  ).toBeVisible()
-  await expect(
-    opencode.getByRole('button', { name: '安装' }),
-  ).toHaveCount(0)
-  await page.reload()
-  await expect(
-    opencode.getByText('已安装', { exact: true }),
-  ).toBeVisible()
-  await expect(
-    opencode.getByRole('button', { name: '安装' }),
-  ).toHaveCount(0)
+  expect(await opencode.getByRole('button', { name: '安装' }).count()).toBe(0)
+  expect(await opencode.getByRole('button', { name: '移除' }).count()).toBe(0)
   await expect(
     page
       .getByRole('article', { name: 'Claude Code' })
       .getByText('运行时预装'),
   ).toBeVisible()
-
-  const remove = codex.getByRole('button', { name: '移除' })
-  if (await remove.count()) {
-    await remove.click()
-    await page
-      .getByRole('alertdialog')
-      .getByRole('button', { name: '移除' })
-      .click()
-    await expect(codex.getByText('未安装', { exact: true })).toBeVisible()
-  }
-  await codex.getByRole('button', { name: '安装' }).click()
-  await expect(codex.getByText('已安装', { exact: true })).toBeVisible({
-    timeout: 15_000,
-  })
+  await expect(codex.getByText('暂不支持安装')).toBeVisible()
+  expect(await codex.getByRole('button', { name: '安装' }).count()).toBe(0)
   await page.reload()
-  await expect(codex.getByText('已安装', { exact: true })).toBeVisible()
-
-  const other = await browser.newContext({ baseURL: new URL(page.url()).origin })
-  const otherPage = await other.newPage()
-  await login(otherPage, '/settings/plugins')
-  await expect(
-    otherPage
-      .getByRole('article', { name: 'Codex' })
-      .getByText('已安装', { exact: true }),
-  ).toBeVisible()
-  await other.close()
-
-  await codex.getByRole('button', { name: '移除' }).click()
-  await page
-    .getByRole('alertdialog')
-    .getByRole('button', { name: '移除' })
-    .click()
-  await expect(codex.getByText('未安装', { exact: true })).toBeVisible()
+  await expect(opencode.getByText('运行时预装')).toBeVisible()
+  await expect(codex.getByText('暂不支持安装')).toBeVisible()
 })
 
 test('owner manages a space market while the official catalog stays shared', async ({
@@ -560,23 +463,9 @@ test('seven settings pages and keyboard-accessible details', async ({
     if (path !== 'theme')
       await expect(page.getByText('正在加载…', { exact: true })).toHaveCount(0)
     if (path === 'plugins') {
-      for (const name of ['Tavily', '示例 Hooks']) {
-        const plugin = page.getByRole('article', { name })
-        const install = plugin.getByRole('button', { name: '安装' })
-        if (await install.count()) await install.click()
-      }
-      await expect(
-        page.getByRole('article', { name: 'Tavily' }).getByText(
-          '已安装',
-          { exact: true },
-        ),
-      ).toBeVisible({ timeout: 15_000 })
-      await expect(
-        page.getByRole('article', { name: '示例 Hooks' }).getByText(
-          '已安装（演示）',
-          { exact: true },
-        ),
-      ).toBeVisible({ timeout: 15_000 })
+      const tavily = page.getByRole('article', { name: 'Tavily' })
+      await expect(tavily.getByText('暂不支持安装')).toBeVisible()
+      expect(await tavily.getByRole('button', { name: '安装' }).count()).toBe(0)
     }
     await resetScroll(page)
     await page.screenshot({
