@@ -966,11 +966,10 @@
         "required": [
           "kind",
           "workflowId",
-          "snapshotId",
           "input"
         ],
         "additionalProperties": false,
-        "description": "A workflow run in the schedule's project: one published snapshot of the workflow, frozen when the schedule is saved, and the kickoff input (may be empty). Each trigger creates and starts one run whose stable identity is the occurrence.",
+        "description": "Workflow target: fixed (default) pins snapshotId; latest resolves the effective release for each trigger. The resulting run permanently freezes the resolved snapshot.",
         "properties": {
           "kind": {
             "type": "string",
@@ -989,6 +988,14 @@
           "input": {
             "type": "string",
             "maxLength": 32000
+          },
+          "versionPolicy": {
+            "type": "string",
+            "enum": [
+              "fixed",
+              "latest"
+            ],
+            "description": "Omitted means fixed. Fixed requires snapshotId; latest forbids it and resolves the effective published snapshot atomically on every trigger."
           }
         }
       },

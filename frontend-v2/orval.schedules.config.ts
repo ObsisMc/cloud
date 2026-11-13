@@ -5,7 +5,7 @@ export default defineConfig({
   schedules: {
     input: { target: '../v2-server/schedules.openapi.json' },
     output: {
-      target: 'src/features/schedules/api/generated.ts',
+      target: 'src/lib/schedules-api/generated.ts',
       client: 'react-query',
       httpClient: 'axios',
       clean: true,

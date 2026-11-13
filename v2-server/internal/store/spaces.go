@@ -64,18 +64,13 @@ type SpacePlugin struct {
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
-// TenantSpaces returns the caller's workspace spaces. The membership check runs first so a
-// non-member cannot probe which spaces a workspace holds.
-func (s *Store) TenantSpaces(ctx context.Context, tenant, caller string) ([]Space, error) {
-	role, e := tenantRole(ctx, s.pool, tenant, caller)
-	if e != nil {
-		return nil, e
-	}
+// TenantSpaces returns the spaces of the caller's tenant, each carrying the caller's role.
+func (s *Store) TenantSpaces(ctx context.Context, a Access) ([]Space, error) {
 	rows, e := s.pool.Query(ctx, `
 		SELECT id, name, description, slug, version, created_by, created_at, updated_at, archived_at
 		FROM v2_spaces
 		WHERE tenant_id = $1 AND archived_at IS NULL
-		ORDER BY created_at, id`, tenant)
+		ORDER BY created_at, id`, a.TenantID)
 	if e != nil {
 		return nil, fmt.Errorf("list tenant spaces: %w", e)
 	}
@@ -87,7 +82,7 @@ func (s *Store) TenantSpaces(ctx context.Context, tenant, caller string) ([]Spac
 			&sp.CreatedAt, &sp.UpdatedAt, &sp.ArchivedAt); e != nil {
 			return nil, fmt.Errorf("scan tenant space: %w", e)
 		}
-		sp.TenantID, sp.Role = tenant, role
+		sp.TenantID, sp.Role = a.TenantID, a.Role
 		items = append(items, sp)
 	}
 	if e := rows.Err(); e != nil {
@@ -96,14 +91,10 @@ func (s *Store) TenantSpaces(ctx context.Context, tenant, caller string) ([]Spac
 	return items, nil
 }
 
-// SpaceAgentPlugins returns the system-preinstalled executable Agents in one of the caller's
-// spaces. Marketplace Agent selections are deliberately excluded. A space outside the caller's
-// workspace answers ErrNotFound, which the HTTP layer turns into 403 so an outsider cannot tell a
-// missing space from a forbidden one.
-func (s *Store) SpaceAgentPlugins(ctx context.Context, tenant, space, caller string) ([]SpacePlugin, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return nil, e
-	}
+// SpaceAgentPlugins returns the system-preinstalled executable Agents in one of the tenant's
+// spaces. Marketplace Agent selections are deliberately excluded. A space outside the tenant
+// answers ErrNotFound.
+func (s *Store) SpaceAgentPlugins(ctx context.Context, tenant, space string) ([]SpacePlugin, error) {
 	var owned bool
 	if e := s.pool.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM v2_spaces

@@ -134,7 +134,9 @@ func (s *Service) start(ctx context.Context, scope execution.Scope, caller execu
 	if s.closed || s.failed || s.ctx.Err() != nil {
 		return execution.Ref{}, execution.ErrUnavailable
 	}
-	if err := s.db.CheckExecutionScope(ctx, scope); err != nil {
+	// Admission is where execution starts on the user's behalf, so it applies tenant authorization;
+	// the store repeats it inside the transaction that records the session or turn.
+	if _, err := s.db.TenantAccess(ctx, scope.TenantID, scope.UserID); err != nil {
 		return execution.Ref{}, publicError(err)
 	}
 	// Retained attempts remain readable even when the original runtime has ended.
@@ -259,6 +261,11 @@ func sameAgentSelection(e *execution.Executor, executorID, agentID, modelID stri
 func (s *Service) Append(ctx context.Context, scope execution.Scope, req execution.AppendRequest) (execution.Ref, error) {
 	if err := validate(req.Caller, req.Prompt); err != nil {
 		return execution.Ref{}, err
+	}
+	// A new turn starts execution on the user's behalf, so it applies tenant authorization like
+	// start; the store repeats it inside the transaction that records the turn.
+	if _, err := s.db.TenantAccess(ctx, scope.TenantID, scope.UserID); err != nil {
+		return execution.Ref{}, publicError(err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -596,9 +603,6 @@ func (s *Service) readTurn(ctx context.Context, scope execution.Scope, ref execu
 }
 
 func (s *Service) ListModels(ctx context.Context, scope execution.Scope) ([]execution.Model, error) {
-	if err := s.db.CheckExecutionScope(ctx, scope); err != nil {
-		return nil, publicError(err)
-	}
 	// Consumers use the catalog as an execution-readiness gate, so an unusable
 	// runtime must not keep advertising otherwise valid deployment selections.
 	s.mu.Lock()

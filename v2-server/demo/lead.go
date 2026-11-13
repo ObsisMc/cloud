@@ -76,7 +76,11 @@ func seedLead(ctx context.Context, s *Seeder) error {
 			if status == store.TaskDone {
 				actor = lead.UserID
 			}
-			if task, err = s.Store.SetTaskStatus(ctx, lead.TenantID, actor, task.ID, status, task.Version); err != nil {
+			a, err := seedAccess(ctx, s.Store, execution.Scope{TenantID: lead.TenantID, UserID: actor})
+			if err != nil {
+				return err
+			}
+			if task, err = s.Store.SetTaskStatus(ctx, a, task.ID, status, task.Version); err != nil {
 				return fmt.Errorf("task %s → %s: %w", h.title, status, err)
 			}
 		}
@@ -97,6 +101,10 @@ func seedLeadSquad(ctx context.Context, s *Seeder, lead execution.Scope, members
 	if err != nil {
 		return err
 	}
+	a, err := seedAccess(ctx, s.Store, lead)
+	if err != nil {
+		return err
+	}
 	for _, m := range []store.SquadMemberInput{
 		{Type: store.MemberHuman, UserID: members[suRuiEmail].UserID, Role: "前端"},
 		{Type: store.MemberHuman, UserID: members[zhouHengEmail].UserID, Role: "后端"},
@@ -104,7 +112,7 @@ func seedLeadSquad(ctx context.Context, s *Seeder, lead execution.Scope, members
 		{Type: store.MemberAgent, SpaceAgentID: agents["ora-space.claude"], Role: "代码评审"},
 	} {
 		m.Version = squad.Version
-		if squad, err = s.Store.AddSquadMember(ctx, lead.TenantID, lead.UserID, squad.ID, m); err != nil {
+		if squad, err = s.Store.AddSquadMember(ctx, a, squad.ID, m); err != nil {
 			return fmt.Errorf("squad member %s: %w", m.Role, err)
 		}
 	}
@@ -113,7 +121,11 @@ func seedLeadSquad(ctx context.Context, s *Seeder, lead execution.Scope, members
 
 // spaceAgents maps the demo space's preinstalled Agents by identifier to their space Agent ids.
 func spaceAgents(ctx context.Context, s *Seeder, scope execution.Scope) (map[string]string, error) {
-	spaces, err := s.Store.TenantSpaces(ctx, scope.TenantID, scope.UserID)
+	a, err := seedAccess(ctx, s.Store, scope)
+	if err != nil {
+		return nil, err
+	}
+	spaces, err := s.Store.TenantSpaces(ctx, a)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +134,7 @@ func spaceAgents(ctx context.Context, s *Seeder, scope execution.Scope) (map[str
 		if space.Slug != store.DemoSpaceSlug {
 			continue
 		}
-		plugins, err := s.Store.SpaceAgentPlugins(ctx, scope.TenantID, space.ID, scope.UserID)
+		plugins, err := s.Store.SpaceAgentPlugins(ctx, scope.TenantID, space.ID)
 		if err != nil {
 			return nil, err
 		}

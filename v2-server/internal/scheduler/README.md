@@ -35,6 +35,7 @@
 
 `TargetRunner` 按冻结快照里的目标类型分派：对话交给 `ConversationAdapter`，工作流交给 `WorkflowAdapter`；没有工作流适配器时由对话适配器按不支持的目标拒绝。`WorkflowAdapter` 通过 `WorkflowRuns`（`server` 包把运行存储和执行桥 `WorkflowRunHost` 接成这个端口）在任务创建者的 scope 里执行，不复制图校验或引擎，也不直接驱动 Node：
 
+- 版本策略：旧配置/`fixed` 使用配置快照；`latest` 每次创建运行时在数据库事务内解析生效发布快照。运行创建后只按 occurrence 身份找回，重试、恢复和历史读取不重新解析版本。
 - **Dispatch**：`begin` 之后按 occurrence ID 这个稳定身份创建运行（重复创建得到 `store.ErrWorkflowRunTriggerTaken` 时按身份找回），再启动，成功后 `accepted` 并记 `{"workflowRunId"}`。快照、工作流或项目已不存在记 `rejected`（`workflow_unavailable` / `project_unavailable`）；执行桥拒绝启动或执行不可用时取消那个未开始的运行，记 `rejected`；结果未知（超时、取消、其他错误）记 `reconcile`，交给 Reconcile 按身份查。
 - **Reconcile**：按身份找运行。没有运行且没绑定过记 `not_accepted`；运行还是 pending 说明启动没有提交，取消它再记 `not_accepted`；运行中则绑定后等待；结束则记结果并释放占位（没有会话需要 End）。重启恢复（`server_restarted`）中失败的运行记 `interrupted`。
 - **Cancel**：`cancel_requested` 后经执行桥取消；停止未确认时保持 `cancelling`，运行真正结束后由 Reconcile 记录。

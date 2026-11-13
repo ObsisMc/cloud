@@ -16,6 +16,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/projectrepos"
 	"github.com/wanglongan587/cloud/v2-server/internal/scheduler"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 	"github.com/wanglongan587/cloud/v2-server/internal/workflow"
 )
 
@@ -222,7 +223,7 @@ func TestSeedsComposeAndHistoryIsOwnedByOps(t *testing.T) {
 			if run.Status != "awaitingInput" || item.Released || !item.WaitingForInput {
 				t.Fatalf("waiting history: %+v %+v", run, item)
 			}
-			form, err := s.WorkflowForm(ctx, tenant, seeds["ops"].Scope.UserID, runID)
+			form, err := s.WorkflowForm(ctx, storetest.Access(t, s, tenant, seeds["ops"].Scope.UserID), runID)
 			if err != nil || form.Status != "open" {
 				t.Fatalf("waiting form: %+v %v", form, err)
 			}
@@ -231,7 +232,7 @@ func TestSeedsComposeAndHistoryIsOwnedByOps(t *testing.T) {
 				t.Fatalf("finished history: %+v", run)
 			}
 			if i == 1 {
-				form, err := s.WorkflowForm(ctx, tenant, seeds["ops"].Scope.UserID, runID)
+				form, err := s.WorkflowForm(ctx, storetest.Access(t, s, tenant, seeds["ops"].Scope.UserID), runID)
 				if err != nil || string(form.Results) == "[]" {
 					t.Fatalf("submitted history: %+v %v", form, err)
 				}
@@ -264,7 +265,7 @@ func TestSeedsComposeAndHistoryIsOwnedByOps(t *testing.T) {
 		if err != nil || run.Status != "succeeded" || run.SnapshotID != quality.Snapshot.ID {
 			t.Fatalf("quality history run: %+v %v", run, err)
 		}
-		form, err := s.WorkflowForm(ctx, tenant, seeds["lead"].Scope.UserID, runID)
+		form, err := s.WorkflowForm(ctx, storetest.Access(t, s, tenant, seeds["lead"].Scope.UserID), runID)
 		if err != nil || form.Status != "submitted" || string(form.Answers) == "[]" {
 			t.Fatalf("quality form: %+v %v", form, err)
 		}

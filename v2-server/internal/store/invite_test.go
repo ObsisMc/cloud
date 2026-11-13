@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestSeedUsersIsIdempotentAndKeepsInvitedAccounts(t *testing.T) {
@@ -22,7 +23,7 @@ func TestSeedUsersIsIdempotentAndKeepsInvitedAccounts(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	invited, e := f.store.InviteMember(ctx, tenantOf(t, f, owner.ID), owner.ID, store.Invite{Email: "bob@demo.test"})
+	invited, e := f.store.InviteMember(ctx, tenantOf(t, f, owner.ID), store.Invite{Email: "bob@demo.test"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -63,7 +64,7 @@ func TestRetirePresetUsersHidesThemAndKeepsInvitedMembers(t *testing.T) {
 		t.Fatal(e)
 	}
 	tenant := tenantOf(t, f, owner.ID)
-	if _, e := f.store.InviteMember(ctx, tenant, owner.ID, store.Invite{Email: "carol@demo.test", DisplayName: "Carol"}); e != nil {
+	if _, e := f.store.InviteMember(ctx, tenant, store.Invite{Email: "carol@demo.test", DisplayName: "Carol"}); e != nil {
 		t.Fatal(e)
 	}
 
@@ -73,7 +74,7 @@ func TestRetirePresetUsersHidesThemAndKeepsInvitedMembers(t *testing.T) {
 	if _, e := f.store.UserByEmail(ctx, "alice@demo.test"); !errors.Is(e, store.ErrNotFound) {
 		t.Fatalf("retired user still signs in: %v", e)
 	}
-	members, e := f.store.TenantMembers(ctx, tenant, owner.ID)
+	members, e := f.store.TenantMembers(ctx, tenant)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -105,7 +106,7 @@ func TestRetirePresetUsersHidesThemAndKeepsInvitedMembers(t *testing.T) {
 func TestRetiredAccountIsNeitherInvitedBackNorGivenStarterSkills(t *testing.T) {
 	f := newSquadFixture(t)
 	ctx := f.ctx
-	owner := f.login(t, "owner", store.RoleOwner)
+	f.login(t, "owner", store.RoleOwner)
 	// An account from an older preset: it was created before the starter catalog existed, so it
 	// owns neither a skill nor a seed marker of its own.
 	var legacy string
@@ -124,7 +125,7 @@ func TestRetiredAccountIsNeitherInvitedBackNorGivenStarterSkills(t *testing.T) {
 	}
 
 	// The invitation path refuses the address instead of resurrecting it with a fresh catalog.
-	if _, e := f.store.InviteMember(ctx, f.tenant, owner, store.Invite{Email: "alice@demo.test"}); !errors.Is(e, store.ErrUserUnavailable) {
+	if _, e := f.store.InviteMember(ctx, f.tenant, store.Invite{Email: "alice@demo.test"}); !errors.Is(e, store.ErrUserUnavailable) {
 		t.Fatalf("inviting a retired address = %v", e)
 	}
 
@@ -176,7 +177,7 @@ func TestRetireLegacyDemoUserKeepsItsHistory(t *testing.T) {
 	if e := f.store.RetireLegacyDemoUser(ctx); e != nil {
 		t.Fatal(e)
 	}
-	members, e := f.store.TenantMembers(ctx, f.tenant, owner)
+	members, e := f.store.TenantMembers(ctx, f.tenant)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -255,16 +256,13 @@ func TestDeletedAccountsLeaveSquadsWithoutAName(t *testing.T) {
 	}
 }
 
-func TestInviteMemberRequiresOwnerAndCreatesTheAccount(t *testing.T) {
+// Only an owner may invite; the route declares that (see the server's route table test).
+func TestInviteMemberCreatesTheAccount(t *testing.T) {
 	f := newSquadFixture(t)
 	ctx := f.ctx
-	owner := f.login(t, "owner", "owner")
-	member := f.login(t, "member", "member")
+	f.login(t, "owner", "owner")
 
-	if _, e := f.store.InviteMember(ctx, f.tenant, member, store.Invite{Email: "new@demo.test"}); !errors.Is(e, store.ErrForbidden) {
-		t.Fatalf("member invite = %v", e)
-	}
-	if _, e := f.store.InviteMember(ctx, f.tenant, owner, store.Invite{Email: "new@demo.test"}); e != nil {
+	if _, e := f.store.InviteMember(ctx, f.tenant, store.Invite{Email: "new@demo.test"}); e != nil {
 		t.Fatal(e)
 	}
 	// The display name defaults to the local part, and the invitee can now sign in.
@@ -272,11 +270,11 @@ func TestInviteMemberRequiresOwnerAndCreatesTheAccount(t *testing.T) {
 	if e != nil || u.DisplayName != "new" {
 		t.Fatalf("invitee = %+v %v", u, e)
 	}
-	if _, e := f.store.InviteMember(ctx, f.tenant, owner, store.Invite{Email: "NEW@demo.test"}); !errors.Is(e, store.ErrAlreadyMember) {
+	if _, e := f.store.InviteMember(ctx, f.tenant, store.Invite{Email: "NEW@demo.test"}); !errors.Is(e, store.ErrAlreadyMember) {
 		t.Fatalf("duplicate invite = %v", e)
 	}
 	// An invalid address never creates an account.
-	if _, e := f.store.InviteMember(ctx, f.tenant, owner, store.Invite{Email: "not-an-address"}); e == nil {
+	if _, e := f.store.InviteMember(ctx, f.tenant, store.Invite{Email: "not-an-address"}); e == nil {
 		t.Fatal("invited an invalid address")
 	}
 }
@@ -289,7 +287,7 @@ func TestInviteMemberJoinsOneLiveSquad(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e := f.store.InviteMember(ctx, f.tenant, owner, store.Invite{Email: "new@demo.test", SquadID: squad.ID}); e != nil {
+	if _, e := f.store.InviteMember(ctx, f.tenant, store.Invite{Email: "new@demo.test", SquadID: squad.ID}); e != nil {
 		t.Fatal(e)
 	}
 	detail, e := f.store.Squad(ctx, f.tenant, squad.ID)
@@ -311,10 +309,10 @@ func TestInviteMemberJoinsOneLiveSquad(t *testing.T) {
 	}
 
 	// An archived or foreign squad refuses the invitation without creating the account.
-	if _, e := f.store.ArchiveSquad(ctx, f.tenant, owner, squad.ID, detail.Version); e != nil {
+	if _, e := f.store.ArchiveSquad(ctx, storetest.Access(t, f.store, f.tenant, owner), squad.ID, detail.Version); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := f.store.InviteMember(ctx, f.tenant, owner, store.Invite{Email: "late@demo.test", SquadID: squad.ID}); !errors.Is(e, store.ErrSquadNotFound) {
+	if _, e := f.store.InviteMember(ctx, f.tenant, store.Invite{Email: "late@demo.test", SquadID: squad.ID}); !errors.Is(e, store.ErrSquadNotFound) {
 		t.Fatalf("archived squad invite = %v", e)
 	}
 	if _, e := f.store.UserByEmail(ctx, "late@demo.test"); !errors.Is(e, store.ErrNotFound) {

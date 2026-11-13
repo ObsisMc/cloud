@@ -1,3 +1,4 @@
+import { PinnedSchedulesWarning } from "@/lib/workflows/editor/pinned-schedules-warning";
 import type { WorkflowContainerInsertion } from "./workflow-container-insertion";
 import { insertOnCanvasEdge } from "./workflow-canvas-graph";
 import { insertLoopMember } from "./workflow-loop-graph";
@@ -2913,6 +2914,7 @@ function WorkflowEditorContent({
               {t("settings.workflow.publishDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {publishDialogOpen && workflow && <PinnedSchedulesWarning workflowId={workflow.id} />}
           <Input
             value={publishVersionName}
             onChange={(event) => setPublishVersionName(event.target.value)}

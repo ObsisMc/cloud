@@ -21,7 +21,6 @@ import (
 const chatBase = "/api/v2/tenants/{tid}/chat"
 
 type chatStore interface {
-	Member(ctx context.Context, tenant, user string) (bool, error)
 	ChatProjectOrder(ctx context.Context, tenant, user string) ([]string, error)
 	SetChatProjectOrder(ctx context.Context, tenant, user string, ids []string) error
 }
@@ -29,17 +28,17 @@ type chatStore interface {
 // heartbeat keeps idle event streams open through proxies.
 const heartbeat = 15 * time.Second
 
-func (h *handler) chatRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET "+chatBase+"/executors", h.chat(h.chatExecutors))
-	mux.HandleFunc("GET "+chatBase+"/conversations", h.chat(h.chatConversations))
-	mux.HandleFunc("POST "+chatBase+"/conversations", h.chat(h.chatCreate))
-	mux.HandleFunc("PATCH "+chatBase+"/conversations/{cid}", h.chat(h.chatRename))
-	mux.HandleFunc("DELETE "+chatBase+"/conversations/{cid}", h.chat(h.chatDelete))
-	mux.HandleFunc("POST "+chatBase+"/conversations/{cid}/messages", h.chat(h.chatSend))
-	mux.HandleFunc("POST "+chatBase+"/conversations/{cid}/stop", h.chat(h.chatStop))
-	mux.HandleFunc("GET "+chatBase+"/conversations/{cid}/events", h.chat(h.chatEvents))
-	mux.HandleFunc("GET "+chatBase+"/project-order", h.chat(h.chatProjectOrder))
-	mux.HandleFunc("PUT "+chatBase+"/project-order", h.chat(h.chatSetProjectOrder))
+func (h *handler) chatRoutes(rt *router) {
+	rt.tenant("GET "+chatBase+"/executors", h.chat(h.chatExecutors))
+	rt.tenant("GET "+chatBase+"/conversations", h.chat(h.chatConversations))
+	rt.tenant("POST "+chatBase+"/conversations", h.chat(h.chatCreate))
+	rt.tenant("PATCH "+chatBase+"/conversations/{cid}", h.chat(h.chatRename))
+	rt.tenant("DELETE "+chatBase+"/conversations/{cid}", h.chat(h.chatDelete))
+	rt.tenant("POST "+chatBase+"/conversations/{cid}/messages", h.chat(h.chatSend))
+	rt.tenant("POST "+chatBase+"/conversations/{cid}/stop", h.chat(h.chatStop))
+	rt.tenant("GET "+chatBase+"/conversations/{cid}/events", h.chat(h.chatEvents))
+	rt.tenant("GET "+chatBase+"/project-order", h.chat(h.chatProjectOrder))
+	rt.tenant("PUT "+chatBase+"/project-order", h.chat(h.chatSetProjectOrder))
 }
 
 type chatRequest struct {
@@ -48,32 +47,18 @@ type chatRequest struct {
 	store chatStore
 }
 
-// chat authenticates and checks membership of the path's tenant. The execution service and catalog
-// come from the shared injection point (Options.Execution and Catalog); until main installs the
-// real ones, each call that needs them answers 503 execution_unavailable.
-func (h *handler) chat(next func(http.ResponseWriter, *http.Request, chatRequest)) http.HandlerFunc {
-	return h.authed(func(w http.ResponseWriter, r *http.Request, u store.User) {
+// chat adapts a chat handler to the tenant route. The execution service and catalog come from the
+// shared injection point (Options.Execution and Catalog); until main installs the real ones, each
+// call that needs them answers 503 execution_unavailable.
+func (h *handler) chat(next func(http.ResponseWriter, *http.Request, chatRequest)) func(http.ResponseWriter, *http.Request, access) {
+	return func(w http.ResponseWriter, r *http.Request, a access) {
 		s, ok := h.store.(chatStore)
 		if !ok || h.chats == nil {
 			fault(w, http.StatusServiceUnavailable, "execution_unavailable")
 			return
 		}
-		tenant := r.PathValue("tid")
-		if !scheduleUUID.MatchString(tenant) {
-			fault(w, http.StatusNotFound, "not_found")
-			return
-		}
-		member, e := s.Member(r.Context(), tenant, u.ID)
-		if e != nil {
-			internal(w, "chat membership", e)
-			return
-		}
-		if !member {
-			fault(w, http.StatusNotFound, "not_found")
-			return
-		}
-		next(w, r, chatRequest{scope: execution.Scope{TenantID: tenant, UserID: u.ID}, svc: h.chats, store: s})
-	})
+		next(w, r, chatRequest{scope: a.scope(), svc: h.chats, store: s})
+	}
 }
 
 type chatExecutor struct {

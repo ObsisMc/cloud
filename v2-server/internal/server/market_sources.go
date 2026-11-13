@@ -7,14 +7,14 @@ import (
 	"net/http"
 )
 
-func (h *handler) marketSources(w http.ResponseWriter, r *http.Request, u store.User) {
-	t, s := r.PathValue("tid"), r.PathValue("sid")
-	if !squadUUID.MatchString(t) || !squadUUID.MatchString(s) {
-		fault(w, 404, "not_found")
+func (h *handler) marketSources(w http.ResponseWriter, r *http.Request, a access) {
+	t, s := a.TenantID, r.PathValue("sid")
+	if !squadUUID.MatchString(s) {
+		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if r.Method == "GET" {
-		items, e := h.store.MarketSources(r.Context(), t, s, u.ID)
+		items, e := h.store.MarketSources(r.Context(), t, s)
 		if e != nil {
 			pluginError(w, "list markets", e)
 			return
@@ -29,7 +29,7 @@ func (h *handler) marketSources(w http.ResponseWriter, r *http.Request, u store.
 	} else if action != "DELETE" && !decodeStrict(w, r, &in) {
 		return
 	}
-	e := h.store.ChangeMarket(r.Context(), t, s, u.ID, r.PathValue("source"), action, in)
+	e := h.store.ChangeMarket(r.Context(), t, s, r.PathValue("source"), action, in)
 	if e == nil && action == "sync" && r.PathValue("source") == "official" {
 		if h.opts.RefreshOfficial == nil {
 			fault(w, 503, "official_sync_unavailable")
@@ -55,13 +55,13 @@ func (h *handler) marketSources(w http.ResponseWriter, r *http.Request, u store.
 	}
 }
 
-func (h *handler) skillProgress(w http.ResponseWriter, r *http.Request, u store.User) {
-	t, s := r.PathValue("tid"), r.PathValue("sid")
-	if !squadUUID.MatchString(t) || !squadUUID.MatchString(s) {
-		fault(w, 404, "not_found")
+func (h *handler) skillProgress(w http.ResponseWriter, r *http.Request, a access) {
+	t, s := a.TenantID, r.PathValue("sid")
+	if !squadUUID.MatchString(s) {
+		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
-	items, e := h.store.SkillProgress(r.Context(), t, s, u.ID, r.PathValue("namespace"), r.PathValue("identifier"))
+	items, e := h.store.SkillProgress(r.Context(), t, s, r.PathValue("namespace"), r.PathValue("identifier"))
 	if e != nil {
 		pluginError(w, "skill project results", e)
 		return

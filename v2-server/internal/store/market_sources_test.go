@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/wanglongan587/cloud/v2-server/internal/pluginmarket"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 	"testing"
 	"time"
 )
@@ -14,8 +15,7 @@ import (
 func TestCustomMarketKeepsSelectionsAndIsolatesSpaces(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	member := f.login(t, "reader", "member")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -25,16 +25,13 @@ func TestCustomMarketKeepsSelectionsAndIsolatesSpaces(t *testing.T) {
 		t.Fatal(e)
 	}
 	in := store.MarketSource{URL: "https://example.org/market", Branch: "main", Enabled: true}
-	change := func(space, user, id, action string) error {
-		return f.store.ChangeMarket(f.ctx, f.tenant, space, user, id, action, in)
+	change := func(space, id, action string) error {
+		return f.store.ChangeMarket(f.ctx, f.tenant, space, id, action, in)
 	}
-	if !errors.Is(change(a, member, "", "POST"), store.ErrForbidden) {
-		t.Fatal("member write accepted")
-	}
-	if e := change(a, owner, "", "POST"); e != nil {
+	if e := change(a, "", "POST"); e != nil {
 		t.Fatal(e)
 	}
-	list, e := f.store.MarketSources(f.ctx, f.tenant, a, member)
+	list, e := f.store.MarketSources(f.ctx, f.tenant, a)
 	if e != nil || len(list) != 1 {
 		t.Fatal(list, e)
 	}
@@ -52,25 +49,25 @@ func TestCustomMarketKeepsSelectionsAndIsolatesSpaces(t *testing.T) {
 		space string
 		n     int
 	}{{a, 2}, {b, 0}} {
-		list, _, e := f.store.PluginCatalog(f.ctx, f.tenant, pair.space, member)
+		list, _, e := f.store.PluginCatalog(f.ctx, f.tenant, pair.space)
 		if e != nil || len(list) != pair.n {
 			t.Fatal(list, e)
 		}
 	}
-	if !errors.Is(change(b, owner, id, "DELETE"), store.ErrNotFound) {
+	if !errors.Is(change(b, id, "DELETE"), store.ErrNotFound) {
 		t.Fatal("cross-space delete accepted")
 	}
 	in.Retrieval = pluginmarket.Retrieval{Mode: "s3_sigv4", Endpoint: "https://objects.example.org", Bucket: "market", Region: "test"}
-	if e := change(a, owner, id, "PATCH"); !errors.Is(e, pluginmarket.ErrCredentials) {
+	if e := change(a, id, "PATCH"); !errors.Is(e, pluginmarket.ErrCredentials) {
 		t.Fatal("missing credentials", e)
 	}
 	in.Retrieval = pluginmarket.Retrieval{}
 	original := in.URL
 	in.URL += ".git/"
-	if e := change(a, owner, id, "PATCH"); e != nil {
+	if e := change(a, id, "PATCH"); e != nil {
 		t.Fatal(e)
 	}
-	if list, _, e := f.store.PluginCatalog(f.ctx, f.tenant, a, member); e != nil || len(list) != 2 {
+	if list, _, e := f.store.PluginCatalog(f.ctx, f.tenant, a); e != nil || len(list) != 2 {
 		t.Fatal("alias lost catalog", list, e)
 	} else {
 		found := false
@@ -84,11 +81,11 @@ func TestCustomMarketKeepsSelectionsAndIsolatesSpaces(t *testing.T) {
 		}
 	}
 	in.URL = "https://example.org/other"
-	if e := change(a, owner, "", "POST"); e != nil {
+	if e := change(a, "", "POST"); e != nil {
 		t.Fatal(e)
 	}
 	in.URL += ".git"
-	if e := change(a, owner, id, "PATCH"); !errors.Is(e, store.ErrConflict) {
+	if e := change(a, id, "PATCH"); !errors.Is(e, store.ErrConflict) {
 		t.Fatal("duplicate", e)
 	}
 	in.URL = original
@@ -97,21 +94,21 @@ func TestCustomMarketKeepsSelectionsAndIsolatesSpaces(t *testing.T) {
 		t.Fatal(e)
 	}
 	in.Enabled = false
-	if e := change(a, owner, id, "PATCH"); e != nil {
+	if e := change(a, id, "PATCH"); e != nil {
 		t.Fatal(e)
 	}
-	if list, _, e := f.store.PluginCatalog(f.ctx, f.tenant, a, member); e != nil || len(list) != 0 {
+	if list, _, e := f.store.PluginCatalog(f.ctx, f.tenant, a); e != nil || len(list) != 0 {
 		t.Fatal(list, e)
 	}
 	in.Enabled = true
 	in.URL = "https://example.org/replacement"
-	if e := change(a, owner, id, "PATCH"); e != nil {
+	if e := change(a, id, "PATCH"); e != nil {
 		t.Fatal(e)
 	}
-	if list, _, e := f.store.PluginCatalog(f.ctx, f.tenant, a, member); e != nil || len(list) != 0 {
+	if list, _, e := f.store.PluginCatalog(f.ctx, f.tenant, a); e != nil || len(list) != 0 {
 		t.Fatal("old snapshot visible", list, e)
 	}
-	sources, e := f.store.MarketSources(f.ctx, f.tenant, a, owner)
+	sources, e := f.store.MarketSources(f.ctx, f.tenant, a)
 	if e != nil || len(sources) != 2 {
 		t.Fatal(sources, e)
 	}
@@ -128,10 +125,10 @@ func TestCustomMarketKeepsSelectionsAndIsolatesSpaces(t *testing.T) {
 		t.Fatal("identity did not change", sources)
 	}
 	in.URL = original
-	if e := change(a, owner, "", "POST"); e != nil {
+	if e := change(a, "", "POST"); e != nil {
 		t.Fatal(e)
 	}
-	if e := change(a, owner, id, "DELETE"); e != nil {
+	if e := change(a, id, "DELETE"); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := f.store.RemoveSpacePlugin(f.ctx, f.tenant, a, owner, "plugins", "remove", store.PluginRemoveInput{Identifier: item.ID, Version: selected.Version}); e != nil {
@@ -142,7 +139,7 @@ func TestCustomMarketKeepsSelectionsAndIsolatesSpaces(t *testing.T) {
 func TestRemovingSourceClearsPlanCredentials(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -158,10 +155,10 @@ func TestRemovingSourceClearsPlanCredentials(t *testing.T) {
 			SecretKey: "fixture-secret",
 		},
 	}
-	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, owner, "", "POST", in); e != nil {
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, "", "POST", in); e != nil {
 		t.Fatal(e)
 	}
-	sources, e := f.store.MarketSources(f.ctx, f.tenant, space, owner)
+	sources, e := f.store.MarketSources(f.ctx, f.tenant, space)
 	if e != nil || len(sources) != 1 {
 		t.Fatal(sources, e)
 	}
@@ -181,14 +178,14 @@ func TestRemovingSourceClearsPlanCredentials(t *testing.T) {
 	if e := f.db.QueryRow(f.ctx, `select credentials is not null from v2_skill_plans where selection_id=$1`, selection.ID).Scan(&stored); e != nil || !stored {
 		t.Fatalf("plan credentials stored=%t err=%v", stored, e)
 	}
-	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, owner, namespace, "DELETE", store.MarketSource{}); e != nil {
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, namespace, "DELETE", store.MarketSource{}); e != nil {
 		t.Fatal(e)
 	}
 	var cleared bool
 	if e := f.db.QueryRow(f.ctx, `select credentials is null from v2_skill_plans where selection_id=$1`, selection.ID).Scan(&cleared); e != nil || !cleared {
 		t.Fatalf("plan credentials cleared=%t err=%v", cleared, e)
 	}
-	list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner)
+	list, e := f.store.SpacePlugins(f.ctx, f.tenant, space)
 	selected, found := findSpacePlugin(list, selection.ID)
 	if e != nil || !found {
 		t.Fatal("removing source deleted the selection", list, e)
@@ -201,7 +198,7 @@ func TestRemovingSourceClearsPlanCredentials(t *testing.T) {
 func TestMarketSourceGitCredentialsAreSealedKeptAndCleared(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -209,10 +206,10 @@ func TestMarketSourceGitCredentialsAreSealedKeptAndCleared(t *testing.T) {
 	t.Setenv("V2_MARKET_CREDENTIAL_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	git := &pluginmarket.GitCredentials{Username: "intranet-bot", Password: "intranet-token"}
 	in := store.MarketSource{URL: "https://git.example.com/market", Branch: "main", Enabled: true, GitCredentials: git}
-	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, owner, "", "POST", in); e != nil {
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, "", "POST", in); e != nil {
 		t.Fatal(e)
 	}
-	sources, e := f.store.MarketSources(f.ctx, f.tenant, space, owner)
+	sources, e := f.store.MarketSources(f.ctx, f.tenant, space)
 	if e != nil || len(sources) != 1 || !sources[0].GitConfigured {
 		t.Fatalf("git credentials not reported as configured: %+v %v", sources, e)
 	}
@@ -229,30 +226,30 @@ func TestMarketSourceGitCredentialsAreSealedKeptAndCleared(t *testing.T) {
 
 	// Editing without touching the auth keeps the saved credentials.
 	keep := store.MarketSource{URL: "https://git.example.com/market", Branch: "develop", Enabled: true}
-	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, owner, sources[0].Namespace, "PATCH", keep); e != nil {
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, sources[0].Namespace, "PATCH", keep); e != nil {
 		t.Fatal(e)
 	}
-	after, e := f.store.MarketSources(f.ctx, f.tenant, space, owner)
+	after, e := f.store.MarketSources(f.ctx, f.tenant, space)
 	if e != nil || len(after) != 1 || !after[0].GitConfigured {
 		t.Fatalf("credentials lost on unrelated edit: %+v %v", after, e)
 	}
 
 	// A new pair replaces the saved one.
 	replace := store.MarketSource{URL: "https://git.example.com/market", Branch: "main", Enabled: true, GitCredentials: &pluginmarket.GitCredentials{Username: "new-bot", Password: "new-token"}}
-	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, owner, after[0].Namespace, "PATCH", replace); e != nil {
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, after[0].Namespace, "PATCH", replace); e != nil {
 		t.Fatal(e)
 	}
-	replaced, e := f.store.MarketSources(f.ctx, f.tenant, space, owner)
+	replaced, e := f.store.MarketSources(f.ctx, f.tenant, space)
 	if e != nil || len(replaced) != 1 || !replaced[0].GitConfigured {
 		t.Fatalf("credentials not replaced: %+v %v", replaced, e)
 	}
 
 	// An explicit clear drops them.
 	clear := store.MarketSource{URL: "https://git.example.com/market", Branch: "main", Enabled: true, ClearGitCredentials: true}
-	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, owner, replaced[0].Namespace, "PATCH", clear); e != nil {
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, replaced[0].Namespace, "PATCH", clear); e != nil {
 		t.Fatal(e)
 	}
-	final, e := f.store.MarketSources(f.ctx, f.tenant, space, owner)
+	final, e := f.store.MarketSources(f.ctx, f.tenant, space)
 	if e != nil || len(final) != 1 || final[0].GitConfigured {
 		t.Fatalf("credentials not cleared: %+v %v", final, e)
 	}
@@ -261,14 +258,14 @@ func TestMarketSourceGitCredentialsAreSealedKeptAndCleared(t *testing.T) {
 func TestMarketSourceGitCredentialsRequireNonEmptyValues(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil {
 		t.Fatal(e)
 	}
 	space := spaces[0].ID
 	t.Setenv("V2_MARKET_CREDENTIAL_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	in := store.MarketSource{URL: "https://git.example.com/market", Branch: "main", Enabled: true, GitCredentials: &pluginmarket.GitCredentials{Username: "", Password: ""}}
-	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, owner, "", "POST", in); !errors.Is(e, pluginmarket.ErrCredentials) {
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, "", "POST", in); !errors.Is(e, pluginmarket.ErrCredentials) {
 		t.Fatalf("empty git credentials accepted: %v", e)
 	}
 }

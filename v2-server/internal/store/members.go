@@ -25,12 +25,8 @@ type Member struct {
 	JoinedAt         *time.Time `json:"joinedAt"`
 }
 
-// TenantMembers returns the roster of one workspace to a caller who belongs to it. The membership
-// check runs first so a non-member cannot probe which users a workspace holds.
-func (s *Store) TenantMembers(ctx context.Context, tenant, caller string) ([]Member, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return nil, e
-	}
+// TenantMembers returns the roster of one workspace. Tenant access is checked by the caller.
+func (s *Store) TenantMembers(ctx context.Context, tenant string) ([]Member, error) {
 	rows, e := s.pool.Query(ctx, `
 		SELECT m.user_id, u.display_name, m.role, u.status
 		FROM memberships m

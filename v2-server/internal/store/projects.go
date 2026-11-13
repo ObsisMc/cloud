@@ -23,12 +23,9 @@ type Project struct {
 	CreatedAt     time.Time
 }
 
-// CreateProject retains a prepared project after verifying current tenant membership.
+// CreateProject retains a prepared project in the caller's tenant; tenant access is checked by the caller.
 // Its ID must be a server-generated random identity, never a caller-selected ID.
 func (s *Store) CreateProject(ctx context.Context, scope execution.Scope, project Project) (Project, error) {
-	if err := s.CheckExecutionScope(ctx, scope); err != nil {
-		return Project{}, err
-	}
 	if project.ID == "" || project.Name == "" || project.RepositoryURL == "" || project.Commit == "" || project.MirrorPath == "" {
 		return Project{}, execution.ErrInvalidRequest
 	}
@@ -41,7 +38,7 @@ func (s *Store) CreateProject(ctx context.Context, scope execution.Scope, projec
 	// The authenticated creator is authoritative even when a caller supplied another owner.
 	project.OwnerUserID = scope.UserID
 	if project.SpaceID != "" {
-		if _, e := requireSpaceAccess(ctx, s.pool, scope.TenantID, project.SpaceID, scope.UserID); e != nil {
+		if e := requireSpace(ctx, s.pool, scope.TenantID, project.SpaceID); e != nil {
 			return Project{}, execution.ErrInvalidRequest
 		}
 	} else if e := s.pool.QueryRow(ctx, `select id from v2_spaces where tenant_id=$1 and slug=$2 and archived_at is null`, scope.TenantID, DemoSpaceSlug).Scan(&project.SpaceID); e != nil {
@@ -55,11 +52,8 @@ func (s *Store) CreateProject(ctx context.Context, scope execution.Scope, projec
 	return project, executionError(err)
 }
 
-// GetProject returns a shared project only to current members of its tenant.
+// GetProject returns a project of the tenant; tenant access is checked by the caller.
 func (s *Store) GetProject(ctx context.Context, scope execution.Scope, id string) (Project, error) {
-	if err := s.CheckExecutionScope(ctx, scope); err != nil {
-		return Project{}, err
-	}
 	var raw []byte
 	if err := s.pool.QueryRow(ctx, `SELECT data FROM v2_projects WHERE id=$1 AND tenant_id=$2::uuid`, id, scope.TenantID).Scan(&raw); err != nil {
 		return Project{}, executionError(err)
@@ -71,9 +65,6 @@ func (s *Store) GetProject(ctx context.Context, scope execution.Scope, id string
 
 // ListProjects lists the tenant's prepared projects in stable name/identity order.
 func (s *Store) ListProjects(ctx context.Context, scope execution.Scope) ([]Project, error) {
-	if err := s.CheckExecutionScope(ctx, scope); err != nil {
-		return nil, err
-	}
 	rows, err := s.pool.Query(ctx, `SELECT data FROM v2_projects WHERE tenant_id=$1::uuid ORDER BY data->>'Name',id`, scope.TenantID)
 	if err != nil {
 		return nil, err

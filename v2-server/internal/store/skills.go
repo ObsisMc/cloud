@@ -45,9 +45,6 @@ var ErrSkillNotFound = errors.New("skill not found")
 
 // ListSkills returns the caller's live skills, newest update first.
 func (s *Store) ListSkills(ctx context.Context, tenant, caller string) ([]Skill, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return nil, e
-	}
 	rows, e := s.pool.Query(ctx, `
 		SELECT id::text, name, description, content, version, created_at, updated_at
 		FROM v2_skills
@@ -73,9 +70,6 @@ func (s *Store) ListSkills(ctx context.Context, tenant, caller string) ([]Skill,
 
 // GetSkill returns one skill owned by the caller.
 func (s *Store) GetSkill(ctx context.Context, tenant, caller, id string) (Skill, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return Skill{}, e
-	}
 	item, e := querySkill(ctx, s.pool, tenant, caller, id)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return Skill{}, ErrSkillNotFound
@@ -90,9 +84,6 @@ func (s *Store) GetSkill(ctx context.Context, tenant, caller, id string) (Skill,
 func (s *Store) CreateSkill(ctx context.Context, tenant, caller string, in SkillInput) (Skill, error) {
 	doc, e := skilldoc.Validate(skilldoc.Document{Name: in.Name, Description: in.Description, Content: in.Content})
 	if e != nil {
-		return Skill{}, e
-	}
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
 		return Skill{}, e
 	}
 	var item Skill
@@ -117,9 +108,6 @@ func (s *Store) UpdateSkill(ctx context.Context, tenant, caller, id string, in S
 	if e != nil {
 		return Skill{}, e
 	}
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return Skill{}, e
-	}
 	var item Skill
 	e = s.pool.QueryRow(ctx, `
 		UPDATE v2_skills
@@ -142,9 +130,6 @@ func (s *Store) UpdateSkill(ctx context.Context, tenant, caller, id string, in S
 
 // DeleteSkill soft-deletes one owned skill and frees its name for a later import or create.
 func (s *Store) DeleteSkill(ctx context.Context, tenant, caller, id string) error {
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
-		return e
-	}
 	tag, e := s.pool.Exec(ctx, `
 		UPDATE v2_skills
 		SET deleted_at = now(), updated_at = now(), version = version + 1
@@ -162,9 +147,6 @@ func (s *Store) DeleteSkill(ctx context.Context, tenant, caller, id string) erro
 func (s *Store) ImportSkill(ctx context.Context, tenant, caller string, raw []byte, overwrite bool) (Skill, error) {
 	doc, e := skilldoc.Parse(raw)
 	if e != nil {
-		return Skill{}, e
-	}
-	if _, e := tenantRole(ctx, s.pool, tenant, caller); e != nil {
 		return Skill{}, e
 	}
 	existing, e := querySkillByName(ctx, s.pool, tenant, caller, doc.Name)
@@ -187,9 +169,6 @@ func (s *Store) ImportSkill(ctx context.Context, tenant, caller string, raw []by
 
 // UserSkillDocuments returns one active member's live skills for workspace materialization.
 func (s *Store) UserSkillDocuments(ctx context.Context, tenant, user string) ([]SkillDocument, error) {
-	if _, e := tenantRole(ctx, s.pool, tenant, user); e != nil {
-		return nil, e
-	}
 	rows, e := s.pool.Query(ctx, `
 		SELECT name, description, content
 		FROM v2_skills

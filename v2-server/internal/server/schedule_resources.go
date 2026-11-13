@@ -54,28 +54,14 @@ type scheduleResourceView struct {
 
 // scheduleResources projects the shared stores/catalog without exposing bindings,
 // repository paths or credentials. Empty and unavailable catalogs are distinct.
-func (h *handler) scheduleResources(w http.ResponseWriter, r *http.Request, u store.User) {
+func (h *handler) scheduleResources(w http.ResponseWriter, r *http.Request, a access) {
 	w.Header().Set("Cache-Control", "no-store")
-	tid := r.PathValue("tid")
-	if !scheduleUUID.MatchString(tid) {
-		fault(w, 404, "not_found")
-		return
-	}
-	s, ok := h.store.(scheduleStore)
-	if !ok {
+	tid := a.TenantID
+	if _, ok := h.store.(scheduleStore); !ok {
 		fault(w, 503, "schedule_resources_unavailable")
 		return
 	}
-	member, err := s.ScheduleMember(r.Context(), tid, u.ID)
-	if err != nil {
-		internal(w, "schedule resource membership", err)
-		return
-	}
-	if !member {
-		fault(w, 404, "not_found")
-		return
-	}
-	scope := execution.Scope{TenantID: tid, UserID: u.ID}
+	scope := a.scope()
 	out := scheduleResourceView{Projects: []scheduleProjectView{}, Models: []scheduleModelView{}, Agents: []scheduleAgentView{}, Workflows: []scheduleWorkflowView{}}
 	if projects, ok := h.store.(scheduleProjects); ok {
 		items, err := projects.ListProjects(r.Context(), scope)
@@ -227,7 +213,7 @@ var errScheduleWorkflowsUnavailable = errors.New("schedule workflow targets unav
 
 // resolveScheduleWorkflow checks a workflow target against what the owner can run now: the project
 // is theirs, and the snapshot is a published (not draft) version of the workflow in this tenant.
-// The schedule keeps that snapshot; a newer version applies only once the schedule is edited.
+// Fixed targets keep their snapshot. Latest targets verify availability without saving a pin.
 func (h *handler) resolveScheduleWorkflow(ctx context.Context, tenant, user string, in *store.ScheduleInput, target scheduler.WorkflowTarget) error {
 	workflows, ok := h.store.(WorkflowStore)
 	if !ok || h.opts.WorkflowRuns == nil {
@@ -243,6 +229,16 @@ func (h *handler) resolveScheduleWorkflow(ctx context.Context, tenant, user stri
 	scope := execution.Scope{TenantID: tenant, UserID: user}
 	if _, err := projects.GetProject(ctx, scope, in.ProjectID); err != nil {
 		return scheduleSelectionError(err)
+	}
+	if target.VersionPolicy == "latest" {
+		w, err := workflows.Workflow(ctx, tenant, target.WorkflowID)
+		if err != nil {
+			return err
+		}
+		if w.PublishedSnapshotID == nil {
+			return store.ErrNotFound
+		}
+		target.SnapshotID = *w.PublishedSnapshotID
 	}
 	snapshot, err := workflows.WorkflowSnapshot(ctx, tenant, target.WorkflowID, target.SnapshotID)
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrWorkflowSnapshotNotFound) {

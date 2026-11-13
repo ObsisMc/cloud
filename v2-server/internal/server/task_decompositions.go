@@ -8,21 +8,20 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/taskdecomp"
 )
 
-func (h *handler) taskDecompositionRoutes(mux *http.ServeMux) {
+func (h *handler) taskDecompositionRoutes(rt *router) {
 	base := "/api/v2/tenants/{tid}/tasks/{taskid}/decompositions"
-	mux.HandleFunc("GET "+base, h.authed(h.listTaskDecompositions))
-	mux.HandleFunc("POST "+base, h.authed(h.startTaskDecomposition))
+	rt.tenant("GET "+base, h.listTaskDecompositions)
+	rt.tenant("POST "+base, h.startTaskDecomposition)
 }
 
-// taskDecompositionScope checks the path ids and that decompositions are wired; the host checks
-// membership.
-func (h *handler) taskDecompositionScope(w http.ResponseWriter, r *http.Request) (*taskdecomp.Host, string, string, bool) {
+// taskDecompositionScope checks the task id and that decompositions are wired.
+func (h *handler) taskDecompositionScope(w http.ResponseWriter, r *http.Request, a access) (*taskdecomp.Host, string, string, bool) {
 	if h.opts.TaskDecompositions == nil {
 		fault(w, http.StatusServiceUnavailable, "workflow_run_host_unavailable")
 		return nil, "", "", false
 	}
-	tenant, id := r.PathValue("tid"), r.PathValue("taskid")
-	if !taskUUID.MatchString(tenant) || !taskUUID.MatchString(id) {
+	tenant, id := a.TenantID, r.PathValue("taskid")
+	if !taskUUID.MatchString(id) {
 		fault(w, http.StatusNotFound, "not_found")
 		return nil, "", "", false
 	}
@@ -46,12 +45,12 @@ func taskDecompositionFault(w http.ResponseWriter, op string, e error) {
 	}
 }
 
-func (h *handler) listTaskDecompositions(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, tenant, id, ok := h.taskDecompositionScope(w, r)
+func (h *handler) listTaskDecompositions(w http.ResponseWriter, r *http.Request, a access) {
+	host, tenant, id, ok := h.taskDecompositionScope(w, r, a)
 	if !ok {
 		return
 	}
-	items, e := host.List(r.Context(), tenant, u.ID, id)
+	items, e := host.List(r.Context(), tenant, id)
 	if e != nil {
 		taskDecompositionFault(w, "list task decompositions", e)
 		return
@@ -61,8 +60,8 @@ func (h *handler) listTaskDecompositions(w http.ResponseWriter, r *http.Request,
 
 // startTaskDecomposition runs a published workflow over the task; its `tasks` output becomes the
 // task's subtasks once the run succeeds.
-func (h *handler) startTaskDecomposition(w http.ResponseWriter, r *http.Request, u store.User) {
-	host, tenant, id, ok := h.taskDecompositionScope(w, r)
+func (h *handler) startTaskDecomposition(w http.ResponseWriter, r *http.Request, a access) {
+	host, tenant, id, ok := h.taskDecompositionScope(w, r, a)
 	if !ok {
 		return
 	}
@@ -80,7 +79,7 @@ func (h *handler) startTaskDecomposition(w http.ResponseWriter, r *http.Request,
 		fault(w, http.StatusBadRequest, "invalid_workflow")
 		return
 	}
-	d, e := host.Start(r.Context(), tenant, u.ID, id, in.WorkflowID, key)
+	d, e := host.Start(r.Context(), tenant, a.UserID, id, in.WorkflowID, key)
 	if e != nil {
 		taskDecompositionFault(w, "start task decomposition", e)
 		return

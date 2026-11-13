@@ -41,7 +41,6 @@ const dashboardQuery = `WITH dashboard AS (
  JOIN v2_task_runs tr ON tr.session_id=s.id AND tr.tenant_id=s.tenant_id AND tr.started_by=s.user_id
  JOIN v2_tasks task ON task.id=tr.task_id AND task.tenant_id=s.tenant_id
  JOIN v2_projects p ON p.id=task.project_id AND p.tenant_id=s.tenant_id
- JOIN memberships m ON m.tenant_id=s.tenant_id AND m.user_id=$2::uuid
  JOIN LATERAL(SELECT caller FROM v2_execution_turns WHERE session_id=s.id ORDER BY position LIMIT 1) f
    ON f.caller->>'Kind'='task' AND f.caller->>'ID'=tr.id::text
  JOIN LATERAL(SELECT data FROM v2_execution_turns WHERE session_id=s.id ORDER BY position DESC LIMIT 1) l ON true
@@ -56,7 +55,6 @@ const dashboardQuery = `WITH dashboard AS (
  JOIN v2_chat_sessions cs ON cs.session_id=s.id
  JOIN v2_chat_conversations c ON c.id=cs.conversation_id AND c.tenant_id=s.tenant_id AND c.user_id=s.user_id
  JOIN v2_projects p ON p.id=c.project_id AND p.tenant_id=s.tenant_id
- JOIN memberships m ON m.tenant_id=s.tenant_id AND m.user_id=$2::uuid
  JOIN LATERAL(SELECT caller FROM v2_execution_turns WHERE session_id=s.id ORDER BY position LIMIT 1) f
    ON f.caller->>'Kind'='chat' AND f.caller->>'ID'=c.id::text
  JOIN LATERAL(SELECT data FROM v2_execution_turns WHERE session_id=s.id ORDER BY position DESC LIMIT 1) l ON true
@@ -76,9 +74,6 @@ func dashboardSelection(f DashboardFilter) string {
 
 // DashboardSessions lists newest-first admitted Agent sessions without triggering execution.
 func (s *Store) DashboardSessions(ctx context.Context, scope execution.Scope, f DashboardFilter) ([]DashboardSession, string, error) {
-	if err := s.CheckExecutionScope(ctx, scope); err != nil {
-		return nil, "", err
-	}
 	var anchor dashboardCursor
 	if f.After != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(f.After)
@@ -116,9 +111,6 @@ func (s *Store) DashboardSessions(ctx context.Context, scope execution.Scope, f 
 		raw, _ := json.Marshal(dashboardCursor{scope.TenantID, scope.UserID, dashboardSelection(f), last.ID, last.CreatedAt})
 		next = base64.RawURLEncoding.EncodeToString(raw)
 	}
-	if err := s.CheckExecutionScope(ctx, scope); err != nil {
-		return nil, "", err
-	}
 	return items, next, nil
 }
 
@@ -129,9 +121,6 @@ func scanDashboard(row dashboardScanner, item *DashboardSession) error {
 }
 func (s *Store) dashboardSession(ctx context.Context, scope execution.Scope, id string) (DashboardSession, error) {
 	var item DashboardSession
-	if err := s.CheckExecutionScope(ctx, scope); err != nil {
-		return item, err
-	}
 	err := scanDashboard(s.pool.QueryRow(ctx, dashboardQuery+` WHERE id=$4`, scope.TenantID, scope.UserID, ScheduledTaskStartPrefix, id), &item)
 	return item, executionError(err)
 }

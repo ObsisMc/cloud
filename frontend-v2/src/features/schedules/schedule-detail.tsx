@@ -8,7 +8,7 @@ import { getWorkflowRun } from '@/lib/workflows/api/generated'
 import { listScheduleHistory, getScheduleHistoryItem, getScheduleExecutionResult } from './api/history/generated'
 import { runScheduleNow, cancelScheduleRun } from './api/actions/generated'
 import type { ScheduleActionReceipt } from './api/actions/generated'
-import type { ScheduleResources } from './api/generated'
+import type { ScheduleResources } from '@/lib/schedules-api/generated'
 import { type PersonalTarget, type Catalog, formatTime, isPersonalTarget, isWorkflowTarget, modelLabel, nextTimes, projectName, ruleText, type Run, type Task } from './schedule-model'
 import { compareOccurrences, compareTimestampsDesc, completeResult, errorOccurrenceId, finishManualRequest, isDeletedWorkflowRun, isTerminalActionRejection, manualRequestKey, occurrenceTaskPath, occurrenceWorkflowRun, reasonText, runLabels, runnable, scheduleError } from './runtime'
 
@@ -68,7 +68,7 @@ export function ScheduleDetail({data,resources,tenantId,scope,task,initialTab='c
     </CardContent></Card><Card className="sp-config-card"><CardHeader><CardTitle>运行环境</CardTitle><CardDescription>执行所使用的项目与资源</CardDescription></CardHeader><CardContent><dl className="sp-key-values">
      <div><dt>关联项目</dt><dd>{projectName(task.projectId,data)}</dd></div>
      {isPersonalTarget(target)&&<><PersonalExecutor target={target} tenantId={tenantId}/>{target.note&&<div><dt>补充说明</dt><dd>{target.note}</dd></div>}</>}
-     {isWorkflowTarget(target)&&<div><dt>工作流</dt><dd>{!workflow?'原工作流暂不可用':workflow.snapshotId===target.snapshotId?`${workflow.name}（${workflow.version}）`:`${workflow.name}（固定的旧版本；生效版本已是 ${workflow.version}，编辑保存后改用）`}</dd></div>}
+     {isWorkflowTarget(target)&&<div><dt>工作流</dt><dd>{!workflow?'原工作流暂不可用':target.versionPolicy==='latest'?`${workflow.name}（跟随最新发布版本，当前 ${workflow.version}；历史运行快照不变）`:workflow.snapshotId===target.snapshotId?`${workflow.name}（${workflow.version}）`:`${workflow.name}（固定的旧版本；生效版本已是 ${workflow.version}，编辑保存后改用）`}</dd></div>}
      {target.kind==='chat'&&<><div><dt>Agent</dt><dd>{!task.projectId?'无需 Agent':targetAgent?.name??(target.agent?'原 Agent 暂不可用':'尚未选择 Agent')}</dd></div><div><dt>模型</dt><dd>{target.model?modelLabel(target,data)||'原模型暂不可用':'尚未选择模型'}</dd></div></>}
     </dl></CardContent></Card><Card className="sp-config-card"><CardHeader><CardTitle>执行计划</CardTitle><CardDescription>按任务时区安排下一次运行</CardDescription></CardHeader><CardContent><dl className="sp-key-values">
      <div><dt>执行频率</dt><dd>{ruleText(task.rule)}</dd></div><div><dt>时区</dt><dd>{task.rule.timezone}</dd></div>

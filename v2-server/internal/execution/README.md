@@ -19,7 +19,7 @@
 ## 身份与目录
 
 Scope 来自登录会话或后台任务的持久归属，不从请求正文直接取值。首版沿用 dev 演示用户和演示团队；
-执行侧检查成员关系与资源归属，无权限的资源返回 `ErrNotFound`。
+执行侧在开始执行时检查租户授权（`store.TenantAccess`），并按资源归属定位，无权限的资源返回 `ErrNotFound`。
 
 Caller 的 kind/ID/node/有序容器轮次/attempt 在 Scope 内定位一次调用。
 chat 的 ID 是 conversation，workflow 是 run，schedule 是 occurrence；容器轮次从外到内，索引从零开始。

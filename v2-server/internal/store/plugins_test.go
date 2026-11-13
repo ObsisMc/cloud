@@ -7,12 +7,13 @@ import (
 
 	"github.com/wanglongan587/cloud/v2-server/internal/pluginmarket"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 func TestEmptyPluginCatalogKeepsThePreviousSnapshot(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
@@ -28,7 +29,7 @@ func TestEmptyPluginCatalogKeepsThePreviousSnapshot(t *testing.T) {
 	if e := f.store.ReplacePluginCatalog(f.ctx, nil, time.Now()); e == nil {
 		t.Fatal("empty snapshot replaced the catalog")
 	}
-	catalog, _, e := f.store.PluginCatalog(f.ctx, f.tenant, space, owner)
+	catalog, _, e := f.store.PluginCatalog(f.ctx, f.tenant, space)
 	if e != nil || len(catalog) != 1 || catalog[0].ID != "official/stable.skill" {
 		t.Fatalf("catalog after empty sync = %+v %v", catalog, e)
 	}
@@ -37,7 +38,7 @@ func TestEmptyPluginCatalogKeepsThePreviousSnapshot(t *testing.T) {
 func TestRemoveSpacePluginDeletesAnUndeliveredSkillSelection(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
@@ -73,7 +74,7 @@ func TestRemoveSpacePluginDeletesAnUndeliveredSkillSelection(t *testing.T) {
 	if removed.DesiredState != "removed" || removed.ObservedState != "removed" || removed.ObservedVersion != nil {
 		t.Fatalf("removed = %+v", removed)
 	}
-	list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner)
+	list, e := f.store.SpacePlugins(f.ctx, f.tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -88,7 +89,7 @@ func TestRemoveSpacePluginDeletesAnUndeliveredSkillSelection(t *testing.T) {
 func TestRemoveSpacePluginNotifiesDeliveredProjectsAndReinstallWorks(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
@@ -136,7 +137,7 @@ func TestRemoveSpacePluginNotifiesDeliveredProjectsAndReinstallWorks(t *testing.
 	if removed.DesiredState != "removed" || removed.ObservedState != "removing" || removed.ObservedVersion == nil {
 		t.Fatalf("removed = %+v", removed)
 	}
-	if list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner); e != nil {
+	if list, e := f.store.SpacePlugins(f.ctx, f.tenant, space); e != nil {
 		t.Fatal(e)
 	} else if _, found := findSpacePlugin(list, installed.ID); !found {
 		t.Fatalf("removal dropped the selection before the project confirmed: %+v", list)
@@ -156,7 +157,7 @@ func TestRemoveSpacePluginNotifiesDeliveredProjectsAndReinstallWorks(t *testing.
 	if e := f.store.DeleteSettledSkillRemovals(f.ctx); e != nil {
 		t.Fatal(e)
 	}
-	if list, e := f.store.SpacePlugins(f.ctx, f.tenant, space, owner); e != nil {
+	if list, e := f.store.SpacePlugins(f.ctx, f.tenant, space); e != nil {
 		t.Fatal(e)
 	} else if _, found := findSpacePlugin(list, installed.ID); found {
 		t.Fatalf("settled removal left a selection: %+v", list)
@@ -181,7 +182,7 @@ func TestRemoveSpacePluginNotifiesDeliveredProjectsAndReinstallWorks(t *testing.
 	} else if e := f.store.FinishSkillJob(f.ctx, jobs[0], store.SkillJobSucceeded, ""); e != nil {
 		t.Fatal(e)
 	}
-	result, e := f.store.SkillProgress(f.ctx, f.tenant, space, owner, "official", "notify.skill")
+	result, e := f.store.SkillProgress(f.ctx, f.tenant, space, "official", "notify.skill")
 	if e != nil || len(result) != 1 || result[0].State != "installed" {
 		t.Fatalf("reinstall progress = %+v %v", result, e)
 	}
@@ -191,8 +192,7 @@ func TestPluginMarketLifecycle(t *testing.T) {
 	f := newSquadFixture(t)
 	ctx := f.ctx
 	owner := f.login(t, "owner", "owner")
-	member := f.login(t, "member", "member")
-	spaces, e := f.store.TenantSpaces(ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
@@ -209,7 +209,7 @@ func TestPluginMarketLifecycle(t *testing.T) {
 		t.Fatal(e)
 	}
 
-	catalog, syncedAt, e := f.store.PluginCatalog(ctx, f.tenant, space, owner)
+	catalog, syncedAt, e := f.store.PluginCatalog(ctx, f.tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -229,7 +229,7 @@ func TestPluginMarketLifecycle(t *testing.T) {
 		}
 	}
 
-	initial, e := f.store.SpacePlugins(ctx, f.tenant, space, member)
+	initial, e := f.store.SpacePlugins(ctx, f.tenant, space)
 	if e != nil || len(initial) != 2 {
 		t.Fatalf("initial selections = %+v %v", initial, e)
 	}
@@ -297,7 +297,7 @@ func TestPluginMarketLifecycle(t *testing.T) {
 		*codex.RequestedByUserID != owner {
 		t.Fatalf("codex install = %+v", codex)
 	}
-	if agents, e := f.store.SpaceAgentPlugins(ctx, f.tenant, space, member); e != nil || len(agents) != 2 {
+	if agents, e := f.store.SpaceAgentPlugins(ctx, f.tenant, space); e != nil || len(agents) != 2 {
 		t.Fatalf("runnable agents after codex install = %+v %v", agents, e)
 	}
 	if _, e := f.store.CreateSquad(ctx, f.tenant, owner, store.SquadInput{
@@ -322,11 +322,6 @@ func TestPluginMarketLifecycle(t *testing.T) {
 		reinstalledCodex.ObservedState != "installed" {
 		t.Fatalf("reinstalled codex = %+v %v", reinstalledCodex, e)
 	}
-	if _, e := f.store.InstallSpacePlugin(ctx, f.tenant, space, member, path, "member-install", store.PluginInstallInput{
-		Identifier: "official/ora-space.tavily-search", Version: 0,
-	}); !errors.Is(e, store.ErrForbidden) {
-		t.Fatalf("member install = %v", e)
-	}
 
 	removed, e := f.store.RemoveSpacePlugin(ctx, f.tenant, space, owner, path, "remove-skill", store.PluginRemoveInput{
 		Identifier: "official/mattpocock.skills", Version: installed.Version,
@@ -342,24 +337,19 @@ func TestPluginMarketLifecycle(t *testing.T) {
 	}); !errors.Is(e, store.ErrPluginNotInstalled) {
 		t.Fatalf("stale removal = %v", e)
 	}
-	if _, e := f.store.RemoveSpacePlugin(ctx, f.tenant, space, member, path, "member-remove", store.PluginRemoveInput{
-		Identifier: "official/mattpocock.skills", Version: removed.Version,
-	}); !errors.Is(e, store.ErrForbidden) {
-		t.Fatalf("member removal = %v", e)
-	}
 
 	_, e = f.store.InstallSpacePlugin(ctx, f.tenant, space, owner, path, "install-mcp", store.PluginInstallInput{Identifier: "official/ora-space.tavily-search"})
 	if !errors.Is(e, store.ErrPluginKindNotInstallable) {
 		t.Fatal(e)
 	}
-	selections, e := f.store.SpacePlugins(ctx, f.tenant, space, member)
+	selections, e := f.store.SpacePlugins(ctx, f.tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}
 	if len(selections) != 3 {
 		t.Fatalf("selections after removal = %+v", selections)
 	}
-	agents, e := f.store.SpaceAgentPlugins(ctx, f.tenant, space, member)
+	agents, e := f.store.SpaceAgentPlugins(ctx, f.tenant, space)
 	if e != nil || len(agents) != 2 {
 		t.Fatalf("agent selections = %+v %v", agents, e)
 	}
@@ -368,8 +358,7 @@ func TestPluginMarketLifecycle(t *testing.T) {
 func TestHookSelectionIsDatabaseBackedWithoutExecuting(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
-	member := f.login(t, "member", "member")
-	spaces, e := f.store.TenantSpaces(f.ctx, f.tenant, owner)
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
 	if e != nil || len(spaces) != 1 {
 		t.Fatalf("spaces = %v %v", spaces, e)
 	}
@@ -405,7 +394,7 @@ func TestHookSelectionIsDatabaseBackedWithoutExecuting(t *testing.T) {
 		t.Fatalf("hook row = kind=%q desired=%q observed=%q version=%v", kind, desired, observed, observedVersion)
 	}
 
-	selections, e := f.store.SpacePlugins(f.ctx, f.tenant, space, member)
+	selections, e := f.store.SpacePlugins(f.ctx, f.tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -421,7 +410,7 @@ func TestHookSelectionIsDatabaseBackedWithoutExecuting(t *testing.T) {
 	if !found {
 		t.Fatalf("member cannot read hook selection: %+v", selections)
 	}
-	agents, e := f.store.SpaceAgentPlugins(f.ctx, f.tenant, space, member)
+	agents, e := f.store.SpaceAgentPlugins(f.ctx, f.tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -441,7 +430,7 @@ func TestHookSelectionIsDatabaseBackedWithoutExecuting(t *testing.T) {
 		removed.ObservedVersion != nil {
 		t.Fatalf("removed hook = %+v", removed)
 	}
-	after, e := f.store.SpacePlugins(f.ctx, f.tenant, space, member)
+	after, e := f.store.SpacePlugins(f.ctx, f.tenant, space)
 	if e != nil {
 		t.Fatal(e)
 	}

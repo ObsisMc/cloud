@@ -1517,7 +1517,7 @@
               }
             }
           },
-          "403": {
+          "404": {
             "description": "Response",
             "content": {
               "application/json": {
@@ -1588,7 +1588,7 @@
               }
             }
           },
-          "403": {
+          "404": {
             "description": "Response",
             "content": {
               "application/json": {

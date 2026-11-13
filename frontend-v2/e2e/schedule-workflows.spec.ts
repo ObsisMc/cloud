@@ -147,3 +147,106 @@ for (const containers of [false, true]) {
     await page.screenshot({ path: testInfo.outputPath('schedule-container-session.png'), fullPage: true })
   })
 }
+
+test('latest schedules adopt a republish while fixed schedules and run history keep their snapshots', async ({ page }, testInfo) => {
+  test.setTimeout(realAgents ? 300_000 : 150_000)
+  await page.goto('/schedules')
+  await signIn(page)
+  const tenant = (await (await page.request.get('/api/v1/me/tenants')).json()).items[0].id
+  const base = `/api/v2/tenants/${tenant}`
+  const suffix = crypto.randomUUID().slice(0, 8)
+  const name = `版本策略 ${suffix}`
+  const created = await page.request.post(`${base}/workflows`, { data: { name, graph } })
+  expect(created.status()).toBe(201)
+  const workflowId = (await created.json()).workflow.id
+  const publish = async (version: string) => {
+    const response = await page.request.post(`${base}/workflows/${workflowId}/publish`, { data: { version } })
+    expect(response.ok()).toBe(true)
+    return (await response.json()).snapshot.id as string
+  }
+  const v1 = await publish('v1')
+  const projectId = (await (await page.request.get(`${base}/schedule-resources`)).json()).projects.find((p: { name: string }) => p.name === 'Demo').id
+  const fixedResponse = await page.request.post(`${base}/schedule-configs`, { data: { name: `固定-${suffix}`, projectId, target: { kind: 'workflow', workflowId, snapshotId: v1, input: '' }, rule: { kind: 'hours', hours: 24, time: '09:00', days: [], timezone: 'UTC' } } })
+  expect(fixedResponse.status()).toBe(201)
+  const fixed = await fixedResponse.json()
+  await page.reload()
+  const dialog = page.getByRole('dialog')
+  await page.locator('header').getByRole('button', { name: '新建任务', exact: true }).click()
+  await dialog.getByLabel('任务名称').fill(`跟随-${suffix}`)
+  await dialog.getByRole('button', { name: /运行工作流/ }).click()
+  await dialog.getByLabel('工作流', { exact: true }).selectOption(workflowId)
+  await dialog.getByRole('button', { name: '跟随最新发布版本' }).click()
+  await dialog.getByLabel('关联项目', { exact: true }).selectOption(projectId)
+  await dialog.getByRole('button', { name: '创建并启用' }).click()
+  await expect(dialog.getByText(/跟随最新发布版本，当前 v1/)).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('schedule-latest-policy.png'), fullPage: true })
+  const configs = (await (await page.request.get(`${base}/schedule-configs`)).json()).items
+  const latest = configs.find((c: { name: string }) => c.name === `跟随-${suffix}`)
+  expect(latest.target).toEqual({ kind: 'workflow', workflowId, versionPolicy: 'latest', input: '' })
+  const trigger = async (id: string, snapshot: string) => {
+    const response = await page.request.post(`${base}/schedule-configs/${id}/run`, { data: { requestId: crypto.randomUUID() } })
+    expect(response.ok()).toBe(true)
+    const occurrence = await response.json()
+    await expect.poll(async () => (await (await page.request.get(`${base}/schedule-configs/${id}/runs/${occurrence.id}`)).json()).released, { timeout: 60_000 }).toBe(true)
+    const history = await (await page.request.get(`${base}/schedule-configs/${id}/runs/${occurrence.id}`)).json()
+    const runId = JSON.parse(history.executionRef).workflowRunId
+    const run = (await (await page.request.get(`${base}/workflow-runs/${runId}`)).json()).run
+    expect(run.snapshotId).toBe(snapshot)
+    return runId as string
+  }
+  const oldRun = await trigger(latest.id, v1)
+  // Give the next release a visible graph difference so the old run's UI proves it is frozen.
+  const nextGraph = JSON.parse(graph)
+  nextGraph.nodes.find((node: { id: string }) => node.id === 'draft').data.title = '新版起草'
+  expect((await page.request.put(`${base}/workflows/${workflowId}/draft`, { data: { graph: JSON.stringify(nextGraph) } })).ok()).toBe(true)
+  // The editor warns before publication and names only the fixed task for this workflow.
+  await page.goto('/workflows')
+  await page.getByRole('complementary', { name: '工作流列表' }).getByRole('button', { name, exact: true }).click()
+  await expect(page.getByLabel('工作流画布').getByTestId('rf__node-draft')).toContainText('新版起草')
+  await page.getByRole('button', { name: '发布', exact: true }).click()
+  const publishDialog = page.getByRole('alertdialog', { name: '发布工作流' })
+  await expect(publishDialog.getByText(new RegExp(`固定-${suffix}`))).toBeVisible()
+  await expect(publishDialog.getByText(new RegExp(`跟随-${suffix}`))).toBeHidden()
+  await page.screenshot({ path: testInfo.outputPath('publish-pinned-warning.png'), fullPage: true })
+  await publishDialog.getByRole('textbox').fill('v2')
+  await publishDialog.getByRole('button', { name: '发布', exact: true }).click()
+  await expect(publishDialog).toBeHidden()
+  const v2 = (await (await page.request.get(`${base}/workflows/${workflowId}`)).json()).published.id
+  expect(v2).not.toBe(v1)
+  // Editing and saving a latest schedule must keep its policy and omit a snapshot pin.
+  await page.goto('/schedules')
+  await page.getByRole('button', { name: `查看跟随-${suffix}`, exact: true }).click()
+  await dialog.getByRole('button', { name: '编辑', exact: true }).click()
+  await expect(dialog.getByRole('button', { name: '跟随最新发布版本', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await dialog.getByLabel('初始输入').fill('编辑后的需求')
+  await dialog.getByRole('button', { name: '保存修改', exact: true }).click()
+  await expect(dialog.getByText(/跟随最新发布版本，当前 v2/)).toBeVisible()
+  const edited = (await (await page.request.get(`${base}/schedule-configs`)).json()).items.find((config: { id: string }) => config.id === latest.id)
+  expect(edited.target).toEqual({kind:'workflow',workflowId,versionPolicy:'latest',input:'编辑后的需求'})
+  expect(edited.version).toBeGreaterThan(latest.version)
+  await trigger(latest.id, v2)
+  await trigger(fixed.id, v1)
+  expect((await (await page.request.get(`${base}/workflow-runs/${oldRun}`)).json()).run.snapshotId).toBe(v1)
+  await dialog.getByRole('button', { name: '运行历史', exact: true }).click()
+  // This schedule has exactly two executions: the oldest is the one made before republishing.
+  await expect(dialog.locator('.sp-history-list > button')).toHaveCount(2)
+  await dialog.locator('.sp-history-list > button').last().click()
+  const historicalLink = dialog.getByRole('link', { name: '查看执行详情' })
+  await expect(historicalLink).toHaveAttribute('href', `/chat?run=${oldRun}`)
+  await historicalLink.click()
+  const pane = page.getByRole('region', { name: '工作流运行' })
+  await expect(pane.getByRole('heading', { name: `跟随-${suffix}` })).toBeVisible()
+  await pane.getByRole('button', { name: '全图', exact: true }).click()
+  await expect(pane.getByTestId('rf__node-draft')).toContainText('起草')
+  await expect(pane.getByTestId('rf__node-draft')).not.toContainText('新版起草')
+  await page.reload()
+  await expect(pane.getByTestId('rf__node-draft')).toContainText('起草')
+  await expect(pane.getByTestId('rf__node-draft')).not.toContainText('新版起草')
+  await page.screenshot({ path: testInfo.outputPath('schedule-latest-frozen-history.png'), fullPage: true })
+  // UI edits advance the resource version; pause with freshly read versions and the enabled route.
+  const current = (await (await page.request.get(`${base}/schedule-configs`)).json()).items
+  for (const id of [fixed.id, latest.id]) {
+    const config = current.find((item: { id: string }) => item.id === id)
+    expect((await page.request.patch(`${base}/schedule-configs/${id}/enabled`, { data: { version: config.version, enabled: false } })).ok()).toBe(true)
+  }
+})

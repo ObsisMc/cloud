@@ -102,7 +102,7 @@ access token 和 PKCE verifier 只存在于单次请求的内存里，不持久�
 **华为 IDaaS（`internal/gateway/idaas`）。** 使用 IDaaS 2.0 Authorization Code，以机密客户端方式
 （`client_secret_post`）换取令牌，不启用 PKCE。
 
-- authorize 地址为 `<idaas.base_url>/saaslogin1/oauth2/v1/authorize`，只带 `client_id`、
+- authorize 默认地址为 `<idaas.base_url>/saaslogin1/oauth2/v1/authorize`，只带 `client_id`、
   `response_type=code`、`scope=base.profile`、`state` 和固定 callback。callback 的协议、域名、端口必须与
   IDaaS 应用的登记值逐字一致。
 - 以表单 `POST` 调用 `/saaslogin1/oauth2/v1/token`，`client_id`、`client_secret`、`code` 放在请求体里，
@@ -111,6 +111,14 @@ access token 和 PKCE verifier 只存在于单次请求的内存里，不持久�
   `globalUserID` 拼写）和 `idaas.display_name_field` 指定的显示名，缺失时回退为 uuid。`globalUserId` 缺失时
   仍可登录，只是不能自动关联管理员按员工目录预先添加的人员。
 - 令牌和 userinfo 客户端有独立的总超时、64 KiB 响应上限，传播取消，不跟随重定向。
+- 部署可独立覆盖 authorize、token、userinfo 完整 HTTPS 地址；省略的端点仍使用上述默认路径。
+  覆盖值不得包含 URL 用户凭据、query 或 fragment，也不从浏览器请求读取。配置项见
+  [配置参考](../operations/configuration.md#gateway)。覆盖地址不改变表单协议、scope、`huawei-corp` 来源或 UUID 映射，
+  不迁移身份、撤销已有会话或授予租户权限；目标必须维持同一企业身份权威。
+- 启动时 `IDaaS endpoints resolved` 日志给出三个端点实际使用的 scheme+host+path，以及每项是否来自部署覆盖
+  （`authorizeOverride`、`tokenOverride`、`userinfoOverride`）。覆盖变量名写错时，日志会给出默认地址和 `false`，
+  直接看出覆盖没生效；镜像本身不含端点覆盖或这条日志时，整行不会出现，需要先核对镜像版本。日志不含
+  client ID、client secret 和请求参数；它只证明进程采用的配置，不证明端点可达、凭据有效或登录成功。
 
 **GitHub（`internal/gateway/github`）。** OAuth App Authorization Code 加 PKCE S256，不请求任何 scope，
 authorize 请求带 `allow_signup=false` 和 `prompt=select_account`。读取 `GET /user` 后立即丢弃 access token，

@@ -44,10 +44,10 @@ const (
 
 // Store is the persistence a Host needs; *store.Store implements it.
 type Store interface {
-	Task(ctx context.Context, tenant, caller, id string) (store.Task, error)
+	Task(ctx context.Context, tenant, id string) (store.Task, error)
 	CreateWorkflowRun(ctx context.Context, tenant, workflowID, snapshotID string, in store.WorkflowRunInput) (store.WorkflowRun, error)
 	WorkflowRun(ctx context.Context, tenant, runID string) (store.WorkflowRun, error)
-	TaskDecompositions(ctx context.Context, tenant, caller, taskID string) ([]store.TaskDecomposition, error)
+	TaskDecompositions(ctx context.Context, tenant, taskID string) ([]store.TaskDecomposition, error)
 	TaskDecompositionByKey(ctx context.Context, tenant, taskID, user, key string) (store.TaskDecomposition, error)
 	LiveTaskDecomposition(ctx context.Context, tenant, taskID string) (store.TaskDecomposition, bool, error)
 	RunningTaskDecompositions(ctx context.Context) ([]store.TaskDecomposition, error)
@@ -111,7 +111,7 @@ func (h *Host) lock(taskID string) func() {
 // same key returns the decomposition it already started. A run the workflow host refuses to start
 // fails the decomposition at once, with the reason, rather than leaving it running.
 func (h *Host) Start(ctx context.Context, tenant, user, taskID, workflowID, key string) (store.TaskDecomposition, error) {
-	task, e := h.store.Task(ctx, tenant, user, taskID)
+	task, e := h.store.Task(ctx, tenant, taskID)
 	if e != nil {
 		return store.TaskDecomposition{}, e
 	}
@@ -170,8 +170,8 @@ func (h *Host) Start(ctx context.Context, tenant, user, taskID, workflowID, key 
 
 // List returns the task's decompositions, newest first, settling any whose run has ended in case
 // its watcher missed it.
-func (h *Host) List(ctx context.Context, tenant, caller, taskID string) ([]store.TaskDecomposition, error) {
-	items, e := h.store.TaskDecompositions(ctx, tenant, caller, taskID)
+func (h *Host) List(ctx context.Context, tenant, taskID string) ([]store.TaskDecomposition, error) {
+	items, e := h.store.TaskDecompositions(ctx, tenant, taskID)
 	if e != nil {
 		return nil, e
 	}

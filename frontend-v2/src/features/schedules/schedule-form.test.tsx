@@ -78,3 +78,18 @@ it('requires a project for a workflow while keeping projectless chat', async () 
   expect(within(project).getByRole('option', { name: '不关联项目' })).toBeEnabled()
   expect(within(project).getByRole('option', { name: '不关联项目' })).not.toHaveAttribute('hidden')
 })
+
+it('lets a workflow explicitly follow the latest release while explaining frozen history', async () => {
+ const user=userEvent.setup()
+ const onSave=vi.fn()
+ const data={projects:[{id:'p',name:'Demo',description:''}],workflows:[{id:'wf',name:'流程',version:'v1',snapshotId:'s1'}],available:{projects:true,models:true,agents:true,workflows:true}}
+ render(<ScheduleForm onSave={onSave} onCancel={()=>{}} data={data}/>)
+ await user.type(screen.getByLabelText('任务名称'),'跟随计划')
+ await user.click(screen.getByRole('button',{name:/运行工作流/}))
+ await user.selectOptions(screen.getByLabelText('工作流'),'wf')
+ await user.selectOptions(screen.getByLabelText('关联项目'),'p')
+ await user.click(screen.getByRole('button',{name:'跟随最新发布版本'}))
+ expect(screen.getByText(/历史运行始终保留当次实际使用的快照/)).toBeInTheDocument()
+ await user.click(screen.getByRole('button',{name:'创建并启用'}))
+ expect(onSave).toHaveBeenCalledWith(expect.objectContaining({versionPolicy:'latest',workflowId:'wf'}),data)
+})

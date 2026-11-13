@@ -128,22 +128,22 @@ func TestSquadLifecycle(t *testing.T) {
 	if out, e := f.store.Squad(ctx, f.tenant, created.ID); e != nil || out.Name != "产品小队" {
 		t.Fatalf("read as member = %+v %v", out, e)
 	}
-	if _, e := f.store.UpdateSquad(ctx, f.tenant, member, created.ID, store.SquadInput{Name: "改名", Version: 1}); !errors.Is(e, store.ErrForbidden) {
+	if _, e := f.store.UpdateSquad(ctx, storetest.Access(t, f.store, f.tenant, member), created.ID, store.SquadInput{Name: "改名", Version: 1}); !errors.Is(e, store.ErrForbidden) {
 		t.Fatalf("non-maintainer edit = %v", e)
 	}
 
 	// The maintainer adds the other human and the agent; counts split by type.
-	added, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Role: "评审", Version: 1})
+	added, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Role: "评审", Version: 1})
 	if e != nil {
 		t.Fatal(e)
 	}
 	if added.Version != 2 || added.HumanCount != 2 || added.AgentCount != 0 {
 		t.Fatalf("after human add = %+v", added)
 	}
-	if _, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: 2}); !errors.Is(e, store.ErrMemberExists) {
+	if _, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: 2}); !errors.Is(e, store.ErrMemberExists) {
 		t.Fatalf("duplicate add = %v", e)
 	}
-	withAgent, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberAgent, SpaceAgentID: agent, Role: "调研", Version: 2})
+	withAgent, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberAgent, SpaceAgentID: agent, Role: "调研", Version: 2})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -152,14 +152,14 @@ func TestSquadLifecycle(t *testing.T) {
 	}
 
 	// Agents cannot be maintainers, and retired or not-installed agents cannot join.
-	if _, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberAgent, SpaceAgentID: f.agent(t, "退役", "retired"), Version: 3}); !errors.Is(e, store.ErrAgentUnavailable) {
+	if _, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberAgent, SpaceAgentID: f.agent(t, "退役", "retired"), Version: 3}); !errors.Is(e, store.ErrAgentUnavailable) {
 		t.Fatalf("retired agent = %v", e)
 	}
 	var failed string
 	if e := f.db.QueryRow(ctx, `INSERT INTO v2_space_agents (tenant_id, name, observed_state) VALUES ($1, '安装失败', 'failed') RETURNING id`, f.tenant).Scan(&failed); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberAgent, SpaceAgentID: failed, Version: 3}); !errors.Is(e, store.ErrAgentUnavailable) {
+	if _, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberAgent, SpaceAgentID: failed, Version: 3}); !errors.Is(e, store.ErrAgentUnavailable) {
 		t.Fatalf("agent not installed = %v", e)
 	}
 
@@ -176,12 +176,12 @@ func TestSquadLifecycle(t *testing.T) {
 	if memberID == "" || detail.MaintainerCount != 1 || detail.HumanCount != 2 || detail.AgentCount != 1 {
 		t.Fatalf("added detail = %+v", detail)
 	}
-	if _, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: true, Version: detail.Version}); e != nil {
+	if _, e := f.store.UpdateSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: true, Version: detail.Version}); e != nil {
 		t.Fatalf("promote maintainer = %v", e)
 	}
 
 	// The stale version fails before any write; the current one is required.
-	if _, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberAgent, SpaceAgentID: agent, Version: 2}); !errors.Is(e, store.ErrConflict) {
+	if _, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberAgent, SpaceAgentID: agent, Version: 2}); !errors.Is(e, store.ErrConflict) {
 		t.Fatalf("stale version = %v", e)
 	}
 
@@ -194,14 +194,14 @@ func TestSquadLifecycle(t *testing.T) {
 	}
 
 	// Removing ends the grant; rejoining is a new grant and keeps the old row as history.
-	removed, e := f.store.RemoveSquadMember(ctx, f.tenant, member, created.ID, memberID, detail.Version)
+	removed, e := f.store.RemoveSquadMember(ctx, storetest.Access(t, f.store, f.tenant, member), created.ID, memberID, detail.Version)
 	if e != nil {
 		t.Fatal(e)
 	}
 	if removed.HumanCount != 1 || removed.MaintainerCount != 1 {
 		t.Fatalf("after remove = %+v", removed)
 	}
-	rejoined, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Role: "重新加入", Version: removed.Version})
+	rejoined, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Role: "重新加入", Version: removed.Version})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -216,7 +216,7 @@ func TestSquadLifecycle(t *testing.T) {
 	}
 
 	// The leader must be an active agent member; setting one adds the membership in the same write.
-	leader, e := f.store.UpdateSquad(ctx, f.tenant, owner, created.ID, store.SquadInput{Name: "产品小队", Description: "一起做产品", Charter: "上午评审", LeaderAgentID: &agent, Version: rejoined.Version})
+	leader, e := f.store.UpdateSquad(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadInput{Name: "产品小队", Description: "一起做产品", Charter: "上午评审", LeaderAgentID: &agent, Version: rejoined.Version})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -234,7 +234,7 @@ func TestSquadLifecycle(t *testing.T) {
 	}
 
 	// Removing the leader clears the leader in the same transaction.
-	noLeader, e := f.store.RemoveSquadMember(ctx, f.tenant, owner, created.ID, leaderMember, leader.Version)
+	noLeader, e := f.store.RemoveSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, leaderMember, leader.Version)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -243,7 +243,7 @@ func TestSquadLifecycle(t *testing.T) {
 	}
 
 	// Archiving ends every live membership, keeps the history and blocks further edits.
-	archived, e := f.store.ArchiveSquad(ctx, f.tenant, owner, created.ID, noLeader.Version)
+	archived, e := f.store.ArchiveSquad(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, noLeader.Version)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -253,10 +253,10 @@ func TestSquadLifecycle(t *testing.T) {
 	if len(archived.Members) < 3 {
 		t.Fatalf("archive lost history: %+v", archived.Members)
 	}
-	if _, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: archived.Version}); !errors.Is(e, store.ErrArchived) {
+	if _, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: archived.Version}); !errors.Is(e, store.ErrArchived) {
 		t.Fatalf("add after archive = %v", e)
 	}
-	if _, e := f.store.ArchiveSquad(ctx, f.tenant, owner, created.ID, archived.Version); !errors.Is(e, store.ErrArchived) {
+	if _, e := f.store.ArchiveSquad(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, archived.Version); !errors.Is(e, store.ErrArchived) {
 		t.Fatalf("second archive = %v", e)
 	}
 	list, e := f.store.Squads(ctx, f.tenant)
@@ -279,11 +279,11 @@ func TestSquadSelfExit(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	withMember, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: 1})
+	withMember, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: 1})
 	if e != nil {
 		t.Fatal(e)
 	}
-	withOther, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: other, Version: withMember.Version})
+	withOther, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: other, Version: withMember.Version})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -294,12 +294,12 @@ func TestSquadSelfExit(t *testing.T) {
 	}
 
 	// A plain member cannot remove another member; only self-exit bypasses the manager check.
-	if _, e := f.store.RemoveSquadMember(ctx, f.tenant, member, created.ID, otherID, withOther.Version); !errors.Is(e, store.ErrForbidden) {
+	if _, e := f.store.RemoveSquadMember(ctx, storetest.Access(t, f.store, f.tenant, member), created.ID, otherID, withOther.Version); !errors.Is(e, store.ErrForbidden) {
 		t.Fatalf("non-maintainer remove other = %v", e)
 	}
 
 	// Self-exit ends only the caller's membership and keeps it as history.
-	removed, e := f.store.RemoveSquadMember(ctx, f.tenant, member, created.ID, memberID, withOther.Version)
+	removed, e := f.store.RemoveSquadMember(ctx, storetest.Access(t, f.store, f.tenant, member), created.ID, memberID, withOther.Version)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -327,7 +327,7 @@ func TestSquadMaintainerHandover(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	withMember, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: 1})
+	withMember, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Version: 1})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -338,26 +338,26 @@ func TestSquadMaintainerHandover(t *testing.T) {
 	}
 
 	// A maintainer promotes another human to maintainer.
-	promoted, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: true, Version: withMember.Version})
+	promoted, e := f.store.UpdateSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: true, Version: withMember.Version})
 	if e != nil || promoted.MaintainerCount != 2 {
 		t.Fatalf("promote = %+v %v", promoted, e)
 	}
 	// And demotes them again, leaving a single maintainer.
-	demoted, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: false, Version: promoted.Version})
+	demoted, e := f.store.UpdateSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: false, Version: promoted.Version})
 	if e != nil || demoted.MaintainerCount != 1 {
 		t.Fatalf("demote = %+v %v", demoted, e)
 	}
 
 	// Removing the last maintainer mark leaves zero maintainers; only the workspace owner can
 	// restore authority afterwards.
-	zero, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, ownerID, store.SquadMemberUpdate{Role: "", Maintainer: false, Version: demoted.Version})
+	zero, e := f.store.UpdateSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, ownerID, store.SquadMemberUpdate{Role: "", Maintainer: false, Version: demoted.Version})
 	if e != nil || zero.MaintainerCount != 0 {
 		t.Fatalf("zero maintainers = %+v %v", zero, e)
 	}
-	if _, e := f.store.AddSquadMember(ctx, f.tenant, member, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: owner, Version: zero.Version}); !errors.Is(e, store.ErrForbidden) {
+	if _, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, member), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: owner, Version: zero.Version}); !errors.Is(e, store.ErrForbidden) {
 		t.Fatalf("non-maintainer edit at zero = %v", e)
 	}
-	restored, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: true, Version: zero.Version})
+	restored, e := f.store.UpdateSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, memberID, store.SquadMemberUpdate{Role: "评审", Maintainer: true, Version: zero.Version})
 	if e != nil || restored.MaintainerCount != 1 {
 		t.Fatalf("owner restore = %+v %v", restored, e)
 	}
@@ -373,7 +373,7 @@ func TestSquadLastMaintainerSelfExit(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	withMember, e := f.store.AddSquadMember(ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Maintainer: true, Version: 1})
+	withMember, e := f.store.AddSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: member, Maintainer: true, Version: 1})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -383,13 +383,13 @@ func TestSquadLastMaintainerSelfExit(t *testing.T) {
 		t.Fatalf("memberships missing: %+v", withMember.Members)
 	}
 	// Drop the owner's own maintainer mark so member is the sole maintainer.
-	demoted, e := f.store.UpdateSquadMember(ctx, f.tenant, owner, created.ID, ownerID, store.SquadMemberUpdate{Maintainer: false, Version: withMember.Version})
+	demoted, e := f.store.UpdateSquadMember(ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, ownerID, store.SquadMemberUpdate{Maintainer: false, Version: withMember.Version})
 	if e != nil || demoted.MaintainerCount != 1 {
 		t.Fatalf("sole maintainer = %+v %v", demoted, e)
 	}
 
 	// The last maintainer leaves on their own authority; no last-maintainer guard blocks it.
-	removed, e := f.store.RemoveSquadMember(ctx, f.tenant, member, created.ID, memberID, demoted.Version)
+	removed, e := f.store.RemoveSquadMember(ctx, storetest.Access(t, f.store, f.tenant, member), created.ID, memberID, demoted.Version)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -421,7 +421,7 @@ func TestSquadConcurrentMemberAdd(t *testing.T) {
 	for _, user := range []string{first, second} {
 		go func(user string) {
 			<-start
-			_, e := f.store.AddSquadMember(f.ctx, f.tenant, owner, created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: user, Version: 1})
+			_, e := f.store.AddSquadMember(f.ctx, storetest.Access(t, f.store, f.tenant, owner), created.ID, store.SquadMemberInput{Type: store.MemberHuman, UserID: user, Version: 1})
 			results <- e
 		}(user)
 	}

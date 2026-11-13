@@ -15,7 +15,6 @@ import (
 // WorkflowStore is what the definition routes need from the database. It is asserted from the
 // server's store so the login and member routes stay independent of workflow storage.
 type WorkflowStore interface {
-	Member(context.Context, string, string) (bool, error)
 	Workflows(context.Context, string) ([]store.WorkflowSummary, error)
 	Workflow(context.Context, string, string) (store.Workflow, error)
 	CreateWorkflow(context.Context, string, string, string) (store.Workflow, store.WorkflowSnapshot, error)
@@ -145,29 +144,14 @@ func decodeWorkflow(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-// workflowScope resolves the workflow store, the tenant, and current membership before any handler
-// touches a definition. Authorization failures answer 404 so hidden tenants stay indistinguishable.
-func (h *handler) workflowScope(w http.ResponseWriter, r *http.Request, u store.User) (WorkflowStore, string, bool) {
+// workflowScope resolves the workflow store for the route's tenant.
+func (h *handler) workflowScope(w http.ResponseWriter, a access) (WorkflowStore, string, bool) {
 	s, ok := h.store.(WorkflowStore)
 	if !ok {
 		fault(w, http.StatusServiceUnavailable, "workflow_store_unavailable")
 		return nil, "", false
 	}
-	tenant := r.PathValue("tid")
-	if !workflowUUID.MatchString(tenant) {
-		fault(w, http.StatusNotFound, "not_found")
-		return nil, "", false
-	}
-	member, err := s.Member(r.Context(), tenant, u.ID)
-	if err != nil {
-		internal(w, "workflow membership", err)
-		return nil, "", false
-	}
-	if !member {
-		fault(w, http.StatusNotFound, "not_found")
-		return nil, "", false
-	}
-	return s, tenant, true
+	return s, a.TenantID, true
 }
 
 // workflowID reads the definition id from the route and answers 404 for anything that cannot be one.
@@ -212,8 +196,8 @@ func workflowFault(w http.ResponseWriter, err error, op, draftSource string) {
 	}
 }
 
-func (h *handler) listWorkflows(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) listWorkflows(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -229,8 +213,8 @@ func (h *handler) listWorkflows(w http.ResponseWriter, r *http.Request, u store.
 	writeJSON(w, http.StatusOK, map[string]any{"workflows": views})
 }
 
-func (h *handler) createWorkflow(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) createWorkflow(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -261,8 +245,8 @@ func (h *handler) createWorkflow(w http.ResponseWriter, r *http.Request, u store
 	})
 }
 
-func (h *handler) getWorkflow(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) getWorkflow(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -297,8 +281,8 @@ func (h *handler) getWorkflow(w http.ResponseWriter, r *http.Request, u store.Us
 	})
 }
 
-func (h *handler) updateWorkflow(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) updateWorkflow(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -325,8 +309,8 @@ func (h *handler) updateWorkflow(w http.ResponseWriter, r *http.Request, u store
 	writeJSON(w, http.StatusOK, map[string]any{"workflow": toWorkflowView(workflow)})
 }
 
-func (h *handler) deleteWorkflow(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) deleteWorkflow(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -341,8 +325,8 @@ func (h *handler) deleteWorkflow(w http.ResponseWriter, r *http.Request, u store
 	writeJSON(w, http.StatusOK, map[string]any{"workflowId": id})
 }
 
-func (h *handler) getWorkflowDraft(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) getWorkflowDraft(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}
@@ -362,8 +346,8 @@ func (h *handler) getWorkflowDraft(w http.ResponseWriter, r *http.Request, u sto
 	writeJSON(w, http.StatusOK, map[string]any{"snapshot": toWorkflowSnapshotView(draft)})
 }
 
-func (h *handler) updateWorkflowDraft(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowScope(w, r, u)
+func (h *handler) updateWorkflowDraft(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowScope(w, a)
 	if !ok {
 		return
 	}

@@ -44,9 +44,6 @@ func TestScheduleScopesFollowCurrentAuthorizationAndIncludePaused(t *testing.T) 
 			t.Fatal(err)
 		}
 		assertCount(0)
-		if _, err = f.s.GetScheduleConfig(ctx, scope.TenantID, scope.UserID, one.ID); err != store.ErrNotFound {
-			t.Fatal(err)
-		}
 		if _, err = f.admin.Exec(ctx, mutation.restore, scope.UserID); err != nil {
 			t.Fatal(err)
 		}
@@ -64,7 +61,4 @@ func TestScheduleScopesFollowCurrentAuthorizationAndIncludePaused(t *testing.T) 
 		t.Fatal(err)
 	}
 	assertCount(0)
-	if _, err = f.s.GetScheduleConfig(ctx, scope.TenantID, scope.UserID, one.ID); err != store.ErrNotFound {
-		t.Fatal(err)
-	}
 }

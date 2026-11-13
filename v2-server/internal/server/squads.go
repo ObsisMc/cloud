@@ -17,15 +17,14 @@ import (
 // squadStore is the part of the database the squad routes need. It lives beside the handlers so
 // the rest of the server can run against a store that does not implement squads yet.
 type squadStore interface {
-	TenantMemberRole(context.Context, string, string) (string, error)
 	Squads(context.Context, string) ([]store.SquadSummary, error)
 	Squad(context.Context, string, string) (store.SquadDetail, error)
 	CreateSquad(context.Context, string, string, store.SquadInput) (store.SquadDetail, error)
-	UpdateSquad(context.Context, string, string, string, store.SquadInput) (store.SquadDetail, error)
-	ArchiveSquad(context.Context, string, string, string, int64) (store.SquadDetail, error)
-	AddSquadMember(context.Context, string, string, string, store.SquadMemberInput) (store.SquadDetail, error)
-	UpdateSquadMember(context.Context, string, string, string, string, store.SquadMemberUpdate) (store.SquadDetail, error)
-	RemoveSquadMember(context.Context, string, string, string, string, int64) (store.SquadDetail, error)
+	UpdateSquad(context.Context, store.Access, string, store.SquadInput) (store.SquadDetail, error)
+	ArchiveSquad(context.Context, store.Access, string, int64) (store.SquadDetail, error)
+	AddSquadMember(context.Context, store.Access, string, store.SquadMemberInput) (store.SquadDetail, error)
+	UpdateSquadMember(context.Context, store.Access, string, string, store.SquadMemberUpdate) (store.SquadDetail, error)
+	RemoveSquadMember(context.Context, store.Access, string, string, int64) (store.SquadDetail, error)
 }
 
 var squadUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -135,30 +134,22 @@ func (h *handler) squadStore(w http.ResponseWriter) (squadStore, bool) {
 	return s, ok
 }
 
-// squadMember keeps the tenant scoping and live-membership check in one place: every squad route
-// answers 404 to a non-member so another tenant cannot be enumerated.
-func (h *handler) squadMember(w http.ResponseWriter, r *http.Request, u store.User, tenant, squadID string) (squadStore, bool) {
+// squadScope requires the squad store and answers 404 to a squad id that cannot exist.
+func (h *handler) squadScope(w http.ResponseWriter, squadID string) (squadStore, bool) {
 	s, ok := h.squadStore(w)
 	if !ok {
 		return nil, false
 	}
-	if !squadUUID.MatchString(tenant) || (squadID != "" && !squadUUID.MatchString(squadID)) {
+	if squadID != "" && !squadUUID.MatchString(squadID) {
 		fault(w, http.StatusNotFound, "not_found")
-		return nil, false
-	}
-	if _, e := s.TenantMemberRole(r.Context(), tenant, u.ID); e != nil {
-		if squadFault(w, e) {
-			return nil, false
-		}
-		internal(w, "squad membership", e)
 		return nil, false
 	}
 	return s, true
 }
 
-func (h *handler) listSquads(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant := r.PathValue("tid")
-	s, ok := h.squadMember(w, r, u, tenant, "")
+func (h *handler) listSquads(w http.ResponseWriter, r *http.Request, a access) {
+	tenant := a.TenantID
+	s, ok := h.squadScope(w, "")
 	if !ok {
 		return
 	}
@@ -170,9 +161,9 @@ func (h *handler) listSquads(w http.ResponseWriter, r *http.Request, u store.Use
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": ""})
 }
 
-func (h *handler) createSquad(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant := r.PathValue("tid")
-	s, ok := h.squadMember(w, r, u, tenant, "")
+func (h *handler) createSquad(w http.ResponseWriter, r *http.Request, a access) {
+	tenant := a.TenantID
+	s, ok := h.squadScope(w, "")
 	if !ok {
 		return
 	}
@@ -194,7 +185,7 @@ func (h *handler) createSquad(w http.ResponseWriter, r *http.Request, u store.Us
 		fault(w, http.StatusBadRequest, code)
 		return
 	}
-	out, e := s.CreateSquad(r.Context(), tenant, u.ID, in)
+	out, e := s.CreateSquad(r.Context(), tenant, a.UserID, in)
 	if e != nil {
 		if squadFault(w, e) {
 			return
@@ -205,13 +196,13 @@ func (h *handler) createSquad(w http.ResponseWriter, r *http.Request, u store.Us
 	writeJSON(w, http.StatusCreated, out)
 }
 
-func (h *handler) getSquad(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, id := r.PathValue("tid"), r.PathValue("sid")
-	s, ok := h.squadMember(w, r, u, tenant, id)
+func (h *handler) getSquad(w http.ResponseWriter, r *http.Request, a access) {
+	id := r.PathValue("sid")
+	s, ok := h.squadScope(w, id)
 	if !ok {
 		return
 	}
-	out, e := s.Squad(r.Context(), tenant, id)
+	out, e := s.Squad(r.Context(), a.TenantID, id)
 	if e != nil {
 		if squadFault(w, e) {
 			return
@@ -222,9 +213,9 @@ func (h *handler) getSquad(w http.ResponseWriter, r *http.Request, u store.User)
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (h *handler) updateSquad(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, id := r.PathValue("tid"), r.PathValue("sid")
-	s, ok := h.squadMember(w, r, u, tenant, id)
+func (h *handler) updateSquad(w http.ResponseWriter, r *http.Request, a access) {
+	id := r.PathValue("sid")
+	s, ok := h.squadScope(w, id)
 	if !ok {
 		return
 	}
@@ -246,7 +237,7 @@ func (h *handler) updateSquad(w http.ResponseWriter, r *http.Request, u store.Us
 		fault(w, http.StatusBadRequest, code)
 		return
 	}
-	out, e := s.UpdateSquad(r.Context(), tenant, u.ID, id, in)
+	out, e := s.UpdateSquad(r.Context(), a.Access, id, in)
 	if e != nil {
 		if squadFault(w, e) {
 			return
@@ -257,9 +248,9 @@ func (h *handler) updateSquad(w http.ResponseWriter, r *http.Request, u store.Us
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (h *handler) archiveSquad(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, id := r.PathValue("tid"), r.PathValue("sid")
-	s, ok := h.squadMember(w, r, u, tenant, id)
+func (h *handler) archiveSquad(w http.ResponseWriter, r *http.Request, a access) {
+	id := r.PathValue("sid")
+	s, ok := h.squadScope(w, id)
 	if !ok {
 		return
 	}
@@ -273,7 +264,7 @@ func (h *handler) archiveSquad(w http.ResponseWriter, r *http.Request, u store.U
 		fault(w, http.StatusPreconditionRequired, "version_required")
 		return
 	}
-	out, e := s.ArchiveSquad(r.Context(), tenant, u.ID, id, req.Version)
+	out, e := s.ArchiveSquad(r.Context(), a.Access, id, req.Version)
 	if e != nil {
 		if squadFault(w, e) {
 			return
@@ -284,9 +275,9 @@ func (h *handler) archiveSquad(w http.ResponseWriter, r *http.Request, u store.U
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (h *handler) addSquadMember(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, id := r.PathValue("tid"), r.PathValue("sid")
-	s, ok := h.squadMember(w, r, u, tenant, id)
+func (h *handler) addSquadMember(w http.ResponseWriter, r *http.Request, a access) {
+	id := r.PathValue("sid")
+	s, ok := h.squadScope(w, id)
 	if !ok {
 		return
 	}
@@ -318,7 +309,7 @@ func (h *handler) addSquadMember(w http.ResponseWriter, r *http.Request, u store
 		return
 	}
 	in := store.SquadMemberInput{Type: req.Type, UserID: req.UserID, SpaceAgentID: req.SpaceAgentID, Role: req.Role, Maintainer: req.Maintainer, Version: req.Version}
-	out, e := s.AddSquadMember(r.Context(), tenant, u.ID, id, in)
+	out, e := s.AddSquadMember(r.Context(), a.Access, id, in)
 	if e != nil {
 		if squadFault(w, e) {
 			return
@@ -329,13 +320,13 @@ func (h *handler) addSquadMember(w http.ResponseWriter, r *http.Request, u store
 	writeJSON(w, http.StatusCreated, out)
 }
 
-func (h *handler) updateSquadMember(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, id, member := r.PathValue("tid"), r.PathValue("sid"), r.PathValue("mid")
+func (h *handler) updateSquadMember(w http.ResponseWriter, r *http.Request, a access) {
+	id, member := r.PathValue("sid"), r.PathValue("mid")
 	if !squadUUID.MatchString(member) {
 		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
-	s, ok := h.squadMember(w, r, u, tenant, id)
+	s, ok := h.squadScope(w, id)
 	if !ok {
 		return
 	}
@@ -352,7 +343,7 @@ func (h *handler) updateSquadMember(w http.ResponseWriter, r *http.Request, u st
 		return
 	}
 	in := store.SquadMemberUpdate{Role: *req.Role, Maintainer: *req.Maintainer, Version: req.Version}
-	out, e := s.UpdateSquadMember(r.Context(), tenant, u.ID, id, member, in)
+	out, e := s.UpdateSquadMember(r.Context(), a.Access, id, member, in)
 	if e != nil {
 		if squadFault(w, e) {
 			return
@@ -363,13 +354,13 @@ func (h *handler) updateSquadMember(w http.ResponseWriter, r *http.Request, u st
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (h *handler) removeSquadMember(w http.ResponseWriter, r *http.Request, u store.User) {
-	tenant, id, member := r.PathValue("tid"), r.PathValue("sid"), r.PathValue("mid")
+func (h *handler) removeSquadMember(w http.ResponseWriter, r *http.Request, a access) {
+	id, member := r.PathValue("sid"), r.PathValue("mid")
 	if !squadUUID.MatchString(member) {
 		fault(w, http.StatusNotFound, "not_found")
 		return
 	}
-	s, ok := h.squadMember(w, r, u, tenant, id)
+	s, ok := h.squadScope(w, id)
 	if !ok {
 		return
 	}
@@ -378,7 +369,7 @@ func (h *handler) removeSquadMember(w http.ResponseWriter, r *http.Request, u st
 		fault(w, http.StatusPreconditionRequired, "version_required")
 		return
 	}
-	out, e := s.RemoveSquadMember(r.Context(), tenant, u.ID, id, member, version)
+	out, e := s.RemoveSquadMember(r.Context(), a.Access, id, member, version)
 	if e != nil {
 		if squadFault(w, e) {
 			return

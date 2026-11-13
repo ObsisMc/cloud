@@ -9,7 +9,6 @@ import (
 
 	"github.com/wanglongan587/cloud/v2-server/internal/chat"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
-	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
 // WorkflowRunEvents tells which runs changed. Subscribe returns a channel that receives a value
@@ -23,8 +22,8 @@ type WorkflowRunEvents interface {
 // of desktop's app event: no state, only that the run must be read again, so the page keeps reading
 // the persisted run over HTTP. One is sent as soon as the stream opens, so a page that read the run
 // before subscribing misses no change in between.
-func (h *handler) workflowRunEvents(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowRunScope(w, r, u)
+func (h *handler) workflowRunEvents(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowRunScope(w, a)
 	if !ok {
 		return
 	}
@@ -80,8 +79,8 @@ func (h *handler) workflowRunEvents(w http.ResponseWriter, r *http.Request, u st
 // execution service keeps a session in the scope of whoever started the run, and it is read in the
 // caller's own scope: another member of the tenant gets workflow_node_session_not_found and the
 // page keeps showing the task and answer the attempt recorded.
-func (h *handler) workflowNodeEvents(w http.ResponseWriter, r *http.Request, u store.User) {
-	s, tenant, ok := h.workflowRunScope(w, r, u)
+func (h *handler) workflowNodeEvents(w http.ResponseWriter, r *http.Request, a access) {
+	s, tenant, ok := h.workflowRunScope(w, a)
 	if !ok {
 		return
 	}
@@ -121,7 +120,7 @@ func (h *handler) workflowNodeEvents(w http.ResponseWriter, r *http.Request, u s
 		fault(w, http.StatusBadRequest, "invalid_cursor")
 		return
 	}
-	scope := execution.Scope{TenantID: tenant, UserID: u.ID}
+	scope := execution.Scope{TenantID: tenant, UserID: a.UserID}
 	stream, err := h.opts.Execution.Subscribe(r.Context(), scope, *sessionID, after)
 	switch {
 	case err == nil:

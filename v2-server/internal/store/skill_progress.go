@@ -10,8 +10,8 @@ type SkillProgress struct {
 	Failure          string `json:"failure"`
 }
 
-func (s *Store) SkillProgress(ctx context.Context, tenant, space, user, namespace, id string) ([]SkillProgress, error) {
-	if _, e := requireSpaceAccess(ctx, s.pool, tenant, space, user); e != nil {
+func (s *Store) SkillProgress(ctx context.Context, tenant, space, namespace, id string) ([]SkillProgress, error) {
+	if e := requireSpace(ctx, s.pool, tenant, space); e != nil {
 		return nil, e
 	}
 	rows, e := s.pool.Query(ctx, `select p.id,coalesce(p.data->>'Name',p.id),

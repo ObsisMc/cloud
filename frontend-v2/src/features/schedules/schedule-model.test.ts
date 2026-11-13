@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { emptyDraft, nextTimes, summary, targetFromDraft, validateDraft } from './schedule-model'
+import { emptyDraft, nextTimes, summary, targetFromDraft, taskDraft, isWorkflowTarget, validateDraft } from './schedule-model'
 
 describe('schedule rules', () => {
   it('uses task timezone, skips an elapsed time, and rolls the year over', () => {
@@ -48,4 +48,13 @@ describe('execution target boundaries',()=>{
   expect(targetFromDraft({...draft,projectId:'p'},data)).toEqual({kind:'workflow',workflowId:'wf',snapshotId:'snap-3',input:'整理'})
   expect(summary({...draft,projectId:'p'},data)).toContain('运行工作流「周报流程」（v3）')
  })
+})
+
+it('saves latest as a policy without a stale snapshot and restores it for editing', () => {
+ const data={projects:[],workflows:[{id:'wf',name:'流程',version:'v2',snapshotId:'snap-2'}]}
+ const draft={...emptyDraft(),kind:'workflow' as const,workflowId:'wf',snapshotId:'snap-1',versionPolicy:'latest' as const,input:'需求'}
+ const target=targetFromDraft(draft,data)
+ expect(target).toEqual({kind:'workflow',workflowId:'wf',versionPolicy:'latest',input:'需求'})
+ expect(isWorkflowTarget(target)).toBe(true)
+ expect(taskDraft({id:'schedule',name:'计划',projectId:'p',target,rule:draft.rule,enabled:true,createdAt:'2026-11-01T00:00:00Z',runs:[]})).toMatchObject({versionPolicy:'latest',snapshotId:'',input:'需求'})
 })

@@ -76,9 +76,6 @@ func scanForm(row pgx.Row) (WorkflowForm, error) {
 
 // SetWorkflowStarter freezes the actor before any node begins.
 func (s *Store) SetWorkflowStarter(ctx context.Context, tenant, runID, user string) error {
-	if _, err := tenantRole(ctx, s.pool, tenant, user); err != nil {
-		return err
-	}
 	_, err := s.pool.Exec(ctx, `UPDATE v2_workflow_runs SET started_by=$3::uuid WHERE tenant_id=$1 AND id=$2 AND status='pending'`, tenant, runID, user)
 	return err
 }
@@ -128,13 +125,9 @@ func (s *Store) OpenWorkflowForm(ctx context.Context, runID, nodeRunID string, i
 	return out, err
 }
 
-// WorkflowForm reads evidence through current tenant membership.
-func (s *Store) WorkflowForm(ctx context.Context, tenant, user, runID string) (WorkflowForm, error) {
-	role, err := tenantRole(ctx, s.pool, tenant, user)
-	if err != nil {
-		return WorkflowForm{}, err
-	}
-	f, err := scanForm(s.pool.QueryRow(ctx, `SELECT `+formColumns+` FROM v2_workflow_forms WHERE tenant_id=$1 AND run_id=$2`, tenant, runID))
+// WorkflowForm reads the run's evidence form; CanEdit follows the reviewer-or-owner rule.
+func (s *Store) WorkflowForm(ctx context.Context, a Access, runID string) (WorkflowForm, error) {
+	f, err := scanForm(s.pool.QueryRow(ctx, `SELECT `+formColumns+` FROM v2_workflow_forms WHERE tenant_id=$1 AND run_id=$2`, a.TenantID, runID))
 	if err != nil {
 		return f, err
 	}
@@ -144,7 +137,7 @@ func (s *Store) WorkflowForm(ctx context.Context, tenant, user, runID string) (W
 	if status == "cancelled" {
 		f.Status = "cancelled"
 	}
-	f.CanEdit = live && f.Status == "open" && (f.ReviewerID == user || isAdministrator(role))
+	f.CanEdit = live && f.Status == "open" && (f.ReviewerID == a.UserID || a.Owner())
 	if err == nil {
 		f.ExistingTasks, err = existingFormTasks(ctx, s.pool, f.ID)
 	}
@@ -153,28 +146,24 @@ func (s *Store) WorkflowForm(ctx context.Context, tenant, user, runID string) (W
 
 // SaveWorkflowForm uses a caller-supplied pure validator and completion fold under
 // the run lock, so cancel, edits and final submission cannot overtake each other.
-func (s *Store) SaveWorkflowForm(ctx context.Context, tenant, user, runID string, version int64, key string, answers json.RawMessage, final bool, validate func(WorkflowForm) error, fold func([]byte, WorkflowForm) ([]byte, error)) (WorkflowForm, error) {
+func (s *Store) SaveWorkflowForm(ctx context.Context, a Access, runID string, version int64, key string, answers json.RawMessage, final bool, validate func(WorkflowForm) error, fold func([]byte, WorkflowForm) ([]byte, error)) (WorkflowForm, error) {
 	var out WorkflowForm
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		role, err := tenantRole(ctx, tx, tenant, user)
-		if err != nil {
-			return err
-		}
-		if err := lockWorkflowRun(ctx, tx, tenant, runID); err != nil {
+		if err := lockWorkflowRun(ctx, tx, a.TenantID, runID); err != nil {
 			return err
 		}
 		r, err := lockEngineRun(ctx, tx, runID)
 		if err != nil {
 			return err
 		}
-		f, err := scanForm(tx.QueryRow(ctx, `SELECT `+formColumns+` FROM v2_workflow_forms WHERE tenant_id=$1 AND run_id=$2 FOR UPDATE`, tenant, runID))
+		f, err := scanForm(tx.QueryRow(ctx, `SELECT `+formColumns+` FROM v2_workflow_forms WHERE tenant_id=$1 AND run_id=$2 FOR UPDATE`, a.TenantID, runID))
 		if err != nil {
 			return err
 		}
-		if f.ReviewerID != user && !isAdministrator(role) {
+		if f.ReviewerID != a.UserID && !a.Owner() {
 			return ErrForbidden
 		}
-		if final && f.Status == "submitted" && f.SubmitKey == key && f.SubmittedBy == user {
+		if final && f.Status == "submitted" && f.SubmitKey == key && f.SubmittedBy == a.UserID {
 			out = f
 			return nil
 		}
@@ -234,7 +223,7 @@ func (s *Store) SaveWorkflowForm(ctx context.Context, tenant, user, runID string
 			}
 			for _, row := range rows {
 				if row.Decision == "confirmed" && row.Assignee != nil {
-					if err := requireAssignee(ctx, tx, tenant, TaskAssigneeRef{Type: row.Assignee.Type, ID: row.Assignee.ID}); err != nil {
+					if err := requireAssignee(ctx, tx, a.TenantID, TaskAssigneeRef{Type: row.Assignee.Type, ID: row.Assignee.ID}); err != nil {
 						return err
 					}
 				}
@@ -243,7 +232,7 @@ func (s *Store) SaveWorkflowForm(ctx context.Context, tenant, user, runID string
 				return fmt.Errorf("invalid submission key")
 			}
 			f.Status = "submitted"
-			f.SubmittedBy = user
+			f.SubmittedBy = a.UserID
 			f.SubmitKey = key
 			payload, err := fold(r.payload, f)
 			if err != nil {
@@ -274,20 +263,16 @@ func (s *Store) WorkflowStarter(ctx context.Context, runID string) (string, erro
 
 // RetryWorkflowFormTasks reopens only a failed deterministic action. Completed
 // tasks, cancelled runs and failures in evidence collection cannot be replayed.
-func (s *Store) RetryWorkflowFormTasks(ctx context.Context, tenant, user, runID string) error {
+func (s *Store) RetryWorkflowFormTasks(ctx context.Context, a Access, runID string) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		role, err := tenantRole(ctx, tx, tenant, user)
-		if err != nil {
-			return err
-		}
-		if err := lockWorkflowRun(ctx, tx, tenant, runID); err != nil {
+		if err := lockWorkflowRun(ctx, tx, a.TenantID, runID); err != nil {
 			return err
 		}
 		f, err := scanForm(tx.QueryRow(ctx, `SELECT `+formColumns+` FROM v2_workflow_forms WHERE run_id=$1`, runID))
 		if err != nil {
 			return err
 		}
-		if user != f.ReviewerID && !isAdministrator(role) {
+		if a.UserID != f.ReviewerID && !a.Owner() {
 			return ErrForbidden
 		}
 		r, err := lockEngineRun(ctx, tx, runID)
