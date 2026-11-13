@@ -15,7 +15,6 @@ test('MCP is read-only in Settings, so workflows have no browser-local MCP choic
   const name = `MCP 只读-${Date.now()}`
   const response = await page.request.post(base, { data: { name, graph: null } })
   expect(response.status()).toBe(201)
-  const wid = (await response.json()).workflow.id
   await page.goto('/workflows')
   await page.getByRole('complementary', { name: '工作流列表' }).getByRole('button', { name, exact: true }).click()
   await expect(page.getByLabel('工作流名称', { exact: true })).toHaveValue(name)
