@@ -329,8 +329,14 @@ func (s *Store) installSpacePlugin(
 		old, oldErr := querySpacePlugin(ctx, tx, space, namespace, identifier, true)
 		switch {
 		case oldErr == nil:
-			if old.Kind == "agent" && old.RequestedByUserID == nil {
-				return ErrPluginRuntimeManaged
+			// Agents never get a server-backed install here: a preinstalled Agent is managed by the
+			// runtime, and an existing market Agent selection (requested_by_user_id set) is only
+			// browsed, so an update is rejected instead of quietly refreshing it.
+			if old.Kind == "agent" {
+				if old.RequestedByUserID == nil {
+					return ErrPluginRuntimeManaged
+				}
+				return ErrPluginKindNotInstallable
 			}
 			if in.Version != old.Version {
 				return ErrConflict

@@ -119,19 +119,21 @@ test('settings pages avoid global demo labels and the reset control', async ({ p
   }
 })
 
-test('Workflow Examples is read-only and never writes to the server', async ({ page }) => {
+test('Workflow Examples installs through the server like any workflow', async ({ page }) => {
+  test.setTimeout(90_000)
   await login(page, '/settings/plugins')
-  const writes: string[] = []
-  page.on('request', (req) => {
-    if (new URL(req.url()).pathname.startsWith('/api/') &&
-      !['GET', 'HEAD', 'OPTIONS'].includes(req.method())) writes.push(req.url())
-  })
   const row = page.getByRole('article', { name: 'Workflow Examples' })
-  await expect(row.getByText('暂不支持安装')).toBeVisible()
-  expect(
-    await row.getByRole('button', { name: '安装' }).count(),
-  ).toBe(0)
-  expect(writes).toEqual([])
+  // The space may keep a workflow selection across runs; start from a known uninstalled state.
+  if (await row.getByRole('button', { name: '卸载' }).count()) {
+    await row.getByRole('button', { name: '卸载' }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: '卸载' }).click()
+    await expect(row.getByText('未安装', { exact: true })).toBeVisible()
+  }
+  await expect(row.getByRole('button', { name: '安装' })).toBeVisible()
+  await row.getByRole('button', { name: '安装' }).click()
+  await expect(row.getByText('已安装', { exact: true })).toBeVisible({
+    timeout: 60_000,
+  })
 })
 
 test('server-backed plugin and skill install lifecycle survives reload and a new browser context', async ({

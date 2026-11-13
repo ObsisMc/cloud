@@ -33,4 +33,10 @@ export const demoMocks: readonly DemoMock[] = [
     covers: 'Handling a task with a workflow: the entry, the requirement, and the run belonging to the task',
     replacedBy: 'Task-owned workflow runs: start one on a task with a requirement, list them, and move the task when they end',
   },
+  {
+    module: 'plugin-installs.ts',
+    scene: 'lead',
+    covers: 'Browser-local install state for the sample MCP/Hook and for market or preinstalled Agents, plus the install delay',
+    replacedBy: 'A server-backed install and runtime for every plugin kind, including MCP and Hooks (#938)',
+  },
 ]

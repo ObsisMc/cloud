@@ -1,4 +1,4 @@
-import { beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { PluginCatalogEntry } from '@/api/generated.schemas'
@@ -9,7 +9,14 @@ import {
   renderSettingsPage,
 } from '../test-utils'
 import PluginsPage from './page'
-import { useDemoPluginSelections } from '@/lib/settings-demo/plugin-selections'
+import { useDemoPluginSelections } from '@/lib/demo/plugin-installs'
+
+const mock = vi.hoisted(() => ({ enabled: false }))
+vi.mock('@/lib/demo/flags', () => ({ demoMockEnabled: () => mock.enabled }))
+vi.mock('@/lib/demo/plugin-installs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/demo/plugin-installs')>()
+  return { ...actual, demoInstallDelayMs: () => 0 }
+})
 
 const writing = marketplaceEntry('writing-kit', {
   kind: 'skill',
@@ -61,6 +68,7 @@ const hook = marketplaceEntry('sample-hooks', {
 })
 
 beforeEach(() => {
+  mock.enabled = false
   useDemoPluginSelections.getState().reset()
   localStorage.clear()
 })
@@ -197,19 +205,24 @@ it('installs and removes an official workflow through the server', async () => {
   await waitFor(() => expect(within(row).getByText('未安装')).toBeInTheDocument())
 })
 
-it('keeps a non-official workflow read-only', async () => {
+it('installs a non-official workflow through the server like any workflow', async () => {
   const example = marketplaceEntry('ora-space.workflow-examples', {
-    kind: 'workflow', title: 'Workflow Examples', sourceNamespace: 'official',
+    kind: 'workflow', title: 'Workflow Examples', sourceNamespace: 'official', version: '0.1.0',
   })
   const backend = installMarketplaceBackend({
     catalog: [example],
   })
+  const user = userEvent.setup()
   renderSettingsPage(<PluginsPage />)
   const row = await screen.findByRole('article', { name: 'Workflow Examples' })
   expect(screen.getByRole('heading', { name: '工作流' })).toBeInTheDocument()
-  expect(within(row).getByText('暂不支持安装')).toBeInTheDocument()
-  expect(within(row).queryByRole('button', { name: '安装' })).not.toBeInTheDocument()
-  expect(backend.bodies).toHaveLength(0)
+  await user.click(within(row).getByRole('button', { name: '安装' }))
+  await waitFor(() => expect(within(row).getByText('已安装')).toBeInTheDocument())
+  expect(backend.bodies.at(-1)).toEqual({
+    identifier: 'official/ora-space.workflow-examples',
+    pluginVersion: '0.1.0',
+    version: 0,
+  })
 })
 
 it('reports a runtime-preinstalled Agent without any install action', async () => {
@@ -403,4 +416,78 @@ it('keeps Git credentials untouched when editing does not change them', async ()
       retrieval: { mode: 'direct_https', useProxy: false },
     }),
   )
+})
+
+it('installs the demo MCP and a market Agent in the browser only, without a server request', async () => {
+  mock.enabled = true
+  const backend = installMarketplaceBackend({ catalog: [writing, codex] })
+  const user = userEvent.setup()
+  renderSettingsPage(<PluginsPage />)
+  const mcpRow = await screen.findByRole('article', { name: '示例 MCP 工具' })
+  expect(within(mcpRow).getByRole('button', { name: '安装' })).toBeInTheDocument()
+  await user.click(within(mcpRow).getByRole('button', { name: '安装' }))
+  await waitFor(() =>
+    expect(
+      within(mcpRow).getByRole('button', { name: '移除' }),
+    ).toBeInTheDocument(),
+  )
+  expect(within(mcpRow).getByText('已安装（演示）')).toBeInTheDocument()
+
+  const agentRow = await screen.findByRole('article', { name: 'Codex' })
+  expect(within(agentRow).getByRole('button', { name: '安装' })).toBeInTheDocument()
+  await user.click(within(agentRow).getByRole('button', { name: '安装' }))
+  await waitFor(() =>
+    expect(
+      within(agentRow).getByRole('button', { name: '移除' }),
+    ).toBeInTheDocument(),
+  )
+  expect(backend.bodies).toHaveLength(0)
+  expect(localStorage.getItem('ora-v2-plugin-demo:v1')).toContain(
+    'demo/sample-mcp',
+  )
+  expect(localStorage.getItem('ora-v2-plugin-demo:v1')).toContain(
+    'official/ora-space.codex',
+  )
+})
+
+it('records a demo Hook install and removes it without contacting the server', async () => {
+  mock.enabled = true
+  const backend = installMarketplaceBackend({ catalog: [hook] })
+  const user = userEvent.setup()
+  renderSettingsPage(<PluginsPage />)
+  const row = await screen.findByRole('article', { name: '示例 Hooks' })
+  await user.click(within(row).getByRole('button', { name: '安装' }))
+  await waitFor(() =>
+    expect(within(row).getByRole('button', { name: '移除' })).toBeInTheDocument(),
+  )
+  await user.click(within(row).getByRole('button', { name: '移除' }))
+  await user.click(
+    within(await screen.findByRole('alertdialog')).getByRole('button', {
+      name: '移除',
+    }),
+  )
+  await waitFor(() =>
+    expect(
+      within(row).queryByRole('button', { name: '移除' }),
+    ).not.toBeInTheDocument(),
+  )
+  expect(backend.bodies).toHaveLength(0)
+})
+
+it('keeps the demo runtime-preinstalled Agent install browser-only', async () => {
+  mock.enabled = true
+  const backend = installMarketplaceBackend({
+    catalog: [opencode],
+    selections: [marketplaceSelection(opencode)],
+  })
+  const user = userEvent.setup()
+  renderSettingsPage(<PluginsPage />)
+  const row = await screen.findByRole('article', { name: 'OpenCode' })
+  expect(within(row).getByText('运行时预装')).toBeInTheDocument()
+  expect(within(row).getByRole('button', { name: '安装' })).toBeInTheDocument()
+  await user.click(within(row).getByRole('button', { name: '安装' }))
+  await waitFor(() =>
+    expect(within(row).getByRole('button', { name: '移除' })).toBeInTheDocument(),
+  )
+  expect(backend.bodies).toHaveLength(0)
 })

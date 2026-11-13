@@ -5,13 +5,19 @@ import type { ReactNode } from 'react'
 import { UserContext } from '@/app/auth/user'
 import { demoUser, fakeBackend } from '@/test/backend'
 import { http } from '@/lib/api-client'
-import { useDemoPluginSelections } from '@/lib/settings-demo/plugin-selections'
+import { useDemoPluginSelections } from '@/lib/demo/plugin-installs'
 import { useInstalledPlugins } from './catalog-hooks'
 import { createContractsClient, createHttpWorkflowContracts } from './contracts-client'
 import { ContractsClientProvider } from './contracts-client-provider'
 
 const original = http.defaults.adapter
 afterEach(() => { http.defaults.adapter = original; useDemoPluginSelections.getState().reset() })
+
+// The first test exercises the demo recording, where Settings installs the sample MCP into
+// browser state and the workflow editor picks it up; outside VITE_DEMO_MOCK the sample entry
+// does not exist.
+const mock = vi.hoisted(() => ({ enabled: true }))
+vi.mock('@/lib/demo/flags', () => ({ demoMockEnabled: () => mock.enabled }))
 
 it('updates mounted MCP pickers on Settings installation and removal without stale cache', async () => {
   fakeBackend((config) => ({ status: 200, data: { items: config.url === '/api/v1/tenants/t/spaces' ? [{ id: 's' }] : [] } }))

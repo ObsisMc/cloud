@@ -328,6 +328,47 @@ func TestPluginMarketLifecycle(t *testing.T) {
 	}
 }
 
+func TestMarketAgentSelectionUpdateIsRejected(t *testing.T) {
+	f := newSquadFixture(t)
+	owner := f.login(t, "owner", "owner")
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
+	if e != nil || len(spaces) != 1 {
+		t.Fatalf("spaces = %v %v", spaces, e)
+	}
+	space := spaces[0].ID
+	path := "/api/v1/tenants/" + f.tenant + "/spaces/" + space + "/plugins"
+	if e := f.store.ReplacePluginCatalog(f.ctx, []pluginmarket.Entry{
+		{Namespace: "official", Identifier: "ora-space.codex", Title: "Codex", Kind: "agent", Version: "0.3.14", Description: "Agent", Readme: "# Codex", MarketplaceVisible: true, SourceURL: "https://github.com/ora-space/marketplace"},
+	}, time.Now()); e != nil {
+		t.Fatal(e)
+	}
+	// Simulate a market Agent selection recorded before the read-only change: the row exists with
+	// a user as the requester. The update must be rejected, not silently refreshed.
+	if _, e := f.db.Exec(f.ctx, `
+		INSERT INTO v2_space_agents
+			(tenant_id, space_id, name, status, source_namespace, identifier, kind,
+			 desired_state, desired_version, observed_state, observed_version, requested_by_user_id)
+		VALUES ($1, $2, 'Codex', 'active', 'official', 'ora-space.codex', 'agent',
+			'installed', '0.3.14', 'installed', '0.3.14', $3)`,
+		f.tenant, space, owner); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := f.store.InstallSpacePlugin(f.ctx, f.tenant, space, owner, path, "update-market-agent", store.PluginInstallInput{
+		Identifier: "official/ora-space.codex", PluginVersion: "0.3.14", Version: 1,
+	}); !errors.Is(e, store.ErrPluginKindNotInstallable) {
+		t.Fatalf("market agent update = %v", e)
+	}
+	agents, e := f.store.SpaceAgentPlugins(f.ctx, f.tenant, space)
+	if e != nil || len(agents) != 2 {
+		t.Fatalf("market agent leaked into executable Agents: %+v %v", agents, e)
+	}
+	for _, agent := range agents {
+		if agent.Identifier == "ora-space.codex" {
+			t.Fatalf("market agent leaked into executable Agents: %+v", agent)
+		}
+	}
+}
+
 func TestHookInstallIsRejected(t *testing.T) {
 	f := newSquadFixture(t)
 	owner := f.login(t, "owner", "owner")
