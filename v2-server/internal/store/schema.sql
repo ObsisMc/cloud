@@ -534,11 +534,12 @@ CREATE TABLE IF NOT EXISTS v2_market_sources (
  url text NOT NULL, branch text NOT NULL, enabled boolean NOT NULL DEFAULT true,
  revision bigint NOT NULL DEFAULT 1, synced_at timestamptz, failure text NOT NULL DEFAULT '',
  retrieval jsonb NOT NULL DEFAULT '{}', credentials bytea,
- snapshot jsonb NOT NULL DEFAULT '[]', PRIMARY KEY(space_id,namespace)
+ snapshot jsonb NOT NULL DEFAULT '[]', git_credentials bytea, PRIMARY KEY(space_id,namespace)
 );
 
 ALTER TABLE v2_market_sources ADD COLUMN IF NOT EXISTS retrieval jsonb NOT NULL DEFAULT '{}';
 ALTER TABLE v2_market_sources ADD COLUMN IF NOT EXISTS credentials bytea;
+ALTER TABLE v2_market_sources ADD COLUMN IF NOT EXISTS git_credentials bytea;
 
 -- Earlier v2 databases seeded demo/* plugin selections and idempotency responses. Those rows no
 -- longer have a catalog entry. Clear references before removing them so upgrades stay valid.

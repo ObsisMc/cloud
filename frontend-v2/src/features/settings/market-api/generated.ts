@@ -30,6 +30,11 @@ export type MarketSourceInputCredentials = {
   secretKey: string;
 };
 
+export type MarketSourceInputGitCredentials = {
+  username: string;
+  password: string;
+};
+
 export type RetrievalMode = typeof RetrievalMode[keyof typeof RetrievalMode];
 
 
@@ -52,6 +57,8 @@ export interface MarketSourceInput {
   enabled: boolean;
   retrieval?: Retrieval;
   credentials?: MarketSourceInputCredentials;
+  gitCredentials?: MarketSourceInputGitCredentials;
+  clearGitCredentials?: boolean;
 }
 
 export interface MarketSource {
@@ -63,6 +70,7 @@ export interface MarketSource {
   syncedAt: string | null;
   failure: string;
   retrieval?: Retrieval;
+  gitConfigured?: boolean;
 }
 
 export interface SkillProgress {

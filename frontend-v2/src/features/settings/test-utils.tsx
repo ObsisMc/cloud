@@ -288,6 +288,7 @@ export function installMarketplaceBackend({
           ? JSON.parse(config.data)
           : config.data
       ) as MarketSourceInput
+      bodies.push(body)
       const source: MarketSource = {
         ...body,
         namespace: 'custom-market',
@@ -320,6 +321,7 @@ export function installMarketplaceBackend({
             ? JSON.parse(config.data)
             : config.data
         ) as MarketSourceInput
+        bodies.push(body)
         state.marketSources[index] = {
           ...state.marketSources[index],
           ...body,

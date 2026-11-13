@@ -194,3 +194,141 @@ func TestRemovingSourceClearsPlanCredentials(t *testing.T) {
 		t.Fatal(selected)
 	}
 }
+
+func TestMarketSourceGitCredentialsAreSealedKeptAndCleared(t *testing.T) {
+	f := newSquadFixture(t)
+	owner := f.login(t, "owner", "owner")
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
+	if e != nil {
+		t.Fatal(e)
+	}
+	space := spaces[0].ID
+	t.Setenv("V2_MARKET_CREDENTIAL_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
+	git := &pluginmarket.GitCredentials{Username: "intranet-bot", Password: "intranet-token"}
+	in := store.MarketSource{URL: "https://git.example.com/market", Branch: "main", Enabled: true, GitCredentials: git}
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, "", "POST", in); e != nil {
+		t.Fatal(e)
+	}
+	sources, e := f.store.MarketSources(f.ctx, f.tenant, space)
+	if e != nil || len(sources) != 1 || !sources[0].GitConfigured {
+		t.Fatalf("git credentials not reported as configured: %+v %v", sources, e)
+	}
+	if sources[0].GitCredentials != nil || sources[0].Credentials != nil {
+		t.Fatalf("read-back leaked credentials: %+v", sources[0])
+	}
+	var stored []byte
+	if e := f.db.QueryRow(f.ctx, `select git_credentials from v2_market_sources where namespace=$1`, sources[0].Namespace).Scan(&stored); e != nil || len(stored) == 0 {
+		t.Fatalf("git credentials not stored encrypted: %v", e)
+	}
+	if bytes.Contains(stored, []byte("intranet-token")) || bytes.Contains(stored, []byte("intranet-bot")) {
+		t.Fatal("plaintext git credentials in the database column")
+	}
+
+	// Editing without touching the auth keeps the saved credentials.
+	keep := store.MarketSource{URL: "https://git.example.com/market", Branch: "develop", Enabled: true}
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, sources[0].Namespace, "PATCH", keep); e != nil {
+		t.Fatal(e)
+	}
+	after, e := f.store.MarketSources(f.ctx, f.tenant, space)
+	if e != nil || len(after) != 1 || !after[0].GitConfigured {
+		t.Fatalf("credentials lost on unrelated edit: %+v %v", after, e)
+	}
+
+	// A new pair replaces the saved one.
+	replace := store.MarketSource{URL: "https://git.example.com/market", Branch: "main", Enabled: true, GitCredentials: &pluginmarket.GitCredentials{Username: "new-bot", Password: "new-token"}}
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, after[0].Namespace, "PATCH", replace); e != nil {
+		t.Fatal(e)
+	}
+	replaced, e := f.store.MarketSources(f.ctx, f.tenant, space)
+	if e != nil || len(replaced) != 1 || !replaced[0].GitConfigured {
+		t.Fatalf("credentials not replaced: %+v %v", replaced, e)
+	}
+
+	// An explicit clear drops them.
+	clear := store.MarketSource{URL: "https://git.example.com/market", Branch: "main", Enabled: true, ClearGitCredentials: true}
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, replaced[0].Namespace, "PATCH", clear); e != nil {
+		t.Fatal(e)
+	}
+	final, e := f.store.MarketSources(f.ctx, f.tenant, space)
+	if e != nil || len(final) != 1 || final[0].GitConfigured {
+		t.Fatalf("credentials not cleared: %+v %v", final, e)
+	}
+}
+
+func TestMarketSourceGitCredentialsRequireNonEmptyValues(t *testing.T) {
+	f := newSquadFixture(t)
+	owner := f.login(t, "owner", "owner")
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
+	if e != nil {
+		t.Fatal(e)
+	}
+	space := spaces[0].ID
+	t.Setenv("V2_MARKET_CREDENTIAL_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
+	in := store.MarketSource{URL: "https://git.example.com/market", Branch: "main", Enabled: true, GitCredentials: &pluginmarket.GitCredentials{Username: "", Password: ""}}
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, "", "POST", in); !errors.Is(e, pluginmarket.ErrCredentials) {
+		t.Fatalf("empty git credentials accepted: %v", e)
+	}
+}
+
+// Git credentials are sealed to the source namespace, which follows the URL. Moving a source to
+// another repository must not keep a secret that no sync can open, so the edit has to replace or
+// drop it; the rejected edit leaves the source untouched.
+func TestMarketSourceURLChangeNeedsNewGitCredentials(t *testing.T) {
+	f := newSquadFixture(t)
+	owner := f.login(t, "owner", "owner")
+	spaces, e := f.store.TenantSpaces(f.ctx, storetest.Access(t, f.store, f.tenant, owner))
+	if e != nil {
+		t.Fatal(e)
+	}
+	space := spaces[0].ID
+	t.Setenv("V2_MARKET_CREDENTIAL_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
+	git := &pluginmarket.GitCredentials{Username: "intranet-bot", Password: "intranet-token"}
+	in := store.MarketSource{URL: "https://git.example.com/market", Branch: "main", Enabled: true, GitCredentials: git}
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, "", "POST", in); e != nil {
+		t.Fatal(e)
+	}
+	only := func(t *testing.T) store.MarketSource {
+		t.Helper()
+		sources, e := f.store.MarketSources(f.ctx, f.tenant, space)
+		if e != nil || len(sources) != 1 {
+			t.Fatalf("sources = %+v, %v", sources, e)
+		}
+		return sources[0]
+	}
+	before := only(t)
+
+	moved := store.MarketSource{URL: "https://git.example.com/other-market", Branch: "main", Enabled: true}
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, before.Namespace, "PATCH", moved); !errors.Is(e, pluginmarket.ErrCredentials) {
+		t.Fatalf("moving a source while keeping its Git credentials: %v, want ErrCredentials", e)
+	}
+	if got := only(t); got.Namespace != before.Namespace || got.URL != before.URL || !got.GitConfigured {
+		t.Fatalf("rejected edit changed the source: %+v", got)
+	}
+
+	// The same URL keeps its credentials when the edit does not mention them.
+	same := store.MarketSource{URL: before.URL, Branch: "main", Enabled: false}
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, before.Namespace, "PATCH", same); e != nil {
+		t.Fatal(e)
+	}
+	if got := only(t); !got.GitConfigured {
+		t.Fatalf("an edit without a URL change dropped the credentials: %+v", got)
+	}
+
+	cleared := moved
+	cleared.ClearGitCredentials = true
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, before.Namespace, "PATCH", cleared); e != nil {
+		t.Fatal(e)
+	}
+	after := only(t)
+	if after.Namespace == before.Namespace || after.GitConfigured {
+		t.Fatalf("moving with clear: %+v", after)
+	}
+
+	back := store.MarketSource{URL: before.URL, Branch: "main", Enabled: true, GitCredentials: git}
+	if e := f.store.ChangeMarket(f.ctx, f.tenant, space, after.Namespace, "PATCH", back); e != nil {
+		t.Fatal(e)
+	}
+	if got := only(t); got.Namespace != before.Namespace || !got.GitConfigured {
+		t.Fatalf("moving with new credentials: %+v", got)
+	}
+}

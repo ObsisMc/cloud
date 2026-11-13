@@ -3,6 +3,7 @@ package pluginmarket
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"net"
@@ -18,6 +19,10 @@ import (
 )
 
 var ErrSource = errors.New("invalid public HTTPS marketplace source")
+
+// ErrGitAuth marks a checkout that failed because the repository rejected the configured
+// credentials, so callers can tell it apart from a network or DNS failure.
+var ErrGitAuth = errors.New("marketplace repository authentication failed")
 
 // Local proxy DNS servers commonly answer public hostnames with an address from this
 // benchmarking range and route the connection through their own tunnel. Treating the pinned
@@ -90,7 +95,7 @@ func selectDialAddress(host string, ips []netip.Addr) (netip.Addr, error) {
 
 // Pin the resolved address for the entire clone. Never inherit host git configuration,
 // credential helpers or proxy settings for a repository chosen by a space owner.
-func ReadPublic(ctx context.Context, source Source, useProxy bool) ([]Entry, error) {
+func ReadPublic(ctx context.Context, source Source, useProxy bool, gitCredentials *GitCredentials) ([]Entry, error) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	u, e := ValidatePublicSource(source.URL, source.Branch)
@@ -126,8 +131,11 @@ func ReadPublic(ctx context.Context, source Source, useProxy bool) ([]Entry, err
 	defer closeTunnel()
 	cmd := exec.CommandContext(ctx, "git", "-c", "http.followRedirects=false", "-c", "http.proxy="+tunnel, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "clone", "--depth=1", "--single-branch", "--no-tags", "--branch", source.Branch, "--", source.URL, dst)
 	cmd.Dir = tmp
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + tmp, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0"}
-	if e := cmd.Run(); e != nil {
+	cmd.Env = gitAuthEnv(tmp, gitCredentials)
+	if output, e := cmd.CombinedOutput(); e != nil {
+		if gitAuthError(output) {
+			return nil, ErrGitAuth
+		}
 		return nil, errors.New("marketplace checkout failed")
 	}
 	entries, skipped, e := Scan(filepath.Join(dst, "registry"), source.Namespace, source.URL)
@@ -138,4 +146,33 @@ func ReadPublic(ctx context.Context, source Source, useProxy bool) ([]Entry, err
 		return nil, errors.New("marketplace has no visible entries")
 	}
 	return entries, nil
+}
+
+// gitAuthEnv builds the git environment with repository credentials. Credentials never reach the
+// command line, the URL, logs, or the working directory's git config: git reads them through
+// environment-fed configuration as an HTTPS Basic Authorization header. The HOME override keeps
+// any system or user git config out, and a clone that needs more than the header gets no prompt.
+func gitAuthEnv(home string, credentials *GitCredentials) []string {
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0"}
+	if credentials == nil || credentials.Username == "" || credentials.Password == "" {
+		return env
+	}
+	header := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(credentials.Username+":"+credentials.Password))
+	return append(env,
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0="+header,
+	)
+}
+
+// gitAuthError reports whether a failed checkout's output shows the repository rejected the
+// credentials, which lets callers distinguish an authentication failure from a network one.
+func gitAuthError(output []byte) bool {
+	text := strings.ToLower(string(output))
+	for _, marker := range []string{"authentication failed", "could not read username", "invalid username or password", "access denied", "returned error: 401", "returned error: 403"} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
