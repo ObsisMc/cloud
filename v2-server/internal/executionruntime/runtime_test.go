@@ -862,3 +862,40 @@ func TestModelsFromEnvironmentRejectsPartialConfigurationWithoutSecrets(t *testi
 		t.Fatalf("configured Messages provider=%v err=%v", models, err)
 	}
 }
+
+func TestModelsFromEnvironmentAppliesRequestLimits(t *testing.T) {
+	env := map[string]string{"V2_MODEL_BASE_URL": "https://provider.example/v1", "V2_MODEL_API_KEY": "secret-key", "V2_MODEL_NAME": "model", "V2_ANTHROPIC_MODEL_BASE_URL": "https://provider.example/v1", "V2_ANTHROPIC_MODEL_API_KEY": "secret-key", "V2_ANTHROPIC_MODEL_NAME": "claude-model"}
+	limits := func() map[string][2]time.Duration {
+		models, err := ModelsFromEnvironment(func(name string) string { return env[name] })
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string][2]time.Duration{}
+		for id, c := range models {
+			idle, total := c.Binding.Provider.(*nodeservices.RemoteProvider).Limits()
+			got[id] = [2]time.Duration{idle, total}
+		}
+		return got
+	}
+	for id, l := range limits() {
+		if l != [2]time.Duration{nodeservices.DefaultIdleTimeout, nodeservices.DefaultMaxDuration} {
+			t.Fatalf("%s default limits=%v", id, l)
+		}
+	}
+	env["V2_MODEL_IDLE_TIMEOUT"], env["V2_MODEL_MAX_DURATION"] = "45s", "1h"
+	got := limits()
+	if len(got) != 2 {
+		t.Fatalf("providers=%v", got)
+	}
+	for id, l := range got {
+		if l != [2]time.Duration{45 * time.Second, time.Hour} {
+			t.Fatalf("%s configured limits=%v", id, l)
+		}
+	}
+	for _, bad := range [][2]string{{"soon", "1h"}, {"0s", "1h"}, {"2m", "-1m"}, {"2h", "1h"}} {
+		env["V2_MODEL_IDLE_TIMEOUT"], env["V2_MODEL_MAX_DURATION"] = bad[0], bad[1]
+		if models, err := ModelsFromEnvironment(func(name string) string { return env[name] }); err == nil || models != nil {
+			t.Fatalf("accepted limits %v", bad)
+		}
+	}
+}

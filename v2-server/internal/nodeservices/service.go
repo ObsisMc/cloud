@@ -99,6 +99,7 @@ type Service struct {
 	mu           sync.Mutex
 	permits      map[string]string
 	grants       map[string]*grant
+	grantTTL     time.Duration
 	closed       bool
 }
 
@@ -127,7 +128,7 @@ func start(opts Options, issued time.Time) (_ *Service, resultErr error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{opts: opts, directory: dir, packages: map[string]servedPackage{}, PackageURLs: map[string]string{}, permits: map[string]string{}, grants: map[string]*grant{}}
+	s := &Service{opts: opts, directory: dir, packages: map[string]servedPackage{}, PackageURLs: map[string]string{}, permits: map[string]string{}, grants: map[string]*grant{}, grantTTL: defaultGrantTTL}
 	defer func() {
 		if resultErr != nil {
 			_ = s.Close()
@@ -375,4 +376,7 @@ type grant struct {
 	expires                   time.Time
 	ctx                       context.Context
 	cancel                    context.CancelFunc
+	// calls counts in-flight model calls. An expired grant with calls stays registered, so
+	// revocation can still cancel them, until the last one finishes.
+	calls int
 }

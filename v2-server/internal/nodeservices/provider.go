@@ -3,6 +3,7 @@ package nodeservices
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,6 +21,32 @@ type RemoteProvider struct {
 	bearer        bool
 	protocol      Protocol
 	client        *http.Client
+	idle, total   time.Duration
+}
+
+// Default limits of one upstream call. A call is cut off when no upstream data arrives for the
+// idle limit, or when it has run for the total limit; length alone is never a failure before that.
+const (
+	DefaultIdleTimeout = 2 * time.Minute
+	DefaultMaxDuration = 30 * time.Minute
+)
+
+var (
+	errIdleTimeout = errors.New("model_idle_timeout")
+	errMaxDuration = errors.New("model_max_duration")
+)
+
+// Limits returns the idle and total limits of one call.
+func (p *RemoteProvider) Limits() (idle, total time.Duration) { return p.idle, p.total }
+
+// SetLimits replaces the idle and total limits of every later call; both must be positive and
+// the idle limit cannot exceed the total.
+func (p *RemoteProvider) SetLimits(idle, total time.Duration) error {
+	if idle <= 0 || total <= 0 || idle > total {
+		return errors.New("invalid model request limits")
+	}
+	p.idle, p.total = idle, total
+	return nil
 }
 
 // NewRemoteProvider forwards OpenAI chat completions. baseURL is a trusted deployment URL
@@ -51,9 +78,11 @@ func newRemoteProvider(protocol Protocol, baseURL, path, apiKey string, transpor
 		return nil, errors.New("invalid model provider configuration")
 	}
 	if transport == nil {
-		transport = &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, MaxIdleConns: 16, MaxIdleConnsPerHost: 8, IdleConnTimeout: time.Minute, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second}
+		transport = &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, MaxIdleConns: 16, MaxIdleConnsPerHost: 8, IdleConnTimeout: time.Minute, TLSHandshakeTimeout: 10 * time.Second}
 	}
-	return &RemoteProvider{endpoint: strings.TrimRight(baseURL, "/") + path, key: apiKey, protocol: protocol, client: &http.Client{Transport: transport, Timeout: 5 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	// No client Timeout (it would bound the whole streamed body) and no ResponseHeaderTimeout:
+	// the idle limit covers the wait for the header, and the idle and total limits bound the rest.
+	return &RemoteProvider{endpoint: strings.TrimRight(baseURL, "/") + path, key: apiKey, protocol: protocol, idle: DefaultIdleTimeout, total: DefaultMaxDuration, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 // Complete preserves successful JSON/SSE payloads and usage fields. Only selected content and
@@ -64,23 +93,28 @@ func (p *RemoteProvider) Complete(w http.ResponseWriter, r *http.Request, model 
 
 // CompleteObserved runs begin immediately before dispatch, after local validation. A rejected
 // admission has already written its response. Zero means no upstream status was received.
-func (p *RemoteProvider) CompleteObserved(w http.ResponseWriter, r *http.Request, model Model, begin func() bool) int {
+// cut reports a response stopped after its header was sent (idle or total limit, revocation,
+// upstream or client failure). Such a response is marked so the Agent model route aborts it
+// instead of ending it normally; in-process callers only see the truncated body.
+func (p *RemoteProvider) CompleteObserved(w http.ResponseWriter, r *http.Request, model Model, begin func() bool) (status int, cut bool) {
 	var body map[string]json.RawMessage
 	d := json.NewDecoder(r.Body)
 	if d.Decode(&body) != nil || body == nil || d.Decode(new(any)) != io.EOF {
 		fault(w, 400, "invalid_completion")
-		return 0
+		return 0, false
 	}
 	body["model"], _ = json.Marshal(model.ID)
 	data, err := json.Marshal(body)
 	if err != nil {
 		fault(w, 400, "invalid_completion")
-		return 0
+		return 0, false
 	}
-	req, err := http.NewRequestWithContext(r.Context(), "POST", p.endpoint, bytes.NewReader(data))
+	ctx, cancel := context.WithCancelCause(r.Context())
+	defer cancel(nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewReader(data))
 	if err != nil {
 		fault(w, 502, "provider_unavailable")
-		return 0
+		return 0, false
 	}
 	if p.protocol == AnthropicMessages {
 		if p.bearer {
@@ -98,29 +132,60 @@ func (p *RemoteProvider) CompleteObserved(w http.ResponseWriter, r *http.Request
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if begin != nil && !begin() {
-		return 0
+		return 0, false
 	}
+	// The idle timer covers the wait for the response header too and restarts on every chunk.
+	total := time.AfterFunc(p.total, func() { cancel(errMaxDuration) })
+	defer total.Stop()
+	idle := time.AfterFunc(p.idle, func() { cancel(errIdleTimeout) })
+	defer idle.Stop()
 	resp, err := p.client.Do(req)
 	if err != nil {
 		fault(w, 502, "provider_unavailable")
-		return 0
+		return 0, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		slog.WarnContext(r.Context(), "model provider rejected request", "status", resp.StatusCode)
 		fault(w, 502, "provider_rejected")
-		return resp.StatusCode
+		return resp.StatusCode, false
 	}
 	content := resp.Header.Get("Content-Type")
 	if !strings.HasPrefix(content, "application/json") && !strings.HasPrefix(content, "text/event-stream") {
 		fault(w, 502, "provider_response_invalid")
-		return resp.StatusCode
+		return resp.StatusCode, false
 	}
 	w.Header().Set("Content-Type", content)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(flushWriter{w}, resp.Body)
-	return resp.StatusCode
+	if _, err := io.Copy(flushWriter{w}, idleReader{resp.Body, idle, p.idle}); err != nil {
+		reason := "interrupted"
+		switch cause := context.Cause(ctx); {
+		case errors.Is(cause, errIdleTimeout), errors.Is(cause, errMaxDuration):
+			reason = cause.Error()
+		case r.Context().Err() != nil:
+			reason = "cancelled"
+		}
+		slog.WarnContext(r.Context(), "model response cut off", "reason", reason)
+		markCut(w)
+		return resp.StatusCode, true
+	}
+	return resp.StatusCode, false
+}
+
+// idleReader restarts the idle timer whenever upstream data arrives.
+type idleReader struct {
+	r     io.Reader
+	timer *time.Timer
+	idle  time.Duration
+}
+
+func (i idleReader) Read(p []byte) (int, error) {
+	n, err := i.r.Read(p)
+	if n > 0 {
+		i.timer.Reset(i.idle)
+	}
+	return n, err
 }
 
 type flushWriter struct{ http.ResponseWriter }
@@ -193,4 +258,38 @@ func (FixtureProvider) Complete(w http.ResponseWriter, r *http.Request, model Mo
 		}
 	}
 	_, _ = flushWriter{w}.Write([]byte("data: [DONE]\n\n"))
+}
+
+// abortableWriter is the Agent model route's response. A provider that stops a response after
+// its header was sent marks it, and the route aborts the response with http.ErrAbortHandler, so
+// the Agent sees a failed call rather than a stream that ended normally. Aborting stays with the
+// HTTP handler that owns the response: a panic inside Provider.Complete would also reach callers
+// that are not HTTP handlers.
+type abortableWriter struct {
+	http.ResponseWriter
+	cut bool
+}
+
+func (w *abortableWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *abortableWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// markCut finds the route's abortableWriter through wrappers that expose Unwrap, as
+// http.ResponseController does; without one there is nothing to abort.
+func markCut(w http.ResponseWriter) {
+	for {
+		if a, ok := w.(*abortableWriter); ok {
+			a.cut = true
+			return
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return
+		}
+		w = u.Unwrap()
+	}
 }

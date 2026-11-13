@@ -3,6 +3,7 @@ package executionruntime
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/nodeservices"
@@ -17,7 +18,14 @@ const messagesPrefix = "messages-"
 // OpenAI chat completions and V2_ANTHROPIC_MODEL_* for Anthropic Messages. An empty result means
 // no real model is available; callers must expose an empty catalog instead of falling back to
 // deterministic fixtures.
+//
+// V2_MODEL_IDLE_TIMEOUT and V2_MODEL_MAX_DURATION (Go durations) bound every upstream call of
+// both protocols: it is cut off when no data arrives for the idle limit or after the total limit.
 func ModelsFromEnvironment(getenv func(string) string) (map[string]ModelChoice, error) {
+	idle, total, err := requestLimits(getenv)
+	if err != nil {
+		return nil, err
+	}
 	choices := make(map[string]ModelChoice, 2)
 	for _, c := range []struct {
 		env, id  string
@@ -53,10 +61,36 @@ func ModelsFromEnvironment(getenv func(string) string) (map[string]ModelChoice, 
 		if err != nil {
 			return nil, err
 		}
+		if err := provider.SetLimits(idle, total); err != nil {
+			return nil, err
+		}
 		model := nodeservices.Model{ID: name, Name: name, ContextWindow: 128000, MaxTokens: 16384}
 		choices[c.id] = ModelChoice{Model: execution.Model{ID: c.id, Name: name, BindingVersion: c.id + "-v1"}, Binding: nodeservices.Binding{Model: model, Protocol: c.protocol, Provider: provider}}
 	}
 	return choices, nil
+}
+
+// requestLimits reads the per-call limits; an unset value keeps the provider default.
+func requestLimits(getenv func(string) string) (time.Duration, time.Duration, error) {
+	idle, total := nodeservices.DefaultIdleTimeout, nodeservices.DefaultMaxDuration
+	for _, l := range []struct {
+		env   string
+		value *time.Duration
+	}{{"V2_MODEL_IDLE_TIMEOUT", &idle}, {"V2_MODEL_MAX_DURATION", &total}} {
+		raw := strings.TrimSpace(getenv(l.env))
+		if raw == "" {
+			continue
+		}
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return 0, 0, errors.New(l.env + " must be a positive duration such as 2m")
+		}
+		*l.value = d
+	}
+	if idle > total {
+		return 0, 0, errors.New("V2_MODEL_IDLE_TIMEOUT cannot exceed V2_MODEL_MAX_DURATION")
+	}
+	return idle, total, nil
 }
 
 // WithFixtureModels adds the deterministic credential-free bindings used by fixture-check and

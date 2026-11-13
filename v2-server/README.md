@@ -35,6 +35,7 @@ go run .                               # 监听 127.0.0.1:8090
 | `V2_NODE_ASSETS_DIR` | 未设置 | `task v2:node:prepare` 生成的固定 Node、host、guardian、Deno、OpenCode 和 Claude Code 资源；未设置时只启用纯模型路径 |
 | `V2_MODEL_BASE_URL` / `V2_MODEL_API_KEY` / `V2_MODEL_NAME` | 未设置 | 可选的一组 HTTPS OpenAI 兼容 provider；必须同时设置，OpenCode 与纯模型共用，清单只公开模型名称与版本 |
 | `V2_ANTHROPIC_MODEL_BASE_URL` / `V2_ANTHROPIC_MODEL_API_KEY` / `V2_ANTHROPIC_MODEL_NAME` | 未设置 | 可选的一组 HTTPS Anthropic 兼容 provider（Messages API，base URL 写到 `/v1`，如 `https://api.anthropic.com/v1`）；必须同时提供地址、凭据和模型名，只供 Claude Code 使用。使用 Bearer 网关时以 `V2_ANTHROPIC_MODEL_AUTH_TOKEN` 代替 `V2_ANTHROPIC_MODEL_API_KEY`，二者不能同时配置；Claude Code 的 base URL 若以 `/compatible` 结尾，这里填 `/compatible/v1` |
+| `V2_MODEL_IDLE_TIMEOUT` / `V2_MODEL_MAX_DURATION` | `2m` / `30m` | 单次上游模型请求的空闲超时和总上限，两种协议共用；必须为正 duration，空闲超时不能大于总上限。连续这么久收不到上游数据、或总时长到上限时中止响应，Agent 收到的是失败而不是正常结束的流 |
 
 测试需要 `TEST_DATABASE_URL`（任意可建 schema 的库），每个测试用独立的 schema：
 

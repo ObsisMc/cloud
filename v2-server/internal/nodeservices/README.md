@@ -38,7 +38,7 @@ renew 必须匹配原 execution，过期后不能续期。binding 和 Model 快�
 `NewRemoteProvider` 转发 OpenAI chat completions，`NewRemoteMessagesProvider` 转发 Anthropic
 Messages（后端 API key 放在 `x-api-key`，或将配置的 auth token 放在 `Authorization: Bearer …`，只透传 `anthropic-version` / `anthropic-beta`）；两者都支持 JSON/SSE，强制使用已选模型，保留成功响应的
 usage 等字段。真实 API key 留在后端内存，不转发 Agent token、调用者自定义 header 或上游错误正文；
-禁止 HTTP 和重定向。请求取消、grant 撤销/到期均会取消上游请求；单次远端请求上限 5 分钟。
+禁止 HTTP 和重定向。Agent 断开、grant 撤销（`End`、删除授权、`Close`）会取消进行中的上游请求；grant 到期只拒绝新请求和续期，不取消已经开始的请求。单次远端请求有空闲超时（默认 2 分钟，每收到一段上游数据重新计时，也覆盖等待响应头）和总上限（默认 30 分钟），由 `SetLimits` 设置。响应头发出后因上述任一原因中途停止时，provider 只标记这个响应（经 `Unwrap` 穿过包装它的 writer），由 Agent 模型路由在 `Complete` 返回后以 `http.ErrAbortHandler` 中止，Agent 读到的是失败而不是正常结束的流；不经这条路由的进程内调用方（纯模型轮次）只看到被截断的正文。`CompleteObserved` 另返回 `cut` 供调用方记账。
 不支持运行时模型切换或任何隐式环境变量凭据读取。
 
 ## 验证

@@ -9,7 +9,9 @@ import (
 	"time"
 )
 
-const grantTTL = 10 * time.Minute
+// defaultGrantTTL is how long a token stays valid without renewal. Expiry only stops new
+// calls and renewals; an in-flight call is stopped by revocation, never by expiry.
+const defaultGrantTTL = 10 * time.Minute
 
 func (s *Service) issue(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -40,15 +42,17 @@ func (s *Service) issue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Duplicate grant requests invalidate the previous token, and expired entries never grow
-	// without bound. Only the active execution's binding decides the model/provider.
+	// without bound. Only the active execution's binding decides the model/provider. An expired
+	// grant whose calls are still running is left for its last call to remove: expiry never
+	// cancels an admitted call.
 	for existing, g := range s.grants {
-		if g.execution == req.ExecutionID || !time.Now().Before(g.expires) {
+		if g.execution == req.ExecutionID || (!time.Now().Before(g.expires) && g.calls == 0) {
 			g.cancel()
 			delete(s.grants, existing)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	g := &grant{execution: req.ExecutionID, binding: req.BindingID, token: token, expires: time.Now().Add(grantTTL), ctx: ctx, cancel: cancel}
+	g := &grant{execution: req.ExecutionID, binding: req.BindingID, token: token, expires: time.Now().Add(s.grantTTL), ctx: ctx, cancel: cancel}
 	s.grants[id] = g
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -87,13 +91,22 @@ func (s *Service) changeGrant(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{})
 		return
 	}
-	if s.permits[g.execution] != g.binding || !time.Now().Before(g.expires) {
+	if s.permits[g.execution] != g.binding {
 		g.cancel()
 		delete(s.grants, parts[0])
 		fault(w, 403, "model_access_revoked")
 		return
 	}
-	g.expires = time.Now().Add(grantTTL)
+	if !time.Now().Before(g.expires) {
+		// An expired grant cannot be renewed, but its running calls are not revoked by expiry.
+		if g.calls == 0 {
+			g.cancel()
+			delete(s.grants, parts[0])
+		}
+		fault(w, 403, "model_access_revoked")
+		return
+	}
+	g.expires = time.Now().Add(s.grantTTL)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"expiresAt": g.expires})
 }
@@ -123,11 +136,13 @@ func (s *Service) model(w http.ResponseWriter, r *http.Request, protocol Protoco
 		return
 	}
 	binding := s.opts.Bindings[selected.binding]
-	// Request disconnect, revoke/End, and the grant's fixed expiry all stop provider work.
-	// A later renewal extends future calls only, never an already unbounded stream.
-	ctx, cancel := context.WithDeadline(r.Context(), selected.expires)
+	// Request disconnect and revoke/End stop provider work. Expiry only refuses new calls: a
+	// call admitted with a live token runs to completion, bounded by the provider's own limits.
+	ctx, cancel := context.WithCancel(r.Context())
 	stop := context.AfterFunc(selected.ctx, cancel)
+	selected.calls++
 	s.mu.Unlock()
+	defer s.finishCall(selected)
 	defer cancel()
 	defer stop()
 	r = r.Clone(ctx)
@@ -140,5 +155,25 @@ func (s *Service) model(w http.ResponseWriter, r *http.Request, protocol Protoco
 			return
 		}
 	}
-	provider.Complete(w, r, binding.Model)
+	out := &abortableWriter{ResponseWriter: w}
+	provider.Complete(out, r, binding.Model)
+	if out.cut {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// finishCall ends one call of g; the last call of an expired grant removes it.
+func (s *Service) finishCall(g *grant) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g.calls--
+	if g.calls > 0 || time.Now().Before(g.expires) {
+		return
+	}
+	for id, registered := range s.grants {
+		if registered == g {
+			g.cancel()
+			delete(s.grants, id)
+		}
+	}
 }
