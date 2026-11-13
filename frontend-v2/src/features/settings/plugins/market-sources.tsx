@@ -346,7 +346,7 @@ export function MarketSources({
                 <legend className="text-sm font-medium">Git 认证</legend>
                 {editing?.gitConfigured && (
                   <p className="text-sm text-muted-foreground">
-                    已配置认证；填写用户名和令牌会替换，勾选清除则移除。
+                    已配置认证；填写用户名和令牌会替换，勾选清除则移除。更改仓库地址时必须重新填写或清除。
                   </p>
                 )}
                 <label className="block">

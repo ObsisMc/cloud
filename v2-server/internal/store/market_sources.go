@@ -103,8 +103,8 @@ func (s *Store) ChangeMarket(ctx context.Context, tenant, space, id, action stri
 			return e
 		}
 		defer tx.Rollback(ctx)
-		var reusable bool
-		e = tx.QueryRow(ctx, `select coalesce(credentials is not null and namespace=$3 and retrieval->>'endpoint'=$4 and retrieval->>'bucket'=$5,false) from v2_market_sources where space_id=$1 and namespace=$2 for update`, space, id, newID, in.Retrieval.Endpoint, in.Retrieval.Bucket).Scan(&reusable)
+		var reusable, gitStranded bool
+		e = tx.QueryRow(ctx, `select coalesce(credentials is not null and namespace=$3 and retrieval->>'endpoint'=$4 and retrieval->>'bucket'=$5,false), git_credentials is not null and namespace<>$3 from v2_market_sources where space_id=$1 and namespace=$2 for update`, space, id, newID, in.Retrieval.Endpoint, in.Retrieval.Bucket).Scan(&reusable, &gitStranded)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -112,6 +112,12 @@ func (s *Store) ChangeMarket(ctx context.Context, tenant, space, id, action stri
 			return e
 		}
 		if in.Retrieval.Mode == "s3_sigv4" && sealed == nil && !reusable {
+			return pluginmarket.ErrCredentials
+		}
+		// Saved Git credentials are sealed to the source namespace, which follows the URL. A new URL
+		// could not open them, and they were meant for the old repository anyway, so the edit must
+		// supply new credentials or drop the saved ones instead of keeping a secret no sync can use.
+		if gitStranded && gitSealed == nil && !in.ClearGitCredentials {
 			return pluginmarket.ErrCredentials
 		}
 		_, e = tx.Exec(ctx, `update v2_market_sources set namespace=$8,url=$3,branch=$4,enabled=$5,retrieval=$6,
