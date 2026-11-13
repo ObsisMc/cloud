@@ -34,6 +34,8 @@ Close 取消并 join worker，再关闭 Agent driver，必须在数据库关闭�
 `messages-` 前缀的 `claude:configured`；OpenCode 排在前面。Messages 绑定不进模型清单，纯模型 Start
 选它返回 NotFound。无 driver 时执行器清单为空，Agent Start 返回 Unavailable；纯模型仍可执行。
 服务在没有真实模型时也能启动，两个目录都返回空列表，不回退 fixture。
+`V2_MODEL_IDLE_TIMEOUT` 与 `V2_MODEL_MAX_DURATION`（默认 `2m`、`30m`）设到这两个 provider 上，
+取值非法或空闲超时大于总上限时返回错误，不静默回退默认值。
 
 fixture 目录只由 `WithFixtureModels` 显式合入，供 fixture-check、编排测试和 Playwright 使用：
 OpenAI 协议的 `fixture` 与 Messages 协议的 `messages-fixture` 分别生成 `opencode:fixture` 和
