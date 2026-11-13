@@ -68,19 +68,10 @@ func cleanOwned(ctx context.Context, paths Paths, grace time.Duration) error {
 	}
 	// A process escaping the reaper must not be silently called cleaned. Do not kill by cwd:
 	// it could be a user's shell; keep the Workspace unavailable for explicit investigation.
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
+	// Node may exit before an Agent it was stopping has finished exiting, so such a process
+	// gets the same grace to go away on its own before cleanup counts it as a leftover.
+	if err := awaitUnowned(ctx, paths.Root, grace); err != nil {
 		return err
-	}
-	for _, entry := range entries {
-		if _, err := strconv.Atoi(entry.Name()); err != nil {
-			continue
-		}
-		cwd, cwdErr := os.Readlink(filepath.Join("/proc", entry.Name(), "cwd"))
-		exe, exeErr := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
-		if (cwdErr == nil && within(paths.Root, cwd)) || (exeErr == nil && ownedExecutable(paths.Root, exe)) {
-			return fmt.Errorf("runtime cleanup unconfirmed: process %s remains in workspace", entry.Name())
-		}
 	}
 	for _, root := range []string{paths.NodeHome, paths.HostHome} {
 		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -100,6 +91,45 @@ func cleanOwned(ctx context.Context, paths Paths, grace time.Duration) error {
 		}
 	}
 	return nil
+}
+
+// awaitUnowned waits up to grace for every process running from or inside root to exit.
+func awaitUnowned(ctx context.Context, root string, grace time.Duration) error {
+	deadline := time.Now().Add(grace)
+	for {
+		pid, err := processInRoot(root)
+		if err != nil || pid == "" {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("runtime cleanup unconfirmed: process %s remains in workspace", pid)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+// processInRoot returns a process whose working directory is inside root or whose executable
+// is one copied into it, or "" when there is none.
+func processInRoot(root string) (string, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range entries {
+		if _, err := strconv.Atoi(entry.Name()); err != nil {
+			continue
+		}
+		cwd, cwdErr := os.Readlink(filepath.Join("/proc", entry.Name(), "cwd"))
+		exe, exeErr := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
+		if (cwdErr == nil && within(root, cwd)) || (exeErr == nil && ownedExecutable(root, exe)) {
+			return entry.Name(), nil
+		}
+	}
+	return "", nil
 }
 
 func ownedExecutable(root, exe string) bool {

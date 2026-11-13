@@ -56,7 +56,7 @@ v2-server 不再启动 process host 和 guardian。升级前准备的 Root 里�
 
 Stop 先停 Node，再按可执行文件路径清理残留：Node 被强杀后 reaper 还会存活片刻（终止登记的进程组后自己退出），
 清理把它算作本 Root 的进程；升级前的 Root 里可能还有旧的 host、guardian 进程，名单里同样保留它们。残留清理用 Linux pidfd，避免 PID 重用误杀；
-只信号本 Root 专属可执行文件，发现归属不明的剩余 cwd 则失败并保持不可用，不按 cwd 或全局名字杀进程。
+只信号本 Root 专属可执行文件，归属不明、cwd 仍在 Root 内的进程先等一个宽限期让它自己退出（Node 可能先于正在停止的 Agent 退出），仍在则失败并保持不可用，不按 cwd 或全局名字杀进程。
 确认进程退出后只删除 Node/旧 host 目录下的 socket，数据库和仓库内容保留；清理失败可重试，成功后才释放独占锁。
 依赖 `golang.org/x/sys/unix` 的 pidfd；不支持 pidfd 的系统不能假称完成残留回收。
 

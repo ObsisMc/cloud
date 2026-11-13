@@ -139,6 +139,31 @@ func TestCleanupRefusesUnknownProcessInRoot(t *testing.T) {
 	}
 }
 
+// An Agent that Node was stopping can still be exiting when Node itself has gone; cleanup
+// waits for it within the grace instead of reporting a leftover.
+func TestCleanupWaitsForExitingProcessInRoot(t *testing.T) {
+	paths, lock, err := claimRoot(socketDirectory(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	exiting := exec.Command("/usr/bin/sleep", "0.3")
+	exiting.Dir = paths.Root
+	if err := exiting.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { _ = exiting.Wait(); close(done) }()
+	t.Cleanup(func() { _ = exiting.Process.Kill(); <-done })
+	started := time.Now()
+	if err := cleanOwned(context.Background(), paths, 3*time.Second); err != nil {
+		t.Fatalf("cleanup did not wait for an exiting process: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 200*time.Millisecond {
+		t.Fatalf("cleanup returned after %v, before the process exited", elapsed)
+	}
+}
+
 func realRuntimeOptions(t *testing.T, root string) RuntimeOptions {
 	t.Helper()
 	bins := os.Getenv("V2_NODE_TEST_BIN_DIR")
