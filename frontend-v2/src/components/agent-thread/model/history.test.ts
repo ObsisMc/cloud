@@ -200,6 +200,15 @@ describe('conversationOf', () => {
     expect(turn.error).toContain('history_limit')
   })
 
+  it('says which model limit stopped a turn that Node only recorded as cancelled', () => {
+    for (const [code, text] of [['model_max_duration', '超过时长上限'], ['model_idle_timeout', '长时间没有输出']]) {
+      const failed: ChatResult = { status: 'failed', answer: '', answerComplete: false, stopReason: 'cancelled', failureCode: code }
+      const [turn] = conversationOf([view({ records: [user(1, 'a'), say(2, 'Start. '), ended(3, 'cancelled')], results: [failed] })]).turns
+      expect(turn.status).toBe('failed')
+      expect(turn.error).toContain(text)
+    }
+  })
+
   it('marks where an ended session stops the conversation, as interrupted when chat did not end it', () => {
     const stopped = conversationOf([view({ id: 's1', records: [user(1, 'a'), ended(2)], results: [done], ended: true, endReason: 'stopped' })])
     expect(stopped.markers).toEqual([{ kind: 'session', id: 'session-s1', afterTurn: 1, reason: 'stopped' }])
