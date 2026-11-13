@@ -16,7 +16,11 @@ provider error classification, and response bounds; callers receive only
 Operators may override each full authorize/token/userinfo HTTPS URL. Omitted values retain BaseURL
 and the original paths. URL credentials, query and fragment components are rejected without reflecting
 the configured value. Credentials still come from files. Browser requests cannot select endpoints.
-Changes must retain the same corporate identity authority, source, scope and UUID semantics. See
+Changes must retain the same corporate identity authority, source, scope and UUID semantics.
+`Endpoints()` reports the scheme+host+path of each endpoint. The authorize query string and the
+token/userinfo form bodies are built per request, and credentials never enter a URL, so none of them
+appear in the view. `cmd/gateway` logs it as `IDaaS endpoints resolved` at startup, so an override that
+never reached the process is visible. See
 [Deployment and operations](../../../docs/operations/deployment.en.md#huawei-idaas-site-configuration)
 for applying configuration and rotating secrets.
 

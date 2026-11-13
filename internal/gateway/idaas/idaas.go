@@ -46,13 +46,16 @@ type Options struct {
 
 // Authenticator implements gateway.Authenticator for Huawei IDaaS.
 type Authenticator struct {
-	authorizeURL     *url.URL
-	tokenURL         *url.URL
-	userInfoURL      *url.URL
-	clientID         string
-	clientSecret     string
-	displayNameField string
-	http             *http.Client
+	authorizeURL      *url.URL
+	tokenURL          *url.URL
+	userInfoURL       *url.URL
+	authorizeOverride bool
+	tokenOverride     bool
+	userInfoOverride  bool
+	clientID          string
+	clientSecret      string
+	displayNameField  string
+	http              *http.Client
 }
 
 // New validates an IDaaS adapter. The HTTP client must have a total timeout because token and
@@ -76,6 +79,7 @@ func New(o *Options) (*Authenticator, error) {
 		return nil, errors.New("IDaaS display name field must be a trimmed top-level field name of at most 128 bytes")
 	}
 	endpoints := make([]*url.URL, 3)
+	overrides := [3]bool{}
 	for i, endpoint := range []struct{ override, path string }{
 		{o.AuthorizeURL, authorizePath}, {o.TokenURL, tokenPath}, {o.UserInfoURL, userInfoPath},
 	} {
@@ -87,9 +91,50 @@ func New(o *Options) (*Authenticator, error) {
 			if e != nil {
 				return nil, e
 			}
+			overrides[i] = true
 		}
 	}
-	return &Authenticator{authorizeURL: endpoints[0], tokenURL: endpoints[1], userInfoURL: endpoints[2], clientID: o.ClientID, clientSecret: o.ClientSecret, displayNameField: o.DisplayNameField, http: o.HTTP}, nil
+	return &Authenticator{
+		authorizeURL: endpoints[0], tokenURL: endpoints[1], userInfoURL: endpoints[2],
+		authorizeOverride: overrides[0], tokenOverride: overrides[1], userInfoOverride: overrides[2],
+		clientID: o.ClientID, clientSecret: o.ClientSecret, displayNameField: o.DisplayNameField, http: o.HTTP,
+	}, nil
+}
+
+// Endpoint is one resolved provider endpoint and whether a deployment override produced it. The
+// address keeps the scheme, host and path; query, fragment and URL credentials are never part of
+// an endpoint.
+type Endpoint struct {
+	URL      string
+	Override bool
+}
+
+// Endpoints is the resolved endpoint set this adapter will call. A deployment logs it at startup
+// so an override that never reached the process is visible without reproducing a login.
+type Endpoints struct {
+	Authorize Endpoint
+	Token     Endpoint
+	UserInfo  Endpoint
+}
+
+// Endpoints returns the effective endpoints and their provenance. It is configuration evidence:
+// it does not prove the endpoints are reachable, that the credentials are accepted or that a login
+// succeeded.
+func (a *Authenticator) Endpoints() Endpoints {
+	return Endpoints{
+		Authorize: Endpoint{URL: endpointView(a.authorizeURL), Override: a.authorizeOverride},
+		Token:     Endpoint{URL: endpointView(a.tokenURL), Override: a.tokenOverride},
+		UserInfo:  Endpoint{URL: endpointView(a.userInfoURL), Override: a.userInfoOverride},
+	}
+}
+
+// endpointView renders the scheme+host+path of one resolved endpoint. The adapter adds request
+// parameters per call, and resolution rejects query, fragment and URL credentials, so none of them
+// can appear here.
+func endpointView(u *url.URL) string {
+	safe := *u
+	safe.RawQuery, safe.ForceQuery, safe.Fragment, safe.User = "", false, "", nil
+	return safe.String()
 }
 
 // AuthorizationURL builds the IDaaS 2.0 authorize redirect. PKCE is omitted because that mode is

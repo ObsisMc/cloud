@@ -15,6 +15,9 @@ authorize、表单 token 交换、userinfo 解析、provider 错误分类和响�
 部署可分别设置 authorize/token/userinfo 的完整 HTTPS URL；省略时沿用 BaseURL 与原有路径。
 端点不接受 URL 用户凭据、query 或 fragment，错误不回显配置值。凭据仍由文件注入，
 不能由浏览器选择目标地址；更换端点必须保持同一企业身份权威、来源、scope 与 UUID 语义。
+`Endpoints()` 返回三个端点的基础地址（scheme+host+path）；authorize 的查询参数与 token/userinfo 的
+请求体参数在每次请求时单独构造，凭据从不进入 URL，因此不在这个视图里。
+`cmd/gateway` 用它在启动时打印 `IDaaS endpoints resolved`，核对部署覆盖是否真正生效。
 配置应用与 secret 轮换见 [部署与运维](../../../docs/operations/deployment.md#华为-idaas-现场配置)。
 
 `uuid` 是唯一身份键（对应员工工号而非工号明文或 W3 账号），读取时去掉首尾空白（文档成功示例

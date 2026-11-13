@@ -132,7 +132,7 @@ func buildHandler(cfg *gateway.Config, store *gateway.Store, web *gateway.Web, l
 	// (only its secret is read) and, on a loopback development origin only, the "dev" adapter.
 	providers := map[string]gateway.Authenticator{}
 	if cfg.Login.Provider != "" {
-		if providers[cfg.Login.Provider], e = buildProvider(cfg); e != nil {
+		if providers[cfg.Login.Provider], e = buildProvider(cfg, log); e != nil {
 			return nil, e
 		}
 	}
@@ -176,7 +176,7 @@ func buildHandler(cfg *gateway.Config, store *gateway.Store, web *gateway.Web, l
 	return engine, nil
 }
 
-func buildProvider(cfg *gateway.Config) (gateway.Authenticator, error) {
+func buildProvider(cfg *gateway.Config, log *zap.Logger) (gateway.Authenticator, error) {
 	switch cfg.Login.Provider {
 	case gateway.ProviderGitHub:
 		secret, e := readSecret(cfg.GitHub.ClientSecretFile, "github client secret")
@@ -189,10 +189,29 @@ func buildProvider(cfg *gateway.Config) (gateway.Authenticator, error) {
 		if e != nil {
 			return nil, e
 		}
-		return idaas.New(&idaas.Options{BaseURL: cfg.IDaaS.BaseURL, AuthorizeURL: cfg.IDaaS.AuthorizeURL, TokenURL: cfg.IDaaS.TokenURL, UserInfoURL: cfg.IDaaS.UserInfoURL, ClientID: cfg.IDaaS.ClientID, ClientSecret: secret, DisplayNameField: cfg.IDaaS.DisplayNameField, HTTP: idaas.NewHTTPClient(cfg.IDaaS.Timeout)})
+		adapter, e := idaas.New(&idaas.Options{BaseURL: cfg.IDaaS.BaseURL, AuthorizeURL: cfg.IDaaS.AuthorizeURL, TokenURL: cfg.IDaaS.TokenURL, UserInfoURL: cfg.IDaaS.UserInfoURL, ClientID: cfg.IDaaS.ClientID, ClientSecret: secret, DisplayNameField: cfg.IDaaS.DisplayNameField, HTTP: idaas.NewHTTPClient(cfg.IDaaS.Timeout)})
+		if e != nil {
+			return nil, e
+		}
+		logIDaaSEndpoints(log, adapter.Endpoints())
+		return adapter, nil
 	default:
 		return nil, fmt.Errorf("unsupported login provider %q", cfg.Login.Provider)
 	}
+}
+
+// logIDaaSEndpoints records the provider endpoints this process will actually call, so a
+// deployment whose override never reached the process is visible before a login is reproduced.
+// The line carries no client ID, secret, query or request parameter and is safe to quote.
+func logIDaaSEndpoints(log *zap.Logger, endpoints idaas.Endpoints) {
+	log.Info("IDaaS endpoints resolved",
+		zap.String("authorize", endpoints.Authorize.URL),
+		zap.String("token", endpoints.Token.URL),
+		zap.String("userinfo", endpoints.UserInfo.URL),
+		zap.Bool("authorizeOverride", endpoints.Authorize.Override),
+		zap.Bool("tokenOverride", endpoints.Token.Override),
+		zap.Bool("userinfoOverride", endpoints.UserInfo.Override),
+	)
 }
 
 func readSecret(path, name string) (string, error) {
