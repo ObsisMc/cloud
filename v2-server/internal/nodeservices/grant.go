@@ -9,7 +9,9 @@ import (
 	"time"
 )
 
-const grantTTL = 10 * time.Minute
+// defaultGrantTTL is how long a token stays valid without renewal. Expiry only stops new
+// calls and renewals; an in-flight call is stopped by revocation, never by expiry.
+const defaultGrantTTL = 10 * time.Minute
 
 func (s *Service) issue(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -48,7 +50,7 @@ func (s *Service) issue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	g := &grant{execution: req.ExecutionID, binding: req.BindingID, token: token, expires: time.Now().Add(grantTTL), ctx: ctx, cancel: cancel}
+	g := &grant{execution: req.ExecutionID, binding: req.BindingID, token: token, expires: time.Now().Add(s.grantTTL), ctx: ctx, cancel: cancel}
 	s.grants[id] = g
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -93,7 +95,7 @@ func (s *Service) changeGrant(w http.ResponseWriter, r *http.Request) {
 		fault(w, 403, "model_access_revoked")
 		return
 	}
-	g.expires = time.Now().Add(grantTTL)
+	g.expires = time.Now().Add(s.grantTTL)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"expiresAt": g.expires})
 }
@@ -123,9 +125,9 @@ func (s *Service) model(w http.ResponseWriter, r *http.Request, protocol Protoco
 		return
 	}
 	binding := s.opts.Bindings[selected.binding]
-	// Request disconnect, revoke/End, and the grant's fixed expiry all stop provider work.
-	// A later renewal extends future calls only, never an already unbounded stream.
-	ctx, cancel := context.WithDeadline(r.Context(), selected.expires)
+	// Request disconnect and revoke/End stop provider work. Expiry only refuses new calls: a
+	// call admitted with a live token runs to completion, bounded by the provider's own limits.
+	ctx, cancel := context.WithCancel(r.Context())
 	stop := context.AfterFunc(selected.ctx, cancel)
 	s.mu.Unlock()
 	defer cancel()
