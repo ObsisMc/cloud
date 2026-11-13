@@ -23,6 +23,9 @@ var ErrRuntimeBusy = errors.New("workspace runtime already owned")
 // where the retired process host kept its state; Node deletes it once the old host has stopped.
 type Paths struct{ Root, NodeHome, HostHome, Repositories, UserHome, Config, Socket string }
 
+// ControlSocket is Node's control socket, the longest path the runtime binds under root.
+func ControlSocket(root string) string { return filepath.Join(root, "n", "control.sock") }
+
 // RuntimeOptions contains trusted deployment inputs, not HTTP request values. Configure must
 // produce Node configuration using the supplied paths and the same identity/timing as IPC.
 type RuntimeOptions struct {
@@ -182,8 +185,8 @@ func stopChild(ctx context.Context, p *child, grace time.Duration) error {
 }
 
 func claimRoot(root string) (Paths, *os.File, error) {
-	if !filepath.IsAbs(root) || filepath.Clean(root) != root || len(filepath.Join(root, "h", "scopes", "00000000-0000-0000-0000-000000000001", "control.sock")) >= 108 {
-		return Paths{}, nil, errors.New("runtime root must be absolute, clean and fit guardian socket paths")
+	if !filepath.IsAbs(root) || filepath.Clean(root) != root || len(ControlSocket(root)) >= 108 {
+		return Paths{}, nil, errors.New("runtime root must be absolute, clean and fit the Node control socket path")
 	}
 	if err := os.Mkdir(root, 0700); err != nil && !os.IsExist(err) {
 		return Paths{}, nil, err
@@ -237,7 +240,7 @@ func claimRoot(root string) (Paths, *os.File, error) {
 		lock.Close()
 		return Paths{}, nil, errors.New("unsupported runtime ownership marker")
 	}
-	paths := Paths{Root: root, NodeHome: filepath.Join(root, "n"), HostHome: filepath.Join(root, "h"), Repositories: filepath.Join(root, "r"), UserHome: filepath.Join(root, "u"), Config: filepath.Join(root, "config.json"), Socket: filepath.Join(root, "n", "control.sock")}
+	paths := Paths{Root: root, NodeHome: filepath.Join(root, "n"), HostHome: filepath.Join(root, "h"), Repositories: filepath.Join(root, "r"), UserHome: filepath.Join(root, "u"), Config: filepath.Join(root, "config.json"), Socket: ControlSocket(root)}
 	return paths, lock, nil
 }
 
