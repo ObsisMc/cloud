@@ -32,8 +32,8 @@ const (
 )
 
 var (
-	errIdleTimeout = errors.New("model_idle_timeout")
-	errMaxDuration = errors.New("model_max_duration")
+	errIdleTimeout = errors.New(CutIdle)
+	errMaxDuration = errors.New(CutMaxDuration)
 )
 
 // Limits returns the idle and total limits of one call.
@@ -167,7 +167,7 @@ func (p *RemoteProvider) CompleteObserved(w http.ResponseWriter, r *http.Request
 			reason = "cancelled"
 		}
 		slog.WarnContext(r.Context(), "model response cut off", "reason", reason)
-		markCut(w)
+		markCut(w, reason)
 		return resp.StatusCode, true
 	}
 	return resp.StatusCode, false
@@ -268,6 +268,9 @@ func (FixtureProvider) Complete(w http.ResponseWriter, r *http.Request, model Mo
 type abortableWriter struct {
 	http.ResponseWriter
 	cut bool
+	// reason is why the provider stopped the response: model_idle_timeout, model_max_duration,
+	// cancelled or interrupted.
+	reason string
 }
 
 func (w *abortableWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
@@ -280,16 +283,67 @@ func (w *abortableWriter) Flush() {
 
 // markCut finds the route's abortableWriter through wrappers that expose Unwrap, as
 // http.ResponseController does; without one there is nothing to abort.
-func markCut(w http.ResponseWriter) {
+func markCut(w http.ResponseWriter, reason string) {
+	if a := routeWriter(w); a != nil {
+		a.cut, a.reason = true, reason
+	}
+}
+
+func routeWriter(w http.ResponseWriter) *abortableWriter {
 	for {
 		if a, ok := w.(*abortableWriter); ok {
-			a.cut = true
-			return
+			return a
 		}
 		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
 		if !ok {
-			return
+			return nil
 		}
 		w = u.Unwrap()
 	}
+}
+
+// CutReason reports why a provider stopped this Agent model response after its header was sent,
+// or "" when it was not cut. Only the two limits are reported by name (CutIdle, CutMaxDuration);
+// any other cut is "interrupted" or "cancelled". It asks the first writer in the Unwrap chain
+// that knows, which on the Agent model route is the route's own response.
+func CutReason(w http.ResponseWriter) string {
+	for {
+		if c, ok := w.(interface{ CutReason() string }); ok {
+			return c.CutReason()
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return ""
+		}
+		w = u.Unwrap()
+	}
+}
+
+// CutReason implements the lookup used by the exported CutReason.
+func (w *abortableWriter) CutReason() string {
+	if !w.cut {
+		return ""
+	}
+	return w.reason
+}
+
+// Cut reasons that end a model response at a limit.
+const (
+	CutIdle        = "model_idle_timeout"
+	CutMaxDuration = "model_max_duration"
+)
+
+// RefuseCall answers an Agent model call before any upstream work with a final, protocol-shaped
+// error. Agents retry 408, 409, 429, 5xx and errors whose text reads like a network failure or a
+// timeout, so the status is 422 and the message avoids those words: the Agent stops and reports
+// the message instead of re-sending the same request.
+func RefuseCall(w http.ResponseWriter, protocol Protocol, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	text := message + "（" + code + "）"
+	if protocol == AnthropicMessages {
+		_ = json.NewEncoder(w).Encode(map[string]any{"type": "error", "error": map[string]string{"type": "invalid_request_error", "message": text}})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": text, "type": "invalid_request_error", "code": code}})
 }
