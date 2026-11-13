@@ -249,6 +249,46 @@ func TestExpiredGrantKeepsRunningCallsUntilRevoked(t *testing.T) {
 	}
 }
 
+// Revocation after the header was sent aborts the response too, not only cancels upstream.
+func TestRevocationAfterHeaderAbortsRemoteResponse(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for {
+			if _, err := (flushWriter{w}).Write([]byte("data: {}\n\n")); err != nil {
+				return
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}))
+	defer upstream.Close()
+	p, err := NewRemoteProvider(upstream.URL, "backend-key", upstream.Client().Transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := testService(t, p)
+	c := serviceClient(t, s, true)
+	token, _ := issueToken(t, s, c, "execution")
+	req, _ := http.NewRequest("POST", s.URL+"/runtime/openai/v1/chat/completions", strings.NewReader(`{"stream":true}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	first := make([]byte, 4)
+	if _, err := io.ReadFull(resp.Body, first); err != nil {
+		t.Fatal(err)
+	}
+	s.End("execution")
+	if data, err := io.ReadAll(resp.Body); err == nil || errors.Is(err, io.EOF) {
+		t.Fatalf("revoked stream ended normally: err=%v body=%q", err, data)
+	}
+}
+
 // Only the idle limit bounds the wait for the response header; there is no separate header timeout.
 func TestRemoteProviderHeaderWaitBoundedOnlyByIdleLimit(t *testing.T) {
 	p, err := NewRemoteProvider("https://example.test/v1", "key", nil)
