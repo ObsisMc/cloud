@@ -15,7 +15,7 @@ import (
 type retryGuard struct {
 	mu sync.Mutex
 	// idleCuts counts stalls (idle cuts of calls started after the previous cut) since the last
-	// call that started after a cut and completed.
+	// call that started after a cut and completed normally.
 	idleCuts int
 	// calls numbers the turn's calls as they start; cutAfter is the number of the newest call
 	// started when the latest cut happened, so only a call started later can clear it.
@@ -52,24 +52,28 @@ func (g *retryGuard) begin() (stopped string, call int) {
 	return g.stopped, g.calls
 }
 
-func (g *retryGuard) finish(call int, reason string) {
+// finish records how call ended: completed is true only for a 2xx answer nothing cut, and limit
+// is the model limit that stopped it, before or after its header. Any other failure (a provider
+// rejection, an unreachable provider, a cancelled call) changes nothing: re-sending those is the
+// Agent's own policy.
+func (g *retryGuard) finish(call int, completed bool, limit string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	switch reason {
-	case nodeservices.CutMaxDuration:
-		g.last, g.stopped, g.cutAfter = reason, reason, g.calls
-	case nodeservices.CutIdle:
+	switch {
+	case limit == nodeservices.CutMaxDuration:
+		g.last, g.stopped, g.cutAfter = limit, limit, g.calls
+	case limit == nodeservices.CutIdle:
 		// Calls that were already running at the previous cut stalled with it (a title request
 		// beside the turn's call): one stall, however many calls it cuts, earns one retry.
 		if call > g.cutAfter {
 			g.idleCuts++
 		}
-		g.last, g.cutAfter = reason, g.calls
+		g.last, g.cutAfter = limit, g.calls
 		if g.idleCuts > 1 {
-			g.stopped = reason
+			g.stopped = limit
 		}
-	case "":
-		// A call running alongside the cut one (a title request) proves nothing about the retry.
+	case completed:
+		// A call running alongside the cut one proves nothing about the retry.
 		if call > g.cutAfter {
 			g.idleCuts, g.last = 0, ""
 		}
@@ -89,5 +93,6 @@ func (p guardedProvider) Complete(w http.ResponseWriter, r *http.Request, m node
 		return
 	}
 	p.next.Complete(w, r, m)
-	p.guard.finish(n, nodeservices.CutReason(w))
+	completed, limit := nodeservices.Outcome(w)
+	p.guard.finish(n, completed, limit)
 }

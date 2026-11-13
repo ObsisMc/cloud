@@ -12,24 +12,37 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/nodeservices"
 )
 
-// cutWriter stands in for the Agent model route's response, which knows why a call was cut.
+// cutWriter stands in for the Agent model route's response, which knows how a call ended.
 type cutWriter struct {
 	*httptest.ResponseRecorder
-	reason string
+	limit string
 }
 
-func (w *cutWriter) CutReason() string { return w.reason }
+func (w *cutWriter) Outcome() (bool, string) {
+	return w.Code >= 200 && w.Code < 300 && w.limit == "", w.limit
+}
 
-// scriptedCalls ends each call it serves with the next scripted cut reason ("" completes).
+// providerFailed is a call that ended without a limit and without a 2xx answer (502 provider_unavailable,
+// provider_rejected and the like).
+const providerFailed = "provider_failed"
+
+// scriptedCalls ends each call it serves with the next scripted outcome: "" completes normally,
+// providerFailed answers 502, and a limit name stops the call at that limit.
 type scriptedCalls struct {
-	cuts  []string
-	calls int
+	outcomes []string
+	calls    int
 }
 
 func (s *scriptedCalls) Complete(w http.ResponseWriter, _ *http.Request, _ nodeservices.Model) {
-	w.WriteHeader(200)
-	w.(*cutWriter).reason = s.cuts[s.calls]
+	outcome := s.outcomes[s.calls]
 	s.calls++
+	switch outcome {
+	case providerFailed:
+		w.WriteHeader(http.StatusBadGateway)
+	default:
+		w.WriteHeader(200)
+		w.(*cutWriter).limit = outcome
+	}
 }
 
 func call(t *testing.T, p nodeservices.Provider) *cutWriter {
@@ -91,7 +104,7 @@ func assertRefused(t *testing.T, w *cutWriter, protocol nodeservices.Protocol, c
 func TestRetryGuardRefusesEveryCallAfterTheTotalLimit(t *testing.T) {
 	for _, protocol := range []nodeservices.Protocol{nodeservices.OpenAICompletions, nodeservices.AnthropicMessages} {
 		var g retryGuard
-		upstream := &scriptedCalls{cuts: []string{nodeservices.CutMaxDuration}}
+		upstream := &scriptedCalls{outcomes: []string{nodeservices.CutMaxDuration}}
 		p := g.provider(upstream, protocol)
 		call(t, p)
 		for range 3 {
@@ -108,7 +121,7 @@ func TestRetryGuardRefusesEveryCallAfterTheTotalLimit(t *testing.T) {
 
 func TestRetryGuardAllowsOneRetryAfterAnIdleCut(t *testing.T) {
 	var g retryGuard
-	upstream := &scriptedCalls{cuts: []string{nodeservices.CutIdle, nodeservices.CutIdle}}
+	upstream := &scriptedCalls{outcomes: []string{nodeservices.CutIdle, nodeservices.CutIdle}}
 	p := g.provider(upstream, nodeservices.OpenAICompletions)
 	call(t, p)
 	if g.failure() != nodeservices.CutIdle {
@@ -125,7 +138,7 @@ func TestRetryGuardAllowsOneRetryAfterAnIdleCut(t *testing.T) {
 
 func TestRetryGuardCompletedCallClearsIdleCuts(t *testing.T) {
 	var g retryGuard
-	upstream := &scriptedCalls{cuts: []string{nodeservices.CutIdle, "", nodeservices.CutIdle, ""}}
+	upstream := &scriptedCalls{outcomes: []string{nodeservices.CutIdle, "", nodeservices.CutIdle, ""}}
 	p := g.provider(upstream, nodeservices.OpenAICompletions)
 	call(t, p)
 	call(t, p)
@@ -143,8 +156,8 @@ func TestRetryGuardIgnoresCallsStartedBeforeTheCut(t *testing.T) {
 	var g retryGuard
 	_, cut := g.begin()
 	_, title := g.begin() // e.g. a title request that ran alongside the cut call
-	g.finish(cut, nodeservices.CutIdle)
-	g.finish(title, "")
+	g.finish(cut, false, nodeservices.CutIdle)
+	g.finish(title, true, "")
 	if g.failure() != nodeservices.CutIdle {
 		t.Fatalf("concurrent call cleared the cut: %q", g.failure())
 	}
@@ -167,14 +180,31 @@ func TestRetryGuardCountsOneStallForCallsCutTogether(t *testing.T) {
 	var g retryGuard
 	_, title := g.begin()
 	_, turn := g.begin()
-	g.finish(turn, nodeservices.CutIdle)
-	g.finish(title, nodeservices.CutIdle) // stalled alongside: the same stall
+	g.finish(turn, false, nodeservices.CutIdle)
+	g.finish(title, false, nodeservices.CutIdle) // stalled alongside: the same stall
 	stopped, retry := g.begin()
 	if stopped != "" {
 		t.Fatal("the one retry after a stall was refused because two calls were cut together")
 	}
-	g.finish(retry, nodeservices.CutIdle)
+	g.finish(retry, false, nodeservices.CutIdle)
 	if stopped, _ := g.begin(); stopped != nodeservices.CutIdle {
 		t.Fatalf("a second stall did not stop the turn: %q", stopped)
+	}
+}
+
+func TestRetryGuardOnlyANormalCompletionClearsAStall(t *testing.T) {
+	var g retryGuard
+	// idle cut, then the retry fails at the provider (502), then another call stalls
+	upstream := &scriptedCalls{outcomes: []string{nodeservices.CutIdle, providerFailed, nodeservices.CutIdle}}
+	p := g.provider(upstream, nodeservices.OpenAICompletions)
+	call(t, p)
+	call(t, p)
+	if g.failure() != nodeservices.CutIdle {
+		t.Fatalf("a failed call cleared the stall: %q", g.failure())
+	}
+	call(t, p)
+	assertRefused(t, call(t, p), nodeservices.OpenAICompletions, nodeservices.CutIdle)
+	if upstream.calls != 3 {
+		t.Fatalf("upstream calls %d, want 3", upstream.calls)
 	}
 }
