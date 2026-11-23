@@ -811,13 +811,15 @@ func TestRetryInjectsPreviousFailureAndRespectsSwitch(t *testing.T) {
 
 func TestPreviousFailureForInjectionFilteringAndEnglishFormatting(t *testing.T) {
 	errMsg := "refused by policy"
+	refusalOutput := "REFUSAL_BODY_MUST_NOT_BE_INJECTED"
 	refusal := &store.WorkflowNodeRun{
 		Error:   &errMsg,
+		Output:  &refusalOutput,
 		Payload: []byte(`{"error_detail":{"kind":"agent_refusal","attempt":2,"message":""}}`),
 	}
 	prev := previousFailureForInjection(true, refusal)
 	if prev == nil || prev.Attempt != 2 || prev.Message != errMsg || prev.Output != nil {
-		t.Fatalf("prev = %+v", prev)
+		t.Fatalf("prev = %+v (want Output=nil for agent_refusal)", prev)
 	}
 	rendered := renderPreviousFailure(*prev, workflow.LocaleEnUS)
 	for _, want := range []string{
@@ -829,6 +831,20 @@ func TestPreviousFailureForInjectionFilteringAndEnglishFormatting(t *testing.T) 
 			t.Fatalf("rendered missing %q:\n%s", want, rendered)
 		}
 	}
+	if strings.Contains(rendered, refusalOutput) || strings.Contains(rendered, "Previous final output") {
+		t.Fatalf("refusal answer leaked into injected prompt:\n%s", rendered)
+	}
+
+	structuredOutput := "STRUCTURED_BAD_JSON_BODY"
+	structured := &store.WorkflowNodeRun{
+		Output:  &structuredOutput,
+		Payload: []byte(`{"error_detail":{"kind":"structured_output","attempt":1,"message":"invalid json"}}`),
+	}
+	prevStructured := previousFailureForInjection(true, structured)
+	if prevStructured == nil || prevStructured.Output == nil || *prevStructured.Output != structuredOutput {
+		t.Fatalf("structured prev = %+v, want output kept", prevStructured)
+	}
+
 	sessionFail := &store.WorkflowNodeRun{
 		Payload: []byte(`{"error_detail":{"kind":"session","attempt":1,"message":"boom"}}`),
 	}
@@ -837,5 +853,142 @@ func TestPreviousFailureForInjectionFilteringAndEnglishFormatting(t *testing.T) 
 	}
 	if got := previousFailureForInjection(false, refusal); got != nil {
 		t.Fatalf("disabled flag returned %+v", got)
+	}
+}
+
+func TestAgentPromptBlockOrderWithPreviousFailure(t *testing.T) {
+	graphJSON := strings.Replace(
+		reviewBranches,
+		`"prompt":"评审：{{#start.input#}}"`,
+		`"prompt":"评审：{{#start.input#}}","roleId":"reviewer","skills":[{"skillId":"review-checklist","enabled":true}]`,
+		1,
+	)
+	g, err := workflow.ParseGraph(graphJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewNode, ok := g.Node("review")
+	if !ok {
+		t.Fatal("missing review node")
+	}
+	d := workflow.AgentDispatch{
+		Node:     reviewNode,
+		Graph:    g,
+		Locale:   workflow.LocaleZhCN,
+		RunInput: str("支付重构"),
+	}
+	prevText := renderPreviousFailure(previousFailureForPrompt{
+		Attempt: 1,
+		Kind:    workflow.FailureStructuredOutput,
+		Message: "missing approved",
+		Output:  str(`{"ok":1}`),
+	}, workflow.LocaleZhCN)
+
+	blockText := func(raw json.RawMessage) string {
+		t.Helper()
+		var block struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(raw, &block); err != nil {
+			t.Fatalf("unmarshal prompt block %s: %v", raw, err)
+		}
+		return block.Text
+	}
+
+	prompt := agentPrompt(d, "评审：支付重构", "# 评审角色约束", prevText)
+	wantPrefixes := []string{
+		"<workspace_root>",
+		"<system_instructions>",
+		"<current_workflow_step>",
+		"<workflow_context>",
+		"<required_skills>",
+		"## 上一次尝试（第 1 次）失败信息",
+		"<structured_output_contract>",
+	}
+	if len(prompt) != len(wantPrefixes) {
+		t.Fatalf("prompt block count = %d, want %d\n%s", len(prompt), len(wantPrefixes), promptText(t, prompt))
+	}
+	for i, prefix := range wantPrefixes {
+		got := blockText(prompt[i])
+		if !strings.HasPrefix(got, prefix) {
+			t.Fatalf("block[%d] = %q, want prefix %q", i, got, prefix)
+		}
+	}
+
+	// Without a structured contract, the previous failure block sits last.
+	plainGraph, err := workflow.ParseGraph(strings.Replace(twoAgents, `"roleId":"reviewer"`, `"roleId":"reviewer","skills":[{"skillId":"review-checklist","enabled":true}]`, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aNode, _ := plainGraph.Node("a")
+	plainPrompt := agentPrompt(workflow.AgentDispatch{Node: aNode, Graph: plainGraph, Locale: workflow.LocaleZhCN, RunInput: str("支付重构")}, "起草：支付重构", "# 评审角色约束", prevText)
+	if len(plainPrompt) != 6 || !strings.HasPrefix(blockText(plainPrompt[5]), "## 上一次尝试（第 1 次）失败信息") {
+		t.Fatalf("plain prompt blocks = %d, last = %q", len(plainPrompt), blockText(plainPrompt[len(plainPrompt)-1]))
+	}
+}
+
+func TestAgentRefusalKeepsNodeOutputButDropsAnswerWhenInjectingRetry(t *testing.T) {
+	f := newFixture(t)
+	clock := retryClock(t, f)
+	ctx := context.Background()
+	graph := retryGraph(`{"enabled":true,"maxRetries":1,"initialDelaySeconds":0}`)
+	runID := f.run(t, graph, str("检查安全策略"))
+	if _, err := f.host.StartRun(ctx, f.scope, runID); err != nil {
+		t.Fatal(err)
+	}
+	firstSession := f.exec.awaitStart(t)
+	const refusalAnswer = "I cannot process this request because of refusal-answer-marker"
+	f.exec.finish(firstSession, execution.Result{
+		Status:         execution.StatusCompleted,
+		Answer:         refusalAnswer,
+		AnswerComplete: true,
+		StopReason:     "refusal",
+	})
+
+	waitRow, p := awaitWait(t, f, runID, "a")
+	history, err := f.s.WorkflowRunFailedAttempts(ctx, f.scope.TenantID, runID)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("failed history = %+v %v", history, err)
+	}
+	if history[0].Output == nil || *history[0].Output != refusalAnswer {
+		t.Fatalf("failed refusal attempt output = %v, want preserved %q", history[0].Output, refusalAnswer)
+	}
+
+	clock.Store(p.Wait.Due)
+	if err := f.host.engine.WakeRetry(ctx, runID, waitRow.ID); err != nil {
+		t.Fatal(err)
+	}
+	retrySession := f.exec.awaitStart(t)
+	prompt := promptText(t, f.exec.request(retrySession).Prompt)
+	for _, want := range []string{
+		"## 上一次尝试（第 1 次）失败信息",
+		"失败类型：智能体拒绝了请求",
+		"agent refused the request",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("retry prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, refusalAnswer) || strings.Contains(prompt, "上一次的最终输出") {
+		t.Fatalf("retry prompt must drop agent_refusal answer:\n%s", prompt)
+	}
+	nodes, err := f.s.WorkflowRunNodes(ctx, f.scope.TenantID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(node(nodes, "a").Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	injected, _ := payload["injected_failure_context"].(string)
+	if !strings.Contains(injected, "智能体拒绝了请求") || strings.Contains(injected, refusalAnswer) {
+		t.Fatalf("injected_failure_context = %q", injected)
+	}
+
+	f.exec.finish(retrySession, completed("已合规完成"))
+	f.exec.finish(f.exec.awaitStart(t), completed("审阅通过"))
+	settled, _ := f.await(t, runID, terminal)
+	if settled.Status != store.WorkflowStatusSucceeded {
+		t.Fatalf("settled = %+v, want succeeded", settled)
 	}
 }

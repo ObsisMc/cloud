@@ -444,3 +444,77 @@ func TestWorkflowRunCreationAndVersionDeletionSerialize(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkflowRunStarterPersistsAcrossFinishCancelAndSchedule(t *testing.T) {
+	s := storetest.Open(t)
+	user, tenant := storetest.Login(t, s, "starter-lifecycle-owner")
+	ctx := context.Background()
+	project := workflowProject(t, s, user, tenant, "project-starter-lifecycle")
+	w, _ := publishedWorkflow(t, s, tenant, "发起人追踪", "v1")
+
+	startAs := func(in store.WorkflowRunInput) store.WorkflowRun {
+		t.Helper()
+		created, err := s.CreateWorkflowRun(ctx, tenant, w.ID, "", in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetWorkflowStarter(ctx, tenant, created.ID, user); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.StartWorkflowRun(ctx, tenant, created.ID); err != nil {
+			t.Fatal(err)
+		}
+		return created
+	}
+
+	// 1. Succeeded run keeps starter name in detail and list.
+	okRun := startAs(store.WorkflowRunInput{ProjectID: project.ID, Name: "成功运行"})
+	out := `{"ok":true}`
+	finished, err := s.FinishWorkflowRun(ctx, tenant, okRun.ID, store.WorkflowStatusSucceeded, &out, nil)
+	if err != nil || finished.Status != store.WorkflowStatusSucceeded || finished.StartedBy != user || finished.StartedByName != "starter-lifecycle-owner" {
+		t.Fatalf("finish succeeded = %+v %v", finished, err)
+	}
+
+	// 2. Failed run keeps starter name.
+	failRun := startAs(store.WorkflowRunInput{ProjectID: project.ID, Name: "失败运行"})
+	errMsg := "node failed"
+	failed, err := s.FinishWorkflowRun(ctx, tenant, failRun.ID, store.WorkflowStatusFailed, nil, &errMsg)
+	if err != nil || failed.Status != store.WorkflowStatusFailed || failed.StartedBy != user || failed.StartedByName != "starter-lifecycle-owner" {
+		t.Fatalf("finish failed = %+v %v", failed, err)
+	}
+
+	// 3. Cancelled run keeps starter name.
+	cancelRun := startAs(store.WorkflowRunInput{ProjectID: project.ID, Name: "取消运行"})
+	cancelled, err := s.CancelWorkflowRun(ctx, tenant, cancelRun.ID)
+	if err != nil || cancelled.Status != store.WorkflowStatusCancelled || cancelled.StartedBy != user || cancelled.StartedByName != "starter-lifecycle-owner" {
+		t.Fatalf("cancel = %+v %v", cancelled, err)
+	}
+
+	// 4. Scheduled workflow run keeps starter name across ScheduledWorkflowRun, detail and lists.
+	schedRun := startAs(store.WorkflowRunInput{
+		ProjectID:   project.ID,
+		Name:        "定时运行",
+		TriggerKind: "schedule",
+		TriggerRef:  "occ-starter-1",
+	})
+	foundSched, err := s.ScheduledWorkflowRun(ctx, tenant, "occ-starter-1")
+	if err != nil || foundSched.ID != schedRun.ID || foundSched.StartedBy != user || foundSched.StartedByName != "starter-lifecycle-owner" {
+		t.Fatalf("scheduled run = %+v %v", foundSched, err)
+	}
+
+	for _, id := range []string{okRun.ID, failRun.ID, cancelRun.ID, schedRun.ID} {
+		got, err := s.WorkflowRun(ctx, tenant, id)
+		if err != nil || got.StartedBy != user || got.StartedByName != "starter-lifecycle-owner" {
+			t.Fatalf("WorkflowRun(%s) = %+v %v", id, got, err)
+		}
+	}
+	listed, err := s.WorkflowRuns(ctx, tenant, w.ID, project.ID)
+	if err != nil || len(listed) != 4 {
+		t.Fatalf("WorkflowRuns = %+v %v", listed, err)
+	}
+	for _, item := range listed {
+		if item.StartedBy != user || item.StartedByName != "starter-lifecycle-owner" {
+			t.Fatalf("listed run %s starter = (%q, %q), want (%q, starter-lifecycle-owner)", item.ID, item.StartedBy, item.StartedByName, user)
+		}
+	}
+}
