@@ -147,6 +147,8 @@ func TestWorkflowRunLifecycleRefusals(t *testing.T) {
 		{"run missing", store.ErrWorkflowRunNotFound, "workflow_run_not_found", 404, "POST", "/start", nil},
 		{"stop unconfirmed", server.ErrWorkflowRunStopUnconfirmed, "workflow_run_stop_unconfirmed", 503, "POST", "/cancel", nil},
 		{"state conflict", store.ErrWorkflowRunState, "workflow_run_state_conflict", 409, "POST", "/start", nil},
+		{"role missing", server.ErrWorkflowRoleNotFound, "workflow_role_not_found", 400, "POST", "/start", nil},
+		{"skill missing", &server.WorkflowSkillNotFound{NodeID: "reviewer", NodeTitle: "代码审查", SkillID: "code_review"}, "workflow_skill_not_found", 400, "POST", "/start", nil},
 		{"input invalid", &server.WorkflowRunInputInvalid{Variable: "count", Reason: "must be a number"}, "workflow_run_input_invalid", 400, "PATCH", "/input", map[string]any{"input": "x"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -161,6 +163,12 @@ func TestWorkflowRunLifecycleRefusals(t *testing.T) {
 				params := failure["params"].(map[string]any)
 				if params["variable"] != "count" || params["reason"] != "must be a number" {
 					t.Fatalf("params = %v", params)
+				}
+			}
+			if tc.code == "workflow_skill_not_found" {
+				params := failure["params"].(map[string]any)
+				if params["nodeId"] != "reviewer" || params["nodeTitle"] != "代码审查" || params["skillId"] != "code_review" {
+					t.Fatalf("skill params = %v", params)
 				}
 			}
 		})

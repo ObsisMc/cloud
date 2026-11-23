@@ -23,17 +23,25 @@ import (
 )
 
 // storeRunHost starts and cancels runs in the store as the execution bridge would, executing
-// nothing; refuse makes it decline to start, as the bridge does for a graph it cannot run.
+// nothing; refuseErr (or refuse) makes it decline to start, as the bridge does for a graph it
+// cannot run or a missing dependency.
 type storeRunHost struct {
-	db     *store.Store
-	refuse bool
-	scopes []server.WorkflowRunScope
+	db        *store.Store
+	refuse    bool
+	refuseErr error
+	scopes    []server.WorkflowRunScope
 }
 
 func (h *storeRunHost) StartRun(ctx context.Context, scope server.WorkflowRunScope, runID string) (store.WorkflowRun, error) {
 	h.scopes = append(h.scopes, scope)
+	if h.refuseErr != nil {
+		return store.WorkflowRun{}, h.refuseErr
+	}
 	if h.refuse {
 		return store.WorkflowRun{}, server.ErrWorkflowRunNotStartable
+	}
+	if err := h.db.SetWorkflowStarter(ctx, scope.TenantID, runID, scope.UserID); err != nil {
+		return store.WorkflowRun{}, err
 	}
 	return h.db.StartWorkflowRun(ctx, scope.TenantID, runID)
 }
@@ -260,6 +268,10 @@ func TestScheduledWorkflowRunsThroughTheRunEntry(t *testing.T) {
 	if _, err := f.db.FinishWorkflowRun(ctx, f.scope.TenantID, run.ID, store.WorkflowStatusSucceeded, &output, nil); err != nil {
 		t.Fatal(err)
 	}
+	finishedRun, err := f.db.WorkflowRun(ctx, f.scope.TenantID, run.ID)
+	if err != nil || finishedRun.StartedBy != f.scope.UserID || finishedRun.StartedByName != "Owner" {
+		t.Fatalf("scheduled finished run starter = %+v %v", finishedRun, err)
+	}
 	if err := c.Tick(ctx, f.scope); err != nil {
 		t.Fatal(err)
 	}
@@ -280,31 +292,43 @@ func TestScheduledWorkflowRunsThroughTheRunEntry(t *testing.T) {
 }
 
 func TestScheduledWorkflowTheBridgeRefusesLeavesNoRunBehind(t *testing.T) {
-	f := newWorkflowTargetFixture(t)
-	f.host.refuse = true
-	ctx := context.Background()
-	input, _ := json.Marshal(f.target(nil))
-	saved, err := f.db.CreateScheduleConfig(ctx, f.scope.TenantID, f.scope.UserID, store.ScheduleInput{Name: "拒绝", ProjectID: f.project.ID, Target: input, Rule: json.RawMessage(`{"kind":"hours","hours":1,"timezone":"UTC"}`)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := server.NewScheduleCoordinator(f.db, f.options(true), func() time.Time { return saved.CreatedAt.Add(time.Minute) })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = c.Recover(ctx, f.scope); err != nil {
-		t.Fatal(err)
-	}
-	occ, err := c.Manual(ctx, f.scope, saved.ID, "refused")
-	if !errors.Is(err, server.ErrWorkflowRunNotStartable) {
-		t.Fatalf("manual = %+v %v", occ, err)
-	}
-	occ, err = f.db.GetOccurrence(ctx, f.scope.TenantID, f.scope.UserID, occ.ID)
-	if err != nil || occ.Status != "skipped" || occ.Reason != "workflow_run_not_startable" || !occ.Released {
-		t.Fatalf("occurrence = %+v %v", occ, err)
-	}
-	run, err := f.db.ScheduledWorkflowRun(ctx, f.scope.TenantID, occ.ID)
-	if err != nil || run.Status != store.WorkflowStatusCancelled {
-		t.Fatalf("refused run = %+v %v", run, err)
+	for _, tc := range []struct {
+		name       string
+		err        error
+		wantReason string
+	}{
+		{"not_startable", server.ErrWorkflowRunNotStartable, "workflow_run_not_startable"},
+		{"role_missing", server.ErrWorkflowRoleNotFound, "workflow_role_not_found"},
+		{"skill_missing", &server.WorkflowSkillNotFound{NodeID: "a", NodeTitle: "审查", SkillID: "review-checklist"}, "workflow_skill_not_found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWorkflowTargetFixture(t)
+			f.host.refuseErr = tc.err
+			ctx := context.Background()
+			input, _ := json.Marshal(f.target(nil))
+			saved, err := f.db.CreateScheduleConfig(ctx, f.scope.TenantID, f.scope.UserID, store.ScheduleInput{Name: "拒绝", ProjectID: f.project.ID, Target: input, Rule: json.RawMessage(`{"kind":"hours","hours":1,"timezone":"UTC"}`)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := server.NewScheduleCoordinator(f.db, f.options(true), func() time.Time { return saved.CreatedAt.Add(time.Minute) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = c.Recover(ctx, f.scope); err != nil {
+				t.Fatal(err)
+			}
+			occ, err := c.Manual(ctx, f.scope, saved.ID, "refused-"+tc.name)
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("manual = %+v %v", occ, err)
+			}
+			occ, err = f.db.GetOccurrence(ctx, f.scope.TenantID, f.scope.UserID, occ.ID)
+			if err != nil || occ.Status != "skipped" || occ.Reason != tc.wantReason || !occ.Released {
+				t.Fatalf("occurrence = %+v %v, want reason %q", occ, err, tc.wantReason)
+			}
+			run, err := f.db.ScheduledWorkflowRun(ctx, f.scope.TenantID, occ.ID)
+			if err != nil || run.Status != store.WorkflowStatusCancelled {
+				t.Fatalf("refused run = %+v %v", run, err)
+			}
+		})
 	}
 }

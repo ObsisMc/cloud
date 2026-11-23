@@ -193,6 +193,58 @@ func (g *Graph) RoleReferences() []string {
 	return result
 }
 
+// SkillReference names one enabled Skill binding an executable Agent node declares.
+type SkillReference struct {
+	NodeID    string
+	NodeTitle string
+	SkillID   string
+}
+
+// SkillReferences lists the enabled Skill bindings every executable Agent node declares, in a
+// stable order: the root graph, then each Loop body by id. As on desktop (collect_skills), every
+// enabled Skill in the frozen graph is checked before the run starts, even on branches this run
+// never reaches; disabled bindings and unpublished spare nodes are excluded, and a blank node
+// title falls back to its id.
+func (g *Graph) SkillReferences() []SkillReference {
+	type key struct {
+		nodeID  string
+		skillID string
+	}
+	seen := map[key]bool{}
+	result := []SkillReference{}
+	collect := func(nodes []*node) {
+		for _, n := range nodes {
+			if n.kind != "agent" {
+				continue
+			}
+			view := g.view(n)
+			title := strings.TrimSpace(view.Title)
+			if title == "" {
+				title = view.ID
+			}
+			for _, skillID := range view.Agent().Skills {
+				k := key{nodeID: view.ID, skillID: skillID}
+				if skillID != "" && !seen[k] {
+					seen[k] = true
+					result = append(result, SkillReference{NodeID: view.ID, NodeTitle: title, SkillID: skillID})
+				}
+			}
+		}
+	}
+	collect(g.root.order)
+	ids := make([]string, 0, len(g.scopes))
+	for id := range g.scopes {
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		collect(g.scopes[id].order)
+	}
+	return result
+}
+
 // StartVariable is one typed Start input declaration.
 type StartVariable struct {
 	Name        string

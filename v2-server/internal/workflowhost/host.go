@@ -442,12 +442,12 @@ func executionScope(s server.WorkflowRunScope) execution.Scope {
 	return execution.Scope{TenantID: s.TenantID, UserID: s.UserID}
 }
 
-// StartRun authorizes the run against the caller's tenant, then checks the roles its graph
-// references, then starts it and its first wave. Roles are a start hard-dependency exactly as on
-// desktop: the whole frozen graph is checked before anything runs, so a role missing from a node
-// this run would not reach still refuses the start, and the run stays pending until the role
-// exists again. A graph that does not parse is left to the engine, which reports it as it always
-// has.
+// StartRun authorizes the run against the caller's tenant, then checks the roles and Skills its
+// graph references, then starts it and its first wave. Roles and Skills are start hard-dependencies
+// exactly as on desktop: the whole frozen graph is checked before anything runs, so a dependency
+// missing from a node this run would not reach still refuses the start, and the run stays pending
+// until the dependency exists again. A graph that does not parse is left to the engine, which
+// reports it as it always has.
 func (h *Host) StartRun(ctx context.Context, scope server.WorkflowRunScope, runID string) (store.WorkflowRun, error) {
 	run, err := h.store.WorkflowRun(ctx, scope.TenantID, runID)
 	if err != nil {
@@ -456,10 +456,11 @@ func (h *Host) StartRun(ctx context.Context, scope server.WorkflowRunScope, runI
 	if run.Status != store.WorkflowStatusPending {
 		return store.WorkflowRun{}, server.ErrWorkflowRunNotStartable
 	}
-	if err := h.checkRoles(ctx, scope.TenantID, runID); err != nil {
+	execScope := executionScope(scope)
+	if err := h.checkDependencies(ctx, execScope, run.ProjectID, runID); err != nil {
 		return store.WorkflowRun{}, err
 	}
-	st := h.register(runID, executionScope(scope))
+	st := h.register(runID, execScope)
 	// The run outlives the request once it starts; a disconnecting client must not abandon the
 	// first scheduling pass halfway.
 	err = h.engine.StartAs(context.WithoutCancel(ctx), runID, st.scope.UserID)
@@ -473,9 +474,10 @@ func (h *Host) StartRun(ctx context.Context, scope server.WorkflowRunScope, runI
 	return h.store.WorkflowRun(ctx, scope.TenantID, runID)
 }
 
-// checkRoles resolves every role the frozen graph references in the caller's tenant. Roles are
-// shared by the tenant, so the check reads the same catalog the settings page writes.
-func (h *Host) checkRoles(ctx context.Context, tenant, runID string) error {
+// checkDependencies resolves every role and enabled Skill the frozen graph references before the
+// first scheduling pass: roles against the workspace catalog, personal Skills against the starter's
+// catalog, and marketplace Skill plugins against the run's project.
+func (h *Host) checkDependencies(ctx context.Context, scope execution.Scope, projectID, runID string) error {
 	frozen, err := h.store.WorkflowEngineContext(ctx, runID)
 	if err != nil {
 		return err
@@ -485,9 +487,34 @@ func (h *Host) checkRoles(ctx context.Context, tenant, runID string) error {
 		return nil // the engine reports the parse failure on start
 	}
 	for _, reference := range graph.RoleReferences() {
-		if _, err := h.store.ResolveWorkflowRole(ctx, tenant, reference); err != nil {
+		if _, err := h.store.ResolveWorkflowRole(ctx, scope.TenantID, reference); err != nil {
 			return roleCheckError(reference, err)
 		}
+	}
+	skillRefs := graph.SkillReferences()
+	if len(skillRefs) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(skillRefs))
+	firstBySkill := make(map[string]workflow.SkillReference, len(skillRefs))
+	for _, ref := range skillRefs {
+		if _, ok := firstBySkill[ref.SkillID]; !ok {
+			firstBySkill[ref.SkillID] = ref
+			names = append(names, ref.SkillID)
+		}
+	}
+	if _, err := h.store.ResolveWorkflowSkills(ctx, scope, projectID, names); err != nil {
+		var missing *store.MissingWorkflowSkillError
+		if errors.As(err, &missing) {
+			ref := firstBySkill[missing.SkillID]
+			return &server.WorkflowSkillNotFound{
+				NodeID:    ref.NodeID,
+				NodeTitle: ref.NodeTitle,
+				SkillID:   ref.SkillID,
+				Reason:    missing.Reason,
+			}
+		}
+		return err
 	}
 	return nil
 }

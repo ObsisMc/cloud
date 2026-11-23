@@ -42,6 +42,10 @@ var (
 	// ErrWorkflowNotStartable is the bridge refusing to start the run: the graph holds a node kind
 	// v2 cannot execute yet, or the input does not satisfy the Start node.
 	ErrWorkflowNotStartable = errors.New("workflow run cannot start")
+	// ErrWorkflowRoleNotFound is the bridge refusing start because a referenced workspace role is missing.
+	ErrWorkflowRoleNotFound = errors.New("workflow role not found")
+	// ErrWorkflowSkillNotFound is the bridge refusing start because an enabled Skill is unavailable.
+	ErrWorkflowSkillNotFound = errors.New("workflow skill not found")
 	// ErrWorkflowStopUnconfirmed is a cancellation execution has not confirmed yet.
 	ErrWorkflowStopUnconfirmed = errors.New("workflow run stop unconfirmed")
 )
@@ -177,13 +181,9 @@ func (a *WorkflowAdapter) Dispatch(ctx context.Context, scope execution.Scope, o
 	}
 	if run.Status == store.WorkflowStatusPending {
 		if _, err = a.runs.Start(ctx, scope, run.ID); err != nil {
-			if errors.Is(err, ErrWorkflowNotStartable) || errors.Is(err, execution.ErrUnavailable) {
+			if reason := workflowStartRejected(err); reason != "" {
 				// Nothing started: withdraw the pending run so no list keeps waiting on it.
 				_, cancelErr := a.runs.Cancel(writeCtx, scope, run.ID)
-				reason := "workflow_run_not_startable"
-				if errors.Is(err, execution.ErrUnavailable) {
-					reason = "execution_unavailable"
-				}
 				_, applyErr := a.apply(writeCtx, scope, o, "rejected", "", reason)
 				return errors.Join(err, cancelErr, applyErr)
 			}
@@ -193,6 +193,20 @@ func (a *WorkflowAdapter) Dispatch(ctx context.Context, scope execution.Scope, o
 	}
 	_, err = a.apply(writeCtx, scope, o, "accepted", encodeWorkflowRef(run.ID), "")
 	return err
+}
+
+func workflowStartRejected(err error) string {
+	switch {
+	case errors.Is(err, execution.ErrUnavailable):
+		return "execution_unavailable"
+	case errors.Is(err, ErrWorkflowSkillNotFound):
+		return "workflow_skill_not_found"
+	case errors.Is(err, ErrWorkflowRoleNotFound):
+		return "workflow_role_not_found"
+	case errors.Is(err, ErrWorkflowNotStartable):
+		return "workflow_run_not_startable"
+	}
+	return ""
 }
 
 // workflowTargetUnavailable names a frozen target that can no longer be created: the workflow,
