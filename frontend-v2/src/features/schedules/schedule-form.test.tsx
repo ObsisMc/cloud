@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import * as workflowsApi from '@/lib/workflows/api/generated'
-import { reasonText } from './runtime'
+import { isTerminalActionRejection, reasonText, scheduleError } from './runtime'
 import { ScheduleForm } from './schedule-form'
 
 vi.mock('@/lib/workflows/api/generated', () => ({ getWorkflow: vi.fn().mockResolvedValue({ published: null }) }))
@@ -113,4 +113,13 @@ it('shows the personal Skill team visibility hint when a scheduled workflow refe
  expect(await screen.findByText('运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见。')).toBeInTheDocument()
  expect(reasonText('workflow_skill_not_found')).toBe('工作流需要的技能不可用，请确认发起人的个人技能已导入或市场技能已下发到项目')
  expect(reasonText('workflow_role_not_found')).toBe('工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色')
+ for (const [code, expected] of [
+  ['workflow_skill_not_found', '工作流需要的技能不可用，请确认发起人的个人技能已导入或市场技能已下发到项目。'],
+  ['workflow_role_not_found', '工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色。'],
+  ['workflow_run_not_startable', '工作流不能启动：图里有当前版本还不能执行的节点，或输入不满足开始节点。'],
+ ] as const) {
+  const err = { isAxiosError: true, response: { status: 400, data: { code, params: { occurrenceId: 'occ-1' } } } }
+  expect(scheduleError(err, 'fallback')).toBe(expected)
+  expect(isTerminalActionRejection(err)).toBe(true)
+ }
 })

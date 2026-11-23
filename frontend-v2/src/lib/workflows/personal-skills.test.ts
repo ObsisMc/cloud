@@ -55,4 +55,61 @@ describe("personal-skills", () => {
     expect(graphHasEnabledPersonalSkills(undefined)).toBe(false);
     expect(graphHasEnabledPersonalSkills("not json")).toBe(false);
   });
+
+  it("treats bindings omitting enabled as enabled and ignores malformed spare node skill configs", () => {
+    const spareWithInvalidAndOmittedEnabled = JSON.stringify({
+      nodes: [
+        { id: "start", data: { kind: "start" } },
+        {
+          id: "spare-object-skills",
+          data: {
+            kind: "agent",
+            agentConfig: {
+              prompt: "Draft",
+              skills: {},
+            },
+          },
+        },
+        {
+          id: "spare-malformed-entries",
+          data: {
+            kind: "agent",
+            agentConfig: {
+              prompt: "Draft",
+              skills: [null, {}, { skillId: 123, enabled: true }, { skillId: "personal-disabled", enabled: false }],
+            },
+          },
+        },
+      ],
+      edges: [],
+    });
+    expect(graphHasEnabledPersonalSkills(spareWithInvalidAndOmittedEnabled)).toBe(false);
+
+    const omittedEnabled = JSON.stringify({
+      nodes: [
+        {
+          id: "spare-object-skills",
+          data: {
+            kind: "agent",
+            agentConfig: {
+              prompt: "Draft",
+              skills: {},
+            },
+          },
+        },
+        {
+          id: "writer",
+          data: {
+            kind: "agent",
+            agentConfig: {
+              prompt: "Draft",
+              skills: [{ skillId: "implicit-enabled-skill" }],
+            },
+          },
+        },
+      ],
+      edges: [],
+    });
+    expect(graphHasEnabledPersonalSkills(omittedEnabled)).toBe(true);
+  });
 });

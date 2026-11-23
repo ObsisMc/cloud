@@ -22,6 +22,9 @@ export function scheduleError(error: unknown, fallback: string) {
     execution_busy: 'Agent 正忙，本次请求已跳过。', execution_target_unavailable: '所选 Agent、模型或项目当前不可用，请编辑任务并重新选择后重试。',
     task_binding_invalid:'任务分配、状态或执行器已变化，请重新选择后保存。', invalid_execution_request: '运行配置无效，请检查任务设置后重试。', execution_unsupported: '当前执行方式不受支持，请修改配置后重试。',
     schedule_target_unavailable: '所选执行方式尚未就绪，配置未保存。', project_required: '工作流要在项目中运行，请选择项目。',
+    workflow_skill_not_found: '工作流需要的技能不可用，请确认发起人的个人技能已导入或市场技能已下发到项目。',
+    workflow_role_not_found: '工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色。',
+    workflow_run_not_startable: '工作流不能启动：图里有当前版本还不能执行的节点，或输入不满足开始节点。',
   }
   if (messages[code]) return messages[code]
   if (error.response?.status === 401) return '登录已失效，请重新登录。'

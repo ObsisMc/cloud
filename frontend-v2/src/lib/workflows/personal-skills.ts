@@ -20,10 +20,17 @@ export function isPersonalSkillId(skillId: string): boolean {
 export function hasEnabledPersonalSkills(nodes: readonly WorkflowDefinitionNode[]): boolean {
   for (const node of nodes) {
     if (node.data.kind !== "agent") continue;
-    const skills = node.data.agentConfig?.skills;
-    if (!skills) continue;
+    const skills: unknown = node.data.agentConfig?.skills;
+    if (!Array.isArray(skills)) continue;
     for (const binding of skills) {
-      if (binding.enabled && isPersonalSkillId(binding.skillId)) {
+      if (
+        binding !== null &&
+        typeof binding === "object" &&
+        "skillId" in binding &&
+        typeof binding.skillId === "string" &&
+        (!("enabled" in binding) || binding.enabled !== false) &&
+        isPersonalSkillId(binding.skillId)
+      ) {
         return true;
       }
     }
