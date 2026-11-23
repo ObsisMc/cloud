@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution/executiontest"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
+	"github.com/wanglongan587/cloud/v2-server/internal/taskdecomp"
 	"github.com/wanglongan587/cloud/v2-server/internal/workflowhost"
 )
 
@@ -137,5 +140,98 @@ func TestWorkflowDomainStreamsTheHostsRunChanges(t *testing.T) {
 	}
 	if o := withWorkflowDomain(server.Options{}, nil); o.WorkflowRunEvents != nil {
 		t.Fatalf("run events without a host = %v", o.WorkflowRunEvents)
+	}
+}
+
+// TestWorkflowRunStarterMapsPreflightRefusalsForDecomposition exercises the real workflowhost +
+// taskdecomp adapter: a missing Skill or role localizes the decomposition failure and cancels the
+// pending workflow run, and creating the missing Skill lets a subsequent split succeed.
+func TestWorkflowRunStarterMapsPreflightRefusalsForDecomposition(t *testing.T) {
+	ctx := context.Background()
+	s := storetest.Open(t)
+	token := storetest.SignIn(t, s, "decomp-starter", "Owner", store.RoleOwner)
+	u, err := s.SessionUser(ctx, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenants, err := s.Tenants(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tid := tenants[0].ID
+	scope := execution.Scope{TenantID: tid, UserID: u.ID}
+	project, err := s.CreateProject(ctx, scope, store.Project{
+		ID:            "22222222-2222-4222-8222-222222222222",
+		Name:          "Demo",
+		RepositoryURL: "https://example.invalid/demo",
+		Commit:        "c",
+		MirrorPath:    "/tmp/demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub := &executiontest.Stub{}
+	wfHost, err := workflowhost.NewHost(workflowhost.Config{Store: s, Execution: stub, Catalog: stub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(wfHost.Close)
+	decompositions := taskdecomp.New(s, workflowRunStarter{wfHost}, nil)
+	t.Cleanup(decompositions.Close)
+
+	graph := `{"nodes":[
+		{"id":"start","data":{"kind":"start","inputVariables":[{"name":"tasks","valueType":"array[object]","value":[{"title":"拆出的子任务","description":"说明"}]}]}},
+		{"id":"cond","data":{"kind":"condition","cases":[{"id":"never","logic":"and","conditions":[{"variableSelector":["start","input"],"operator":"is","value":"__never__"}]}]}},
+		{"id":"planner","data":{"kind":"agent","title":"拆分助手","agentConfig":{"prompt":"Split","skills":[{"skillId":"decomp-checklist","enabled":true}]}}},
+		{"id":"out","data":{"kind":"output","outputs":[{"name":"tasks","variableSelector":["start","tasks"]}]}}
+	],"edges":[{"source":"start","target":"cond"},{"source":"cond","sourceHandle":"never","target":"planner"},{"source":"cond","target":"out"}]}`
+	wf, _, err := s.CreateWorkflow(ctx, tid, "技能拆分", graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PublishWorkflow(ctx, tid, wf.ID, "v1", nil); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.CreateTask(ctx, tid, u.ID, store.TaskInput{Title: "大需求", ProjectID: project.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := store.Access{TenantID: tid, UserID: u.ID, Role: store.RoleOwner}
+	failed, err := decompositions.Start(ctx, access, task.ID, wf.ID, "missing-skill-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFailure := "节点「拆分助手」需要的技能 decomp-checklist 不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再重新拆分。"
+	if failed.Status != store.DecompositionFailed || failed.Failure != wantFailure {
+		t.Fatalf("failed decomposition = %+v, want failure %q", failed, wantFailure)
+	}
+	refusedRun, err := s.WorkflowRun(ctx, tid, failed.WorkflowRunID)
+	if err != nil || refusedRun.Status != store.WorkflowStatusCancelled {
+		t.Fatalf("refused run = %+v (err=%v), want cancelled", refusedRun, err)
+	}
+
+	if _, err := s.CreateSkill(ctx, tid, u.ID, store.SkillInput{Name: "decomp-checklist", Description: "拆分清单", Content: "# 拆分清单"}); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := decompositions.Start(ctx, access, task.ID, wf.ID, "retry-after-skill")
+	if err != nil || retried.Status != store.DecompositionRunning {
+		t.Fatalf("retry decomposition = %+v (err=%v), want running", retried, err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		items, err := decompositions.List(ctx, tid, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) > 0 && items[0].ID == retried.ID && items[0].Status != store.DecompositionRunning {
+			if items[0].Status != store.DecompositionSucceeded || items[0].CreatedCount != 1 {
+				t.Fatalf("retried decomposition = %+v, want succeeded with 1 subtask", items[0])
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("retried decomposition never settled: %+v", items)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

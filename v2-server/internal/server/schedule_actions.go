@@ -143,6 +143,12 @@ func scheduleActionError(w http.ResponseWriter, op string, err error, id string)
 		status, code = 409, "execution_busy"
 	case errors.Is(err, store.ErrIneligible), errors.Is(err, execution.ErrInvalidRequest):
 		status, code = 400, "invalid_execution_request"
+	case errors.Is(err, scheduler.ErrWorkflowSkillNotFound):
+		status, code = 400, "workflow_skill_not_found"
+	case errors.Is(err, scheduler.ErrWorkflowRoleNotFound):
+		status, code = 400, "workflow_role_not_found"
+	case errors.Is(err, scheduler.ErrWorkflowNotStartable):
+		status, code = 400, "workflow_run_not_startable"
 	case errors.Is(err, execution.ErrUnsupported):
 		status, code = 400, "execution_unsupported"
 	}

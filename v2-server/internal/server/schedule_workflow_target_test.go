@@ -17,9 +17,11 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution/executiontest"
+	"github.com/wanglongan587/cloud/v2-server/internal/scheduler"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
+	"github.com/wanglongan587/cloud/v2-server/internal/workflowhost"
 )
 
 // storeRunHost starts and cancels runs in the store as the execution bridge would, executing
@@ -298,6 +300,7 @@ func TestScheduledWorkflowTheBridgeRefusesLeavesNoRunBehind(t *testing.T) {
 		wantReason string
 	}{
 		{"not_startable", server.ErrWorkflowRunNotStartable, "workflow_run_not_startable"},
+		{"invalid_input", &server.WorkflowRunInputInvalid{Variable: "branch", Reason: "required value is missing"}, "workflow_run_not_startable"},
 		{"role_missing", server.ErrWorkflowRoleNotFound, "workflow_role_not_found"},
 		{"skill_missing", &server.WorkflowSkillNotFound{NodeID: "a", NodeTitle: "审查", SkillID: "review-checklist"}, "workflow_skill_not_found"},
 	} {
@@ -330,5 +333,203 @@ func TestScheduledWorkflowTheBridgeRefusesLeavesNoRunBehind(t *testing.T) {
 				t.Fatalf("refused run = %+v %v", run, err)
 			}
 		})
+	}
+}
+
+func TestScheduledWorkflowManualRunReturns400OnDependencyRefusal(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantCode string
+	}{
+		{"skill_missing", &server.WorkflowSkillNotFound{NodeID: "a", NodeTitle: "审查", SkillID: "review-checklist"}, "workflow_skill_not_found"},
+		{"role_missing", server.ErrWorkflowRoleNotFound, "workflow_role_not_found"},
+		{"not_startable", server.ErrWorkflowRunNotStartable, "workflow_run_not_startable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWorkflowTargetFixture(t)
+			f.host.refuseErr = tc.err
+			ctx := context.Background()
+			input, _ := json.Marshal(f.target(nil))
+			saved, err := f.db.CreateScheduleConfig(ctx, f.scope.TenantID, f.scope.UserID, store.ScheduleInput{
+				Name:      "手动拒绝",
+				ProjectID: f.project.ID,
+				Target:    input,
+				Rule:      json.RawMessage(`{"kind":"hours","hours":1,"timezone":"UTC"}`),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := saved.CreatedAt.Add(time.Minute)
+			c, err := server.NewScheduleCoordinator(f.db, f.options(true), func() time.Time { return now })
+			if err != nil {
+				t.Fatal(err)
+			}
+			h, err := scheduler.NewHost(f.db, c, f.catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runCtx, stopHost := context.WithCancel(t.Context())
+			ticks := make(chan time.Time)
+			done := make(chan error, 1)
+			go func() { done <- h.Run(runCtx, ticks) }()
+			t.Cleanup(func() {
+				stopHost()
+				if err := <-done; err != nil {
+					t.Error(err)
+				}
+			})
+			select {
+			case <-h.Ready():
+			case <-time.After(10 * time.Second):
+				t.Fatal("scheduler host startup timed out")
+			}
+
+			srv := httptest.NewServer(server.New(f.db, server.Options{Schedules: h}))
+			t.Cleanup(srv.Close)
+			doc, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "schedule-actions.openapi.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := doc.Validate(ctx); err != nil {
+				t.Fatal(err)
+			}
+			routes, err := legacy.NewRouter(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			postRun := func(reqID string) (int, map[string]any) {
+				t.Helper()
+				raw, _ := json.Marshal(map[string]string{"requestId": reqID})
+				req, err := http.NewRequest("POST", srv.URL+"/api/v2/tenants/"+f.scope.TenantID+"/schedule-configs/"+saved.ID+"/run", bytes.NewReader(raw))
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Header.Set("Content-Type", "application/json")
+				req.AddCookie(&http.Cookie{Name: server.SessionCookie, Value: f.token})
+				res, err := srv.Client().Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer res.Body.Close()
+				var bodyBytes bytes.Buffer
+				if _, err := bodyBytes.ReadFrom(res.Body); err != nil {
+					t.Fatal(err)
+				}
+				route, params, err := routes.FindRoute(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				v := &openapi3filter.ResponseValidationInput{
+					RequestValidationInput: &openapi3filter.RequestValidationInput{Request: req, PathParams: params, Route: route},
+					Status:                 res.StatusCode,
+					Header:                 res.Header,
+					Options:                &openapi3filter.Options{IncludeResponseStatus: true},
+				}
+				v.SetBodyBytes(bodyBytes.Bytes())
+				if err := openapi3filter.ValidateResponse(ctx, v); err != nil {
+					t.Fatalf("contract: %v\n%s", err, bodyBytes.String())
+				}
+				var out map[string]any
+				if err := json.Unmarshal(bodyBytes.Bytes(), &out); err != nil {
+					t.Fatal(err)
+				}
+				return res.StatusCode, out
+			}
+
+			code, out := postRun("manual-" + tc.name)
+			params, _ := out["params"].(map[string]any)
+			occID, _ := params["occurrenceId"].(string)
+			if code != 400 || out["code"] != tc.wantCode || occID == "" {
+				t.Fatalf("manual refusal = %d %v, want 400 %q with occurrenceId", code, out, tc.wantCode)
+			}
+			occ, err := f.db.GetOccurrence(ctx, f.scope.TenantID, f.scope.UserID, occID)
+			if err != nil || occ.Status != "skipped" || occ.Reason != tc.wantCode || !occ.Released {
+				t.Fatalf("persisted occurrence = %+v (err=%v), want skipped/%s/released", occ, err, tc.wantCode)
+			}
+			run, err := f.db.ScheduledWorkflowRun(ctx, f.scope.TenantID, occID)
+			if err != nil || run.Status != store.WorkflowStatusCancelled {
+				t.Fatalf("refused run = %+v (err=%v), want cancelled", run, err)
+			}
+
+			// Fixing the dependency allows a fresh manual trigger to run without replaying the skipped trigger.
+			f.host.refuseErr = nil
+			code, out = postRun("retry-after-fix-" + tc.name)
+			if code != 200 || out["status"] != "running" {
+				t.Fatalf("retry after fix = %d %v, want 200 running", code, out)
+			}
+		})
+	}
+}
+
+func TestScheduledWorkflowStarterPersistsThroughRealWorkflowHost(t *testing.T) {
+	f := newWorkflowTargetFixture(t)
+	ctx := context.Background()
+	wfHost, err := workflowhost.NewHost(workflowhost.Config{Store: f.db, Execution: f.catalog, Catalog: f.catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(wfHost.Close)
+
+	graph := `{"nodes":[{"id":"start","data":{"kind":"start"}},{"id":"out","data":{"kind":"output","outputs":[{"name":"summary","variableSelector":["start","input"]}]}}],"edges":[{"source":"start","target":"out"}]}`
+	wf, _, err := f.db.CreateWorkflow(ctx, f.scope.TenantID, "真实定时流程", graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := f.db.PublishWorkflow(ctx, f.scope.TenantID, wf.ID, "v1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, _ := json.Marshal(f.target(map[string]any{"workflowId": wf.ID, "snapshotId": snap.ID}))
+	saved, err := f.db.CreateScheduleConfig(ctx, f.scope.TenantID, f.scope.UserID, store.ScheduleInput{
+		Name:      "真实定时发起人",
+		ProjectID: f.project.ID,
+		Target:    input,
+		Rule:      json.RawMessage(`{"kind":"hours","hours":1,"timezone":"UTC"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := saved.CreatedAt.Add(time.Minute)
+	c, err := server.NewScheduleCoordinator(f.db, server.Options{
+		Execution:    f.catalog,
+		Catalog:      f.catalog,
+		WorkflowRuns: wfHost,
+	}, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Recover(ctx, f.scope); err != nil {
+		t.Fatal(err)
+	}
+	occ, err := c.Manual(ctx, f.scope, saved.ID, "real-host-starter")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var run store.WorkflowRun
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		run, err = f.db.ScheduledWorkflowRun(ctx, f.scope.TenantID, occ.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status == store.WorkflowStatusSucceeded {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("scheduled workflow run did not succeed: %+v", run)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if run.StartedBy != f.scope.UserID || run.StartedByName != "Owner" {
+		t.Fatalf("real scheduled run starter = (%q, %q), want (%q, %q)", run.StartedBy, run.StartedByName, f.scope.UserID, "Owner")
+	}
+	if err := c.Tick(ctx, f.scope); err != nil {
+		t.Fatal(err)
+	}
+	settled, err := f.db.GetOccurrence(ctx, f.scope.TenantID, f.scope.UserID, occ.ID)
+	if err != nil || settled.Status != "succeeded" || !settled.Released {
+		t.Fatalf("settled = %+v (err=%v), want succeeded & released", settled, err)
 	}
 }

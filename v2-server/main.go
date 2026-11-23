@@ -643,7 +643,30 @@ type workflowRunStarter struct{ host *workflowhost.Host }
 
 func (s workflowRunStarter) Start(ctx context.Context, tenant, user, runID string) error {
 	_, e := s.host.StartRun(ctx, server.WorkflowRunScope{TenantID: tenant, UserID: user}, runID)
+	var missingSkill *server.WorkflowSkillNotFound
+	var invalidInput *server.WorkflowRunInputInvalid
+	switch {
+	case errors.As(e, &missingSkill):
+		return errors.Join(&taskdecomp.WorkflowSkillNotFound{
+			NodeID:    missingSkill.NodeID,
+			NodeTitle: missingSkill.NodeTitle,
+			SkillID:   missingSkill.SkillID,
+		}, e)
+	case errors.Is(e, server.ErrWorkflowSkillNotFound):
+		return errors.Join(taskdecomp.ErrWorkflowSkillNotFound, e)
+	case errors.Is(e, server.ErrWorkflowRoleNotFound):
+		return errors.Join(taskdecomp.ErrWorkflowRoleNotFound, e)
+	case errors.Is(e, server.ErrWorkflowRunNotStartable), errors.As(e, &invalidInput):
+		return errors.Join(taskdecomp.ErrWorkflowRunNotStartable, e)
+	}
 	return e
+}
+
+// Cancel stops the workflow run through the host, withdrawing a refused start or halting an
+// already-dispatched Agent turn rather than only updating the database row.
+func (s workflowRunStarter) Cancel(ctx context.Context, tenant, user, id string) error {
+	_, err := s.host.CancelRun(ctx, server.WorkflowRunScope{TenantID: tenant, UserID: user}, id)
+	return err
 }
 
 func (s workflowRunStarter) Subscribe(runID string) (<-chan struct{}, func()) {
@@ -655,12 +678,5 @@ type taskWorkflowRunner struct{ workflowRunStarter }
 
 func (s taskWorkflowRunner) Prepare(ctx context.Context, tenant, user, id string, input *string, values map[string]json.RawMessage) error {
 	_, err := s.host.UpdateRunInput(ctx, server.WorkflowRunScope{TenantID: tenant, UserID: user}, id, input, values)
-	return err
-}
-
-// Cancel routes a failed start's cleanup through the workflow host, so an Agent turn the run
-// already dispatched is stopped rather than only the database row.
-func (s taskWorkflowRunner) Cancel(ctx context.Context, tenant, user, id string) error {
-	_, err := s.host.CancelRun(ctx, server.WorkflowRunScope{TenantID: tenant, UserID: user}, id)
 	return err
 }

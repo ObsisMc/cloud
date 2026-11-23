@@ -19,11 +19,12 @@ const startGraph = `{"nodes":[{"id":"start","type":"workflow","data":{"kind":"st
 // runs is a workflow host that starts runs in the store and lets the test end them; every change is
 // published like the host's hub does.
 type runs struct {
-	store   *store.Store
-	refuse  error
-	mu      sync.Mutex
-	started []string
-	subs    map[string][]chan struct{}
+	store     *store.Store
+	refuse    error
+	mu        sync.Mutex
+	started   []string
+	cancelled []string
+	subs      map[string][]chan struct{}
 }
 
 func (r *runs) Start(ctx context.Context, tenant, _, runID string) error {
@@ -35,6 +36,16 @@ func (r *runs) Start(ctx context.Context, tenant, _, runID string) error {
 	}
 	r.mu.Lock()
 	r.started = append(r.started, runID)
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *runs) Cancel(ctx context.Context, tenant, _, runID string) error {
+	if _, e := r.store.CancelWorkflowRun(ctx, tenant, runID); e != nil {
+		return e
+	}
+	r.mu.Lock()
+	r.cancelled = append(r.cancelled, runID)
 	r.mu.Unlock()
 	return nil
 }
@@ -319,11 +330,51 @@ func TestDecompositionStartRefusals(t *testing.T) {
 		t.Fatalf("incompatible start created a decomposition: %+v, %v", items, e)
 	}
 
-	// A run the workflow host refuses fails the decomposition at once, with the reason.
-	f.runs.refuse = errors.New("没有可用的 Agent")
-	d, e := f.host.Start(f.ctx, storetest.Access(t, f.store, f.tenant, f.owner), parent.ID, f.workflow, "refused")
-	if e != nil || d.Status != store.DecompositionFailed || !strings.Contains(d.Failure, "没有可用的 Agent") {
-		t.Fatalf("refused = %+v %v", d, e)
+	// Refused starts map known dependency errors to localized failures, never leak internal SQL
+	// text, and cancel the pending workflow run rather than leaving it queued.
+	refusalCases := []struct {
+		name        string
+		err         error
+		wantFailure string
+	}{
+		{
+			name:        "missing skill with node details",
+			err:         &taskdecomp.WorkflowSkillNotFound{NodeID: "planner", NodeTitle: "拆分规划", SkillID: "split-checklist"},
+			wantFailure: "节点「拆分规划」需要的技能 split-checklist 不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再重新拆分。",
+		},
+		{
+			name:        "missing skill generic",
+			err:         taskdecomp.ErrWorkflowSkillNotFound,
+			wantFailure: "工作流引用的技能不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再重新拆分。",
+		},
+		{
+			name:        "missing role",
+			err:         taskdecomp.ErrWorkflowRoleNotFound,
+			wantFailure: "工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色后再重新拆分。",
+		},
+		{
+			name:        "not startable",
+			err:         taskdecomp.ErrWorkflowRunNotStartable,
+			wantFailure: "工作流图定义不可执行，请检查工作流配置后再重新拆分。",
+		},
+		{
+			name:        "internal sql error hides raw message",
+			err:         errors.New(`ERROR: column "content" does not exist (SQLSTATE 42703)`),
+			wantFailure: "工作流没有启动，请稍后重试。",
+		},
+	}
+	for _, tc := range refusalCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f.runs.refuse = tc.err
+			d, e := f.host.Start(f.ctx, storetest.Access(t, f.store, f.tenant, f.owner), parent.ID, f.workflow, "refused-"+tc.name)
+			if e != nil || d.Status != store.DecompositionFailed || d.Failure != tc.wantFailure {
+				t.Fatalf("refused = %+v (err=%v), want failure %q", d, e, tc.wantFailure)
+			}
+			run, e := f.store.WorkflowRun(f.ctx, f.tenant, d.WorkflowRunID)
+			if e != nil || run.Status != store.WorkflowStatusCancelled {
+				t.Fatalf("refused decomposition run = %+v (err=%v), want cancelled", run, e)
+			}
+		})
 	}
 }
 

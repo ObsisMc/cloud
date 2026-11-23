@@ -125,6 +125,45 @@ func TestStartRefusesASkillMissingFromAnyNodeOfTheGraph(t *testing.T) {
 			t.Fatalf("missing = %+v, want worker/worker/official/mattpocock.skills", missing)
 		}
 	})
+
+	t.Run("iteration member personal skill", func(t *testing.T) {
+		f := newFixture(t)
+		ctx := context.Background()
+		graph := strings.Replace(
+			iterationGraph("fail", []string{"one"}, 10),
+			`"kind":"agent","agentConfig":{`,
+			`"kind":"agent","title":"批量处理","agentConfig":{"skills":[{"skillId":"iter-missing-skill","enabled":true}],`,
+			1,
+		)
+		runID := f.run(t, graph, str("检查迭代技能"))
+		_, err := f.host.StartRun(ctx, f.scope, runID)
+		var missing *server.WorkflowSkillNotFound
+		if !errors.Is(err, server.ErrWorkflowSkillNotFound) || !errors.As(err, &missing) {
+			t.Fatalf("start error = %v, want WorkflowSkillNotFound", err)
+		}
+		if missing.NodeID != "worker" || missing.NodeTitle != "批量处理" || missing.SkillID != "iter-missing-skill" {
+			t.Fatalf("missing = %+v, want worker/批量处理/iter-missing-skill", missing)
+		}
+		f.exec.mu.Lock()
+		started := len(f.exec.started)
+		f.exec.mu.Unlock()
+		if started != 0 {
+			t.Fatalf("started %d Agents despite missing iteration skill", started)
+		}
+		if _, err := f.s.CreateSkill(ctx, f.scope.TenantID, f.scope.UserID, store.SkillInput{
+			Name: "iter-missing-skill", Description: "迭代技能", Content: "# 迭代检查",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.host.StartRun(ctx, f.scope, runID); err != nil {
+			t.Fatalf("start after creating iteration skill = %v", err)
+		}
+		f.exec.finish(f.exec.awaitStart(t), completed("one-done"))
+		run, _ := f.await(t, runID, terminal)
+		if run.Status != store.WorkflowStatusSucceeded {
+			t.Fatalf("run = %+v, want succeeded", run)
+		}
+	})
 }
 
 func TestSkillDeletedAfterStartFailsTheNodeResumably(t *testing.T) {
@@ -201,6 +240,20 @@ func TestSkillLookupDatabaseErrorIsNotReportedAsMissingSkill(t *testing.T) {
 		}
 	})
 
+	t.Run("start preflight preserves plugin skill database error", func(t *testing.T) {
+		f, admin := newFixtureWithAdmin(t)
+		ctx := context.Background()
+		graph := strings.Replace(twoAgents, `"roleId":"reviewer"`, `"skills":[{"skillId":"official/review","enabled":true}]`, 1)
+		runID := f.run(t, graph, str("插件技能库故障"))
+		if _, err := admin.Exec(ctx, `ALTER TABLE v2_skill_results RENAME COLUMN installed_version TO broken_installed_version`); err != nil {
+			t.Fatal(err)
+		}
+		_, err := f.host.StartRun(ctx, f.scope, runID)
+		if err == nil || errors.Is(err, server.ErrWorkflowSkillNotFound) {
+			t.Fatalf("start error = %v, want database error rather than ErrWorkflowSkillNotFound", err)
+		}
+	})
+
 	t.Run("interactive node mid-run database error stays non-retryable and hides SQL", func(t *testing.T) {
 		f, admin := newFixtureWithAdmin(t)
 		ctx := context.Background()
@@ -245,11 +298,63 @@ func TestSkillLookupDatabaseErrorIsNotReportedAsMissingSkill(t *testing.T) {
 		if err := json.Unmarshal(node(nodes, "a").Payload, &detail); err != nil {
 			t.Fatal(err)
 		}
-		if detail.ErrorDetail.Kind != string(workflow.FailureMissingAgentConfig) || !detail.ErrorDetail.Resumable || detail.ErrorDetail.AutoRetryable {
-			t.Fatalf("error_detail = %+v, want missing_agent_config resumable=true auto_retryable=false", detail.ErrorDetail)
+		if detail.ErrorDetail.Kind != string(workflow.FailureInteractiveSession) || !detail.ErrorDetail.Resumable || detail.ErrorDetail.AutoRetryable {
+			t.Fatalf("error_detail = %+v, want interactive_session resumable=true auto_retryable=false", detail.ErrorDetail)
 		}
-		if strings.Contains(detail.ErrorDetail.Message, "broken_content") {
-			t.Fatalf("error_detail leaked SQL identifier: %q", detail.ErrorDetail.Message)
+		if detail.ErrorDetail.Message != "could not resolve selected Skills" {
+			t.Fatalf("error_detail.message = %q, want exact generic message %q", detail.ErrorDetail.Message, "could not resolve selected Skills")
+		}
+	})
+
+	t.Run("automatic node mid-run database error stays retryable session failure and hides SQL", func(t *testing.T) {
+		f, admin := newFixtureWithAdmin(t)
+		ctx := context.Background()
+		if _, err := f.s.CreateSkill(ctx, f.scope.TenantID, f.scope.UserID, store.SkillInput{
+			Name: "review-checklist", Description: "审查", Content: "# 审查",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		graph := strings.Replace(
+			twoAgents,
+			`"roleId":"reviewer"`,
+			`"skills":[{"skillId":"review-checklist","enabled":true}],"retry":{"enabled":false,"maxRetries":1,"initialDelaySeconds":0}`,
+			1,
+		)
+		runID := f.run(t, graph, str("自动技能库故障"))
+		entered, release := f.holdDispatchOf(t, "a")
+		if _, err := f.host.StartRun(ctx, f.scope, runID); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("automatic Agent dispatch never started")
+		}
+		if _, err := admin.Exec(ctx, `ALTER TABLE v2_skills RENAME COLUMN content TO broken_content`); err != nil {
+			t.Fatal(err)
+		}
+		release()
+
+		run, nodes := f.await(t, runID, terminal)
+		if run.Status != store.WorkflowStatusFailed {
+			t.Fatalf("run = %+v, want failed", run)
+		}
+		var detail struct {
+			ErrorDetail struct {
+				Kind          string `json:"kind"`
+				Message       string `json:"message"`
+				Resumable     bool   `json:"resumable"`
+				AutoRetryable bool   `json:"auto_retryable"`
+			} `json:"error_detail"`
+		}
+		if err := json.Unmarshal(node(nodes, "a").Payload, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if detail.ErrorDetail.Kind != string(workflow.FailureSession) || !detail.ErrorDetail.Resumable || !detail.ErrorDetail.AutoRetryable {
+			t.Fatalf("error_detail = %+v, want session resumable=true auto_retryable=true", detail.ErrorDetail)
+		}
+		if detail.ErrorDetail.Message != "could not resolve selected Skills" {
+			t.Fatalf("error_detail.message = %q, want exact generic message %q", detail.ErrorDetail.Message, "could not resolve selected Skills")
 		}
 	})
 }

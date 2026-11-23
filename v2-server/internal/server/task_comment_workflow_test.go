@@ -666,7 +666,9 @@ func TestTaskCommentWorkflowMissingSkillReturns400AndRecovers(t *testing.T) {
 	tid := f.tenant(t)
 	f.project(t)
 
-	graph := `{"nodes":[{"id":"start","data":{"kind":"start"}},{"id":"a","data":{"kind":"agent","title":"代码检查","agentConfig":{"prompt":"Review","skills":[{"skillId":"review-checklist","enabled":true}]}}},{"id":"out","data":{"kind":"output","outputs":[{"name":"comment","variableSelector":["start","input"]}]}}],"edges":[{"source":"start","target":"a"},{"source":"a","target":"out"}]}`
+	// Keep the Agent on a branch this input does not take so preflight catches the missing Skill
+	// before execution, and retrying the exact same workflow succeeds deterministically once created.
+	graph := `{"nodes":[{"id":"start","data":{"kind":"start"}},{"id":"cond","data":{"kind":"condition","cases":[{"id":"never","logic":"and","conditions":[{"variableSelector":["start","input"],"operator":"is","value":"__never__"}]}]}},{"id":"a","data":{"kind":"agent","title":"代码检查","agentConfig":{"prompt":"Review","skills":[{"skillId":"review-checklist","enabled":true}]}}},{"id":"out","data":{"kind":"output","outputs":[{"name":"comment","variableSelector":["start","input"]}]}}],"edges":[{"source":"start","target":"cond"},{"source":"cond","sourceHandle":"never","target":"a"},{"source":"cond","target":"out"}]}`
 	wf, _, err := f.store.CreateWorkflow(f.ctx, tid, "MissingSkillWF", graph)
 	if err != nil {
 		t.Fatal(err)
@@ -703,17 +705,6 @@ func TestTaskCommentWorkflowMissingSkillReturns400AndRecovers(t *testing.T) {
 	if _, err := f.store.CreateSkill(f.ctx, tid, task["createdBy"].(string), store.SkillInput{Name: "review-checklist", Description: "审查清单", Content: "# 清单"}); err != nil {
 		t.Fatal(err)
 	}
-	// Replace the graph with a no-agent output path while keeping an unreached Agent declaring the skill so preflight still runs.
-	readyGraph := `{"nodes":[{"id":"start","data":{"kind":"start"}},{"id":"cond","data":{"kind":"condition","cases":[{"id":"never","logic":"and","conditions":[{"variableSelector":["start","input"],"operator":"is","value":"__never__"}]}]}},{"id":"a","data":{"kind":"agent","title":"代码检查","agentConfig":{"prompt":"Review","skills":[{"skillId":"review-checklist","enabled":true}]}}},{"id":"out","data":{"kind":"output","outputs":[{"name":"comment","variableSelector":["start","input"]}]}}],"edges":[{"source":"start","target":"cond"},{"source":"cond","sourceHandle":"never","target":"a"},{"source":"cond","target":"out"}]}`
-	wfReady, _, err := f.store.CreateWorkflow(f.ctx, tid, "ReadySkillWF", readyGraph)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.store.PublishWorkflow(f.ctx, tid, wfReady.ID, "v1", nil); err != nil {
-		t.Fatal(err)
-	}
-	payload["mentions"] = []map[string]any{{"type": "workflow", "id": wfReady.ID}}
-	payload["workflow"] = map[string]any{"workflowId": wfReady.ID, "values": map[string]any{}}
 	status, created := c.doHeaders("POST", path, payload, key)
 	if status != 201 {
 		t.Fatalf("retry after skill creation = %d %v", status, created)

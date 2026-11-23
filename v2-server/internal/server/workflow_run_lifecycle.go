@@ -47,8 +47,9 @@ var (
 	ErrWorkflowRunStopUnconfirmed = errors.New("workflow run stop is unconfirmed")
 )
 
-// WorkflowSkillNotFound names the first enabled Skill binding a start preflight could not resolve,
-// mirroring desktop's WorkflowSkillNotFoundParams (nodeId, nodeTitle, skillId).
+// WorkflowSkillNotFound names the first enabled Skill binding a start preflight could not resolve.
+// Desktop emits `workflow_skill_not_found` with empty params; v2 extends it with `nodeId`,
+// `nodeTitle`, and `skillId` so the UI can pinpoint the blocked node and Skill.
 type WorkflowSkillNotFound struct {
 	NodeID    string
 	NodeTitle string
