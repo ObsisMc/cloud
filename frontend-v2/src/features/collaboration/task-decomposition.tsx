@@ -7,6 +7,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from '@/components/ui/native-select'
 import { listDecompositionWorkflows } from './decomposition-api/generated'
 import { PanelDialog } from '@/components/panel/panel-dialog'
+import { useWorkflowHasPersonalSkills, WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT } from '@/lib/workflows/personal-skills'
 import { decompositionMessageFor, DEMO_DECOMPOSITION_WORKFLOW, taskStatusLabel } from './task-model'
 import { startTaskDecomposition, type Task, type TaskDecomposition } from './tasks-api/generated'
 import { useTaskList } from './workspace'
@@ -38,6 +39,7 @@ export function DecomposeDialog({ tenantId, task, onClose, onStarted }: {
   for (const w of blocked) blockedByReason.set(w.decompositionBlockedReason, [...(blockedByReason.get(w.decompositionBlockedReason) ?? []), w.name])
   const [picked, setPicked] = useState('')
   const workflowId = picked || (eligible.find(w => w.name === DEMO_DECOMPOSITION_WORKFLOW) ?? eligible[0])?.id || ''
+  const hasPersonalSkills = useWorkflowHasPersonalSkills(tenantId, workflowId)
   const [key] = useState(() => crypto.randomUUID())
   const [error, setError] = useState('')
   const start = useMutation({
@@ -73,6 +75,7 @@ export function DecomposeDialog({ tenantId, task, onClose, onStarted }: {
             </NativeSelectOptGroup>}
           </NativeSelect>
           <FieldDescription>{hint}</FieldDescription>
+          {hasPersonalSkills && <FieldDescription>{WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT}</FieldDescription>}
           {blocked.length > 0 && <details className="text-sm">
             <summary className="cursor-pointer text-muted-foreground">有 {blocked.length} 个已发布工作流不能用于拆分</summary>
             <div className="mt-1 max-h-32 space-y-1 overflow-y-auto">

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { useWorkflowHasPersonalSkills, WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT } from '@/lib/workflows/personal-skills'
 import {
   extractWorkflowInputServerError,
   resolveFormDraftValues,
@@ -186,6 +187,7 @@ export function TaskComposer({ tenantId, task, me, inSquad, sending, error, subm
     undefined,
     { query: { enabled: !!tenantId && !!stagedWorkflow?.formRef, staleTime: 60_000 } },
   )
+  const stagedWorkflowHasPersonalSkills = useWorkflowHasPersonalSkills(tenantId, stagedWorkflow?.workflowId)
   const reach = agentReach(task, me, inSquad)
   const taskFinished = isTaskFinished(task.status)
   const sendToAgent = !stagedWorkflow && reach.ok && (toAgent ?? true)
@@ -346,6 +348,7 @@ export function TaskComposer({ tenantId, task, me, inSquad, sending, error, subm
       </div>}
       {formQuery.data && <>
         {formQuery.data.description && <p className="mc-muted text-xs">{formQuery.data.description}</p>}
+        {stagedWorkflowHasPersonalSkills && <p className="mc-muted text-xs">{WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT}</p>}
         {fields.length > 0
           ? <div className="mc-wf-fields">
             {fields.map(field => {

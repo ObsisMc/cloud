@@ -2,7 +2,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
+import * as workflowsApi from '@/lib/workflows/api/generated'
+import { reasonText } from './runtime'
 import { ScheduleForm } from './schedule-form'
+
+vi.mock('@/lib/workflows/api/generated', () => ({ getWorkflow: vi.fn().mockResolvedValue({ published: null }) }))
 
 it('validates weekly scheduling and accepts unscoped chat', async () => {
   const user = userEvent.setup()
@@ -83,7 +87,7 @@ it('lets a workflow explicitly follow the latest release while explaining frozen
  const user=userEvent.setup()
  const onSave=vi.fn()
  const data={projects:[{id:'p',name:'Demo',description:''}],workflows:[{id:'wf',name:'流程',version:'v1',snapshotId:'s1'}],available:{projects:true,models:true,agents:true,workflows:true}}
- render(<ScheduleForm onSave={onSave} onCancel={()=>{}} data={data}/>)
+ render(<QueryClientProvider client={new QueryClient()}><ScheduleForm onSave={onSave} onCancel={()=>{}} data={data}/></QueryClientProvider>)
  await user.type(screen.getByLabelText('任务名称'),'跟随计划')
  await user.click(screen.getByRole('button',{name:/运行工作流/}))
  await user.selectOptions(screen.getByLabelText('工作流'),'wf')
@@ -92,4 +96,21 @@ it('lets a workflow explicitly follow the latest release while explaining frozen
  expect(screen.getByText(/历史运行始终保留当次实际使用的快照/)).toBeInTheDocument()
  await user.click(screen.getByRole('button',{name:'创建并启用'}))
  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({versionPolicy:'latest',workflowId:'wf'}),data)
+})
+
+it('shows the personal Skill team visibility hint when a scheduled workflow references personal Skills', async () => {
+ const user=userEvent.setup()
+ vi.mocked(workflowsApi.getWorkflow).mockResolvedValueOnce({
+  published:{
+   id:'s-skill',workflowId:'wf-skill',version:'v1',createdAt:0,updatedAt:0,
+   graph:JSON.stringify({nodes:[{id:'a1',type:'workflow',position:{x:0,y:0},data:{kind:'agent',title:'审查',agentConfig:{skills:[{skillId:'my-personal-skill',enabled:true}]}}}],edges:[]}),
+  },
+ } as never)
+ const data={tenantId:'tenant',projects:[{id:'p',name:'Demo',description:''}],workflows:[{id:'wf-skill',name:'带技能流程',version:'v1',snapshotId:'s-skill'}],available:{projects:true,models:true,agents:true,workflows:true}}
+ render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ScheduleForm onSave={()=>{}} onCancel={()=>{}} data={data}/></QueryClientProvider>)
+ await user.click(screen.getByRole('button',{name:/运行工作流/}))
+ await user.selectOptions(screen.getByLabelText('工作流'),'wf-skill')
+ expect(await screen.findByText('运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见。')).toBeInTheDocument()
+ expect(reasonText('workflow_skill_not_found')).toBe('工作流需要的技能不可用，请确认发起人的个人技能已导入或市场技能已下发到项目')
+ expect(reasonText('workflow_role_not_found')).toBe('工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色')
 })

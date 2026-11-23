@@ -21,6 +21,7 @@ import { createHttpWorkflowContracts } from '@/lib/workflows/data/contracts-clie
 import { ContractError } from '@/lib/workflows/contracts'
 import { localizeContractError } from '@/lib/workflows/host/contract-error'
 import { workflowI18n } from '@/lib/workflows/host/i18n'
+import { WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT } from '@/lib/workflows/personal-skills'
 import { isTerminalRunStatus } from '@/lib/workflows/runtime'
 import { FadeText } from '../components/fade-text'
 import { useChatStore } from '../store'
@@ -210,6 +211,11 @@ function RunWorkflowForm({
           {workflowRunTranslations['zh-CN']['workflowRun.injectLastFailure']}
         </Label>
       </div>
+      {workflow.hasPersonalSkills && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT}
+        </p>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       <DialogFooter>
         <DialogClose render={<Button variant="outline" type="button" />}>取消</DialogClose>

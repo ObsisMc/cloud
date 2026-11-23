@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useWorkflowHasPersonalSkills, WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT } from '@/lib/workflows/personal-skills'
 import { agentChoice, agentModels, catalog, editableDraft, emptyDraft, formatTime, nextTimes, summary, taskDraft, validateDraft, weekdayNames, type Catalog, type Draft, type Task } from './schedule-model'
 
 export function ScheduleForm({task,onSave,onCancel,data=catalog,saving=false,blocked=false,saveError,onCloseReady,resourcesLoading=false,resourcesError,onRetryResources}:{task?:Task;onSave:(draft:Draft,data:Catalog)=>void;onCancel:()=>void;data?:Catalog;saving?:boolean;blocked?:boolean;saveError?:string;onCloseReady?:(close:()=>void)=>void;resourcesLoading?:boolean;resourcesError?:string;onRetryResources?:()=>void}) {
@@ -28,6 +29,7 @@ export function ScheduleForm({task,onSave,onCancel,data=catalog,saving=false,blo
  const editable=editableDraft(draft,task)
  const workflows=data.workflows??[]
  const chosen=workflows.find(w=>w.id===draft.workflowId)
+ const workflowHasPersonalSkills=useWorkflowHasPersonalSkills(draft.kind==='workflow'?data.tenantId:undefined,draft.kind==='workflow'?draft.workflowId:undefined)
  // The version a save freezes is the one published now, which may differ from the one frozen before.
  const workflowHint=draft.versionPolicy==='latest'?'每次触发时使用最新发布版本；历史运行始终保留当次实际使用的快照。':!chosen?'只列出已发布的工作流。':draft.snapshotId&&draft.snapshotId!==chosen.snapshotId?`当前固定的是旧版本，保存后改为生效版本 ${chosen.version}。`:`保存时固定生效版本 ${chosen.version}；之后发布的新版本要重新保存任务才会使用。`
  function submit(event:FormEvent<HTMLFormElement>){
@@ -77,6 +79,7 @@ export function ScheduleForm({task,onSave,onCancel,data=catalog,saving=false,blo
         {draft.workflowId&&!chosen&&<NativeSelectOption value={draft.workflowId} disabled>原工作流暂不可用</NativeSelectOption>}
         {workflows.map(w=><NativeSelectOption key={w.id} value={w.id}>{w.name}（{w.version}）</NativeSelectOption>)}
        </NativeSelect>
+       {workflowHasPersonalSkills&&<FieldDescription>{WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT}</FieldDescription>}
       </ScheduleField>
       <ScheduleField name="versionPolicy" label="版本策略" hint="发布新版本不会自动修改固定版本任务。">
        <ToggleGroup id="schedule-versionPolicy" aria-label="版本策略" value={[draft.versionPolicy??'fixed']} onValueChange={values=>{const value=values.at(-1);if(value==='fixed'||value==='latest')patch({versionPolicy:value})}} variant="outline" spacing={2}>

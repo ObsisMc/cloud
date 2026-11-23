@@ -12,6 +12,7 @@ import { parseWorkflowGraph } from '@/lib/workflows/runtime'
 import { createWorkflowI18n } from '@/lib/workflows/host/i18n'
 import { WorkflowStartVariableFields } from '@/lib/workflows/host/start-variable-fields'
 import { workflowStartDrafts, parseWorkflowStartDrafts } from '@/lib/workflows/host/start-variable-drafts'
+import { graphHasEnabledPersonalSkills, WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT } from '@/lib/workflows/personal-skills'
 import { workflowRunTranslations } from '@/features/chat/workflow-run/translations'
 import { codeOf } from '@/lib/api-client'
 import { taskRunMessageFor } from './task-model'
@@ -46,6 +47,7 @@ export function TaskWorkflowDialog({ tenantId, task, onClose, onStarted }: {
 function HandlingForm({tenantId,task,snapshot,onClose,onStarted}:{tenantId:string;task:Task;snapshot:WorkflowSnapshot;onClose:()=>void;onStarted:(id:string)=>void}){
   const client=useQueryClient()
   const [variables]=useState(()=>parseWorkflowGraph(snapshot.graph).nodes.find(n=>n.data.kind==='start' && !n.parentId)?.data.inputVariables ?? [])
+  const [hasPersonalSkills]=useState(()=>graphHasEnabledPersonalSkills(snapshot.graph))
   const [drafts,setDrafts]=useState(()=>workflowStartDrafts(variables))
   const [prompt,setPrompt]=useState(()=>[task.title,task.description].filter(Boolean).join('\n\n'))
   const [attempted,setAttempted]=useState(false)
@@ -67,6 +69,7 @@ function HandlingForm({tenantId,task,snapshot,onClose,onStarted}:{tenantId:strin
   const submit=(event:FormEvent)=>{event.preventDefault();setAttempted(true);if(!invalid)start.mutate()}
   return <form className="mc-form" onSubmit={submit} noValidate>
     <div className="mc-form-scroll"><FieldGroup>
+      {hasPersonalSkills && <p className="text-xs leading-relaxed text-muted-foreground">{WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT}</p>}
       <WorkflowStartVariableFields variables={variables} drafts={drafts} setDrafts={next=>{attempt.current=null;setDrafts(next)}} attemptedStart={attempted}/>
       <Field><FieldLabel htmlFor="mc-handle-prompt">需求</FieldLabel><Textarea id="mc-handle-prompt" rows={6} value={prompt} onChange={e=>{attempt.current=null;setPrompt(e.target.value)}}/></Field>
     </FieldGroup></div>

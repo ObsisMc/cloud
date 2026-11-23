@@ -40,7 +40,10 @@ export const workflowRunTranslations = {
     "errors.workflow_run_validation": "工作流运行校验失败。",
     "errors.workflow_run_input_invalid":
       "启动变量 {{variable}} 的输入无效：{{reason}}",
-    "errors.workflow_skill_not_found": "该工作流需要的技能不可用。",
+    "errors.workflow_skill_not_found":
+      "该工作流需要的技能不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后重试。",
+    "errors.workflow_skill_not_found_detail":
+      "节点「{{nodeTitle}}」需要的技能 {{skillId}} 不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后重试。",
     "errors.workflow_role_not_found":
       "工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色再启动。",
     "errors.workflow_run_start_failed": "启动工作流运行失败。",
@@ -639,7 +642,9 @@ export const workflowRunTranslations = {
     "errors.workflow_run_input_invalid":
       "Invalid input for start variable '{{variable}}': {{reason}}",
     "errors.workflow_skill_not_found":
-      "A skill required by this workflow is unavailable.",
+      "A skill required by this workflow is unavailable. Import the personal skill or verify the marketplace skill is deployed to the project, then retry.",
+    "errors.workflow_skill_not_found_detail":
+      "The skill {{skillId}} required by node '{{nodeTitle}}' is unavailable. Import the personal skill or verify the marketplace skill is deployed to the project, then retry.",
     "errors.workflow_role_not_found":
       "The role this workflow references is missing from the workspace's role catalog. Create it on the Roles settings page, then start the run again.",
     "errors.workflow_run_start_failed": "Failed to start the workflow run.",
