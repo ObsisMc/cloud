@@ -355,6 +355,57 @@ func TestAReportDoesNotCoverATurnThatDidNotEndNormally(t *testing.T) {
 	}
 }
 
+// A report made in a turn that was stopped, cut or lost is dropped with it (completion signal ADR
+// D2): the park carries none, and forcing the node is the starter's decision alone.
+func TestAReportOfACancelledOrLostTurnIsDropped(t *testing.T) {
+	for name, end := range map[string]func(f *fixture, runID, session string) error{
+		"stopped, session kept": func(f *fixture, runID, session string) error {
+			f.exec.finish(session, stopKept())
+			return nil
+		},
+		"stopped by the starter": func(f *fixture, runID, _ string) error {
+			_, err := f.host.StopNodeTurn(context.Background(), f.scope, runID, "a")
+			return err
+		},
+		"cut at a limit": func(f *fixture, _, session string) error {
+			f.exec.finish(session, agentEndedTurns["cut at a limit"])
+			return nil
+		},
+		"Agent lost": func(f *fixture, _, session string) error {
+			f.exec.finish(session, execution.Result{Status: execution.StatusFailed, FailureCode: "agent_failed", AgentLost: true})
+			return nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			ctx := context.Background()
+			runID, a, agent, _ := f.startAgentNode(t, agentChain)
+			f.exec.finish(a, completed("初稿"))
+			f.settledTurns(t, runID, 1)
+			if _, err := f.host.SendNodeTurn(ctx, f.scope, runID, "a", "继续"); err != nil {
+				t.Fatal(err)
+			}
+			f.exec.awaitAppend(t)
+			if text := agent.report(f.follow(t)); !strings.HasPrefix(text, "accepted:") {
+				t.Fatalf("report = %s", text)
+			}
+			if err := end(f, runID, a); err != nil {
+				t.Fatal(err)
+			}
+			if p := f.settledTurns(t, runID, 2); signalOf(p) != "" {
+				t.Fatalf("summary = %v, want no report", p)
+			}
+			if _, err := f.host.CompleteNode(ctx, f.scope, runID, "a", server.WorkflowNodeCompletion{Force: true}); err != nil {
+				t.Fatal(err)
+			}
+			_, payload := f.succeeded(t, runID)
+			if payload["requester"] != requesterHuman || payload["agentSignal"] != nil || payload["completion_forced"] == nil {
+				t.Fatalf("payload = %v", payload)
+			}
+		})
+	}
+}
+
 // Auto-accept completes the node on its own once a turn the starter opened ends with a report, and
 // only then: never the opening turn, never a turn without a report.
 func TestAutoAcceptTakesAReportedHumanTurn(t *testing.T) {

@@ -342,7 +342,10 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 		if endedNormally(result) {
 			n.accepted = &result
 		}
-		if reported != nil && n.policy == workflow.CompletionSignalAgent {
+		// The report of a turn that was stopped, cut or lost is dropped (completion signal ADR D2); a
+		// turn the Agent ended itself keeps it, whatever else blocks the node.
+		kind, _ := turnBlocker(result, n.lastStopCause == stopUserStopped)
+		if reported != nil && n.policy == workflow.CompletionSignalAgent && kind != blockerTurnStopped && kind != blockerTurnUnknown {
 			n.signal = &agentSignal{SignalID: reported.ID, RequestedAt: reported.At.UnixMilli(), TurnKey: turnKey{UserSeq: seq, EndedSeq: n.turns}}
 		}
 	} else if !n.stopping {
