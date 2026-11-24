@@ -100,8 +100,8 @@ describe("Agent prompt inactivity settings", () => {
         }),
       );
 
-      // Turning interactive mode on writes v2's end_turn policy and nothing about silence handling.
-      expect(savedConfig()).toEqual({ ...before, interactive: true, schemaVersion: 4, completionSignal: "end_turn" });
+      // Turning interactive mode on writes the agent policy and nothing about silence handling.
+      expect(savedConfig()).toEqual({ ...before, interactive: true, schemaVersion: 4, completionSignal: "agent" });
       if (promptInactivity === undefined) {
         expect(savedConfig()).not.toHaveProperty("promptInactivity");
       }

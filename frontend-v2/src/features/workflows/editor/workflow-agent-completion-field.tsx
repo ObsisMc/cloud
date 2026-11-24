@@ -12,8 +12,8 @@ import { InspectorField } from "./workflow-node-details";
 
 /**
  * Chooses how an interactive node decides its settled turn is complete (desktop
- * `workflow-agent-completion-field.tsx`). An absent policy reads as `end_turn`, the value new
- * interactive nodes are written with.
+ * `workflow-agent-completion-field.tsx`). An absent policy reads as `end_turn`: only nodes
+ * saved before the policy existed lack one, as new interactive nodes are written with `agent`.
  */
 export function WorkflowAgentCompletionField({
   config,
