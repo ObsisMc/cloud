@@ -3,6 +3,7 @@ package workflowhost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -245,5 +246,54 @@ func TestARestartSettlesTheExecutionOfAParkedNode(t *testing.T) {
 	f.succeeded(t, runID)
 	if x := executions(2); x[0].Reason != execution.FailureServerRestarted || x[1].Reason != execution.HostSessionEnded {
 		t.Fatalf("executions = %+v", x)
+	}
+}
+
+// failingNode is an Agent runtime whose Node could not be started.
+type failingNode struct{ reportingDriver }
+
+func (*failingNode) CheckHostTools(context.Context, execution.Scope, string) error {
+	return execution.ErrUnavailable
+}
+
+// A deployment without an Agent runtime can never give an Agent the tool, so its refusal does not ask
+// to try again; one whose Node could not be started may be able to later, and says so.
+func TestARunIsRefusedWithoutAnAgentRuntime(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		agent executionruntime.AgentDriver
+		want  error
+	}{
+		{"no Agent runtime", nil, server.ErrWorkflowCompletionToolUnavailable},
+		{"Node not started", &failingNode{}, execution.ErrUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.host.Close()
+			ctx := t.Context()
+			runtime, err := executionruntime.New(ctx, executionruntime.Config{Store: f.s, Agent: tc.agent})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.host, err = NewHost(Config{Store: f.s, Execution: runtime, Catalog: runtime, CompletionTool: f.tools, CheckHostTools: runtime.CheckHostTools})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				f.host.Close()
+				if err := runtime.Close(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
+			runID := f.run(t, agentChain, str("支付重构"))
+			if _, err := f.host.StartRun(ctx, f.scope, runID); !errors.Is(err, tc.want) {
+				t.Fatalf("start = %v, want %v", err, tc.want)
+			}
+			run, err := f.s.WorkflowRun(ctx, f.scope.TenantID, runID)
+			nodes, nodesErr := f.s.WorkflowEngineNodeRuns(ctx, runID)
+			if err != nil || nodesErr != nil || run.Status != store.WorkflowStatusPending || len(nodes) != 0 {
+				t.Fatalf("run = %+v %v, nodes = %+v %v", run, err, nodes, nodesErr)
+			}
+		})
 	}
 }
