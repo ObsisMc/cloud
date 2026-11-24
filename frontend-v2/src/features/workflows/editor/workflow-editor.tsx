@@ -373,6 +373,45 @@ export function WorkflowEditor(props: WorkflowEditorProps = {}) {
 
 /** Keeps the selected CLI stable and only substitutes a discovered model, or fills a blank pair with the first catalog entry. */
 type WorkflowNodeExecutor = { agentCli: string; modelId: string };
+type WorkflowNodeExecutorRepair = {
+  from: WorkflowNodeExecutor;
+  to: WorkflowNodeExecutor;
+};
+
+function applyWorkflowNodeExecutorRepairs(
+  nodes: Node<WorkflowNodeData, "workflow">[],
+  repairs: ReadonlyMap<string, WorkflowNodeExecutorRepair>,
+): { nodes: Node<WorkflowNodeData, "workflow">[]; changed: boolean } {
+  let changed = false;
+  const nextNodes = nodes.map((node) => {
+    if (node.data.kind !== "agent" || node.data.agentConfig === undefined) {
+      return node;
+    }
+    const repair = repairs.get(node.id);
+    if (repair === undefined) {
+      return node;
+    }
+    const exec = node.data.agentConfig.executor;
+    if (
+      exec.agentCli !== repair.from.agentCli ||
+      exec.modelId !== repair.from.modelId
+    ) {
+      return node;
+    }
+    changed = true;
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        agentConfig: {
+          ...node.data.agentConfig,
+          executor: repair.to,
+        },
+      },
+    };
+  });
+  return changed ? { nodes: nextNodes, changed: true } : { nodes, changed: false };
+}
 
 function repairWorkflowAgentExecutor(
   executor: WorkflowNodeExecutor,
@@ -543,7 +582,7 @@ function WorkflowEditorContent({
     useState<string | null>(null);
   /** Node executor pairs replaced during the latest late-catalog repair pass, to preserve across undo. */
   const lateModelRepairsRef = useRef<
-    Map<string, { from: WorkflowNodeExecutor; to: WorkflowNodeExecutor }> | null
+    Map<string, WorkflowNodeExecutorRepair> | null
   >(null);
   const clearHydratedWorkflow = useCallback(() => {
     setHydratedWorkflowId(null);
@@ -773,10 +812,23 @@ function WorkflowEditorContent({
     capabilitiesOverride === undefined &&
     availableAgentModels.length > 0
   ) {
-    const repairs = new Map<
-      string,
-      { from: WorkflowNodeExecutor; to: WorkflowNodeExecutor }
-    >();
+    // Derive repairs from all hydrated Agent nodes first so undoing deletions or
+    // user executor edits also restores the repaired model instead of the stale one.
+    const repairs = new Map<string, WorkflowNodeExecutorRepair>();
+    for (const [nodeId, hydratedExecutor] of Object.entries(
+      hydratedNodeExecutors,
+    )) {
+      const repairedExecutor = repairWorkflowAgentExecutor(
+        hydratedExecutor,
+        availableAgentModels,
+      );
+      if (
+        repairedExecutor.agentCli !== hydratedExecutor.agentCli ||
+        repairedExecutor.modelId !== hydratedExecutor.modelId
+      ) {
+        repairs.set(nodeId, { from: hydratedExecutor, to: repairedExecutor });
+      }
+    }
     const nextNodes = workflow.nodes.map((node) => {
       if (node.data.kind !== "agent" || node.data.agentConfig === undefined) {
         return node;
@@ -816,15 +868,16 @@ function WorkflowEditorContent({
     });
     const repairedAny = nextNodes.some((node, index) => node !== workflow.nodes[index]);
     if (repairedAny) {
+      setWorkflow({ ...workflow, nodes: nextNodes });
+    }
+    if (repairs.size > 0) {
       // eslint-disable-next-line react-hooks/refs -- render-phase reconcile pairs this with setState
       lateModelRepairsRef.current = repairs;
-      setWorkflow({ ...workflow, nodes: nextNodes });
       setLateModelRepairedWorkflowId(resolvedWorkflowId);
     }
     setModelHydratedWorkflowId(resolvedWorkflowId);
   }
 
-  const historyHydrateEditGenerationRef = useRef<number | null>(null);
   // History belongs to the mounted draft session, so a workflow switch or
   // activation starts at a clean baseline while ordinary edits keep the stack.
   useEffect(() => {
@@ -834,7 +887,6 @@ function WorkflowEditorContent({
       hydratedWorkflowId === resolvedWorkflowId &&
       workflowRef.current !== null
     ) {
-      historyHydrateEditGenerationRef.current = editGenerationRef.current;
       resetWorkflowHistory(workflowRef.current);
     }
   }, [hydratedWorkflowId, resetWorkflowHistory, resolvedWorkflowId]);
@@ -849,48 +901,35 @@ function WorkflowEditorContent({
     }
     const repairs = lateModelRepairsRef.current;
     lateModelRepairsRef.current = null;
-    if (historyHydrateEditGenerationRef.current === editGenerationRef.current) {
-      resetWorkflowHistory(workflowRef.current);
-      return;
-    }
     if (repairs === null || repairs.size === 0) {
       return;
     }
-    rewriteWorkflowHistorySnapshots((snapshot) => {
-      let changed = false;
-      const nodes = snapshot.nodes.map((node) => {
-        if (node.data.kind !== "agent" || node.data.agentConfig === undefined) {
-          return node;
-        }
-        const repair = repairs.get(node.id);
-        if (repair === undefined) {
-          return node;
-        }
-        const exec = node.data.agentConfig.executor;
-        if (
-          exec.agentCli !== repair.from.agentCli ||
-          exec.modelId !== repair.from.modelId
-        ) {
-          return node;
-        }
-        changed = true;
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            agentConfig: {
-              ...node.data.agentConfig,
-              executor: repair.to,
-            },
-          },
+    if (dragStartWorkflowRef.current !== null) {
+      const repairedLive = applyWorkflowNodeExecutorRepairs(
+        workflowRef.current.nodes,
+        repairs,
+      );
+      if (repairedLive.changed) {
+        workflowRef.current = { ...workflowRef.current, nodes: repairedLive.nodes };
+      }
+      const repairedDragStart = applyWorkflowNodeExecutorRepairs(
+        dragStartWorkflowRef.current.nodes,
+        repairs,
+      );
+      if (repairedDragStart.changed) {
+        dragStartWorkflowRef.current = {
+          ...dragStartWorkflowRef.current,
+          nodes: repairedDragStart.nodes,
         };
-      });
-      return changed ? { ...snapshot, nodes } : snapshot;
+      }
+    }
+    rewriteWorkflowHistorySnapshots((snapshot) => {
+      const repaired = applyWorkflowNodeExecutorRepairs(snapshot.nodes, repairs);
+      return repaired.changed ? { ...snapshot, nodes: repaired.nodes } : snapshot;
     });
   }, [
     hydratedWorkflowId,
     lateModelRepairedWorkflowId,
-    resetWorkflowHistory,
     resolvedWorkflowId,
     rewriteWorkflowHistorySnapshots,
   ]);
