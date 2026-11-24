@@ -54,7 +54,7 @@ func (f *fakeNodeIPC) Supports(capability string) bool {
 		return false
 	}
 	switch capability {
-	case "agent_session", "session_mcp", "session_mcp_lifecycle":
+	case "agent_session", "session_mcp", "session_mcp_lifecycle", "session_host_mcp_servers":
 		return true
 	case "turn_cancel":
 		return f.turnCancel.Load()
@@ -1333,7 +1333,7 @@ func TestDriverIPCEndOfANeverStartedSessionNeedsNoStopProofFromAMarkedNode(t *te
 	old := stuckEnd(t, h, ctx, "first")
 	// A turn cancelled during preparation leaves its session in this state.
 	idle := h.session("idle", "workspace-idle")
-	if _, err := h.driver.session(ctx, h.scope, idle, h.config, execution.CallerChat, newPreparation(execution.Ref{SessionID: idle.ID, TurnID: "turn"}, discardIPCEvent)); err != nil {
+	if _, err := h.driver.session(ctx, h.scope, idle, h.config, execution.Turn{Caller: execution.Caller{Kind: execution.CallerChat}}, newPreparation(execution.Ref{SessionID: idle.ID, TurnID: "turn"}, discardIPCEvent)); err != nil {
 		t.Fatal(err)
 	}
 	h.driver.Rebuild("first")
@@ -1368,7 +1368,7 @@ func TestDriverIPCFirstTurnRefusedBeforeNodeIsNotStarted(t *testing.T) {
 	h := newIPCHarness(t, nil)
 	ctx := ipcContext(t)
 	session := h.session("session", "workspace")
-	a, err := h.driver.session(ctx, h.scope, session, h.config, execution.CallerWorkflow, newPreparation(execution.Ref{SessionID: session.ID, TurnID: "first"}, discardIPCEvent))
+	a, err := h.driver.session(ctx, h.scope, session, h.config, execution.Turn{Caller: execution.Caller{Kind: execution.CallerWorkflow}}, newPreparation(execution.Ref{SessionID: session.ID, TurnID: "first"}, discardIPCEvent))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1407,7 +1407,7 @@ func TestDriverIPCFirstTurnLostBeforeItsStartIsNotStarted(t *testing.T) {
 	h := newIPCHarness(t, nil)
 	ctx := ipcContext(t)
 	session := h.session("session", "workspace")
-	a, err := h.driver.session(ctx, h.scope, session, h.config, execution.CallerWorkflow, newPreparation(execution.Ref{SessionID: session.ID, TurnID: "first"}, discardIPCEvent))
+	a, err := h.driver.session(ctx, h.scope, session, h.config, execution.Turn{Caller: execution.Caller{Kind: execution.CallerWorkflow}}, newPreparation(execution.Ref{SessionID: session.ID, TurnID: "first"}, discardIPCEvent))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1442,7 +1442,7 @@ func TestDriverIPCFirstTurnDoesNotStartAnAgentAfterEnd(t *testing.T) {
 	h := newIPCHarness(t, nil)
 	ctx := ipcContext(t)
 	session := h.session("session", "workspace")
-	a, err := h.driver.session(ctx, h.scope, session, h.config, execution.CallerWorkflow, newPreparation(execution.Ref{SessionID: session.ID, TurnID: "first"}, discardIPCEvent))
+	a, err := h.driver.session(ctx, h.scope, session, h.config, execution.Turn{Caller: execution.Caller{Kind: execution.CallerWorkflow}}, newPreparation(execution.Ref{SessionID: session.ID, TurnID: "first"}, discardIPCEvent))
 	if err != nil {
 		t.Fatal(err)
 	}

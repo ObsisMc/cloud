@@ -67,7 +67,11 @@ func (s *Service) recovery(ctx context.Context, session execution.Session, turn 
 	if err != nil {
 		return nil, false, execution.ErrInvalidRequest
 	}
-	handoff := renderHandoff(history, maxTurnText-len(prompt))
+	room := maxTurnText - len(prompt)
+	if turn.Host != nil {
+		room -= execution.MaxHostInstruction
+	}
+	handoff := renderHandoff(history, room)
 	if handoff == "" {
 		// The prompt leaves no room for the conversation; a new Agent without it would silently
 		// start over, so the turn is refused and a shorter one can try again.

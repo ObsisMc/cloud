@@ -608,7 +608,7 @@ func (p *projectRuntime) receive() {
 			continue
 		}
 		if message.Sequence != nil {
-			if err := json.NewEncoder(p.journal).Encode(message); err != nil || p.journal.Sync() != nil {
+			if err := json.NewEncoder(p.journal).Encode(p.journaled(message)); err != nil || p.journal.Sync() != nil {
 				return
 			}
 			if last, exists := p.acknowledged[message.ExecutionID]; exists && *message.Sequence <= last {
@@ -645,6 +645,18 @@ func (p *projectRuntime) receive() {
 			}
 		}
 	}
+}
+
+// journaled is message as the journal keeps it: without the credentials of its session's host
+// tools, which Node's history records carry.
+func (p *projectRuntime) journaled(message node.Message) node.Message {
+	p.mu.Lock()
+	agent := p.agents[message.ExecutionID]
+	p.mu.Unlock()
+	if agent != nil {
+		message.Payload = agent.censorRecord(message.Payload)
+	}
+	return message
 }
 
 func (p *projectRuntime) transportFailed() {
