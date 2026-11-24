@@ -91,7 +91,8 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
   // Deliverables are checked only when completing, so a refusal names them; it stays shown until
   // the node settles another turn.
   const [refused, setRefused] = useState<{ turns: number; blockers: WorkflowNodeInteractiveBlocker[] }>()
-  const [confirmingForce, setConfirmingForce] = useState(false)
+  // What the open force dialog is about (forceKey); it closes once the node is past that.
+  const [confirmingForce, setConfirmingForce] = useState<string>()
   const { runId, nodeId, status, session } = target
 
   if (!starter) {
@@ -165,6 +166,8 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
     ...(reported ? { confirmSignalId: session.signalId } : {}),
   }
   const overridden = [...shown, ...blockers.filter((b) => b.kind === 'agent_signal_pending' || (b.kind === 'agent_confirmation_pending' && shown.length > 0))]
+  const forceKey = forcible ? JSON.stringify([session?.turns ?? 0, session?.signalId, overridden.map((b) => [b.kind, b.path])]) : undefined
+  if (confirmingForce !== undefined && confirmingForce !== forceKey) setConfirmingForce(undefined)
   const ready = awaiting && blockers.length === 0 && session?.completable === true
   const filesOnly = shown.length > 0 && shown.every((b) => b.kind === 'file_missing' || b.kind === 'file_unchanged')
   const source = session?.answerSource ?? 'none'
@@ -229,7 +232,7 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
           </Button>
         )}
         {forcible && (
-          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setConfirmingForce(true)}>
+          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setConfirmingForce(forceKey)}>
             {t('workflowRun.v2.interactive.completeAnyway')}
           </Button>
         )}
@@ -244,7 +247,7 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
           </Button>
         )}
       </div>
-      <AlertDialog open={confirmingForce} onOpenChange={(open) => { if (!open) setConfirmingForce(false) }}>
+      <AlertDialog open={confirmingForce !== undefined} onOpenChange={(open) => { if (!open) setConfirmingForce(undefined) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('workflowRun.v2.interactive.forceTitle')}</AlertDialogTitle>
@@ -261,7 +264,9 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
               variant="destructive"
               disabled={busy}
               onClick={() => {
-                setConfirmingForce(false)
+                // The dialog may still be closing when its node moved on.
+                if (confirmingForce === undefined) return
+                setConfirmingForce(undefined)
                 void complete(forced)
               }}
             >

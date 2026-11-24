@@ -159,6 +159,20 @@ describe('RunNodeSessionActions', () => {
     await waitFor(() => expect(calls.completeNode).toHaveBeenLastCalledWith('tenant-1', 'run-1', 'a', { force: true }))
   })
 
+  it.each([
+    ['reported', reported],
+    ['ended unreported as well', { ...parked, turns: 2, completable: false, blockers: [{ kind: 'agent_signal_pending' }], parkKind: 'awaiting_user' }],
+  ])('drops the force confirmation once another turn %s', async (_, next) => {
+    const { show } = view({ session: { ...parked, turns: 1, completable: false, blockers: [{ kind: 'turn_unconfirmed' }, { kind: 'agent_signal_pending' }], parkKind: 'awaiting_user', turnOrigin: 'workflow' } })
+    fireEvent.click(button('completeAnyway')!)
+    const force = await screen.findByRole('button', { name: zh['workflowRun.v2.interactive.forceConfirm'] })
+    // Another tab of the starter's carried the conversation on: what they were about to force is gone.
+    show({ session: next })
+    fireEvent.click(force)
+    await waitFor(() => expect(screen.queryByText(zh['workflowRun.v2.interactive.forceTitle'])).toBeNull())
+    expect(calls.completeNode).not.toHaveBeenCalled()
+  })
+
   it('says a confirmed report changed', async () => {
     calls.completeNode.mockRejectedValueOnce(new ContractError('workflow_node_signal_changed', { nodeId: 'a', expected: 'signal-2', actual: 'signal-1' }))
     view({ session: reported })
