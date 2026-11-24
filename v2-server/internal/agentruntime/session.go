@@ -165,6 +165,11 @@ type agentSession struct {
 	// with its host tools (see host_tools.go). Protected by mu.
 	hostBlocks  map[string]bool
 	hostSecrets []string
+	// The record of this execution when it was given host tools (see host_execution.go): whether it
+	// may exist, why it ended, and whether that was written. Protected by mu.
+	hostRecorded bool
+	hostReason   string
+	hostSettled  bool
 }
 
 // recoveredHistory joins a recovered session's new Node history to the one the page showed
@@ -447,6 +452,11 @@ func (a *agentSession) submit(admitted execution.Turn, text string, fresh bool) 
 			}
 			a.conceal("", attached.Secrets...)
 			hostServers = attached.Servers
+			// Every execution that holds a credential is on record before Node can start it.
+			if a.recordHost() != nil {
+				a.settleHost("agent_dispatch_failed")
+				return execution.ErrUnavailable
+			}
 		}
 		// Nothing above reached Node, so a failure there leaves the session not started: its turn
 		// is reported NotStarted and End has no Agent to stop. From here on the write can be
@@ -460,11 +470,13 @@ func (a *agentSession) submit(admitted execution.Turn, text string, fresh bool) 
 		a.mu.Lock()
 		if a.ended || a.ending {
 			a.mu.Unlock()
+			a.settleHost(execution.HostSessionEnded)
 			return execution.ErrSessionEnded
 		}
 		select {
 		case <-a.project.dead:
 			a.mu.Unlock()
+			a.settleHost(execution.FailureNodeLost)
 			return execution.ErrUnavailable
 		default:
 		}
@@ -542,6 +554,7 @@ func (a *agentSession) requestEnd() {
 		return
 	}
 	a.ending = true
+	a.decideHostLocked(execution.HostSessionEnded)
 	a.mu.Unlock()
 	go func() {
 		a.commandMu.Lock()
@@ -597,6 +610,7 @@ func (a *agentSession) complete(outcome turnOutcome) {
 func (a *agentSession) fail(code string, err error) {
 	a.mu.Lock()
 	a.broken = true
+	a.decideHostLocked(code)
 	call := a.active
 	stoppedByCaller := call != nil && call.cancel != ""
 	a.mu.Unlock()
@@ -708,6 +722,8 @@ func (a *agentSession) observe(message node.Message) (*turnOutcome, bool) {
 			a.fail("agent_terminal_invalid", execution.ErrUnavailable)
 			return nil, false
 		}
+		// Before anyone learns of the end: what follows from it finds the execution settled.
+		a.settleHost(ended.Result.Reason)
 		var outcome *turnOutcome
 		if call != nil {
 			result := failed("agent_ended_before_turn")

@@ -249,7 +249,7 @@ func runWithListener(addr, dbURL string, cleanup, fixture, testFixtures bool, li
 			return skills, nil
 		}, RecordWorkspace: func(c context.Context, id string, at agentruntime.Checkout) error {
 			return db.RecordWorkspace(c, id, store.WorkspaceLocation{Path: at.Path, BaseCommit: at.BaseCommit, CloneExecution: at.CloneExecution})
-		}, ForgetCheckout: db.ForgetCloneExecution})
+		}, ForgetCheckout: db.ForgetCloneExecution, RecordHostExecution: db.RecordHostExecution, EndHostExecution: db.EndHostExecution})
 		if e != nil {
 			return e
 		}
