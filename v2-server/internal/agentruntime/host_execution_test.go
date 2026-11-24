@@ -343,6 +343,8 @@ func TestASettlingExecutionIsListedWithItsReason(t *testing.T) {
 	a := h.driver.sessions["hosted"]
 	h.driver.mu.Unlock()
 	entered, release := make(chan struct{}), make(chan struct{})
+	releaseWrite := sync.OnceFunc(func() { close(release) })
+	defer releaseWrite()
 	settle := h.driver.opts.EndHostExecution
 	h.driver.opts.EndHostExecution = func(ctx context.Context, id, reason string) error {
 		close(entered)
@@ -368,11 +370,13 @@ func TestASettlingExecutionIsListedWithItsReason(t *testing.T) {
 	h.driver.mu.Unlock()
 	receiveIPC(t, entered)
 	// The other caller decides nothing and does not wait for the write.
-	a.settleHost("user_ended")
+	second := make(chan struct{})
+	go func() { a.settleHost("user_ended"); close(second) }()
+	receiveIPC(t, second)
 	if ends := h.driver.HostExecutionEnds("hosted"); len(ends) != 1 || ends[start.ExecutionID] != execution.FailureNodeLost {
 		t.Fatalf("ends = %v", ends)
 	}
-	close(release)
+	releaseWrite()
 	receiveIPC(t, first)
 	if end := receiveIPC(t, records.ended); end != [2]string{start.ExecutionID, execution.FailureNodeLost} {
 		t.Fatalf("settled %v", end)
