@@ -99,6 +99,9 @@ func (h *Host) ResumeRun(ctx context.Context, scope server.WorkflowRunScope, run
 	if !available {
 		return store.WorkflowRun{}, &server.WorkflowRunNotResumable{Reason: workflow.ResumeRefusedStarterUnavailable, RunningNodeIDs: []string{}}
 	}
+	if err := h.checkCompletionTool(ctx, execution.Scope{TenantID: scope.TenantID, UserID: owner}, run); err != nil {
+		return store.WorkflowRun{}, err
+	}
 	// A run that a sibling failed may still have interactive nodes parked in this process, their
 	// rows pending and their sessions open. Close them before planning, so the resume restarts
 	// them like any other cancelled node instead of racing the sweep that would end the session

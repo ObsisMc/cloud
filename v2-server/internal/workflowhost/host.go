@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wanglongan587/cloud/v2-server/internal/completiontool"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/executionwait"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
@@ -31,6 +32,12 @@ type Config struct {
 	// BusyRetry bounds how long an interactive node's follow-up turn waits for its session's
 	// previous turn to finish cleaning up; zero means 10s.
 	BusyRetry time.Duration
+	// CompletionTool is the Agent completion tool; nil leaves the agent completion policy
+	// unavailable, and a run whose graph uses it is refused at its start.
+	CompletionTool *completiontool.Registry
+	// CheckHostTools reports whether a project's sessions can be given host tools. Required with
+	// CompletionTool.
+	CheckHostTools func(context.Context, execution.Scope, string) error
 }
 
 // Host executes workflow runs in this process and implements server.WorkflowRunHost. Every run
@@ -55,6 +62,10 @@ type Host struct {
 	// sessionLimit caps a run's unfinished sessions (see sessionsInUse); tests lower it.
 	sessionLimit int
 	engine       *workflow.Engine
+	// tools is the Agent completion tool, nil without one; checkTools says whether a project's
+	// Node can give it to an Agent.
+	tools      *completiontool.Registry
+	checkTools func(context.Context, execution.Scope, string) error
 
 	ctx     context.Context
 	stop    context.CancelFunc
@@ -139,8 +150,12 @@ func NewHost(c Config) (*Host, error) {
 	if c.Store == nil || c.Execution == nil || c.Catalog == nil {
 		return nil, errors.New("workflow host requires a store, execution and catalog")
 	}
+	if c.CompletionTool != nil && c.CheckHostTools == nil {
+		return nil, errors.New("the completion tool requires a host tool check")
+	}
 	h := &Host{
 		store: c.Store, exec: c.Execution, catalog: c.Catalog, hub: c.Hub, log: c.Logger, now: c.Now,
+		tools: c.CompletionTool, checkTools: c.CheckHostTools,
 		stopTimeout: c.StopTimeout, busyRetry: c.BusyRetry, runs: map[string]*runState{}, lifecycles: map[string]*lifecycleLock{},
 	}
 	if h.hub == nil {
@@ -460,6 +475,9 @@ func (h *Host) StartRun(ctx context.Context, scope server.WorkflowRunScope, runI
 	if err := h.checkDependencies(ctx, execScope, run.ProjectID, runID); err != nil {
 		return store.WorkflowRun{}, err
 	}
+	if err := h.checkCompletionTool(ctx, execScope, run); err != nil {
+		return store.WorkflowRun{}, err
+	}
 	st := h.register(runID, execScope)
 	// The run outlives the request once it starts; a disconnecting client must not abandon the
 	// first scheduling pass halfway.
@@ -519,6 +537,28 @@ func (h *Host) checkDependencies(ctx context.Context, scope execution.Scope, pro
 	return nil
 }
 
+// checkCompletionTool refuses a run whose frozen graph asks for the agent completion policy when
+// its project's sessions cannot be given the completion tool (host MCP ADR D6): before anything
+// runs, and never by completing the node under another policy. A graph that does not parse is left
+// to the engine.
+func (h *Host) checkCompletionTool(ctx context.Context, scope execution.Scope, run store.WorkflowRun) error {
+	frozen, err := h.store.WorkflowEngineContext(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	graph, err := workflow.ParseGraph(frozen.Graph)
+	if err != nil || !graph.UsesAgentCompletion() {
+		return nil
+	}
+	if h.tools == nil {
+		return server.ErrWorkflowCompletionToolUnavailable
+	}
+	if err := h.checkTools(ctx, scope, run.ProjectID); err != nil {
+		return fmt.Errorf("%w: %s", server.ErrWorkflowCompletionToolUnavailable, publicReason(err))
+	}
+	return nil
+}
+
 // roleCheckError names the missing role while keeping the server sentinel the route maps.
 func roleCheckError(reference string, err error) error {
 	if errors.Is(err, store.ErrRoleNotFound) {
@@ -571,6 +611,9 @@ func (h *Host) CancelRun(ctx context.Context, scope server.WorkflowRunScope, run
 		st.mu.Lock()
 		st.cancelling = true // no further turn starts
 		st.slotsMayHaveChanged()
+		for _, n := range st.interactive {
+			h.tools.Revoke(n.d.NodeRunID)
+		}
 		st.mu.Unlock()
 		if _, err := h.stopTurns(stopCtx, st, func(*attemptState) bool { return true }); err != nil {
 			return store.WorkflowRun{}, fmt.Errorf("%w: %w", server.ErrWorkflowRunStopUnconfirmed, err)

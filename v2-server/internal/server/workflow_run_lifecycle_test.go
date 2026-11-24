@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -116,6 +117,14 @@ func TestWorkflowRunLifecycleRoutesDelegateToBridge(t *testing.T) {
 		t.Fatalf("confirm = %d %v, bridge %+v", status, completed, host.lastCompletion)
 	}
 
+	status, completed = call("POST", base+"/nodes/agent-1/complete", map[string]any{"force": false, "confirmInitialTurn": true, "confirmAgentCompletion": map[string]any{"signalId": "signal-1"}})
+	if status != 200 || completed["run"] == nil || host.lastCompletion != (server.WorkflowNodeCompletion{ConfirmInitialTurn: true, ConfirmSignalID: "signal-1"}) {
+		t.Fatalf("confirm a report = %d %v, bridge %+v", status, completed, host.lastCompletion)
+	}
+	if status, failure := call("POST", base+"/nodes/agent-1/complete", map[string]any{"force": false, "confirmAgentCompletion": map[string]any{"signalId": ""}}); status != 400 || failure["code"] != "invalid_json" {
+		t.Fatalf("a confirmation naming no report = %d %v", status, failure)
+	}
+
 	// A malformed id never reaches the bridge.
 	if status, _ := call("POST", "/api/v2/tenants/"+tid+"/workflow-runs/not-a-uuid/start", nil); status != 404 {
 		t.Fatalf("malformed id = %d", status)
@@ -140,6 +149,7 @@ func TestWorkflowRunLifecycleRefusals(t *testing.T) {
 		suffix string
 		body   any
 	}{
+		{"no completion tool", fmt.Errorf("%w: gone", server.ErrWorkflowCompletionToolUnavailable), "workflow_completion_tool_unavailable", 400, "POST", "/start", nil},
 		{"not startable", server.ErrWorkflowRunNotStartable, "workflow_run_start_failed", 400, "POST", "/start", nil},
 		{"not editable", server.ErrWorkflowRunNotEditable, "workflow_run_not_editable", 409, "PATCH", "/input", map[string]any{"input": "x"}},
 		{"node not parked", server.ErrWorkflowNodeNotAwaitingInput, "workflow_node_not_awaiting_input", 400, "POST", "/nodes/agent-1/complete", map[string]any{"force": false}},
@@ -262,6 +272,7 @@ func TestWorkflowNodeTurnRefusals(t *testing.T) {
 		{"stop unconfirmed", server.ErrWorkflowRunStopUnconfirmed, "workflow_run_stop_unconfirmed", 503, "/stop", nil},
 		{"incomplete", &server.WorkflowNodeIncomplete{Blockers: []server.WorkflowNodeBlocker{{Kind: "turn_unconfirmed"}, {Kind: "file_missing", Path: "plan.md"}}}, "workflow_node_incomplete", 409, "/complete", map[string]any{"force": false}},
 		{"turn changed", &server.WorkflowNodeTurnChanged{NodeID: "agent-1", Expected: &server.WorkflowNodeTurnKey{UserSeq: 0, EndedSeq: 1}, Actual: &server.WorkflowNodeTurnKey{UserSeq: 1, EndedSeq: 2}}, "workflow_node_turn_changed", 409, "/complete", map[string]any{"force": true}},
+		{"signal changed", &server.WorkflowNodeSignalChanged{NodeID: "agent-1", Expected: "a", Actual: "b"}, "workflow_node_signal_changed", 409, "/complete", map[string]any{"force": true}},
 		{"output changed", &server.WorkflowNodeOutputChanged{NodeID: "agent-1", Expected: "sha256:a", Actual: "sha256:b"}, "workflow_node_output_changed", 409, "/complete", map[string]any{"force": true}},
 		{"confirm with force", server.ErrWorkflowNodeCompletionInvalid, "invalid_request", 400, "/complete", map[string]any{"force": true, "confirmInitialTurn": true}},
 	} {

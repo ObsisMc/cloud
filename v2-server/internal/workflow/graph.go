@@ -160,6 +160,21 @@ func (g *Graph) TopologicalOrder() []Node {
 	return result
 }
 
+// UsesAgentCompletion reports whether a node of the root graph waits for its Agent's completion
+// report: an interactive Agent outside every container whose policy is agent. Whether this run's
+// branches reach it does not matter, as for roles.
+func (g *Graph) UsesAgentCompletion() bool {
+	for _, n := range g.root.order {
+		if n.kind != "agent" || placementOf(n) != (placement{}) {
+			continue
+		}
+		if c := g.view(n).Agent(); c.Interactive && c.CompletionSignal == CompletionSignalAgent {
+			return true
+		}
+	}
+	return false
+}
+
 // RoleReferences lists the distinct role references every executable Agent node declares, in a
 // stable order: the root graph, then each Loop body by id. A role is a start hard-dependency on
 // desktop (collect_roles), so a role a graph node references is checked even when this run's
@@ -336,10 +351,9 @@ type AgentConfig struct {
 	// Structured is the output schema when the node requires a JSON object answer.
 	Structured object
 	// CompletionSignal is the configured completion policy, CompletionSignalEndTurn when absent.
-	// v2 runs CompletionSignalAgent as end_turn (it is listed in Unapplied) until it can hand the
-	// Agent its completion tool.
+	// Like Interactive it counts only where v2 parks the node.
 	CompletionSignal string
-	// AutoAcceptAgentCompletion is saved with the agent policy; v2 never applies it yet.
+	// AutoAcceptAgentCompletion lets the agent policy accept a report without the starter.
 	AutoAcceptAgentCompletion bool
 	// CompletionFiles are the deliverables a completion checks in the run's checkout.
 	CompletionFiles []CompletionFile

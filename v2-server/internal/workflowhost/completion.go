@@ -4,21 +4,24 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
+	"time"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/workflow"
 )
 
-// The completion gate of an interactive node, after desktop's default mode minus the Agent's
-// completion signal (desktop 0fcc3b30 crates/backend/src/workflow/run/completion_snapshot.rs and
-// interactive/completion.rs; specs decisions/desktop/core/workflow/20261021-interactive-node-
-// completion.md, 20261102-first-turn-confirmation.md, 20261023-interactive-deliverable-
-// contract.md). Every park records a snapshot of the settled turn: its identity, the digest of its
+// The completion gate of an interactive node (desktop 22c5b83f
+// crates/backend/src/workflow/run/completion_snapshot.rs and interactive/completion.rs; specs
+// decisions/desktop/core/workflow/20261021-interactive-node-completion.md,
+// 20261102-first-turn-confirmation.md, 20261023-interactive-deliverable-contract.md and
+// 20261110-agent-completion-signal.md). Every park records a snapshot of the settled turn: its identity, the digest of its
 // answer, who opened it, why it stopped, and the blockers that keep it from completing. A
 // completion re-derives the snapshot, refuses one that changed, adds the live deliverable checks,
 // and lets only an explicit confirmation lift the workflow's own opening turn and only force cover
-// the other blockers, recording what force covered.
+// the other blockers, recording what force covered. Under the agent policy a turn that ended
+// normally also waits for its Agent's report and then for a confirmation naming that very report.
 
 // Blocker kinds, desktop's CompletionBlockerKind.
 const (
@@ -27,6 +30,10 @@ const (
 	blockerTurnRefused     = "turn_refused"
 	blockerTurnUnknown     = "turn_unknown"
 	blockerTurnUnconfirmed = "turn_unconfirmed"
+	// blockerSignalPending: the Agent has not reported the step done in this turn.
+	// blockerConfirmationPending: it has, and nobody confirmed the report.
+	blockerSignalPending       = "agent_signal_pending"
+	blockerConfirmationPending = "agent_confirmation_pending"
 	// blockerStructuredInvalid: the answer does not satisfy the node's output schema.
 	blockerStructuredInvalid = "structured_invalid"
 	blockerFileMissing       = "file_missing"
@@ -49,6 +56,9 @@ const (
 	parkAbnormal      = "abnormal"
 	warningFileCheck  = "file_check_unavailable"
 	requesterHuman    = "human"
+	requesterAgent    = "agent"
+	confirmedByHuman  = "human"
+	confirmedByAuto   = "auto"
 	outputLastNormal  = "last_completed_turn"
 	outputTurnWindow  = "turn_window"
 	outputWithoutTurn = "none"
@@ -67,6 +77,13 @@ type turnKey struct {
 	EndedSeq int `json:"endedSeq"`
 }
 
+// agentSignal is the completion an Agent reported in the turn TurnKey names.
+type agentSignal struct {
+	SignalID    string  `json:"signalId"`
+	RequestedAt int64   `json:"requestedAt"`
+	TurnKey     turnKey `json:"turnKey"`
+}
+
 // completionSnapshot is payload.interactive.completion, desktop's CompletionSnapshot.
 type completionSnapshot struct {
 	TurnKey      *turnKey            `json:"turnKey"`
@@ -77,13 +94,59 @@ type completionSnapshot struct {
 	Blockers     []completionBlocker `json:"blockers"`
 	Warnings     []string            `json:"warnings"`
 	OutputDigest string              `json:"outputDigest,omitempty"`
-	// Policy is the policy v2 applies, end_turn until it can hand the Agent its completion tool.
+	// Policy is the policy the node's session runs under. Snapshots written before v2 applied the
+	// agent policy all say end_turn.
 	Policy string `json:"completionPolicy"`
+	// AgentSignal is the Agent's report for TurnKey, absent without one.
+	AgentSignal *agentSignal `json:"agentSignal,omitempty"`
+	// AutoAccept says the node accepts a report on its own where it may (see Host.autoAccept).
+	AutoAccept bool `json:"autoAcceptAgentCompletion,omitempty"`
 }
 
-// approval is what the starter explicitly decided on one completion request.
+// approval is what one completion request explicitly decided. confirmSignal is the ID of the report
+// it confirms, and auto says the node's auto-accept, not the starter, confirms it.
 type approval struct {
 	confirmInitialTurn, force bool
+	confirmSignal             string
+	auto                      bool
+}
+
+// coherent refuses the one combination that means nothing (completion signal ADR D3): confirming
+// the opening turn and forcing at once is only for an agent policy turn that ended normally without
+// a report, where the confirmation lifts turn_unconfirmed and force covers the missing report.
+func (a approval) coherent(s completionSnapshot) bool {
+	if !a.force || !a.confirmInitialTurn {
+		return true
+	}
+	return s.Policy == workflow.CompletionSignalAgent && s.AgentSignal == nil && s.blockedBy(blockerTurnUnconfirmed)
+}
+
+// signalStands refuses a confirmation of a report other than the one of the settled turn; force
+// never covers it. Under end_turn there is no report, so a confirmation of one is ignored.
+func (a approval) signalStands(nodeID string, s completionSnapshot) error {
+	if a.confirmSignal == "" || s.Policy != workflow.CompletionSignalAgent {
+		return nil
+	}
+	if s.AgentSignal == nil || s.AgentSignal.SignalID != a.confirmSignal {
+		return &server.WorkflowNodeSignalChanged{NodeID: nodeID, Expected: s.signalID(), Actual: a.confirmSignal}
+	}
+	return nil
+}
+
+func (s completionSnapshot) blockedBy(kind string) bool {
+	for _, b := range s.Blockers {
+		if b.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func (s completionSnapshot) signalID() string {
+	if s.AgentSignal == nil {
+		return ""
+	}
+	return s.AgentSignal.SignalID
 }
 
 // precise reports the blockers that describe how the turn itself ended.
@@ -127,6 +190,9 @@ func answerDigest(answer string) string {
 // snapshot derives the completion snapshot of n's settled turn. Callers hold st.mu.
 func (n *interactiveNode) snapshot() completionSnapshot {
 	s := completionSnapshot{TurnOrigin: n.lastOrigin, Policy: workflow.CompletionSignalEndTurn, Blockers: []completionBlocker{}, Warnings: []string{}}
+	if n.policy == workflow.CompletionSignalAgent {
+		s.Policy, s.AutoAccept = n.policy, n.cfg.AutoAcceptAgentCompletion
+	}
 	if n.baseline != nil && n.baseline.unavailable() {
 		s.Warnings = append(s.Warnings, warningFileCheck)
 	}
@@ -157,23 +223,42 @@ func (n *interactiveNode) snapshot() completionSnapshot {
 			s.Blockers = append(s.Blockers, completionBlocker{Kind: blockerStructuredInvalid, Params: map[string]any{"message": err.Error()}})
 		}
 	}
+	exact := len(s.Blockers) != 0
 	// The workflow's own opening turn never completes the step by itself: its end_turn says the
 	// reply finished, which may have been a question. A more precise blocker names the reason
 	// instead (first-turn ADR D1).
-	if n.lastOrigin == originWorkflow && len(s.Blockers) == 0 {
+	if n.lastOrigin == originWorkflow && !exact {
 		s.Blockers = append(s.Blockers, completionBlocker{Kind: blockerTurnUnconfirmed})
+	}
+	if n.signal != nil && n.signal.TurnKey == *s.TurnKey {
+		signal := *n.signal
+		s.AgentSignal = &signal
+	}
+	// A turn that did not end normally already says why it blocks; the report changes nothing.
+	if s.Policy == workflow.CompletionSignalAgent && !exact {
+		kind := blockerSignalPending
+		if s.AgentSignal != nil {
+			kind = blockerConfirmationPending
+		}
+		s.Blockers = append(s.Blockers, completionBlocker{Kind: kind})
 	}
 	s.ParkKind = parkKind(s.Blockers, s.StopCause)
 	return s
 }
 
+// participation reports the blockers that only wait for the Agent's report or the starter's word on
+// a turn that ended normally.
+func participation(kind string) bool {
+	return kind == blockerTurnUnconfirmed || kind == blockerSignalPending || kind == blockerConfirmationPending
+}
+
 // parkKind is desktop's park_kind: awaiting_user for the starter's participation (an unconfirmed
-// opening turn, their own stop), abnormal for everything else that blocks, absent when ready.
+// opening turn, a report the Agent owes or they have to confirm, their own stop), abnormal for everything else that blocks, absent when ready.
 func parkKind(blockers []completionBlocker, cause string) string {
 	switch {
 	case len(blockers) == 0:
 		return ""
-	case len(blockers) == 1 && blockers[0].Kind == blockerTurnUnconfirmed:
+	case !slices.ContainsFunc(blockers, func(b completionBlocker) bool { return !participation(b.Kind) }):
 		return parkAwaitingUser
 	case len(blockers) == 1 && blockers[0].Kind == blockerTurnStopped && cause == stopUserStopped:
 		return parkAwaitingUser
@@ -189,18 +274,44 @@ type gated struct {
 	forced map[string]any
 }
 
+// record writes who completed the node beside the output (completion signal ADR D6): the Agent
+// when the settled turn carries its report, whoever pressed the button otherwise, and the
+// confirmation of the report, null when force replaced it. The end_turn policy records only the
+// requester, as before.
+func (g gated) record(keys map[string]any, s completionSnapshot, a approval, now time.Time) {
+	keys["requester"] = requesterHuman
+	if s.Policy != workflow.CompletionSignalAgent {
+		return
+	}
+	keys["completionPolicy"], keys["agentSignal"], keys["confirmation"] = s.Policy, nil, nil
+	if s.AgentSignal == nil {
+		return
+	}
+	keys["requester"], keys["agentSignal"] = requesterAgent, s.AgentSignal
+	if a.confirmSignal != "" {
+		by := confirmedByHuman
+		if a.auto {
+			by = confirmedByAuto
+		}
+		keys["confirmation"] = map[string]any{"by": by, "at": now.UnixMilli()}
+	}
+}
+
 // gate decides a completion of snapshot s plus the live deliverable blockers. Callers hold st.mu.
-// Only confirmInitialTurn lifts turn_unconfirmed and force covers every other blocker but never
-// that one (first-turn ADR D2); both at once only make sense for the agent policy, which v2 does
-// not apply yet, so they are refused as desktop refuses them without a signal gate.
+// Only confirmInitialTurn lifts turn_unconfirmed, only a confirmation of the report (already
+// checked by signalStands) agent_confirmation_pending, and force covers every other blocker but
+// never turn_unconfirmed (first-turn ADR D2).
 func (n *interactiveNode) gate(s completionSnapshot, files []completionBlocker, a approval) (gated, error) {
-	if a.force && a.confirmInitialTurn {
+	if !a.coherent(s) {
 		return gated{}, server.ErrWorkflowNodeCompletionInvalid
 	}
 	effective := append(append([]completionBlocker{}, s.Blockers...), files...)
 	var unfulfilled []completionBlocker
 	for _, b := range effective {
 		if a.confirmInitialTurn && b.Kind == blockerTurnUnconfirmed {
+			continue
+		}
+		if a.confirmSignal != "" && b.Kind == blockerConfirmationPending {
 			continue
 		}
 		unfulfilled = append(unfulfilled, b)
@@ -278,7 +389,7 @@ func storedSnapshot(payload []byte) *completionSnapshot {
 	return p.Interactive.Completion
 }
 
-// stale refuses a completion whose settled turn or answer is no longer the one the last park
+// stale refuses a completion whose settled turn, answer or Agent's report is no longer the one the last park
 // recorded (completion ADR D5): force never covers it.
 func stale(nodeID string, stored *completionSnapshot, live completionSnapshot) error {
 	if stored == nil || stored.TurnKey == nil {
@@ -294,6 +405,9 @@ func stale(nodeID string, stored *completionSnapshot, live completionSnapshot) e
 	}
 	if stored.OutputDigest != "" && stored.OutputDigest != live.OutputDigest {
 		return &server.WorkflowNodeOutputChanged{NodeID: nodeID, Expected: stored.OutputDigest, Actual: live.OutputDigest}
+	}
+	if stored.signalID() != live.signalID() {
+		return &server.WorkflowNodeSignalChanged{NodeID: nodeID, Expected: stored.signalID(), Actual: live.signalID()}
 	}
 	return nil
 }

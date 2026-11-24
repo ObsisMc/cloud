@@ -117,6 +117,14 @@ func (h *Host) parkedNode(ctx context.Context, st *runState, d workflow.AgentDis
 	}
 	n := &interactiveNode{d: d, executor: executor, cfg: cfg, task: payload.Task, session: *row.SessionID, phase: phaseParked,
 		lastOrigin: originWorkflow, baseline: payload.Baseline}
+	// The policy stays the one the node parked under: a node that parked before v2 applied the
+	// agent policy has no Agent that was given the tool, and completes as end_turn (default
+	// end_turn ADR D4). The report of the settled turn is kept only if the turns rebuilt below
+	// still end with that turn; the credentials its Agent had died with the old process.
+	n.policy = workflow.CompletionSignalEndTurn
+	if c := payload.Interactive.Completion; c != nil && c.Policy == workflow.CompletionSignalAgent {
+		n.policy, n.signal = c.Policy, c.AgentSignal
+	}
 	// Only the park knew that the starter stopped the turn (or that its result was lost); the
 	// turns themselves do not say so.
 	if c := payload.Interactive.Completion; c != nil && (c.StopCause == stopUserStopped || c.StopCause == stopSessionLost) {

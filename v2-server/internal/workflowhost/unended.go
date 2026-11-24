@@ -121,6 +121,7 @@ func endConfirmed(err error) bool {
 // may leave nothing to complete, so no completion would end it again. Whoever stops tracking the
 // node meanwhile hands the session to linger instead (see dropInteractive).
 func (h *Host) endInteractive(st *runState, n *interactiveNode) {
+	h.tools.Revoke(n.d.NodeRunID)
 	if !endConfirmed(h.end(st.scope, n.session)) {
 		st.mu.Lock()
 		retrying := n.endRetrying
@@ -166,6 +167,7 @@ func (st *runState) dropInteractive(n *interactiveNode) bool {
 // forgetInteractive is dropInteractive for a caller not holding mu, which then retries the End of a
 // session still held (see retryEnd); every caller has tried to end it already.
 func (h *Host) forgetInteractive(st *runState, n *interactiveNode) {
+	h.tools.Revoke(n.d.NodeRunID)
 	st.mu.Lock()
 	retry := st.dropInteractive(n)
 	st.mu.Unlock()

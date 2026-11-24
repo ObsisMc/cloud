@@ -13,13 +13,13 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/workflow"
 )
 
-// Interactive Agent nodes, desktop's default mode without the Agent completion signal (desktop@ebd5b725
-// docs/workflows/workflow-runs.md "Interactive nodes"): after its first turn the node parks as
-// pending with its session open; the run's starter sends further turns into the same session or
-// completes the node through the completion gate of completion.go: the turn the node parked with
+// Interactive Agent nodes (desktop@ebd5b725 docs/workflows/workflow-runs.md "Interactive nodes"):
+// after its first turn the node parks as pending with its session open; the run's starter sends
+// further turns into the same session or completes the node through the completion gate of completion.go: the turn the node parked with
 // must have ended normally and, for the workflow's own opening turn, be confirmed; force covers
-// the other blockers and leaves an audit. The Agent completion signal is not implemented: a node
-// configured for it completes as end_turn (workflow.CompletionSignalAgent).
+// the other blockers and leaves an audit. A node whose policy is agent also waits for its Agent to
+// report the step done in that turn (package completiontool) and for the starter, or the node's
+// auto-accept, to confirm the report.
 //
 // How a turn ended never fails the node (workflow-runs.md:125-126, 152-155): a refused, truncated,
 // unknown or unrequested cancelled turn keeps it parked with its held session open, so the starter
@@ -60,6 +60,12 @@ type interactiveNode struct {
 	cfg      workflow.AgentConfig
 	task     string
 	session  string
+
+	// policy is the completion policy the node's session runs under: its frozen one, except that
+	// a node that parked before v2 applied the agent policy stays end_turn until its session ends.
+	policy string
+	// signal is the completion the Agent reported in the settled turn its TurnKey names.
+	signal *agentSignal
 
 	phase interactivePhase
 	// turns counts the turns that settled; seq numbers the follow-up caller attempts, that is
@@ -128,6 +134,22 @@ func endedNormally(r execution.Result) bool {
 	return r.Status == execution.StatusCompleted && r.AnswerComplete && r.StopReason == "end_turn"
 }
 
+// attempt is the caller attempt of the node's turn opened by message seq, 0 for its first turn.
+func (n *interactiveNode) attempt(seq int) string {
+	if seq == 0 {
+		return n.d.NodeRunID
+	}
+	return n.d.NodeRunID + "/turn-" + strconv.Itoa(seq)
+}
+
+// tool is the completion tool of the turn opened by message seq, nil when the policy gives none.
+func (h *Host) tool(n *interactiveNode, seq int) execution.HostTools {
+	if n.policy != workflow.CompletionSignalAgent || h.tools == nil {
+		return nil
+	}
+	return h.tools.Attempt(n.d.NodeRunID, n.attempt(seq))
+}
+
 // track registers a node whose first turn is executing.
 func (st *runState) track(n *interactiveNode) *interactiveNode {
 	st.mu.Lock()
@@ -165,7 +187,7 @@ func (n *interactiveNode) summary() map[string]any {
 // for a turn the starter can confirm or complete, otherwise the forced choice. Callers hold st.mu.
 func (n *interactiveNode) candidate(snap completionSnapshot) (string, string) {
 	for _, b := range snap.Blockers {
-		if b.Kind != blockerTurnUnconfirmed {
+		if !participation(b.Kind) {
 			g, _ := n.gate(snap, nil, approval{force: true})
 			source, _ := g.forced["output_source"].(string)
 			return g.answer, source
@@ -204,7 +226,10 @@ func (n *interactiveNode) summaryKeys() map[string]any {
 // seq is the number of the starter's message that opened the turn, 0 for the workflow's own first
 // turn.
 func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interactiveNode, seq int, result execution.Result, err error) {
+	// The turn is over: whatever its Agent reported belongs to it, and a later call is refused.
+	reported := h.tools.Take(n.d.NodeRunID, n.attempt(seq))
 	if cancelling, last := st.endTurn(a, nil); cancelling {
+		h.tools.Revoke(n.d.NodeRunID)
 		h.end(st.scope, n.session)
 		if last {
 			h.finishCancel(st, n.d.RunID)
@@ -217,7 +242,9 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 	st.mu.Lock()
 	// A turn the starter stopped is never a setup failure, even when the stop caught the session
 	// still being prepared: it parks like any stopped turn.
-	if err == nil && n.turns == 0 && !n.stopping && result.AgentLost && (result.NotStarted || execution.CheckoutRefused(result.FailureCode)) {
+	if err == nil && n.turns == 0 && !n.stopping && result.AgentLost &&
+		(result.NotStarted || execution.CheckoutRefused(result.FailureCode) || execution.HostMCPFailure(result.FailureCode)) {
+		h.tools.Revoke(n.d.NodeRunID)
 		// Nothing is running, so End is idempotent; until it is confirmed the session keeps
 		// its slot.
 		lingering := st.dropInteractive(n)
@@ -228,6 +255,9 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 		message := "the Agent session could not be set up: " + result.FailureCode
 		if execution.CheckoutRefused(result.FailureCode) {
 			message = "Node refused the Agent session on the run's directory: " + result.FailureCode
+		}
+		if execution.HostMCPFailure(result.FailureCode) {
+			message = "the node's Agent cannot be given the completion tool its policy needs: " + result.FailureCode
 		}
 		h.fail(n.d, workflow.Failure{Kind: workflow.FailureInteractiveSession, Message: message})
 		return
@@ -246,6 +276,7 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 		}
 		lingering := st.dropInteractive(n)
 		st.mu.Unlock()
+		h.tools.Revoke(n.d.NodeRunID)
 		if lingering {
 			h.endLingering(st, n.d.RunID, n.session)
 		}
@@ -258,6 +289,9 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 		// answered, so the answer it would complete with, and whether it can, stay as they were.
 		// The stop kept the session unless the result says it is lost.
 		n.turns++
+		if n.signal != nil {
+			n.signal.TurnKey.EndedSeq = n.turns // it still speaks of the answer the node keeps
+		}
 		ended := result.AgentLost
 		n.stopping = false
 		if ended {
@@ -297,6 +331,7 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 		n.lastStopCause = stopUserStopped
 	}
 	n.unsettled = err != nil
+	n.signal = nil
 	if err == nil {
 		n.turns++
 		n.last = &result
@@ -306,6 +341,9 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 		}
 		if endedNormally(result) {
 			n.accepted = &result
+		}
+		if reported != nil && n.policy == workflow.CompletionSignalAgent {
+			n.signal = &agentSignal{SignalID: reported.ID, RequestedAt: reported.At.UnixMilli(), TurnKey: turnKey{UserSeq: seq, EndedSeq: n.turns}}
 		}
 	} else if !n.stopping {
 		n.lastStopCause = stopSessionLost
@@ -326,7 +364,9 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 	if err != nil {
 		h.log.Warn("lost an interactive workflow turn", "run", n.d.RunID, "node_run", n.d.NodeRunID, "error", publicReason(err))
 	}
-	h.park(st, n)
+	if h.park(st, n) {
+		h.autoAccept(st, n)
+	}
 }
 
 // refreshSummary rewrites payload.interactive of n's row, which has status, in place: the run
@@ -368,7 +408,8 @@ func (h *Host) moveEngineNode(ctx context.Context, runID, nodeRunID, from, to st
 
 // park moves the node back to awaiting input with its summary. A run that stopped running
 // meanwhile (a sibling failed it) has no use for the node: its session ends and the row closes.
-func (h *Host) park(st *runState, n *interactiveNode) {
+// It reports whether the node parked.
+func (h *Host) park(st *runState, n *interactiveNode) bool {
 	st.mu.Lock()
 	keys := n.summaryKeys()
 	keys["task"] = n.task
@@ -397,7 +438,7 @@ func (h *Host) park(st *runState, n *interactiveNode) {
 			// ends the session through the sweep.
 			h.log.Error("park interactive workflow node", "run", n.d.RunID, "node_run", n.d.NodeRunID, "error", err)
 		}
-		return
+		return false
 	}
 	if !moved {
 		// Only a run that stopped running refuses the park of its own running attempt.
@@ -405,12 +446,13 @@ func (h *Host) park(st *runState, n *interactiveNode) {
 		h.forgetInteractive(st, n)
 		h.closeOrphan(n)
 		h.hub.Publish(n.d.RunID)
-		return
+		return false
 	}
 	st.mu.Lock()
 	n.phase = phaseParked
 	st.mu.Unlock()
 	h.hub.Publish(n.d.RunID)
+	return true
 }
 
 // starter authorizes a turn, stop or completion: the node's session belongs to whoever started the
@@ -467,7 +509,7 @@ func (h *Host) SendNodeTurn(ctx context.Context, scope server.WorkflowRunScope, 
 	n.phase = phaseTurn
 	n.seq++
 	sent := n.seq
-	caller := execution.Caller{Kind: execution.CallerWorkflow, ID: runID, NodeID: nodeID, AttemptID: n.d.NodeRunID + "/turn-" + strconv.Itoa(sent)}
+	caller := execution.Caller{Kind: execution.CallerWorkflow, ID: runID, NodeID: nodeID, AttemptID: n.attempt(sent)}
 	// This message replaces the one that was not delivered, so the row stops saying so as it
 	// starts running; if this one is refused too, the park writes the notice again.
 	undelivered := n.undelivered
@@ -541,8 +583,9 @@ func (h *Host) runFollowUp(st *runState, a *attemptState, f followUp) {
 		h.park(st, n)
 		return
 	}
-	ref, err := h.appendTurn(st.scope, execution.AppendRequest{SessionID: n.session, Caller: f.caller, Prompt: f.prompt})
+	ref, err := h.appendTurn(st.scope, execution.AppendRequest{SessionID: n.session, Caller: f.caller, Prompt: f.prompt, Host: h.tool(n, f.seq)})
 	if cancelling, last, _ := st.endStart(a, ref, err); cancelling {
+		h.tools.Revoke(n.d.NodeRunID)
 		h.end(st.scope, n.session)
 		if err == nil {
 			_, last = st.endTurn(a, nil)
@@ -556,6 +599,7 @@ func (h *Host) runFollowUp(st *runState, a *attemptState, f followUp) {
 		if h.ctx.Err() != nil {
 			return
 		}
+		h.tools.Take(n.d.NodeRunID, n.attempt(f.seq)) // no Agent has it
 		// The turn never started. A session that ended underneath accepts no more turns; any other
 		// refusal leaves the node waiting for another attempt. SendNodeTurn has already answered
 		// the starter, so the summary is the only place that can say the message was lost.
@@ -652,12 +696,7 @@ func (st *runState) turnOf(ctx context.Context, nodeID string) (execution.Ref, e
 	}
 }
 
-// CompleteNode completes a parked interactive node through the completion gate (completion.go):
-// the snapshot the node parked with must still describe its settled turn, the live deliverable
-// checks join its blockers, confirmInitialTurn lifts only the opening turn's turn_unconfirmed and
-// force covers every other blocker, leaving payload.completion_forced. It then ends the session,
-// checks the snapshot again, writes the output once and schedules successors. The requester is
-// always the human starter.
+// CompleteNode completes a parked interactive node for its starter (see completeNode).
 func (h *Host) CompleteNode(ctx context.Context, scope server.WorkflowRunScope, runID, nodeID string, req server.WorkflowNodeCompletion) (store.WorkflowRun, error) {
 	st, err := h.starter(ctx, scope, runID)
 	if err != nil {
@@ -666,13 +705,52 @@ func (h *Host) CompleteNode(ctx context.Context, scope server.WorkflowRunScope, 
 	if st == nil {
 		return store.WorkflowRun{}, server.ErrWorkflowNodeNotAwaitingInput
 	}
-	if req.Force && req.ConfirmInitialTurn {
-		return store.WorkflowRun{}, server.ErrWorkflowNodeCompletionInvalid
+	return h.completeNode(ctx, st, scope.TenantID, runID, nodeID, approval{
+		confirmInitialTurn: req.ConfirmInitialTurn, force: req.Force, confirmSignal: req.ConfirmSignalID})
+}
+
+// autoAccept completes a node that opted into it, through the same gate as its starter, once a turn
+// the starter opened parked with the Agent's report and nothing else in the way (completion signal
+// ADR D4). The opening turn and an abnormal park are never accepted this way. A refusal, such as a
+// missing deliverable or a message the starter sent first, leaves the node to its starter.
+func (h *Host) autoAccept(st *runState, n *interactiveNode) {
+	st.mu.Lock()
+	snap := n.snapshot()
+	st.mu.Unlock()
+	if !n.cfg.AutoAcceptAgentCompletion || n.policy != workflow.CompletionSignalAgent || snap.AgentSignal == nil ||
+		snap.TurnOrigin != originHuman || len(snap.Blockers) != 1 || snap.Blockers[0].Kind != blockerConfirmationPending {
+		return
 	}
+	signal := snap.AgentSignal.SignalID
+	// The caller still counts in workers; the completion must not hold it, as it waits for the
+	// session's turn to finish cleaning up.
+	h.workers.Add(1)
+	go func() {
+		defer h.workers.Done()
+		if _, err := h.completeNode(h.ctx, st, st.scope.TenantID, n.d.RunID, n.d.Node.ID, approval{confirmSignal: signal, auto: true}); err != nil && h.ctx.Err() == nil {
+			h.log.Warn("auto-accept of an interactive workflow node was refused; leaving it to its starter", "run", n.d.RunID, "node_run", n.d.NodeRunID, "error", err)
+		}
+	}()
+}
+
+// completeNode completes a parked interactive node through the completion gate (completion.go): the
+// snapshot the node parked with must still describe its settled turn and the Agent's report, the
+// live deliverable checks join its blockers, confirmInitialTurn lifts only the opening turn's
+// turn_unconfirmed, a confirmed report its agent_confirmation_pending, and force covers every other
+// blocker, leaving payload.completion_forced. It then ends the session, checks the snapshot again,
+// writes the output once and schedules successors.
+func (h *Host) completeNode(ctx context.Context, st *runState, tenant, runID, nodeID string, a approval) (store.WorkflowRun, error) {
 	st.mu.Lock()
 	n, err := st.nodeOf(nodeID)
 	if err == nil && n.phase != phaseParked {
 		err = server.ErrWorkflowNodeNotAwaitingInput
+	}
+	var snap completionSnapshot
+	if err == nil {
+		snap = n.snapshot()
+		if !a.coherent(snap) {
+			err = server.ErrWorkflowNodeCompletionInvalid
+		}
 	}
 	if err != nil {
 		st.mu.Unlock()
@@ -680,7 +758,6 @@ func (h *Host) CompleteNode(ctx context.Context, scope server.WorkflowRunScope, 
 	}
 	// The claim keeps any turn from settling until the completion commits or gives it back.
 	n.phase = phaseCompleting
-	snap := n.snapshot()
 	files, baseline := n.cfg.CompletionFiles, n.baseline
 	st.mu.Unlock()
 	// release gives the claim back and republishes the summary, which may have changed while the
@@ -698,16 +775,19 @@ func (h *Host) CompleteNode(ctx context.Context, scope server.WorkflowRunScope, 
 
 	// The park recorded the turn the starter saw; a node whose turn or answer is no longer that
 	// one refuses, force or not, and the page reloads the run.
-	row, err := h.nodeRow(ctx, scope.TenantID, runID, n.d.NodeRunID)
+	row, err := h.nodeRow(ctx, tenant, runID, n.d.NodeRunID)
 	if err != nil {
 		return refuse(err)
 	}
 	if err := stale(nodeID, storedSnapshot(row.Payload), snap); err != nil {
 		return refuse(err)
 	}
-	fileBlockers, warnings := h.fileBlockers(ctx, scope.TenantID, runID, files, baseline)
+	if err := a.signalStands(nodeID, snap); err != nil {
+		return refuse(err)
+	}
+	fileBlockers, warnings := h.fileBlockers(ctx, tenant, runID, files, baseline)
 	st.mu.Lock()
-	g, err := n.gate(snap, fileBlockers, approval{confirmInitialTurn: req.ConfirmInitialTurn, force: req.Force})
+	g, err := n.gate(snap, fileBlockers, a)
 	gone := n.sessionGone
 	st.mu.Unlock()
 	if err != nil {
@@ -718,6 +798,7 @@ func (h *Host) CompleteNode(ctx context.Context, scope server.WorkflowRunScope, 
 	// accepted answer and the output that names it. A session Node may still hold is ended
 	// again, including after an earlier completion's End went unconfirmed: the retry confirms
 	// the end before the node gives up its slot.
+	h.tools.Revoke(n.d.NodeRunID)
 	if !gone {
 		stopCtx, cancel := context.WithTimeout(ctx, h.stopTimeout)
 		err := h.exec.End(stopCtx, st.scope, n.session)
@@ -763,7 +844,7 @@ func (h *Host) CompleteNode(ctx context.Context, scope server.WorkflowRunScope, 
 	snap.Warnings = dedupe(append(snap.Warnings, warnings...))
 	keys := completionKeys(result, n.executor, n.cfg, n.task)
 	keys["interactive"] = map[string]any{"turns": n.turns, "session_ended": true, "completable": true, "answer": g.answer, "completion": snap}
-	keys["requester"] = requesterHuman
+	g.record(keys, snap, a, h.now())
 	if g.forced != nil {
 		keys["completion_forced"] = g.forced
 	}
@@ -774,7 +855,7 @@ func (h *Host) CompleteNode(ctx context.Context, scope server.WorkflowRunScope, 
 	engineErr := h.engine.CompleteNode(settle, runID, n.d.NodeRunID, completion)
 	// The row decides who won, not the engine's error: the completion can commit and the successor
 	// wave then meet a cancellation that landed in between, which is still this completion's win.
-	status, err := h.nodeStatus(settle, scope.TenantID, runID, n.d.NodeRunID)
+	status, err := h.nodeStatus(settle, tenant, runID, n.d.NodeRunID)
 	if err != nil {
 		release()
 		return store.WorkflowRun{}, errors.Join(engineErr, err)
@@ -807,7 +888,7 @@ func (h *Host) CompleteNode(ctx context.Context, scope server.WorkflowRunScope, 
 	if engineErr != nil {
 		h.log.Warn("schedule after interactive completion", "run", runID, "node_run", n.d.NodeRunID, "error", engineErr)
 	}
-	return h.store.WorkflowRun(ctx, scope.TenantID, runID)
+	return h.store.WorkflowRun(ctx, tenant, runID)
 }
 
 // runStopped reports whether the run is no longer running. A read error counts as running, so
@@ -867,6 +948,7 @@ func (h *Host) endParked(ctx context.Context, st *runState) error {
 	st.mu.Lock()
 	sessions := make([]string, 0, len(st.interactive))
 	for _, n := range st.interactive {
+		h.tools.Revoke(n.d.NodeRunID)
 		sessions = append(sessions, n.session)
 	}
 	st.mu.Unlock()

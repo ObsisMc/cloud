@@ -23,6 +23,7 @@ import (
 
 	"github.com/wanglongan587/cloud/v2-server/internal/agentruntime"
 	"github.com/wanglongan587/cloud/v2-server/internal/boot"
+	"github.com/wanglongan587/cloud/v2-server/internal/completiontool"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/executionruntime"
 	"github.com/wanglongan587/cloud/v2-server/internal/idaas"
@@ -347,7 +348,13 @@ func runWithListener(addr, dbURL string, cleanup, fixture, testFixtures bool, li
 	// LoopExit cleanup it can absorb and resume under its frozen starter. Those runs and runs frozen
 	// at a review form outlive the process. Hosts stop observing turns before the execution runtime closes
 	// (defers run LIFO).
-	workflowRuns, e := workflowhost.NewHost(workflowhost.Config{Store: db, Execution: runtime, Catalog: runtime})
+	completionTool := completiontool.NewRegistry(db.WorkflowNodeTurnLive)
+	completionServer, e := completiontool.Serve(completionTool)
+	if e != nil {
+		return fmt.Errorf("serve the Agent completion tool: %w", e)
+	}
+	defer completionServer.Close()
+	workflowRuns, e := workflowhost.NewHost(workflowhost.Config{Store: db, Execution: runtime, Catalog: runtime, CompletionTool: completionTool, CheckHostTools: runtime.CheckHostTools})
 	if e != nil {
 		return e
 	}
@@ -656,7 +663,7 @@ func (s workflowRunStarter) Start(ctx context.Context, tenant, user, runID strin
 		return errors.Join(taskdecomp.ErrWorkflowSkillNotFound, e)
 	case errors.Is(e, server.ErrWorkflowRoleNotFound):
 		return errors.Join(taskdecomp.ErrWorkflowRoleNotFound, e)
-	case errors.Is(e, server.ErrWorkflowRunNotStartable), errors.As(e, &invalidInput):
+	case errors.Is(e, server.ErrWorkflowRunNotStartable), errors.Is(e, server.ErrWorkflowCompletionToolUnavailable), errors.As(e, &invalidInput):
 		return errors.Join(taskdecomp.ErrWorkflowRunNotStartable, e)
 	}
 	return e

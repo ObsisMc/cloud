@@ -15,8 +15,8 @@ const (
 	// CompletionSignalEndTurn is desktop's legacy policy and the default: a normal end_turn with
 	// no blocker can complete.
 	CompletionSignalEndTurn = "end_turn"
-	// CompletionSignalAgent waits for the Agent's completion tool. v2 cannot hand the tool to the
-	// Agent yet, so it runs such a node as end_turn and lists the setting as unapplied.
+	// CompletionSignalAgent also waits for the Agent to report the step done in that turn through
+	// the host completion tool, and for someone to confirm the report.
 	CompletionSignalAgent = "agent"
 )
 

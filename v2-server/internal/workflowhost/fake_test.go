@@ -8,11 +8,13 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wanglongan587/cloud/v2-server/internal/completiontool"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution/executiontest"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
@@ -303,6 +305,11 @@ type fixture struct {
 	host    *Host
 	scope   server.WorkflowRunScope
 	project string
+	// tools is the host's completion tool, whose stored state the test sets through turnOver;
+	// hostTools is what the project's Node answers when asked for host tools.
+	tools     *completiontool.Registry
+	turnOver  atomic.Bool
+	hostTools error
 }
 
 // reviewerContent is the role definition every fixture run of twoAgents receives.
@@ -383,7 +390,14 @@ func newFixtureOnStore(t *testing.T, s *store.Store) *fixture {
 
 func (f *fixture) newHost(t *testing.T) *Host {
 	t.Helper()
+	f.tools = completiontool.NewRegistry(func(context.Context, string, string) (bool, error) { return !f.turnOver.Load(), nil })
+	served, err := completiontool.Serve(f.tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(served.Close)
 	h, err := NewHost(Config{Store: f.s, Execution: f.exec, Catalog: f.exec, StopTimeout: time.Second, BusyRetry: time.Second,
+		CompletionTool: f.tools, CheckHostTools: func(context.Context, execution.Scope, string) error { return f.hostTools },
 		Now: func() time.Time { return time.UnixMilli(1_700_000_000_000) }})
 	if err != nil {
 		t.Fatal(err)
