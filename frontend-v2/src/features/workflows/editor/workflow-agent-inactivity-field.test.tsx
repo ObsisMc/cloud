@@ -17,9 +17,11 @@ import { WorkflowInspector } from "./workflow-inspector";
 function Harness({
   config = {},
   parentId,
+  unappliedSettings,
 }: {
   config?: Partial<WorkflowAgentConfig>;
   parentId?: string;
+  unappliedSettings?: readonly string[];
 }) {
   const [node, setNode] = useState<Node<WorkflowNodeData, "workflow">>({
     id: "agent",
@@ -61,6 +63,7 @@ function Harness({
           onUpdate={setNode}
           onDelete={() => undefined}
           onCloseNode={() => undefined}
+          unappliedSettings={unappliedSettings}
         />
         <pre data-testid="agent-config">
           {JSON.stringify(node.data.agentConfig)}
@@ -205,6 +208,28 @@ describe("Agent prompt inactivity settings", () => {
     await user.click(await screen.findByRole("option", { name: "持续等待" }));
     await waitFor(() => expect(savedConfig().promptInactivity).toBe("wait"));
   });
+
+  it("shows and hides the unapplied note based on the server analysis", async () => {
+    await appI18n.changeLanguage("zh-CN");
+    const { rerender } = render(
+      <Harness
+        config={{ promptInactivity: "wait" }}
+        unappliedSettings={["promptInactivity"]}
+      />,
+    );
+    expect(
+      screen.getByTestId("workflow-unapplied-promptInactivity"),
+    ).toHaveTextContent("暂不生效");
+    expect(
+      screen.getByTestId("workflow-unapplied-promptInactivity"),
+    ).toHaveTextContent("未把等待策略传给执行节点");
+    expect(screen.queryByTestId("workflow-unapplied-other")).toBeNull();
+
+    rerender(<Harness config={{ promptInactivity: "timeout" }} unappliedSettings={[]} />);
+    expect(
+      screen.queryByTestId("workflow-unapplied-promptInactivity"),
+    ).toBeNull();
+  });
 });
 
 describe("prompt inactivity translations", () => {
@@ -215,6 +240,7 @@ describe("prompt inactivity translations", () => {
       "settings.workflow.promptInactivity.timeout",
       "settings.workflow.promptInactivity.wait",
       "settings.workflow.promptInactivity.hint",
+      "settings.workflow.unapplied.promptInactivity",
     ] as const;
     for (const locale of ["zh-CN", "en-US"] as const) {
       for (const key of keys) {

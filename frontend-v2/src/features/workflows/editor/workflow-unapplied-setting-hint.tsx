@@ -9,6 +9,7 @@ const PLACED_SETTINGS = {
   mcp: "settings.workflow.unapplied.mcp",
   interactive: "settings.workflow.unapplied.interactive",
   retry: "settings.workflow.unapplied.retry",
+  promptInactivity: "settings.workflow.unapplied.promptInactivity",
 } as const;
 
 /** A setting name with a field of its own in the Agent inspector. */

@@ -617,7 +617,14 @@ export interface WorkflowNodeModelUsed {
 
 /** Agent settings v2 keeps in the graph but runs without (`payload.unapplied`). */
 export type WorkflowAgentUnappliedCapability =
-  "role" | "skill" | "mcp" | "retry" | "interactive" | "completionSignal" | "autoAcceptAgentCompletion";
+  | "role"
+  | "skill"
+  | "mcp"
+  | "retry"
+  | "interactive"
+  | "completionSignal"
+  | "autoAcceptAgentCompletion"
+  | "promptInactivity";
 
 export interface GraphWorkflowNodeState {
   /** The branch committed for this exact node execution, not a global latest decision. */

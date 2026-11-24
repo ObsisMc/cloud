@@ -551,6 +551,8 @@ export const workflowEditorTranslations = {
     "settings.workflow.completion.pathIssue.tooDeep":
       "路径不能超过 32 层目录。",
 
+    "settings.workflow.unapplied.promptInactivity":
+      "已保存，v2 暂未把等待策略传给执行节点，运行时仍按默认超时规则处理。",
     "settings.workflow.unapplied.badge": "暂不生效",
     "settings.workflow.unapplied.mcp":
       "已保存，运行时暂不连接已启用的 MCP，节点照常执行。",
@@ -1242,6 +1244,8 @@ export const workflowEditorTranslations = {
     "settings.workflow.completion.pathIssue.tooDeep":
       "The path must not nest deeper than 32 directories.",
 
+    "settings.workflow.unapplied.promptInactivity":
+      "Saved; v2 does not pass the silence policy to the execution node yet, so runs still use the default timeout.",
     "settings.workflow.unapplied.badge": "Not applied yet",
     "settings.workflow.unapplied.mcp":
       "Saved, but runs do not connect the enabled MCPs yet; the node still runs.",
