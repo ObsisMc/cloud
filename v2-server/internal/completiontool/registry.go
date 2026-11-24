@@ -6,8 +6,12 @@
 //
 // A call only records that the Agent considers its step done. Whether the node completes stays
 // with the completion gate of workflowhost, which binds the recorded signal to the turn the
-// attempt settled. Everything here lives in memory: a restart ends every Agent that could call the
-// tool, and the next Agent of a parked node is started with new credentials.
+// attempt settled. Everything here lives in memory, which rests on one premise: no Agent that an
+// earlier process started can call the tool of this one. A killed v2-server may leave its Nodes
+// running for a while, but startup stops every Node under its data directory, or refuses to start
+// (agentruntime.Recover), before it recovers executions and before it serves this tool, so a restart
+// always replaces Node and every credential (host MCP ADR D6). The next Agent of a parked node is
+// started with new credentials.
 package completiontool
 
 import (

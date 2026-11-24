@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/nodeservices"
@@ -61,6 +63,65 @@ func TestRegisteredRecoveryPreservesDataAndCleanupOnlyOwned(t *testing.T) {
 	}
 	if _, err := os.Stat(root); err != nil {
 		t.Fatal("removed parent directory")
+	}
+}
+
+// TestLeftoverNodeHelper blocks when started as a Node an earlier process left behind.
+func TestLeftoverNodeHelper(t *testing.T) {
+	if os.Getenv("V2_LEFTOVER_NODE") != "" {
+		time.Sleep(time.Minute)
+	}
+}
+
+// New stops the Node a killed v2-server left running before it returns, which is what makes a
+// restart replace every credential an Agent of that Node held (package completiontool).
+func TestNewStopsTheNodeOfAnEarlierProcess(t *testing.T) {
+	root, err := os.MkdirTemp("", "ar-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	p := &projectRuntime{id: "project", root: filepath.Join(root, digest("project")[:16])}
+	if err := p.register(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Recover(t.Context(), root); err != nil {
+		t.Fatal(err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(p.root, "w", "nb")
+	if err := os.WriteFile(path, binary, 0700); err != nil {
+		t.Fatal(err)
+	}
+	leftover := exec.Command(path, "-test.run=^TestLeftoverNodeHelper$")
+	leftover.Env = append(os.Environ(), "V2_LEFTOVER_NODE=1")
+	leftover.Dir = filepath.Join(p.root, "w")
+	if err := leftover.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	go func() { _ = leftover.Wait(); close(exited) }()
+	t.Cleanup(func() { _ = leftover.Process.Kill(); <-exited })
+	driver, err := New(Options{Root: root, AssetsDirectory: "/assets", GitBackend: "/bin/false",
+		Bindings:       map[string]nodeservices.Binding{"fixture": {Model: ipcModel(), Protocol: nodeservices.OpenAICompletions, Provider: nodeservices.FixtureProvider{}}},
+		ResolveProject: func(context.Context, execution.Scope, string) (Project, error) { return Project{}, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+	default:
+		t.Fatal("the earlier Node outlived New")
+	}
+	if err := driver.Close(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 

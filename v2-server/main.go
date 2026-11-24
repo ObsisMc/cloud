@@ -348,6 +348,9 @@ func runWithListener(addr, dbURL string, cleanup, fixture, testFixtures bool, li
 	// LoopExit cleanup it can absorb and resume under its frozen starter. Those runs and runs frozen
 	// at a review form outlive the process. Hosts stop observing turns before the execution runtime closes
 	// (defers run LIFO).
+	// agentruntime.New or Recover above has stopped the Nodes of earlier processes, and the
+	// execution runtime has ended their executions: no credential of theirs is left to honor
+	// (package completiontool).
 	completionTool := completiontool.NewRegistry(db.WorkflowNodeTurnLive)
 	completionServer, e := completiontool.Serve(completionTool)
 	if e != nil {

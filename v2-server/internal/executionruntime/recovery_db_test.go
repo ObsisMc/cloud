@@ -615,6 +615,18 @@ func TestRecoveryHandoffLeavesRoomForThePrompt(t *testing.T) {
 	if size := len(recovery.Handoff) + len(prompt); size > maxTurnText {
 		t.Fatalf("handoff %d bytes + prompt %d bytes = %d, over Node's %d-byte turn limit", len(recovery.Handoff), len(prompt), size, maxTurnText)
 	}
+	// A turn with host tools leaves their instruction its room.
+	reserved, _, err := f.service.recovery(f.ctx, session, execution.Turn{Prompt: execution.TextPrompt(prompt), Host: instructing{}})
+	if err != nil || reserved == nil || len(reserved.Handoff)+len(prompt)+execution.MaxHostInstruction > maxTurnText {
+		t.Fatalf("recovery with host tools = %+v %v", reserved, err)
+	}
+	full := strings.Repeat("p", maxTurnText-len(recovery.Handoff)-execution.MaxHostInstruction/2)
+	if plain, _, err := f.service.recovery(f.ctx, session, execution.Turn{Prompt: execution.TextPrompt(full)}); err != nil || len(plain.Handoff)+len(full) <= maxTurnText-execution.MaxHostInstruction {
+		t.Fatalf("the prompt does not reach into the reserve: %v", err)
+	}
+	if reserved, _, err := f.service.recovery(f.ctx, session, execution.Turn{Prompt: execution.TextPrompt(full), Host: instructing{}}); err != nil || len(reserved.Handoff)+len(full)+execution.MaxHostInstruction > maxTurnText {
+		t.Fatalf("recovery of a long prompt with host tools = %v", err)
+	}
 	if !strings.Contains(recovery.Handoff, "earliest turns are left out") || !strings.Contains(recovery.Handoff, "第 3 轮") {
 		t.Fatalf("handoff = %.200q…, want the latest turn kept and the earliest left out", recovery.Handoff)
 	}
@@ -644,3 +656,9 @@ func TestRecoveredSessionOnACheckoutWithoutACloneExecutionEnds(t *testing.T) {
 		t.Fatal("an Agent was started on a checkout Node cannot resolve")
 	}
 }
+
+// instructing is a turn's host tools.
+type instructing struct{}
+
+func (instructing) Attach(string) execution.HostServers { return execution.HostServers{} }
+func (instructing) Instruct() execution.HostInstruction { return execution.HostInstruction{} }
