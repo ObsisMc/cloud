@@ -2,10 +2,12 @@ package server_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"reflect"
 	"testing"
 
+	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
@@ -85,6 +87,8 @@ func TestWorkflowRunResumeRefusals(t *testing.T) {
 		{"refused by status", &server.WorkflowRunNotResumable{Reason: "run_not_ended"}, 409, "workflow_run_not_resumable",
 			map[string]any{"reason": "run_not_ended", "runningNodeIds": []any{}}},
 		{"run missing", store.ErrWorkflowRunNotFound, 404, "workflow_run_not_found", map[string]any{}},
+		{"no completion tool", fmt.Errorf("%w: gone", server.ErrWorkflowCompletionToolUnavailable), 400, "workflow_completion_tool_unavailable", map[string]any{}},
+		{"execution unavailable", execution.ErrUnavailable, 503, "execution_unavailable", map[string]any{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			host := &fakeResumeHost{fakeRunHost: fakeRunHost{err: tc.err}}
