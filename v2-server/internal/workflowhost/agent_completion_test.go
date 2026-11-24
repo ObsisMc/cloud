@@ -121,6 +121,20 @@ func (f *fixture) settledTurns(t *testing.T, runID string, turns int) map[string
 	_, nodes := f.await(t, runID, func(run store.WorkflowRun, n []store.WorkflowNodeRun) bool {
 		return parked("a")(run, n) && interactivePayload(t, node(n, "a"))["turns"] == float64(turns)
 	})
+	// The row is written before the host takes the next message: wait for that as well.
+	deadline := time.Now().Add(5 * time.Second)
+	for st := f.host.state(runID); st != nil; time.Sleep(time.Millisecond) {
+		st.mu.Lock()
+		n := st.interactive["a"]
+		ready := n == nil || n.phase == phaseParked
+		st.mu.Unlock()
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the parked node takes no message")
+		}
+	}
 	return interactivePayload(t, node(nodes, "a"))
 }
 
@@ -347,17 +361,20 @@ func TestAReportDoesNotCoverATurnThatDidNotEndNormally(t *testing.T) {
 	if !reflect.DeepEqual(blockerKinds(p), []string{blockerTurnRefused}) {
 		t.Fatalf("summary = %v, want no auto-accept of an abnormal park", p)
 	}
-	if _, err := f.host.CompleteNode(context.Background(), f.scope, runID, "a", server.WorkflowNodeCompletion{ConfirmSignalID: signalOf(p)}); !refusedWith(err, blockerTurnRefused) {
-		t.Fatalf("confirmation = %v", err)
+	if signalOf(p) != "" {
+		t.Fatalf("summary = %v, want no report", p)
+	}
+	if _, err := f.host.CompleteNode(context.Background(), f.scope, runID, "a", server.WorkflowNodeCompletion{}); !refusedWith(err, blockerTurnRefused) {
+		t.Fatalf("completion = %v", err)
 	}
 	if f.startedSessions() != 1 {
 		t.Fatal("B started")
 	}
 }
 
-// A report made in a turn that was stopped, cut or lost is dropped with it (completion signal ADR
-// D2): the park carries none, and forcing the node is the starter's decision alone.
-func TestAReportOfACancelledOrLostTurnIsDropped(t *testing.T) {
+// A report made in a turn that did not end normally is dropped with it (completion signal ADR D2):
+// the park carries none, and forcing the node is the starter's decision alone.
+func TestAReportOfATurnThatDidNotEndNormallyIsDropped(t *testing.T) {
 	for name, end := range map[string]func(f *fixture, runID, session string) error{
 		"stopped, session kept": func(f *fixture, runID, session string) error {
 			f.exec.finish(session, stopKept())
@@ -369,6 +386,18 @@ func TestAReportOfACancelledOrLostTurnIsDropped(t *testing.T) {
 		},
 		"cut at a limit": func(f *fixture, _, session string) error {
 			f.exec.finish(session, agentEndedTurns["cut at a limit"])
+			return nil
+		},
+		"refused": func(f *fixture, _, session string) error {
+			f.exec.finish(session, agentEndedTurns["refusal"])
+			return nil
+		},
+		"truncated": func(f *fixture, _, session string) error {
+			f.exec.finish(session, agentEndedTurns["max_tokens"])
+			return nil
+		},
+		"unknown stop": func(f *fixture, _, session string) error {
+			f.exec.finish(session, agentEndedTurns["unknown stop"])
 			return nil
 		},
 		"Agent lost": func(f *fixture, _, session string) error {
@@ -627,6 +656,26 @@ func TestANodeParkedBeforeTheToolStaysEndTurn(t *testing.T) {
 	}
 }
 
+// A completion started on one report is refused once the node carries another, or none.
+func TestACompletionOfAnotherReportIsStale(t *testing.T) {
+	snapshot := func(id string) completionSnapshot {
+		s := completionSnapshot{TurnKey: &turnKey{UserSeq: 1, EndedSeq: 2}, OutputDigest: "sha256:x"}
+		if id != "" {
+			s.AgentSignal = &agentSignal{SignalID: id, TurnKey: *s.TurnKey}
+		}
+		return s
+	}
+	for _, tc := range []struct {
+		stored, live string
+		changed      bool
+	}{{"s1", "s1", false}, {"", "", false}, {"s1", "s2", true}, {"s1", "", true}, {"", "s2", true}} {
+		stored := snapshot(tc.stored)
+		if err := stale("a", &stored, snapshot(tc.live)); signalChanged(err) != tc.changed || (err != nil) != tc.changed {
+			t.Errorf("stored %q, live %q: %v", tc.stored, tc.live, err)
+		}
+	}
+}
+
 // A run whose graph asks for the policy is refused at its start, before anything runs, when its
 // Agents could not be given the tool; a graph that does not ask is not.
 func TestARunIsRefusedAtItsStartWithoutTheTool(t *testing.T) {
@@ -640,6 +689,18 @@ func TestARunIsRefusedAtItsStartWithoutTheTool(t *testing.T) {
 	if run, err := f.s.WorkflowRun(ctx, f.scope.TenantID, runID); err != nil || run.Status != store.WorkflowStatusPending || f.startedSessions() != 0 {
 		t.Fatalf("run = %+v %v", run, err)
 	}
+	// A Node that could not be asked says nothing about the tool.
+	for _, failure := range []error{execution.ErrUnavailable, context.Canceled} {
+		f.hostTools = failure
+		_, err := f.host.StartRun(ctx, f.scope, runID)
+		if !errors.Is(err, failure) || errors.Is(err, server.ErrWorkflowCompletionToolUnavailable) || errors.Is(err, server.ErrWorkflowRunNotStartable) {
+			t.Fatalf("start = %v, want %v", err, failure)
+		}
+		if run, err := f.s.WorkflowRun(ctx, f.scope.TenantID, runID); err != nil || run.Status != store.WorkflowStatusPending || f.startedSessions() != 0 {
+			t.Fatalf("run = %+v %v", run, err)
+		}
+	}
+	f.hostTools = execution.ErrHostMCPUnavailable
 	endTurn := f.run(t, policyChain(`"completionSignal":"end_turn"`), str("支付重构"))
 	if _, err := f.host.StartRun(ctx, f.scope, endTurn); err != nil {
 		t.Fatal(err)
