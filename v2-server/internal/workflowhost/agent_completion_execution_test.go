@@ -15,6 +15,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/executionruntime"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 // reportingDriver is an Agent driver whose Agent reports the step done in every turn, through the
@@ -156,7 +157,7 @@ func TestTheToolFollowsStoredExecutionState(t *testing.T) {
 // A parked node waits through a restart while its old execution does not: it is settled, with the
 // restart as its reason, before the tool is served again, and the next turn runs in a new one.
 func TestARestartSettlesTheExecutionOfAParkedNode(t *testing.T) {
-	f := newFixture(t)
+	f, db := newFixtureWithAdmin(t)
 	f.host.Close()
 	ctx := t.Context()
 	// start is one server process over the stored state, in main's order.
@@ -205,11 +206,11 @@ func TestARestartSettlesTheExecutionOfAParkedNode(t *testing.T) {
 	if err := f.s.RecordWorkspace(ctx, session.WorkspaceID, store.WorkspaceLocation{Path: t.TempDir(), BaseCommit: "fixed", CloneExecution: "c-1"}); err != nil {
 		t.Fatal(err)
 	}
-	executions := func(want int) []store.HostExecution {
+	executions := func(want int) []storetest.HostExecution {
 		t.Helper()
-		got, err := f.s.HostExecutions(ctx, sid)
-		if err != nil || len(got) != want {
-			t.Fatalf("executions = %+v %v, want %d", got, err, want)
+		got := storetest.HostExecutions(t, db, sid)
+		if len(got) != want {
+			t.Fatalf("executions = %+v, want %d", got, want)
 		}
 		return got
 	}

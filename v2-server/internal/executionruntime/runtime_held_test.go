@@ -5,8 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 // heldFixture starts held workflow sessions on an Agent that refuses every turn, which leaves a
@@ -155,8 +158,13 @@ func TestRuntimeEndsASessionWithItsDriversReason(t *testing.T) {
 	if err := f.db.EndHostExecution(f.ctx, "x-lost", "agent_failed"); err != nil {
 		t.Fatal(err)
 	}
-	executions, err := f.db.HostExecutions(f.ctx, ref.SessionID)
-	if err != nil || len(executions) != 1 || executions[0].EndedAt == nil || executions[0].Reason != "agent_failed" {
-		t.Fatalf("executions = %+v %v", executions, err)
+	conn, err := pgx.ConnectConfig(f.ctx, f.config.ConnConfig.Copy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(f.ctx)
+	executions := storetest.HostExecutions(t, conn, ref.SessionID)
+	if len(executions) != 1 || executions[0].EndedAt == nil || executions[0].Reason != "agent_failed" {
+		t.Fatalf("executions = %+v", executions)
 	}
 }

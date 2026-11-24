@@ -20,6 +20,13 @@ import (
 // test is skipped when TEST_DATABASE_URL is unset.
 func Open(t *testing.T) *store.Store {
 	t.Helper()
+	s, _ := OpenWithConn(t)
+	return s
+}
+
+// OpenWithConn is Open with a connection of the test's own on the same schema.
+func OpenWithConn(t *testing.T) (*store.Store, *pgx.Conn) {
+	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL is not set")
@@ -47,7 +54,10 @@ func Open(t *testing.T) *store.Store {
 		t.Fatal(e)
 	}
 	t.Cleanup(s.Close)
-	return s
+	if _, e := admin.Exec(ctx, "SET search_path TO "+schema+",public"); e != nil {
+		t.Fatal(e)
+	}
+	return s, admin
 }
 
 // SignIn ensures one demo-team account and returns its session token. Tests call it to sign in

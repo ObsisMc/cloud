@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -387,6 +389,60 @@ func TestASettlingExecutionIsListedWithItsReason(t *testing.T) {
 	f.terminal(start)
 }
 
+// Nor between the two: whoever takes the driver's lock next finds both or neither. The lock is handed
+// over in order, to the settler and then to the observer, which is what sync.Mutex does once the first
+// of its waiters was woken in vain; a settler that released it halfway would queue behind the observer.
+func TestNothingComesBetweenSettlingAnExecutionAndListingIt(t *testing.T) {
+	h := newIPCHarness(t, nil)
+	recordExecutions(h)
+	f, start := parkHosted(t, h, h.session("hosted", "workspace"), nil)
+	d := h.driver
+	d.mu.Lock()
+	a := d.sessions["hosted"]
+	d.mu.Unlock()
+	const wait = 5 * time.Millisecond
+	observed := 0
+	for range 20 {
+		release := make(chan struct{})
+		d.opts.EndHostExecution = func(context.Context, string, string) error { <-release; return nil }
+		settled, listed := false, false
+		first, observer := make(chan struct{}), make(chan struct{})
+		d.mu.Lock()
+		go func() { a.settleHost(execution.FailureNodeLost); close(first) }()
+		time.Sleep(wait)
+		go func() {
+			d.mu.Lock()
+			a.mu.Lock()
+			settled = a.hostSettled
+			a.mu.Unlock()
+			_, listed = d.unsettled[start.ExecutionID]
+			d.mu.Unlock()
+			close(observer)
+		}()
+		time.Sleep(wait)
+		d.mu.Unlock() // wakes the settler,
+		d.mu.Lock()   // which finds the lock taken again
+		time.Sleep(wait)
+		d.mu.Unlock()
+		receiveIPC(t, observer)
+		close(release)
+		receiveIPC(t, first)
+		if settled && !listed {
+			t.Fatal("an execution was seen settled before its reason was listed")
+		}
+		if settled {
+			observed++
+		}
+		a.mu.Lock()
+		a.hostSettled = false
+		a.mu.Unlock()
+	}
+	if observed == 0 {
+		t.Fatal("the observer never came after the settler")
+	}
+	f.terminal(start)
+}
+
 // Settling competes with the Node's loss, its reports and an End of the same session: whichever comes
 // first, the reason of the one end is the one written, and everyone who went on could read it.
 func TestSettlingRacesKeepOneReason(t *testing.T) {
@@ -402,7 +458,9 @@ func TestSettlingRacesKeepOneReason(t *testing.T) {
 			t.Fatal(err)
 		}
 		ends := h.driver.HostExecutionEnds("hosted")
+		h.driver.mu.Lock()
 		a := h.driver.sessions["hosted"]
+		h.driver.mu.Unlock()
 		a.mu.Lock()
 		reason := a.hostReason
 		a.mu.Unlock()
@@ -416,6 +474,24 @@ func TestSettlingRacesKeepOneReason(t *testing.T) {
 // The failure that makes the server end a session is the reason its execution ends, not the end it
 // leads to.
 func TestAFailureThatEndsTheSessionIsTheReason(t *testing.T) {
+	t.Run("unwritable event", func(t *testing.T) {
+		h := newIPCHarness(t, nil)
+		records := recordExecutions(h)
+		session := h.session("hosted", "workspace")
+		f, start := parkHosted(t, h, session, nil)
+		done := runHosted(h, ipcContext(t), session, "second", &scriptedTools{}, func(context.Context, execution.Event) error {
+			return errors.New("synthetic persistence failure")
+		})
+		f.finishTurn(t, nextIPCCommand(t, f, "submit_user_turn"), "second", "never published")
+		nextIPCCommand(t, f, "end_session")
+		f.terminal(start)
+		if got := receiveIPC(t, done); got.result.FailureCode != "agent_event_write_failed" {
+			t.Fatalf("outcome = %+v", got)
+		}
+		if got := receiveIPC(t, records.ended); got != [2]string{start.ExecutionID, "agent_event_write_failed"} {
+			t.Fatalf("settled %v", got)
+		}
+	})
 	t.Run("damaged history", func(t *testing.T) {
 		h := newIPCHarness(t, nil)
 		records := recordExecutions(h)
@@ -520,4 +596,163 @@ func TestATerminalOfAnEarlierProcessSettlesNothing(t *testing.T) {
 		t.Fatalf("acknowledged %+v", acked)
 	}
 	records.none(t)
+}
+
+// blockRecord makes the next record wait: recording receives its execution, and release lets it
+// through. Writing it, the store fails with what release was given.
+func (r *executionRecords) blockRecord(h *ipcHarness) (recording chan string, release chan error) {
+	recording, release = make(chan string, 1), make(chan error, 1)
+	record := h.driver.opts.RecordHostExecution
+	h.driver.opts.RecordHostExecution = func(ctx context.Context, id, session string) error {
+		recording <- id
+		if err := <-release; err != nil {
+			return err
+		}
+		return record(ctx, id, session)
+	}
+	return recording, release
+}
+
+// countStarts counts the starts the driver tries to send, delivered or not.
+func countStarts(f *fakeNodeIPC) *atomic.Int32 {
+	starts := &atomic.Int32{}
+	fail := func(m node.Message) error {
+		if m.Type == "start_agent_session" {
+			starts.Add(1)
+		}
+		select {
+		case <-f.closed: // as Node's client does; the fake's own select may still take a message
+			return net.ErrClosed
+		default:
+			return nil
+		}
+	}
+	f.failSend.Store(&fail)
+	return starts
+}
+
+// What ends an execution while its record is written settles it once the record is there, and no start
+// follows.
+func TestWhatEndsAnExecutionWhileItIsRecordedSettlesIt(t *testing.T) {
+	// begin parks a session on a Node, and starts another one there up to its record.
+	begin := func(t *testing.T) (h *ipcHarness, records *executionRecords, f *fakeNodeIPC, starts *atomic.Int32, done <-chan ipcRunOutcome, id string, release chan error) {
+		t.Helper()
+		h = newIPCHarness(t, nil)
+		records = recordExecutions(h)
+		f, _ = parkHosted(t, h, h.session("other", "workspace-2"), nil)
+		starts = countStarts(f)
+		recording, release := records.blockRecord(h)
+		done = runHosted(h, ipcContext(t), h.session("hosted", "workspace"), "first", &scriptedTools{}, discardIPCEvent)
+		return h, records, f, starts, done, receiveIPC(t, recording), release
+	}
+	settled := func(t *testing.T, records *executionRecords, id, reason string) {
+		t.Helper()
+		for {
+			if end := receiveIPC(t, records.ended); end[0] == id {
+				if end[1] != reason {
+					t.Fatalf("settled %v, want %s", end, reason)
+				}
+				break
+			}
+		}
+	}
+	t.Run("an End", func(t *testing.T) {
+		h, records, _, starts, done, id, release := begin(t)
+		h.driver.mu.Lock()
+		a := h.driver.sessions["hosted"]
+		h.driver.mu.Unlock()
+		ending := make(chan error, 1)
+		go func() { ending <- h.driver.End(ipcContext(t), "hosted") }()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+			a.mu.Lock()
+			arrived := a.ending
+			a.mu.Unlock()
+			if arrived {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("End did not arrive")
+			}
+		}
+		records.none(t)
+		release <- nil
+		if got := receiveIPC(t, done); got.err == nil || !got.result.NotStarted {
+			t.Fatalf("outcome = %+v", got)
+		}
+		if err := receiveIPC(t, ending); err != nil {
+			t.Fatal(err)
+		}
+		settled(t, records, id, execution.HostSessionEnded)
+		if starts.Load() != 0 {
+			t.Fatal("a start was sent")
+		}
+	})
+	t.Run("the loss of the Node", func(t *testing.T) {
+		_, records, f, starts, done, id, release := begin(t)
+		p := f.project
+		_ = f.Close()
+		receiveIPC(t, p.dead)
+		release <- nil
+		if got := receiveIPC(t, done); got.err == nil || got.result.FailureCode != execution.FailureNodeLost {
+			t.Fatalf("outcome = %+v", got)
+		}
+		settled(t, records, id, execution.FailureNodeLost)
+		if starts.Load() != 0 {
+			t.Fatal("a start was sent")
+		}
+	})
+	// The loss decided the reason, and is not announced yet: it waits for another session's write. The
+	// start is still tried here, and fails on the closed connection.
+	t.Run("the loss of the Node, not announced", func(t *testing.T) {
+		h, records, f, _, done, id, release := begin(t)
+		write, announce := h.driver.opts.EndHostExecution, make(chan struct{})
+		announced := sync.OnceFunc(func() { close(announce) })
+		defer announced()
+		h.driver.opts.EndHostExecution = func(ctx context.Context, x, reason string) error {
+			if x != id {
+				<-announce
+			}
+			return write(ctx, x, reason)
+		}
+		h.driver.mu.Lock()
+		a := h.driver.sessions["hosted"]
+		h.driver.mu.Unlock()
+		_ = f.Close()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+			a.mu.Lock()
+			decided := a.hostReason != ""
+			a.mu.Unlock()
+			if decided {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the loss decided nothing")
+			}
+		}
+		release <- nil
+		settled(t, records, id, execution.FailureNodeLost)
+		select {
+		case <-f.project.dead:
+			t.Fatal("the loss was announced before the other session's execution was settled")
+		default:
+		}
+		announced()
+		if got := receiveIPC(t, done); got.err == nil {
+			t.Fatalf("outcome = %+v", got)
+		}
+	})
+	// A loss settles before it is announced, so the driver does not get here by itself; submit settles
+	// all the same.
+	t.Run("a dead Node nobody settled for", func(t *testing.T) {
+		_, records, f, starts, done, id, release := begin(t)
+		f.project.deadOnce.Do(func() { close(f.project.dead) })
+		release <- nil
+		if got := receiveIPC(t, done); got.err == nil || got.result.FailureCode != execution.FailureNodeLost {
+			t.Fatalf("outcome = %+v", got)
+		}
+		settled(t, records, id, execution.FailureNodeLost)
+		if starts.Load() != 0 {
+			t.Fatal("a start was sent")
+		}
+	})
 }

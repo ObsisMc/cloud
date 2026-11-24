@@ -3,21 +3,9 @@ package store
 import (
 	"context"
 	"fmt"
-	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 )
-
-// HostExecution is a Node execution whose Agent was given host tools. EndedAt is nil while it runs;
-// Reason names why it ended.
-type HostExecution struct {
-	ID, SessionID string
-	StartedAt     time.Time
-	EndedAt       *time.Time
-	Reason        string
-}
 
 // RecordHostExecution records an execution before its start is sent to Node. It fails for a session
 // that ended, which takes no new execution.
@@ -40,18 +28,4 @@ func (s *Store) EndHostExecution(ctx context.Context, id, reason string) error {
 		return fmt.Errorf("end host execution %s: %w", id, err)
 	}
 	return nil
-}
-
-// HostExecutions lists a session's executions with host tools, oldest first.
-func (s *Store) HostExecutions(ctx context.Context, sessionID string) ([]HostExecution, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, session_id, started_at, ended_at, reason FROM v2_host_executions
-		WHERE session_id = $1 ORDER BY started_at, id`, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("list host executions: %w", err)
-	}
-	executions, err := pgx.CollectRows(rows, pgx.RowToStructByPos[HostExecution])
-	if err != nil {
-		return nil, fmt.Errorf("list host executions: %w", err)
-	}
-	return executions, nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/projectrepos"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 // A start that cannot settle the executions an earlier process left running is refused as a whole:
@@ -70,11 +71,11 @@ func TestAStartThatCannotSettleHostExecutionsIsRefused(t *testing.T) {
 	if err := db.RecordHostExecution(ctx, "hosted-execution", session.ID); err != nil {
 		t.Fatal(err)
 	}
-	read := func() store.HostExecution {
+	read := func() storetest.HostExecution {
 		t.Helper()
-		executions, err := db.HostExecutions(ctx, session.ID)
-		if err != nil || len(executions) != 1 {
-			t.Fatalf("executions = %+v %v", executions, err)
+		executions := storetest.HostExecutions(t, admin, session.ID)
+		if len(executions) != 1 {
+			t.Fatalf("executions = %+v", executions)
 		}
 		return executions[0]
 	}
