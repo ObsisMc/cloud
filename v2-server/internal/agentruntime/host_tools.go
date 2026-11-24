@@ -118,8 +118,8 @@ var (
 )
 
 // preparationResult reports whether message is the result of a clone or a plugin installation. No
-// Agent runs in those executions, so no host tool ever reached one, and their commits and digests
-// are what the journal keeps them for. Any other message of an unknown execution may be an Agent
+// Agent runs in those executions, so no host tool ever reached one, and their commits and
+// plugin versions are what the journal keeps them for. Any other message of an unknown execution may be an Agent
 // session's.
 func preparationResult(message node.Message) bool {
 	return message.Type == "clone_result" || message.Type == "plugins_result"

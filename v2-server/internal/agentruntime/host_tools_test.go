@@ -235,21 +235,22 @@ func TestTheJournalHasNoCredentialOfAnUnknownExecution(t *testing.T) {
 	}
 }
 
-// A clone or plugin installation has no Agent, so its result keeps the commits and digests the
-// journal is read for, whether this process or an earlier one asked for it. An Agent session's
-// message nobody knows loses them, whatever its kind.
+// A clone or plugin installation has no Agent, so its result keeps the clone commit and the plugin
+// version the journal is read for, whether this process or an earlier one asked for it, also when
+// they hold a long run of hex digits. An Agent session's message nobody knows loses such runs,
+// whatever its kind.
 func TestTheJournalKeepsThePreparationResults(t *testing.T) {
 	h := newIPCHarness(t, nil)
 	done := startIPCRun(h, ipcContext(t), h.session("plain", "workspace"), "first", discardIPCEvent)
 	f := receiveIPC(t, h.created)
 	start := nextIPCCommand(t, f, "start_agent_session")
-	commit, digest, token := strings.Repeat("c0", 20), strings.Repeat("d1", 32), strings.Repeat("0123456789abcdef", 2)
+	commit, version, token := strings.Repeat("c0", 20), "1.0.0+"+strings.Repeat("d1", 20), strings.Repeat("0123456789abcdef", 2)
 	live := &controlWait{kind: "clone_result", done: make(chan node.Message, 1)}
 	f.project.mu.Lock()
 	f.project.controls["asked"] = live
 	f.project.mu.Unlock()
 	clone := `{"kind":"clone_ready","result":{"path":"/checkout","commit":"` + commit + `"}}`
-	plugins := `{"kind":"plugins_completed","result":{"items":[{"plugin_id":"official/x","outcome":{"kind":"installed","sha256":"` + digest + `"}}]}}`
+	plugins := `{"kind":"plugins_completed","result":{"node":{"node_id":"node-1","incarnation_id":"incarnation-1"},"items":[{"plugin_id":"official/x","outcome":{"kind":"installed","version":"` + version + `"}}]}}`
 	for _, m := range []node.Message{
 		{Type: "clone_result", ExecutionID: "asked", Payload: json.RawMessage(clone)},
 		{Type: "clone_result", ExecutionID: "earlier", Payload: json.RawMessage(clone)},
@@ -274,8 +275,8 @@ func TestTheJournalKeepsThePreparationResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal := string(data)
-	if strings.Count(journal, commit) != 2 || strings.Count(journal, digest) != 1 {
-		t.Fatalf("the journal lost a commit or digest: %s", journal)
+	if strings.Count(journal, commit) != 2 || strings.Count(journal, version) != 1 {
+		t.Fatalf("the journal lost a commit or plugin version: %s", journal)
 	}
 	if strings.Contains(journal, token) || !strings.Contains(journal, `"gone"`) || !strings.Contains(journal, `"gone-turn"`) {
 		t.Fatalf("journal = %s", journal)
