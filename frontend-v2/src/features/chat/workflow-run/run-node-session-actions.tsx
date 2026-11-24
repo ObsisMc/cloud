@@ -166,11 +166,11 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
     ...(reported ? { confirmSignalId: session.signalId } : {}),
   }
   const overridden = [...shown, ...blockers.filter((b) => b.kind === 'agent_signal_pending' || (b.kind === 'agent_confirmation_pending' && shown.length > 0))]
-  const forceKey = forcible ? JSON.stringify([session?.turns ?? 0, session?.signalId, overridden.map((b) => [b.kind, b.path])]) : undefined
+  const source = session?.answerSource ?? 'none'
+  const forceKey = forcible ? JSON.stringify([session?.turns ?? 0, session?.signalId, source, overridden.map((b) => [b.kind, b.path])]) : undefined
   if (confirmingForce !== undefined && confirmingForce !== forceKey) setConfirmingForce(undefined)
   const ready = awaiting && blockers.length === 0 && session?.completable === true
   const filesOnly = shown.length > 0 && shown.every((b) => b.kind === 'file_missing' || b.kind === 'file_unchanged')
-  const source = session?.answerSource ?? 'none'
 
   return (
     <div className="flex w-full flex-col gap-2 border-t pt-2" data-interactive-actions="">

@@ -173,6 +173,18 @@ describe('RunNodeSessionActions', () => {
     expect(calls.completeNode).not.toHaveBeenCalled()
   })
 
+  it('drops the force confirmation once force would take another answer', async () => {
+    const stopped = { ...parked, completable: false, blockers: [{ kind: 'turn_stopped' }], stopCause: 'user_stopped', parkKind: 'awaiting_user' }
+    const { show } = view({ session: stopped })
+    fireEvent.click(button('completeAnyway')!)
+    const force = await screen.findByRole('button', { name: zh['workflowRun.v2.interactive.forceConfirm'] })
+    // A message another tab sent was lost with the session: same turns, same blockers, another answer.
+    show({ session: { ...stopped, sessionEnded: true, answerSource: 'last_completed_turn' } })
+    fireEvent.click(force)
+    await waitFor(() => expect(screen.queryByText(zh['workflowRun.v2.interactive.forceTitle'])).toBeNull())
+    expect(calls.completeNode).not.toHaveBeenCalled()
+  })
+
   it('says a confirmed report changed', async () => {
     calls.completeNode.mockRejectedValueOnce(new ContractError('workflow_node_signal_changed', { nodeId: 'a', expected: 'signal-2', actual: 'signal-1' }))
     view({ session: reported })
