@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 	"github.com/wanglongan587/cloud/v2-server/internal/taskworkflow"
 )
@@ -39,7 +40,7 @@ func taskWorkflowFault(w http.ResponseWriter, err error) {
 		fault(w, http.StatusNotFound, "not_found")
 	case errors.Is(err, ErrWorkflowRunNotStartable), errors.Is(err, ErrWorkflowRunNotEditable),
 		errors.Is(err, ErrWorkflowRoleNotFound), errors.Is(err, ErrWorkflowSkillNotFound),
-		errors.Is(err, ErrWorkflowCompletionToolUnavailable):
+		errors.Is(err, ErrWorkflowCompletionToolUnavailable), errors.Is(err, execution.ErrUnavailable):
 		workflowRunLifecycleFault(w, err, "task workflow")
 	default:
 		workflowRunFault(w, err, "task workflow")
