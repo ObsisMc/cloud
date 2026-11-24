@@ -178,7 +178,7 @@ describe('toGraphWorkflowRun', () => {
             stop_reason: 'end_turn',
             executor: { id: 'opencode:fixture', agentId: 'ora/opencode', name: 'OpenCode', pluginVersion: '1.4.0' },
             model: { id: 'fixture', name: 'Fixture', requested: 'claude-sonnet-5-5', fallback: true },
-            unapplied: ['role', 'retry', 'webhook'],
+            unapplied: ['role', 'retry', 'promptInactivity', 'webhook'],
           }),
         }),
       ]),
@@ -188,7 +188,7 @@ describe('toGraphWorkflowRun', () => {
       executor: { id: 'opencode:fixture', agentId: 'ora/opencode', name: 'OpenCode', pluginVersion: '1.4.0' },
       model: { id: 'fixture', name: 'Fixture', requested: 'claude-sonnet-5-5', fallback: true },
       // A name this version does not know is dropped rather than shown raw.
-      unapplied: ['role', 'retry'],
+      unapplied: ['role', 'retry', 'promptInactivity'],
     })
   })
 

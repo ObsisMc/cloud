@@ -111,7 +111,17 @@ function interactiveSession(payload: Record<string, unknown>): WorkflowNodeInter
   return session
 }
 
-const unappliedNames: ReadonlySet<string> = new Set<WorkflowAgentUnappliedCapability>(['role', 'skill', 'mcp', 'retry', 'interactive', 'completionSignal', 'autoAcceptAgentCompletion'])
+const unappliedCapabilityMap: Readonly<Record<WorkflowAgentUnappliedCapability, true>> = {
+  role: true,
+  skill: true,
+  mcp: true,
+  retry: true,
+  interactive: true,
+  promptInactivity: true,
+  completionSignal: true,
+  autoAcceptAgentCompletion: true,
+}
+const unappliedNames: ReadonlySet<string> = new Set(Object.keys(unappliedCapabilityMap))
 
 /** Reads `payload.unapplied`, the configured settings v2 ran the attempt without; unknown names are dropped. */
 function unapplied(payload: Record<string, unknown>): WorkflowAgentUnappliedCapability[] | undefined {
