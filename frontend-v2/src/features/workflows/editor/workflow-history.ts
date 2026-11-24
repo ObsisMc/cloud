@@ -186,3 +186,25 @@ export function redoWorkflowHistory(
     snapshot: step.snapshot,
   };
 }
+
+/** Rewrites every stored snapshot across past and future (e.g. non-dirty model hydration). */
+export function rewriteWorkflowHistory(
+  state: WorkflowHistoryState,
+  transform: (snapshot: WorkflowHistorySnapshot) => WorkflowHistorySnapshot,
+): WorkflowHistoryState {
+  const rewriteStep = (step: WorkflowHistoryStep): WorkflowHistoryStep => {
+    const nextSnapshot = transform(step.snapshot);
+    if (nextSnapshot === step.snapshot) {
+      return step;
+    }
+    return {
+      ...step,
+      snapshot: nextSnapshot,
+      fingerprint: workflowHistoryFingerprint(nextSnapshot),
+    };
+  };
+  return {
+    past: state.past.map(rewriteStep),
+    future: state.future.map(rewriteStep),
+  };
+}

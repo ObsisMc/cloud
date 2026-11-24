@@ -1,10 +1,12 @@
 import "@/lib/workflows/test/dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it, vi } from "vitest";
 import { UserContext } from "@/app/auth/user";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { WorkflowAgentModelsCatalog } from "@/lib/workflows/data/catalog-hooks";
 import { createContractsClient } from "@/lib/workflows/data/contracts-client";
 import { ContractsClientProvider } from "@/lib/workflows/data/contracts-client-provider";
 import { LocalWorkflowBackend } from "@/lib/workflows/data/local-workflow-backend";
@@ -14,6 +16,19 @@ import { localWorkflowContracts, memoryWorkflowStorage } from "@/lib/workflows/t
 import { demoUser, fakeBackend } from "@/test/backend";
 import { WorkflowEditor } from "./workflow-editor";
 import { useWorkflowEditorStore } from "./workflow-editor-store";
+
+let agentModelsCatalogOverride: WorkflowAgentModelsCatalog | null = null;
+
+vi.mock("@/lib/workflows/data/catalog-hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/workflows/data/catalog-hooks")>();
+  return {
+    ...actual,
+    useWorkflowAgentModels: () => {
+      const real = actual.useWorkflowAgentModels();
+      return agentModelsCatalogOverride ?? real;
+    },
+  };
+});
 
 const tenantId = "model-hydration";
 const agent = "official/ora-space.opencode";
@@ -30,6 +45,7 @@ async function openEditor(
     models?: typeof catalog | null;
     agentCli?: string;
     override?: boolean;
+    extraNodes?: unknown[];
     onList?: (client: ReturnType<typeof createContractsClient>) => void;
   } = {},
 ) {
@@ -42,6 +58,7 @@ async function openEditor(
       { id: "agent", type: "workflow", position: { x: 320, y: 0 }, data: { kind: "agent", title: "模型测试", agentConfig: {
         ...createMockWorkflowCapabilities("zh-CN").defaultAgentConfig, executor: initialExecutor,
       } } },
+      ...(options.extraNodes ?? []),
     ],
     edges: [{ id: "edge", source: "start", target: "agent" }],
   }) });
@@ -165,7 +182,7 @@ describe("editor model hydration", () => {
     expect(state.savedExecutor()).toEqual({ agentCli: agent, modelId: "configured" });
   });
 
-  it("keeps prior edits and undo history intact when a late catalog repairs an untouched node", async () => {
+  it("keeps prior edits, undo history, and late model repairs intact when undoing after a late catalog arrives", async () => {
     const state = await openEditor("deepseek/deepseek-v4-flash", { models: null });
     fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     expect(await screen.findByText("未保存")).toBeInTheDocument();
@@ -175,5 +192,89 @@ describe("editor model hydration", () => {
     await waitFor(() => expect(screen.getAllByText(/another-agent · foreign|Foreign/).length).toBeGreaterThan(0));
     expect(screen.getByRole("button", { name: "撤销" })).toBeEnabled();
     expect(screen.getByText("未保存")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "撤销" }));
+    await waitFor(() => expect(screen.queryByText(/another-agent · foreign|Foreign/)).not.toBeInTheDocument());
+    expect(screen.getAllByText(/official\/ora-space\.opencode · configured|Current/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "发布" }));
+    await screen.findByRole("alertdialog", { name: "发布工作流" });
+    await waitFor(() => expect(state.update).toHaveBeenCalledOnce());
+    const savedNodes = JSON.parse(state.backend.getDraft({ workflowId: state.workflowId }).snapshot.graph).nodes as {
+      id: string;
+      data: { kind: string; agentConfig?: { executor: { agentCli: string; modelId: string } } };
+    }[];
+    expect(savedNodes.filter((node) => node.data.kind === "agent")).toHaveLength(1);
+    expect(state.savedExecutor()).toEqual({ agentCli: agent, modelId: "configured" });
+  });
+
+  it("does not overwrite an Agent executor the user already changed before a late catalog arrives", async () => {
+    const user = userEvent.setup();
+    agentModelsCatalogOverride = {
+      agents: [{ agentRef: "another-agent", label: "Other Agent", logo: null }],
+      agentModels: [],
+      modelsByCli: new Map(),
+      cliStatus: { "another-agent": { isLoading: true, isError: false } },
+      isLoading: true,
+      isError: false,
+      refetch: vi.fn(),
+    };
+    try {
+      const state = await openEditor("deepseek/deepseek-v4-flash", {
+        models: null,
+        extraNodes: [
+          {
+            id: "untouched",
+            type: "workflow",
+            position: { x: 640, y: 0 },
+            data: {
+              kind: "agent",
+              title: "未修改节点",
+              agentConfig: {
+                ...createMockWorkflowCapabilities("zh-CN").defaultAgentConfig,
+                executor: { agentCli: agent, modelId: "deepseek/deepseek-v4-flash" },
+              },
+            },
+          },
+        ],
+      });
+
+      const nodeCard = document.querySelector<HTMLElement>('.react-flow__node[data-id="agent"]');
+      expect(nodeCard).not.toBeNull();
+      await user.click(nodeCard!);
+
+      const inspector = await waitFor(() => {
+        const aside = document.querySelector<HTMLElement>("[data-workflow-inspector]");
+        expect(aside).not.toBeNull();
+        return aside!;
+      });
+      await user.click(within(inspector).getByRole("button", { name: "Agent 模型" }));
+      await user.click(await screen.findByRole("option", { name: "Other Agent" }));
+      expect(await screen.findByText("未保存")).toBeInTheDocument();
+
+      agentModelsCatalogOverride = null;
+      state.queries.setQueryData(["workflow-catalog", "executors", tenantId], { items: catalog });
+
+      await waitFor(() =>
+        expect(screen.getAllByText(/official\/ora-space\.opencode · configured|Current/).length).toBeGreaterThan(0),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "发布" }));
+      await screen.findByRole("alertdialog", { name: "发布工作流" });
+      await waitFor(() => expect(state.update).toHaveBeenCalledOnce());
+      const savedNodes = JSON.parse(state.backend.getDraft({ workflowId: state.workflowId }).snapshot.graph).nodes as {
+        id: string;
+        data: { agentConfig: { executor: { agentCli: string; modelId: string } } };
+      }[];
+      expect(savedNodes.find((node) => node.id === "agent")?.data.agentConfig.executor).toEqual({
+        agentCli: "another-agent",
+        modelId: "deepseek/deepseek-v4-flash",
+      });
+      expect(savedNodes.find((node) => node.id === "untouched")?.data.agentConfig.executor).toEqual({
+        agentCli: agent,
+        modelId: "configured",
+      });
+    } finally {
+      agentModelsCatalogOverride = null;
+    }
   });
 });

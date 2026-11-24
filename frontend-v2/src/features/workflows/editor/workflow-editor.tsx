@@ -541,11 +541,16 @@ function WorkflowEditorContent({
   /** Set when late catalog arrival repaired an already-mounted workflow, to refresh clean history. */
   const [lateModelRepairedWorkflowId, setLateModelRepairedWorkflowId] =
     useState<string | null>(null);
+  /** Node executor pairs replaced during the latest late-catalog repair pass, to preserve across undo. */
+  const lateModelRepairsRef = useRef<
+    Map<string, { from: WorkflowNodeExecutor; to: WorkflowNodeExecutor }> | null
+  >(null);
   const clearHydratedWorkflow = useCallback(() => {
     setHydratedWorkflowId(null);
     setModelHydratedWorkflowId(null);
     setHydratedNodeExecutors({});
     setLateModelRepairedWorkflowId(null);
+    lateModelRepairsRef.current = null;
   }, []);
   const [previewedVersion, setPreviewedVersion] =
     useState<MockWorkflowVersion | null>(null);
@@ -613,6 +618,7 @@ function WorkflowEditorContent({
   );
   const workflowHistory = useWorkflowHistory(restoreHistorySnapshot);
   const resetWorkflowHistory = workflowHistory.reset;
+  const rewriteWorkflowHistorySnapshots = workflowHistory.rewriteSnapshots;
 
   /** Names one canvas element for the history panel without exposing internal IDs. */
   function historySubjectForNode(node: WorkflowCanvasNode): string {
@@ -747,6 +753,8 @@ function WorkflowEditorContent({
         : null,
     );
     setLateModelRepairedWorkflowId(null);
+    // eslint-disable-next-line react-hooks/refs -- render-phase hydrate pairs this with setState
+    lateModelRepairsRef.current = null;
     // Capture the server name in the same hydrate turn so autosave can skip no-op renames.
     // eslint-disable-next-line react-hooks/refs -- render-phase hydrate pairs this with setState
     persistedNameRef.current = draftQuery.data.workflow.name;
@@ -765,6 +773,10 @@ function WorkflowEditorContent({
     capabilitiesOverride === undefined &&
     availableAgentModels.length > 0
   ) {
+    const repairs = new Map<
+      string,
+      { from: WorkflowNodeExecutor; to: WorkflowNodeExecutor }
+    >();
     const nextNodes = workflow.nodes.map((node) => {
       if (node.data.kind !== "agent" || node.data.agentConfig === undefined) {
         return node;
@@ -790,6 +802,7 @@ function WorkflowEditorContent({
       ) {
         return node;
       }
+      repairs.set(node.id, { from: currentExecutor, to: repairedExecutor });
       return {
         ...node,
         data: {
@@ -803,6 +816,8 @@ function WorkflowEditorContent({
     });
     const repairedAny = nextNodes.some((node, index) => node !== workflow.nodes[index]);
     if (repairedAny) {
+      // eslint-disable-next-line react-hooks/refs -- render-phase reconcile pairs this with setState
+      lateModelRepairsRef.current = repairs;
       setWorkflow({ ...workflow, nodes: nextNodes });
       setLateModelRepairedWorkflowId(resolvedWorkflowId);
     }
@@ -832,14 +847,52 @@ function WorkflowEditorContent({
     ) {
       return;
     }
+    const repairs = lateModelRepairsRef.current;
+    lateModelRepairsRef.current = null;
     if (historyHydrateEditGenerationRef.current === editGenerationRef.current) {
       resetWorkflowHistory(workflowRef.current);
+      return;
     }
+    if (repairs === null || repairs.size === 0) {
+      return;
+    }
+    rewriteWorkflowHistorySnapshots((snapshot) => {
+      let changed = false;
+      const nodes = snapshot.nodes.map((node) => {
+        if (node.data.kind !== "agent" || node.data.agentConfig === undefined) {
+          return node;
+        }
+        const repair = repairs.get(node.id);
+        if (repair === undefined) {
+          return node;
+        }
+        const exec = node.data.agentConfig.executor;
+        if (
+          exec.agentCli !== repair.from.agentCli ||
+          exec.modelId !== repair.from.modelId
+        ) {
+          return node;
+        }
+        changed = true;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            agentConfig: {
+              ...node.data.agentConfig,
+              executor: repair.to,
+            },
+          },
+        };
+      });
+      return changed ? { ...snapshot, nodes } : snapshot;
+    });
   }, [
     hydratedWorkflowId,
     lateModelRepairedWorkflowId,
     resetWorkflowHistory,
     resolvedWorkflowId,
+    rewriteWorkflowHistorySnapshots,
   ]);
 
   // Explain the nodes the hydrate had to drop, once the draft carrying them has committed.

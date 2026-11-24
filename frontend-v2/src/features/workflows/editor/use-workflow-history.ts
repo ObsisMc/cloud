@@ -11,6 +11,7 @@ import {
   createWorkflowHistoryState,
   redoWorkflowHistory,
   restoreWorkflowHistorySnapshot,
+  rewriteWorkflowHistory,
   undoWorkflowHistory,
   workflowHistoryFingerprint,
 } from "./workflow-history";
@@ -214,6 +215,24 @@ export function useWorkflowHistory(
     notify();
   }, [notify]);
 
+  /** Applies a non-user reconciliation transform across past, future, current, and pending frames. */
+  const rewriteSnapshots = useCallback(
+    (transform: (snapshot: WorkflowHistorySnapshot) => WorkflowHistorySnapshot): void => {
+      historyRef.current = rewriteWorkflowHistory(historyRef.current, transform);
+      if (currentSnapshotRef.current !== null) {
+        currentSnapshotRef.current = transform(currentSnapshotRef.current);
+      }
+      if (transactionRef.current !== null) {
+        transactionRef.current = {
+          ...transactionRef.current,
+          before: transform(transactionRef.current.before),
+        };
+      }
+      notify();
+    },
+    [notify],
+  );
+
   /** Jumps several steps in one render so a history row can restore directly. */
   const jump = useCallback(
     (
@@ -272,6 +291,7 @@ export function useWorkflowHistory(
     redo,
     jump,
     clear,
+    rewriteSnapshots,
   };
 }
 
