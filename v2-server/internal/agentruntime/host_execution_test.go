@@ -333,6 +333,82 @@ func TestAnUnwrittenEndIsKnownUntilItIsWritten(t *testing.T) {
 	}
 }
 
+// No one sees an execution being settled before its reason is listed: a caller that finds another one
+// settling goes on, and may end the session at once.
+func TestASettlingExecutionIsListedWithItsReason(t *testing.T) {
+	h := newIPCHarness(t, nil)
+	records := recordExecutions(h)
+	f, start := parkHosted(t, h, h.session("hosted", "workspace"), nil)
+	h.driver.mu.Lock()
+	a := h.driver.sessions["hosted"]
+	h.driver.mu.Unlock()
+	entered, release := make(chan struct{}), make(chan struct{})
+	settle := h.driver.opts.EndHostExecution
+	h.driver.opts.EndHostExecution = func(ctx context.Context, id, reason string) error {
+		close(entered)
+		<-release
+		return settle(ctx, id, reason)
+	}
+	marked := func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.hostSettled
+	}
+	// While the list cannot be written, the execution is not marked either.
+	h.driver.mu.Lock()
+	first := make(chan struct{})
+	go func() { a.settleHost(execution.FailureNodeLost); close(first) }()
+	for range 50 {
+		if marked() {
+			h.driver.mu.Unlock()
+			t.Fatal("an execution is marked settled before its reason is listed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	h.driver.mu.Unlock()
+	receiveIPC(t, entered)
+	// The other caller decides nothing and does not wait for the write.
+	a.settleHost("user_ended")
+	if ends := h.driver.HostExecutionEnds("hosted"); len(ends) != 1 || ends[start.ExecutionID] != execution.FailureNodeLost {
+		t.Fatalf("ends = %v", ends)
+	}
+	close(release)
+	receiveIPC(t, first)
+	if end := receiveIPC(t, records.ended); end != [2]string{start.ExecutionID, execution.FailureNodeLost} {
+		t.Fatalf("settled %v", end)
+	}
+	if ends := h.driver.HostExecutionEnds("hosted"); len(ends) != 0 {
+		t.Fatalf("ends once written = %v", ends)
+	}
+	f.terminal(start)
+}
+
+// Settling competes with the Node's loss, its reports and an End of the same session: whichever comes
+// first, the reason of the one end is the one written, and everyone who went on could read it.
+func TestSettlingRacesKeepOneReason(t *testing.T) {
+	for range 30 {
+		h := newIPCHarness(t, nil)
+		records := recordExecutions(h)
+		f, start := parkHosted(t, h, h.session("hosted", "workspace"), nil)
+		h.driver.opts.EndHostExecution = func(context.Context, string, string) error { return errors.New("database unavailable") }
+		h.driver.hostExecutionRetry = 20 * time.Millisecond
+		f.terminalAs(start, "idle_timeout", "")
+		go func() { _ = f.Close() }()
+		if err := h.driver.End(ipcContext(t), "hosted"); err != nil {
+			t.Fatal(err)
+		}
+		ends := h.driver.HostExecutionEnds("hosted")
+		a := h.driver.sessions["hosted"]
+		a.mu.Lock()
+		reason := a.hostReason
+		a.mu.Unlock()
+		if len(ends) != 1 || reason == "" || ends[start.ExecutionID] != reason {
+			t.Fatalf("ends = %v, decided %q", ends, reason)
+		}
+		records.none(t)
+	}
+}
+
 // The failure that makes the server end a session is the reason its execution ends, not the end it
 // leads to.
 func TestAFailureThatEndsTheSessionIsTheReason(t *testing.T) {

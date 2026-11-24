@@ -56,27 +56,32 @@ func (a *agentSession) decideHostLocked(reason string) {
 // settleHost writes that the execution ended, with reason unless one was decided before. The write
 // happens before the caller goes on, so nothing that learns of the end from it finds the execution
 // running; one that fails is repeated in the background.
+//
+// A caller that finds another one settling goes on without waiting for its write. Both locks are
+// held while the execution is marked and its reason listed, so that caller, and whoever ends the
+// session after it, finds the reason in HostExecutionEnds until it is written.
 func (a *agentSession) settleHost(reason string) {
+	d := a.project.driver
+	d.mu.Lock()
 	a.mu.Lock()
 	a.decideHostLocked(reason)
-	if !a.hostRecorded || a.hostSettled || a.project.driver.closing.Load() {
+	if !a.hostRecorded || a.hostSettled || d.closing.Load() {
 		a.mu.Unlock()
+		d.mu.Unlock()
 		return
 	}
 	a.hostSettled = true
 	reason = a.hostReason
-	a.mu.Unlock()
-	d := a.project.driver
-	d.mu.Lock()
 	if d.unsettled == nil {
 		d.unsettled = map[string]hostExecutionEnd{}
 	}
 	d.unsettled[a.execution] = hostExecutionEnd{session: a.frozen.ID, reason: reason}
+	a.mu.Unlock()
 	d.mu.Unlock()
 	if a.endHost(reason) == nil {
 		return
 	}
-	retry := a.project.driver.hostExecutionRetry
+	retry := d.hostExecutionRetry
 	if retry <= 0 {
 		retry = defaultHostExecutionRetry
 	}
