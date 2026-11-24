@@ -3,6 +3,7 @@ package workflowhost
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -38,6 +39,9 @@ func (d *reportingDriver) Run(ctx context.Context, _ execution.Scope, s executio
 	if agent == nil {
 		agent = &fakeAgent{t: d.t, url: turn.Host.Attach(s.ID).Servers[0].URL}
 		d.agents[s.ID] = agent
+		if err := d.db.RecordHostExecution(ctx, fmt.Sprintf("%p-%s", d, s.ID), s.ID); err != nil {
+			d.t.Error(err)
+		}
 	}
 	d.mu.Unlock()
 	instruction := turn.Host.Instruct()
@@ -146,5 +150,99 @@ func TestTheToolFollowsStoredExecutionState(t *testing.T) {
 		if strings.Contains(string(stored), token) {
 			t.Fatal("a token was stored")
 		}
+	}
+}
+
+// A parked node waits through a restart while its old execution does not: it is settled, with the
+// restart as its reason, before the tool is served again, and the next turn runs in a new one.
+func TestARestartSettlesTheExecutionOfAParkedNode(t *testing.T) {
+	f := newFixture(t)
+	f.host.Close()
+	ctx := t.Context()
+	// start is one server process over the stored state, in main's order.
+	start := func(check func()) (stop func()) {
+		t.Helper()
+		driver := &reportingDriver{t: t, db: f.s, agents: map[string]*fakeAgent{}}
+		runtime, err := executionruntime.New(ctx, executionruntime.Config{Store: f.s, Models: executionruntime.WithFixtureModels(nil), Agent: driver})
+		if err != nil {
+			t.Fatal(err)
+		}
+		check()
+		tools := completiontool.NewRegistry(f.s.WorkflowNodeTurnLive)
+		served, err := completiontool.Serve(tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.host, err = NewHost(Config{Store: f.s, Execution: runtime, Catalog: runtime, CompletionTool: tools,
+			CheckHostTools: func(context.Context, execution.Scope, string) error { return nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.host.Interrupt(ctx); err != nil {
+			t.Fatal(err)
+		}
+		host := f.host
+		return func() {
+			host.Close()
+			if err := runtime.Close(context.Background()); err != nil {
+				t.Error(err)
+			}
+			served.Close()
+		}
+	}
+	stop := start(func() {})
+	runID := f.run(t, agentChain, str("支付重构"))
+	if _, err := f.host.StartRun(ctx, f.scope, runID); err != nil {
+		t.Fatal(err)
+	}
+	signal := signalOf(f.settledTurns(t, runID, 1))
+	_, nodes := f.await(t, runID, parked("a"))
+	sid := *node(nodes, "a").SessionID
+	session, err := f.s.ReadExecutionSession(ctx, executionScope(f.scope), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.RecordWorkspace(ctx, session.WorkspaceID, store.WorkspaceLocation{Path: t.TempDir(), BaseCommit: "fixed", CloneExecution: "c-1"}); err != nil {
+		t.Fatal(err)
+	}
+	executions := func(want int) []store.HostExecution {
+		t.Helper()
+		got, err := f.s.HostExecutions(ctx, sid)
+		if err != nil || len(got) != want {
+			t.Fatalf("executions = %+v %v, want %d", got, err, want)
+		}
+		return got
+	}
+	if x := executions(1)[0]; x.EndedAt != nil {
+		t.Fatalf("a parked node's execution = %+v", x)
+	}
+	stop()
+
+	stop = start(func() {
+		if x := executions(1)[0]; x.EndedAt == nil || x.Reason != execution.FailureServerRestarted {
+			t.Fatalf("before the tool is served, the execution is %+v", x)
+		}
+		if session, err := f.s.ReadExecutionSession(ctx, executionScope(f.scope), sid); err != nil || session.EndedAt != nil {
+			t.Fatalf("session = %+v %v, want it open", session, err)
+		}
+	})
+	defer func() { stop() }()
+	p := f.settledTurns(t, runID, 1)
+	if signalOf(p) != signal || !reflect.DeepEqual(blockerKinds(p), []string{blockerTurnUnconfirmed, blockerConfirmationPending}) {
+		t.Fatalf("summary after the restart = %v", p)
+	}
+	if _, err := f.host.SendNodeTurn(ctx, f.scope, runID, "a", "继续"); err != nil {
+		t.Fatal(err)
+	}
+	p = f.settledTurns(t, runID, 2)
+	if x := executions(2); x[0].Reason != execution.FailureServerRestarted || x[1].EndedAt != nil || x[0].ID == x[1].ID {
+		t.Fatalf("executions = %+v", x)
+	}
+	if _, err := f.host.CompleteNode(ctx, f.scope, runID, "a", server.WorkflowNodeCompletion{ConfirmSignalID: signalOf(p)}); err != nil {
+		t.Fatal(err)
+	}
+	f.succeeded(t, runID)
+	if x := executions(2); x[0].Reason != execution.FailureServerRestarted || x[1].Reason != execution.HostSessionEnded {
+		t.Fatalf("executions = %+v", x)
 	}
 }
