@@ -198,6 +198,15 @@ const FailureWorkspaceMissing = "workspace_missing"
 // Agent, see Recovery); any other session ends.
 const FailureNodeLost = "agent_transport_closed"
 
+// FailureServerRestarted is the failure code of a turn, and the end reason of a host execution, that
+// a server restart cut.
+const FailureServerRestarted = "server_restarted"
+
+// HostSessionEnded is the end reason of a host execution whose session the server ended. The other
+// reasons are FailureServerRestarted, FailureNodeLost, the failure that made the server end the
+// session, and those Node reports for an Agent session that ended by itself.
+const HostSessionEnded = "session_ended"
+
 // ErrNodeLost is returned with FailureNodeLost when the Node was already gone before the turn
 // reached its Agent: nothing of the turn ran, so a replacement Agent can take it at once.
 var ErrNodeLost = errors.New("the session's Node was lost before the turn reached its Agent")

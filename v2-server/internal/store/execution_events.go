@@ -202,6 +202,10 @@ func endExecutionSession(ctx context.Context, tx pgx.Tx, session execution.Sessi
 	if _, err := tx.Exec(ctx, `UPDATE v2_execution_sessions SET data=$2,ended_at=$3 WHERE id=$1`, session.ID, raw, now); err != nil {
 		return err
 	}
+	// The driver settles what it knows the end of before; a session never ends with one running.
+	if _, err := tx.Exec(ctx, `UPDATE v2_host_executions SET ended_at=$2, reason=$3 WHERE session_id=$1 AND ended_at IS NULL`, session.ID, now, execution.HostSessionEnded); err != nil {
+		return err
+	}
 	_, err = insertExecutionEvent(ctx, tx, execution.Event{Ref: execution.Ref{SessionID: session.ID}, Kind: execution.EventSessionEnded, OccurredAt: now})
 	return err
 }
@@ -247,6 +251,12 @@ func (s *Store) recoverExecutions(ctx context.Context, deliver bool) ([]Recovere
 	var kept []RecoveredSession
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		kept = nil
+		// Every Node of the previous process has been stopped, so no execution it recorded still runs,
+		// also that of a session kept below: the session's next turn starts a new one. In this
+		// transaction, so a start that cannot settle them recovers nothing and serves nothing.
+		if _, err := tx.Exec(ctx, `UPDATE v2_host_executions SET ended_at = now(), reason = $1 WHERE ended_at IS NULL`, execution.FailureServerRestarted); err != nil {
+			return fmt.Errorf("settle host executions: %w", err)
+		}
 		rows, err := tx.Query(ctx, `SELECT s.data, s.tenant_id::text, s.user_id::text, `+parkedInteractiveSession+`
 			AND NOT EXISTS (SELECT 1 FROM v2_execution_turns t WHERE t.session_id = s.id AND t.ended_at IS NULL)
 			FROM v2_execution_sessions s WHERE s.ended_at IS NULL ORDER BY s.id FOR UPDATE OF s`)
@@ -305,7 +315,7 @@ func (s *Store) recoverExecutions(ctx context.Context, deliver bool) ([]Recovere
 			}
 			if err == nil {
 				ref := execution.Ref{SessionID: session.ID, TurnID: tid}
-				result := execution.Result{Status: execution.StatusInterrupted, FailureCode: "server_restarted"}
+				result := execution.Result{Status: execution.StatusInterrupted, FailureCode: execution.FailureServerRestarted}
 				if deliver {
 					staged, err := recoverDeliveryWork(ctx, tx, session, ref)
 					if err != nil {
