@@ -2,11 +2,20 @@ package workflow_test
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/workflow"
 )
+
+func withExecutor(agentConfig obj) obj {
+	out := obj{"executor": obj{"agentCli": "claude", "modelId": "model"}}
+	for k, v := range agentConfig {
+		out[k] = v
+	}
+	return out
+}
 
 // These acceptance/rejection pairs exercise the public publication boundary,
 // following desktop start_input, agent_config, retry and structured_output tests.
@@ -16,22 +25,27 @@ func TestNodeConfigurationValidation(t *testing.T) {
 		data       obj
 		valid      bool
 	}{
-		{"legacy agent", "agent", obj{}, true},
+		{"missing agent config", "agent", obj{}, false},
+		{"missing executor", "agent", obj{"agentConfig": obj{"prompt": ""}}, false},
+		{"empty agentCli", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "", "modelId": "model"}}}, false},
+		{"whitespace agentCli", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "  ", "modelId": "model"}}}, false},
+		{"empty modelId", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "claude", "modelId": ""}}}, false},
+		{"whitespace modelId", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "claude", "modelId": " \t"}}}, false},
 		{"no local catalog required", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "not-installed", "modelId": "not-installed"}, "prompt": ""}}, true},
 		{"agent not object", "agent", obj{"agentConfig": false}, false},
 		{"wrong prompt", "agent", obj{"agentConfig": obj{"prompt": 2}}, false},
 		{"wrong executor", "agent", obj{"agentConfig": obj{"executor": "bad"}}, false},
 		{"wrong interactive", "agent", obj{"agentConfig": obj{"interactive": "true"}}, false},
 		{"bad skills shape", "agent", obj{"agentConfig": obj{"skills": nil}}, false},
-		{"legacy skill", "agent", obj{"agentConfig": obj{"skills": []any{obj{}}}}, true},
-		{"valid mcp", "agent", obj{"agentConfig": obj{"mcps": []any{obj{"mcpId": "official/tools", "enabled": true}}}}, true},
+		{"legacy skill", "agent", obj{"agentConfig": withExecutor(obj{"skills": []any{obj{}}})}, true},
+		{"valid mcp", "agent", obj{"agentConfig": withExecutor(obj{"mcps": []any{obj{"mcpId": "official/tools", "enabled": true}}})}, true},
 		{"noncanonical mcp", "agent", obj{"agentConfig": obj{"mcps": []any{obj{"mcpId": "tools", "enabled": true}}}}, false},
 		{"mcp namespace limit", "agent", obj{"agentConfig": obj{"mcps": []any{obj{"mcpId": strings.Repeat("a", 34) + "/tools", "enabled": false}}}}, false},
 		{"duplicate disabled mcp", "agent", obj{"agentConfig": obj{"mcps": []any{obj{"mcpId": "local/tools", "enabled": false}, obj{"mcpId": "local/tools", "enabled": false}}}}, false},
 		{"mcp enabled required", "agent", obj{"agentConfig": obj{"mcps": []any{obj{"mcpId": "local/tools"}}}}, false},
-		{"wait inactivity", "agent", obj{"agentConfig": obj{"promptInactivity": "wait"}}, true},
+		{"wait inactivity", "agent", obj{"agentConfig": withExecutor(obj{"promptInactivity": "wait"})}, true},
 		{"unknown inactivity", "agent", obj{"agentConfig": obj{"promptInactivity": "forever"}}, false},
-		{"retry limits", "agent", obj{"agentConfig": obj{"retry": obj{"enabled": true, "maxRetries": 5, "initialDelaySeconds": 300}}}, true},
+		{"retry limits", "agent", obj{"agentConfig": withExecutor(obj{"retry": obj{"enabled": true, "maxRetries": 5, "initialDelaySeconds": 300}})}, true},
 		{"disabled retry still validated", "agent", obj{"agentConfig": obj{"retry": obj{"enabled": false, "maxRetries": 6, "initialDelaySeconds": 10}}}, false},
 		{"retry missing field", "agent", obj{"agentConfig": obj{"retry": obj{"enabled": true, "maxRetries": 2}}}, false},
 		{"retry fraction", "agent", obj{"agentConfig": obj{"retry": obj{"enabled": true, "maxRetries": 1.5, "initialDelaySeconds": 10}}}, false},
@@ -54,17 +68,17 @@ func TestNodeConfigurationValidation(t *testing.T) {
 		{"aggregator duplicate", "aggregator", obj{"aggregatorConfig": obj{"variables": []any{[]string{"start", "input"}, []string{"start", "input"}}}}, false},
 		{"aggregator unknown variable", "aggregator", obj{"aggregatorConfig": obj{"variables": []any{[]string{"start", "unknown"}}}}, false},
 		{"bad unrelated wire field", "output", obj{"cases": "unfinished"}, false},
-		{"agent schema version 3", "agent", obj{"agentConfig": obj{"schemaVersion": 3}}, true},
+		{"agent schema version 3", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 3})}, true},
 		{"agent schema version 5", "agent", obj{"agentConfig": obj{"schemaVersion": 5}}, false},
 		{"agent schema version text", "agent", obj{"agentConfig": obj{"schemaVersion": "4"}}, false},
 		{"completion signal needs version 4", "agent", obj{"agentConfig": obj{"schemaVersion": 3, "completionSignal": "end_turn"}}, false},
 		{"completion signal without version", "agent", obj{"agentConfig": obj{"completionSignal": "agent"}}, false},
-		{"completion signal end_turn", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "interactive": true, "completionSignal": "end_turn"}}, true},
-		{"completion signal agent", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "interactive": true, "completionSignal": "agent", "autoAcceptAgentCompletion": true}}, true},
+		{"completion signal end_turn", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "interactive": true, "completionSignal": "end_turn"})}, true},
+		{"completion signal agent", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "interactive": true, "completionSignal": "agent", "autoAcceptAgentCompletion": true})}, true},
 		{"completion signal unknown", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completionSignal": "tool"}}, false},
 		{"auto accept not boolean", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "autoAcceptAgentCompletion": "yes"}}, false},
 		{"auto accept needs version 4", "agent", obj{"agentConfig": obj{"autoAcceptAgentCompletion": false}}, false},
-		{"completion files", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "reports/plan.md", "mustChange": true}, obj{"path": "docs/**/*.md"}}}}}, true},
+		{"completion files", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "reports/plan.md", "mustChange": true}, obj{"path": "docs/**/*.md"}}}})}, true},
 		{"completion files need version 4", "agent", obj{"agentConfig": obj{"completion": obj{"files": []any{obj{"path": "a.md"}}}}}, false},
 		{"completion files empty", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{}}}}, false},
 		{"completion files missing", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{}}}, false},
@@ -76,7 +90,7 @@ func TestNodeConfigurationValidation(t *testing.T) {
 		{"completion file traversal", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a/../b.md"}}}}}, false},
 		{"completion file class", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a/[ab].md"}}}}}, false},
 		{"completion too many files", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": manyFiles(33)}}}, false},
-		{"completion 32 files", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": manyFiles(32)}}}, true},
+		{"completion 32 files", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": manyFiles(32)}})}, true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -165,7 +179,7 @@ func TestStructuredSchemaAdmission(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			g := flat()
-			addNode(g, "agent", "agent", obj{"agentConfig": obj{"outputContract": obj{"type": "structured", "schema": test.schema}}})
+			addNode(g, "agent", "agent", obj{"agentConfig": withExecutor(obj{"outputContract": obj{"type": "structured", "schema": test.schema}})})
 			connect(g, "start", "agent")
 			if test.valid {
 				requireValid(t, g)
@@ -222,7 +236,7 @@ func TestGlobalAndDerivedTypes(t *testing.T) {
 func TestDerivedCatalogKeepsFirstDeclaration(t *testing.T) {
 	g := flat()
 	dataOf(g, "start")["inputVariables"] = []any{obj{"name": "input", "valueType": "number"}}
-	addNode(g, "agent", "agent", nil)
+	addNode(g, "agent", "agent", obj{"agentConfig": withExecutor(nil)})
 	addNode(g, "agg", "aggregator", obj{"aggregatorConfig": obj{"variables": []any{[]string{"start", "input"}, []string{"agent", "output"}}}})
 	connect(g, "start", "agent")
 	connect(g, "agent", "agg")
@@ -240,4 +254,79 @@ func manyFiles(n int) []any {
 		files[i] = obj{"path": "out/" + strings.Repeat("f", i+1) + ".md"}
 	}
 	return files
+}
+
+func TestPublishValidationRequiresAgentExecutorAndIdentifiesNode(t *testing.T) {
+	for name, tc := range map[string]struct {
+		graph     func() obj
+		wantNode  string
+		wantField string
+	}{
+		"root missing executor": {
+			graph: func() obj {
+				g := flat()
+				addNode(g, "worker", "agent", obj{"agentConfig": obj{"prompt": "hi"}})
+				connect(g, "start", "worker")
+				return g
+			},
+			wantNode:  "worker",
+			wantField: "data.agentConfig.executor",
+		},
+		"root empty agentCli": {
+			graph: func() obj {
+				g := flat()
+				addNode(g, "worker", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "", "modelId": "fixture"}}})
+				connect(g, "start", "worker")
+				return g
+			},
+			wantNode:  "worker",
+			wantField: "data.agentConfig.executor.agentCli",
+		},
+		"root empty modelId": {
+			graph: func() obj {
+				g := flat()
+				addNode(g, "worker", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "claude", "modelId": "  "}}})
+				connect(g, "start", "worker")
+				return g
+			},
+			wantNode:  "worker",
+			wantField: "data.agentConfig.executor.modelId",
+		},
+		"loop member empty executor": {
+			graph: func() obj {
+				g := fixture(t, "loop")
+				delete(dataOf(g, "writer")["agentConfig"].(obj), "executor")
+				return g
+			},
+			wantNode:  "writer",
+			wantField: "data.agentConfig.executor",
+		},
+		"iteration member empty executor": {
+			graph: func() obj {
+				g := fixture(t, "iteration")
+				dataOf(g, "fix")["agentConfig"] = obj{"executor": obj{"agentCli": "claude", "modelId": ""}}
+				return g
+			},
+			wantNode:  "fix",
+			wantField: "data.agentConfig.executor.modelId",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := encode(t, tc.graph())
+			err := workflow.ValidateWorkflow(source)
+			var domain *workflow.ValidationError
+			if !errors.As(err, &domain) || domain.Code != "invalid_node" || domain.NodeID != tc.wantNode || domain.Field != tc.wantField || domain.Reason == "" {
+				t.Fatalf("ValidateWorkflow = %#v, want ValidationError{invalid_node, %q, %q}", err, tc.wantNode, tc.wantField)
+			}
+			// ParseGraph keeps legacy published snapshots readable without an executor.
+			if _, err := workflow.ParseGraph(source); err != nil {
+				t.Fatalf("ParseGraph rejected legacy snapshot: %v", err)
+			}
+		})
+	}
+
+	// Spare Agents are not reachable from Start and may remain unfinished on publish.
+	g := flat()
+	addNode(g, "spare", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "", "modelId": ""}}})
+	requireValid(t, g)
 }

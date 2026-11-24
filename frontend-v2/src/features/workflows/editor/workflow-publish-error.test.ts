@@ -44,6 +44,15 @@ describe("describePublishFailure", () => {
     expect(message("agentConfig.prompt")).toBe(
       "发布被拒绝：节点「汇总输出」的提示词变量没有通过发布校验，草稿已保存。",
     );
+    expect(message("data.agentConfig.executor")).toBe(
+      "发布被拒绝：节点「汇总输出」的Agent 模型没有通过发布校验，草稿已保存。",
+    );
+    expect(message("data.agentConfig.executor.agentCli")).toBe(
+      "发布被拒绝：节点「汇总输出」的Agent 模型没有通过发布校验，草稿已保存。",
+    );
+    expect(message("data.agentConfig.executor.modelId")).toBe(
+      "发布被拒绝：节点「汇总输出」的Agent 模型没有通过发布校验，草稿已保存。",
+    );
     expect(message("cases")).toBe(
       "发布被拒绝：节点「汇总输出」的分支条件没有通过发布校验，草稿已保存。",
     );

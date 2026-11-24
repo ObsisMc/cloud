@@ -180,10 +180,10 @@ func TestStructureCannotBeHiddenInSpareNodes(t *testing.T) {
 func TestPublicationDoesNotPretendToStart(t *testing.T) {
 	for _, source := range []string{
 		`{"nodes":[],"edges":[]}`,
-		`{"nodes":[{"id":"a","data":{"kind":"agent"}}],"edges":[]}`,
+		`{"nodes":[{"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"claude","modelId":"model"}}}}],"edges":[]}`,
 		`{"nodes":[{"id":"s","data":{"kind":"start","inputVariables":[{"name":"required","valueType":"string","required":true}]}}],"edges":[]}`,
 		`{"nodes":[{"id":"p","data":{"kind":"prompt"}}],"edges":[]}`,
-		`{"nodes":[{"id":"o","data":{"kind":"output"}},{"id":"a","data":{"kind":"agent"}}],"edges":[{"source":"o","target":"a"}]}`,
+		`{"nodes":[{"id":"o","data":{"kind":"output"}},{"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"claude","modelId":"model"}}}}],"edges":[{"source":"o","target":"a"}]}`,
 	} {
 		if err := workflow.ValidateWorkflow(source); err != nil {
 			t.Fatalf("start-time prerequisite blocked publication: %v", err)

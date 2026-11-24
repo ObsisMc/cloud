@@ -123,3 +123,25 @@ func validateSchema(r reader) {
 func loopName(name string) bool {
 	return name != "" && strings.TrimSpace(name) == name && !strings.Contains(name, ".")
 }
+
+// validatePublishExecutors rejects active Agent nodes without a selected executor at publish
+// time. ParseGraph skips this check so legacy published snapshots and runtime error paths stay intact.
+func validatePublishExecutors(d *document) error {
+	for _, n := range d.nodes {
+		if !d.active[n.id] || n.kind != "agent" {
+			continue
+		}
+		config, _ := n.data["agentConfig"].(object)
+		exec, _ := config["executor"].(object)
+		if config == nil || exec == nil {
+			return invalid("invalid_node", n.id, "data.agentConfig.executor", "Agent node requires a selected executor")
+		}
+		if cli, _ := exec["agentCli"].(string); strings.TrimSpace(cli) == "" {
+			return invalid("invalid_node", n.id, "data.agentConfig.executor.agentCli", "Agent node requires a non-empty executor.agentCli")
+		}
+		if model, _ := exec["modelId"].(string); strings.TrimSpace(model) == "" {
+			return invalid("invalid_node", n.id, "data.agentConfig.executor.modelId", "Agent node requires a non-empty executor.modelId")
+		}
+	}
+	return nil
+}

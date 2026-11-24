@@ -24,7 +24,7 @@ Loop 外（含 Loop 自己的 `initial`）只能读命名输出（没有 `{loop}
 轮次 Start 不提供变量，循环体内的 Aggregator 只能选循环体内产生的变量（与 `validateDeclarations` 的循环体类型表一致）。错误的 `field` 指出引用所在的配置项，如 `agentConfig.prompt`、`cases`、`loopConfig.until`。
 
 发布边界对应 `WorkflowGraph::parse`，启动边界另外调用 `validate_executable_graph`。
-例如缺少 Start 的平面图、未指定本机可用执行器的 Agent 仍可能通过发布校验。
+例如缺少 Start 的平面图、未校验本机已安装目录的执行器（`agentCli` / `modelId` 须非空，但不要求本机已安装）仍可能通过发布校验。
 执行侧必须在启动前另行检查图、运行输入和能力可用性。保存草稿不应调用 `ValidateWorkflow`。
 
 装配层将 `Analysis` 映射成 HTTP 传输类型，`ValidateWorkflow` 可直接作为回调传入。

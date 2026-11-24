@@ -105,11 +105,15 @@ function configuredParameters(
       label: t("settings.workflow.field.role"),
       values: [agentNameById.get(config.roleId) ?? config.roleId],
     });
+    const agentCli = config.executor.agentCli.trim();
+    const modelId = config.executor.modelId.trim();
     parameters.push(
       {
         label: t("settings.workflow.field.agentModel"),
         values: [
-          `${config.executor.agentCli || "—"} · ${config.executor.modelId || "—"}`,
+          agentCli === "" && modelId === ""
+            ? t("settings.workflow.noAgentSelected")
+            : `${agentCli || "—"} · ${modelId || "—"}`,
         ],
       },
     );

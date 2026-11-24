@@ -644,7 +644,7 @@ not execute these kinds: `crates/application/src/workflow_run/engine/node_type.r
 
 图规则不属于 HTTP 层：`server.Options.AnalyzeWorkflow` 提供草稿分析，`Options.ValidateWorkflow` 提供发布前的可执行性校验，两者由工作流领域注入；未注入时定义读写照常，分析和发布返回 `503 workflow_domain_unavailable`，不会把未校验的文档伪装成可运行版本。
 
-与 desktop 的明确差异：v2 以租户代替 desktop 的单一 `local` 命名空间，`namespace` 恒为 `local`；重名改为由数据库唯一索引拒绝并映射为 409（desktop 并发重名可能返回 500）；发布校验放在事务内（desktop 存在校验与冻结之间的 TOCTOU）；软删记录 `deleted_at`（desktop 丢弃快照删除时间）；版本列表在同一毫秒内用 id 兜底排序；名称唯一性用 PostgreSQL `lower()`，比 desktop 的 ASCII `NOCASE` 范围更宽；发布另外拒绝引擎永远不会赋值的 Loop 引用（`invalid_loop_reference`）：Loop 外引用它的命名输出以外的变量（如旧图里的 `{loop}.output`），循环体内引用 Loop 的循环变量以外的变量，或引用轮次 Start 的变量；Loop 自己的配置同样检查（`initial` 读 Loop 开始前的变量池，`feedback`、`until`、`outputs` 读本轮变量池），循环体内的变量聚合器只能选循环体内产生的变量或全局变量。名字恰好以 Loop 或轮次 Start 的 ID 开头的全局变量按全局变量解析，不受影响。desktop 接受这类图，运行到该节点才以变量未赋值失败。
+与 desktop 的明确差异：v2 以租户代替 desktop 的单一 `local` 命名空间，`namespace` 恒为 `local`；重名改为由数据库唯一索引拒绝并映射为 409（desktop 并发重名可能返回 500）；发布校验放在事务内（desktop 存在校验与冻结之间的 TOCTOU）；软删记录 `deleted_at`（desktop 丢弃快照删除时间）；版本列表在同一毫秒内用 id 兜底排序；名称唯一性用 PostgreSQL `lower()`，比 desktop 的 ASCII `NOCASE` 范围更宽；发布另外拒绝可达 Agent 节点使用空的 `executor.agentCli` / `executor.modelId`（`invalid_node`，指出 `nodeId` 和对应字段；备用节点和既有已发布快照不受影响），以及引擎永远不会赋值的 Loop 引用（`invalid_loop_reference`）：Loop 外引用它的命名输出以外的变量（如旧图里的 `{loop}.output`），循环体内引用 Loop 的循环变量以外的变量，或引用轮次 Start 的变量；Loop 自己的配置同样检查（`initial` 读 Loop 开始前的变量池，`feedback`、`until`、`outputs` 读本轮变量池），循环体内的变量聚合器只能选循环体内产生的变量或全局变量。名字恰好以 Loop 或轮次 Start 的 ID 开头的全局变量按全局变量解析，不受影响。desktop 接受这类图，运行到该节点才以变量未赋值失败。
 
 ### 工作流运行历史
 

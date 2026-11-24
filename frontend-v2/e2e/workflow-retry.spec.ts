@@ -16,7 +16,7 @@ async function createRun(page: Page, graph?: string): Promise<{ tid: string, rid
   const project = (await (await page.request.get(`${base}/projects?limit=100`)).json()).items[0]
   const source = graph ?? JSON.stringify({ nodes: [
     { id: 'start', type: 'workflow', position: { x: 0, y: 0 }, data: { kind: 'start', title: '开始' } },
-    { id: 'agent', type: 'workflow', position: { x: 320, y: 0 }, data: { kind: 'agent', title: '重试任务', agentConfig: { prompt: 'retry task' } } },
+    { id: 'agent', type: 'workflow', position: { x: 320, y: 0 }, data: { kind: 'agent', title: '重试任务', agentConfig: { executor: { agentCli: 'official/ora-space.opencode', modelId: 'fixture' }, prompt: 'retry task' } } },
     { id: 'out', type: 'workflow', position: { x: 640, y: 0 }, data: { kind: 'output', title: '输出' } },
   ], edges: [{ id: 'a', source: 'start', target: 'agent' }, { id: 'b', source: 'agent', target: 'out' }] })
   const created = await page.request.post(`${base}/workflows`, { data: { name: `重试验收 ${Date.now()}`, graph: source } })
