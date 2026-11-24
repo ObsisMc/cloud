@@ -123,6 +123,7 @@ export function taskRunMessageFor(error: unknown): string {
     case 'workflow_snapshot_not_found': return '所选工作流版本不存在，请重新选择。'
     case 'workflow_draft_snapshot': return '草稿版本不能直接运行，请选择已发布的工作流。'
     case 'workflow_role_not_found': return '工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色再启动。'
+    case 'workflow_skill_not_found': return missingSkillMessageOf(error)
     case 'workflow_run_start_failed': return '工作流图定义不可执行，请检查工作流配置。'
     case 'workflow_run_host_unavailable': return '工作流执行服务不可用，请稍后重试。'
     case 'execution_unavailable': return '执行服务暂时不可用，请稍后重试。'
@@ -165,6 +166,19 @@ function serverMessageOf(error: unknown): string | undefined {
   if (!isAxiosError(error)) return undefined
   const message = (error.response?.data as { params?: { message?: unknown } } | undefined)?.params?.message
   return typeof message === 'string' && message ? message : undefined
+}
+
+function missingSkillMessageOf(error: unknown): string {
+  if (isAxiosError(error)) {
+    const params = (error.response?.data as { params?: { nodeId?: unknown; nodeTitle?: unknown; skillId?: unknown } } | undefined)?.params
+    const skillId = typeof params?.skillId === 'string' ? params.skillId.trim() : ''
+    const nodeTitle = (typeof params?.nodeTitle === 'string' && params.nodeTitle.trim()) ||
+      (typeof params?.nodeId === 'string' && params.nodeId.trim()) || ''
+    if (skillId && nodeTitle) {
+      return `节点「${nodeTitle}」需要的技能 ${skillId} 不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再启动。`
+    }
+  }
+  return '工作流引用的技能不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再启动。'
 }
 
 /** A user-facing reason for a refused decomposition. */

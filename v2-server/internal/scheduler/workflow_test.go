@@ -190,6 +190,8 @@ func TestWorkflowStartRefusalWithdrawsTheRun(t *testing.T) {
 		reason string
 	}{
 		{ErrWorkflowNotStartable, "workflow_run_not_startable"},
+		{ErrWorkflowRoleNotFound, "workflow_role_not_found"},
+		{ErrWorkflowSkillNotFound, "workflow_skill_not_found"},
 		{execution.ErrUnavailable, "execution_unavailable"},
 	} {
 		t.Run(tc.reason, func(t *testing.T) {

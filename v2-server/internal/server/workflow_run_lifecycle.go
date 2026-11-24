@@ -40,9 +40,31 @@ var (
 	// ErrWorkflowRoleNotFound reports a run whose frozen graph references a role the workspace's
 	// role catalog does not have, so the start is refused before anything executes.
 	ErrWorkflowRoleNotFound = errors.New("workflow role not found")
+	// ErrWorkflowSkillNotFound reports a run whose frozen graph enables a personal or marketplace
+	// Skill that is not available to the starter in the target project, refusing start before dispatch.
+	ErrWorkflowSkillNotFound = errors.New("workflow skill not found")
 	// ErrWorkflowRunStopUnconfirmed reports a cancellation whose stop was not confirmed.
 	ErrWorkflowRunStopUnconfirmed = errors.New("workflow run stop is unconfirmed")
 )
+
+// WorkflowSkillNotFound names the first enabled Skill binding a start preflight could not resolve.
+// Desktop emits `workflow_skill_not_found` with empty params; v2 extends it with `nodeId`,
+// `nodeTitle`, and `skillId` so the UI can pinpoint the blocked node and Skill.
+type WorkflowSkillNotFound struct {
+	NodeID    string
+	NodeTitle string
+	SkillID   string
+	Reason    string
+}
+
+func (e *WorkflowSkillNotFound) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("%s: node %q (%s) skill %q: %s", ErrWorkflowSkillNotFound, e.NodeTitle, e.NodeID, e.SkillID, e.Reason)
+	}
+	return fmt.Sprintf("%s: node %q (%s) skill %q", ErrWorkflowSkillNotFound, e.NodeTitle, e.NodeID, e.SkillID)
+}
+
+func (e *WorkflowSkillNotFound) Unwrap() error { return ErrWorkflowSkillNotFound }
 
 // WorkflowRunInputInvalid names one rejected start variable, mirroring desktop's error params.
 type WorkflowRunInputInvalid struct {
@@ -173,6 +195,7 @@ func (h *handler) completeWorkflowNode(w http.ResponseWriter, r *http.Request, a
 // stays a 500 so an implementation bug is not reported as a client mistake.
 func workflowRunLifecycleFault(w http.ResponseWriter, err error, op string) {
 	var invalid *WorkflowRunInputInvalid
+	var missingSkill *WorkflowSkillNotFound
 	if interactiveNodeFault(w, err) {
 		return
 	}
@@ -185,6 +208,18 @@ func workflowRunLifecycleFault(w http.ResponseWriter, err error, op string) {
 		fault(w, http.StatusBadRequest, "workflow_run_start_failed")
 	case errors.Is(err, ErrWorkflowRoleNotFound):
 		fault(w, http.StatusBadRequest, "workflow_role_not_found")
+	case errors.As(err, &missingSkill):
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"code": "workflow_skill_not_found",
+			"params": map[string]any{
+				"nodeId":    missingSkill.NodeID,
+				"nodeTitle": missingSkill.NodeTitle,
+				"skillId":   missingSkill.SkillID,
+			},
+			"requestId": requestID(),
+		})
+	case errors.Is(err, ErrWorkflowSkillNotFound):
+		fault(w, http.StatusBadRequest, "workflow_skill_not_found")
 	case errors.Is(err, ErrWorkflowRunNotEditable):
 		fault(w, http.StatusConflict, "workflow_run_not_editable")
 	case errors.Is(err, ErrWorkflowNodeNotAwaitingInput):

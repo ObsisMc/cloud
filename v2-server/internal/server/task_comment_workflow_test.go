@@ -658,6 +658,61 @@ func TestTaskCommentWorkflowMissingRoleReturns400AndRecovers(t *testing.T) {
 	waitForCommentWorkflowStatus(t, c, "/api/v2/tenants/"+tid+"/tasks/"+task["id"].(string)+"/timeline", runID, "succeeded")
 }
 
+func TestTaskCommentWorkflowMissingSkillReturns400AndRecovers(t *testing.T) {
+	f := newSquadServer(t)
+	commentWorkflowServer(t, f)
+	c := f.taskClient()
+	c.login()
+	tid := f.tenant(t)
+	f.project(t)
+
+	// Keep the Agent on a branch this input does not take so preflight catches the missing Skill
+	// before execution, and retrying the exact same workflow succeeds deterministically once created.
+	graph := `{"nodes":[{"id":"start","data":{"kind":"start"}},{"id":"cond","data":{"kind":"condition","cases":[{"id":"never","logic":"and","conditions":[{"variableSelector":["start","input"],"operator":"is","value":"__never__"}]}]}},{"id":"a","data":{"kind":"agent","title":"代码检查","agentConfig":{"prompt":"Review","skills":[{"skillId":"review-checklist","enabled":true}]}}},{"id":"out","data":{"kind":"output","outputs":[{"name":"comment","variableSelector":["start","input"]}]}}],"edges":[{"source":"start","target":"cond"},{"source":"cond","sourceHandle":"never","target":"a"},{"source":"cond","target":"out"}]}`
+	wf, _, err := f.store.CreateWorkflow(f.ctx, tid, "MissingSkillWF", graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.PublishWorkflow(f.ctx, tid, wf.ID, "v1", nil); err != nil {
+		t.Fatal(err)
+	}
+	_, task := c.do("POST", "/api/v2/tenants/"+tid+"/tasks", map[string]any{"title": "MissingSkillTask", "projectId": taskProjectID})
+	path := "/api/v2/tenants/" + tid + "/tasks/" + task["id"].(string) + "/comments"
+	payload := map[string]any{
+		"body":     "@MissingSkillWF",
+		"mentions": []map[string]any{{"type": "workflow", "id": wf.ID}},
+		"workflow": map[string]any{"workflowId": wf.ID, "values": map[string]any{}},
+	}
+	key := map[string]string{"Idempotency-Key": "missing-skill-comment"}
+	status, got := c.doHeaders("POST", path, payload, key)
+	if status != 400 || got["code"] != "workflow_skill_not_found" {
+		t.Fatalf("missing skill comment = %d %v, want 400 workflow_skill_not_found", status, got)
+	}
+	params, _ := got["params"].(map[string]any)
+	if params["nodeId"] != "a" || params["nodeTitle"] != "代码检查" || params["skillId"] != "review-checklist" {
+		t.Fatalf("missing skill comment params = %v", params)
+	}
+	for _, table := range []string{"v2_task_comments", "v2_workflow_runs", "v2_workflow_scopes", "v2_workflow_run_roots"} {
+		var count int
+		if err := f.db.QueryRow(f.ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("missing skill refusal left %d rows in %s", count, table)
+		}
+	}
+
+	if _, err := f.store.CreateSkill(f.ctx, tid, task["createdBy"].(string), store.SkillInput{Name: "review-checklist", Description: "审查清单", Content: "# 清单"}); err != nil {
+		t.Fatal(err)
+	}
+	status, created := c.doHeaders("POST", path, payload, key)
+	if status != 201 {
+		t.Fatalf("retry after skill creation = %d %v", status, created)
+	}
+	runID := created["workflowRun"].(map[string]any)["id"].(string)
+	waitForCommentWorkflowStatus(t, c, "/api/v2/tenants/"+tid+"/tasks/"+task["id"].(string)+"/timeline", runID, "succeeded")
+}
+
 func TestTaskCommentWorkflowBootRecoverClearsPendingCrashWindow(t *testing.T) {
 	f := newSquadServer(t)
 

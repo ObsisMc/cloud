@@ -92,6 +92,15 @@ describe('task errors', () => {
     expect(boardMoveMessageFor(http(400, 'invalid_transition'))).toContain('待处理 → 进行中 → 待验收 → 已完成')
     expect(boardMoveMessageFor(http(403, 'forbidden'))).toBe('只有任务创建人或工作区管理员能确认完成、退回或取消任务。')
     expect(taskRunMessageFor(http(400, 'workflow_role_not_found'))).toBe('工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色再启动。')
+    expect(taskRunMessageFor(http(400, 'workflow_skill_not_found'))).toBe('工作流引用的技能不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再启动。')
+    expect(taskRunMessageFor({
+      isAxiosError: true,
+      response: { status: 400, data: { code: 'workflow_skill_not_found', params: { nodeId: 'a1', nodeTitle: '代码审查', skillId: 'my-skill' } } },
+    })).toBe('节点「代码审查」需要的技能 my-skill 不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再启动。')
+    expect(taskRunMessageFor({
+      isAxiosError: true,
+      response: { status: 400, data: { code: 'workflow_skill_not_found', params: { nodeId: 'a1', nodeTitle: ' ', skillId: 'official/pack' } } },
+    })).toBe('节点「a1」需要的技能 official/pack 不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再启动。')
   })
 })
 

@@ -15,6 +15,7 @@ import {
 import type { WorkflowInputVariable } from "@/lib/workflows/mock";
 import { WorkflowStartVariableFields } from "@/lib/workflows/host/start-variable-fields";
 import { workflowStartDrafts, parseWorkflowStartDrafts } from "@/lib/workflows/host/start-variable-drafts";
+import { WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT } from "@/lib/workflows/personal-skills";
 
 /** A reachable node start will refuse, named as the author titled it. */
 export interface WorkflowRunUnsupportedNode {
@@ -38,6 +39,8 @@ interface WorkflowRunStartDialogProps {
   analyzing?: boolean;
   /** Keeps a failed preflight visible while server start remains the authority. */
   analysisFailed?: boolean;
+  /** True when any Agent node in the frozen snapshot enables a personal Skill. */
+  hasPersonalSkills?: boolean;
   busy: boolean;
   onOpenChange: (open: boolean) => void;
   onStart: (
@@ -55,6 +58,7 @@ export function WorkflowRunStartDialog({
   unsupportedNodes = [],
   analyzing = false,
   analysisFailed = false,
+  hasPersonalSkills = false,
   busy,
   onOpenChange,
   onStart,
@@ -69,6 +73,7 @@ export function WorkflowRunStartDialog({
           unsupportedNodes={unsupportedNodes}
           analyzing={analyzing}
           analysisFailed={analysisFailed}
+          hasPersonalSkills={hasPersonalSkills}
           busy={busy}
           onCancel={() => onOpenChange(false)}
           onStart={onStart}
@@ -86,6 +91,7 @@ function WorkflowRunStartDialogContent({
   unsupportedNodes,
   analyzing,
   analysisFailed,
+  hasPersonalSkills,
   busy,
   onCancel,
   onStart,
@@ -141,6 +147,11 @@ function WorkflowRunStartDialogContent({
         )}
         {unsupportedNodes.length > 0 && (
           <UnsupportedNodesWarning nodes={unsupportedNodes} />
+        )}
+        {hasPersonalSkills && (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {WORKFLOW_PERSONAL_SKILL_TEAM_VISIBILITY_HINT}
+          </p>
         )}
         <WorkflowStartVariableFields variables={variables} drafts={drafts} setDrafts={setDrafts} attemptedStart={attemptedStart} />
         <div className="space-y-1.5">

@@ -9,7 +9,7 @@ export const runLabels: Record<string,string> = { recorded: '已记录', startin
 const reasons: Record<string,string> = {
   task_assignment_changed:'任务不再分配给你或已移除',task_no_longer_actionable:'任务已待验收、结束或更换项目',
   previous_unfinished: '上一次运行尚未结束', execution_busy: 'Agent 正忙', server_restarted: '服务重启，本次不补跑', execution_not_started: '本次执行未启动', lookup_required: '正在核对执行结果', configuration_changed: '配置已修改', paused: '计划已暂停', result_incomplete: '回答不完整', model_required: '尚未选择模型，请编辑任务并选择当前可用的模型', agent_required: '尚未选择 Agent，请编辑任务并选择当前可用的 Agent', executor_required: '原执行器已不可用，请编辑任务并重新选择 Agent 与模型', execution_unavailable: '执行服务尚未就绪', execution_target_unavailable: '执行目标已不可用，请编辑任务并重新选择 Agent、模型或项目', unsupported_schedule_target: '此执行方式尚未接入', execution_failed: '执行失败', cancelled: '运行已取消',
-  workflow_run_failed: '工作流运行失败', workflow_run_deleted: '工作流运行已被删除', workflow_run_not_startable: '工作流不能启动：图里有当前版本还不能执行的节点，或输入不满足开始节点', workflow_unavailable: '工作流或所选版本已不可用', project_unavailable: '项目已不可用', workflow_required: '尚未选择工作流', project_required: '工作流必须关联项目',
+  workflow_run_failed: '工作流运行失败', workflow_run_deleted: '工作流运行已被删除', workflow_run_not_startable: '工作流不能启动：图里有当前版本还不能执行的节点，或输入不满足开始节点', workflow_role_not_found: '工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色', workflow_skill_not_found: '工作流需要的技能不可用，请确认发起人的个人技能已导入或市场技能已下发到项目', workflow_unavailable: '工作流或所选版本已不可用', project_unavailable: '项目已不可用', workflow_required: '尚未选择工作流', project_required: '工作流必须关联项目',
 }
 export function reasonText(reason: string) { return reasons[reason] ?? (reason ? `原因：${reason}` : '') }
 export function scheduleError(error: unknown, fallback: string) {
@@ -22,6 +22,9 @@ export function scheduleError(error: unknown, fallback: string) {
     execution_busy: 'Agent 正忙，本次请求已跳过。', execution_target_unavailable: '所选 Agent、模型或项目当前不可用，请编辑任务并重新选择后重试。',
     task_binding_invalid:'任务分配、状态或执行器已变化，请重新选择后保存。', invalid_execution_request: '运行配置无效，请检查任务设置后重试。', execution_unsupported: '当前执行方式不受支持，请修改配置后重试。',
     schedule_target_unavailable: '所选执行方式尚未就绪，配置未保存。', project_required: '工作流要在项目中运行，请选择项目。',
+    workflow_skill_not_found: '工作流需要的技能不可用，请确认发起人的个人技能已导入或市场技能已下发到项目。',
+    workflow_role_not_found: '工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色。',
+    workflow_run_not_startable: '工作流不能启动：图里有当前版本还不能执行的节点，或输入不满足开始节点。',
   }
   if (messages[code]) return messages[code]
   if (error.response?.status === 401) return '登录已失效，请重新登录。'

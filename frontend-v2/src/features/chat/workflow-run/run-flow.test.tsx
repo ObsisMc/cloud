@@ -762,4 +762,59 @@ describe('workflow runs in chat', () => {
     dialog = await openDialog()
     expect(within(dialog).getByRole('checkbox', { name: '节点重跑时把上次失败原因告诉智能体' })).toBeChecked()
   })
+
+  it('shows the personal Skill team visibility hint in create and start dialogs only when enabled', async () => {
+    const hint = '运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见。'
+    const graphWithPersonalSkill = {
+      nodes: [
+        { id: 'start', type: 'workflow', position: { x: 0, y: 100 }, data: { kind: 'start', title: '开始', description: '' } },
+        {
+          id: 'agent-1',
+          type: 'workflow',
+          position: { x: 300, y: 100 },
+          data: {
+            kind: 'agent',
+            title: '审查节点',
+            description: '',
+            agentConfig: {
+              skills: [{ skillId: 'my-personal-skill', enabled: true }],
+            },
+          },
+        },
+        { id: 'output', type: 'workflow', position: { x: 600, y: 100 }, data: { kind: 'output', title: '输出', description: '', outputs: [] } },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'agent-1' },
+        { id: 'e2', source: 'agent-1', target: 'output' },
+      ],
+    }
+    const created = workflows.backend.create({ name: '带个人技能的工作流', graph: JSON.stringify(graphWithPersonalSkill) })
+    workflows.backend.publish({ workflowId: created.workflow.id, version: 'v1' })
+
+    const user = userEvent.setup()
+    await renderPage()
+
+    // Workflow without personal Skills does not show the hint.
+    await user.click(within(project()).getByRole('button', { name: '在 ora-space/cloud 新建对话' }))
+    await user.click(await screen.findByRole('menuitem', { name: '运行工作流' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /示例：代码审查/ }))
+    const plainDialog = await screen.findByRole('dialog', { name: '运行工作流' })
+    expect(within(plainDialog).queryByText(hint)).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '运行工作流' })).not.toBeInTheDocument())
+
+    // Workflow with an enabled personal Skill shows the hint in both create and start dialogs.
+    await user.click(within(project()).getByRole('button', { name: '在 ora-space/cloud 新建对话' }))
+    await user.click(await screen.findByRole('menuitem', { name: '运行工作流' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /带个人技能的工作流/ }))
+    const createDialog = await screen.findByRole('dialog', { name: '运行工作流' })
+    expect(within(createDialog).getByText(hint)).toBeInTheDocument()
+    await user.click(within(createDialog).getByRole('button', { name: '创建运行' }))
+
+    const pane = await screen.findByRole('region', { name: '工作流运行' })
+    await within(pane).findByRole('button', { name: '启动' }, { timeout: 10_000 })
+    await user.click(within(pane).getByRole('button', { name: '启动' }))
+    const startDialog = await screen.findByRole('dialog')
+    expect(within(startDialog).getByText(hint)).toBeInTheDocument()
+  }, 20_000)
 })

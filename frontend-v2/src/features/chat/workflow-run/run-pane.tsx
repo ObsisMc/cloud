@@ -15,6 +15,7 @@ import { useDarkTheme } from '@/lib/workflows/host/theme'
 import { toast } from '@/lib/workflows/host/ui'
 import { ContractError } from '@/lib/workflows/contracts'
 import { localizeContractError } from '@/lib/workflows/host/contract-error'
+import { hasEnabledPersonalSkills } from '@/lib/workflows/personal-skills'
 import { isTerminalRunStatus, type GraphWorkflowRun, type WorkflowArtifact, type WorkflowNodeConversationItem } from '@/lib/workflows/runtime'
 import { WorkspaceNavigationProvider } from '@/components/workspace-panel/navigation'
 import { useWorkspacePanel, type WorkspacePanelState } from '@/components/workspace-panel/use-panel'
@@ -487,6 +488,7 @@ function RunWorkspace({ tenantId, run, readOnly, hostedWorkspace, leading, refre
         unsupportedNodes={unsupportedNodes}
         analyzing={preflight.analyzing}
         analysisFailed={preflight.failed}
+        hasPersonalSkills={hasEnabledPersonalSkills(run.definitionSnapshot.nodes)}
         busy={busy}
         onOpenChange={setStartOpen}
         onStart={async (prompt, variables) => {

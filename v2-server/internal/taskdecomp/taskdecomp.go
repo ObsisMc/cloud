@@ -41,7 +41,26 @@ var (
 	// ErrTaskInReview reports a decomposition of a task in 待验收: a task is split only while it is
 	// still being worked (待处理 or 进行中).
 	ErrTaskInReview = errors.New("task in review")
+	// ErrWorkflowRoleNotFound reports a decomposition workflow whose frozen graph references a missing role.
+	ErrWorkflowRoleNotFound = errors.New("workflow role not found")
+	// ErrWorkflowSkillNotFound reports a decomposition workflow whose frozen graph enables an unavailable Skill.
+	ErrWorkflowSkillNotFound = errors.New("workflow skill not found")
+	// ErrWorkflowRunNotStartable reports a decomposition workflow run the workflow host refused to start.
+	ErrWorkflowRunNotStartable = errors.New("workflow run cannot start")
 )
+
+// WorkflowSkillNotFound names the first enabled Skill binding that prevented starting a decomposition run.
+type WorkflowSkillNotFound struct {
+	NodeID    string
+	NodeTitle string
+	SkillID   string
+}
+
+func (e *WorkflowSkillNotFound) Error() string {
+	return fmt.Sprintf("%s: node %q (%s) skill %q", ErrWorkflowSkillNotFound, e.NodeTitle, e.NodeID, e.SkillID)
+}
+
+func (e *WorkflowSkillNotFound) Unwrap() error { return ErrWorkflowSkillNotFound }
 
 // Limits on what a run's output may become: the task routes' title and description limits, and a
 // bound on how many subtasks one decomposition writes.
@@ -68,10 +87,11 @@ type Store interface {
 	SettleTaskDecomposition(ctx context.Context, id string, subtasks []store.Subtask, failure string) (store.TaskDecomposition, bool, error)
 }
 
-// Runs starts a workflow run as a person and tells when one changes; main wires the workflow host
-// and its hub. A change carries no data: the watcher reads the run again.
+// Runs starts and cancels a workflow run as a person and tells when one changes; main wires the
+// workflow host and its hub. A change carries no data: the watcher reads the run again.
 type Runs interface {
 	Start(ctx context.Context, tenant, user, runID string) error
+	Cancel(ctx context.Context, tenant, user, runID string) error
 	Subscribe(runID string) (<-chan struct{}, func())
 }
 
@@ -198,12 +218,42 @@ func (h *Host) Start(ctx context.Context, a store.Access, taskID, workflowID, ke
 	if e := h.runs.Start(context.WithoutCancel(ctx), tenant, user, run.ID); e != nil {
 		cancel()
 		h.log.Warn("decomposition run did not start", "task", taskID, "run", run.ID, "error", e)
-		settled, _, e := h.store.SettleTaskDecomposition(context.WithoutCancel(ctx), d.ID, nil, "工作流没有启动："+e.Error())
+		cancelCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer stopCancel()
+		if cancelErr := h.runs.Cancel(cancelCtx, tenant, user, run.ID); cancelErr != nil &&
+			!errors.Is(cancelErr, store.ErrWorkflowRunState) && !errors.Is(cancelErr, store.ErrWorkflowRunNotFound) {
+			h.log.Warn("cancel refused decomposition run", "task", taskID, "run", run.ID, "error", cancelErr)
+		}
+		settled, _, e := h.store.SettleTaskDecomposition(context.WithoutCancel(ctx), d.ID, nil, startFailureMessage(e))
 		return settled, e
 	}
 	h.workers.Add(1)
 	go h.watch(d, events, cancel)
 	return d, nil
+}
+
+func startFailureMessage(err error) string {
+	var missingSkill *WorkflowSkillNotFound
+	switch {
+	case errors.As(err, &missingSkill):
+		skillID := strings.TrimSpace(missingSkill.SkillID)
+		nodeLabel := strings.TrimSpace(missingSkill.NodeTitle)
+		if nodeLabel == "" {
+			nodeLabel = strings.TrimSpace(missingSkill.NodeID)
+		}
+		if skillID != "" && nodeLabel != "" {
+			return fmt.Sprintf("节点「%s」需要的技能 %s 不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再重新拆分。", nodeLabel, skillID)
+		}
+		return "工作流引用的技能不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再重新拆分。"
+	case errors.Is(err, ErrWorkflowSkillNotFound):
+		return "工作流引用的技能不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再重新拆分。"
+	case errors.Is(err, ErrWorkflowRoleNotFound):
+		return "工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色后再重新拆分。"
+	case errors.Is(err, ErrWorkflowRunNotStartable):
+		return "工作流图定义不可执行，请检查工作流配置后再重新拆分。"
+	default:
+		return "工作流没有启动，请稍后重试。"
+	}
 }
 
 // List returns the task's decompositions, newest first, settling any whose run has ended in case

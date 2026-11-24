@@ -143,7 +143,7 @@ v2 只做核心执行，有几项界面在、但不会出现或不可用：服�
 
 Agent 和模型清单读取与 Chat 相同的 `/chat/executors`，保存后端返回的 `agentId` / `modelId`，目录为空或读取失败时不提供演示选项。旧占位配置保留并提示重新选择。角色目录读取工作区服务端目录（与设置页同一份数据）；Skill 清单合并当前用户的服务端技能库与租户各空间已确认安装的 Skill 插件，插件标识保留 `namespace/identifier`，运行时检查目标项目的安装回执。MCP 候选读取租户真实安装目录，展示配置是否完整。卸载后已有绑定保留并提示不可用。每个节点最多启用 16 个 MCP，配置使用团队共享设置。安装和选择可以保存，非空执行须待 Node 与服务端完整生命周期接入；当前明确报错，不会忽略已启用的 MCP 后继续运行。
 
-Agent 检查器在「必需 Skill」下方提示“运行的节点会话对团队可见，所选个人 Skill 的内容也会被看到”，并在交互模式旁标「暂不生效」和一句原因（`editor/workflow-unapplied-setting-hint.tsx`）。标哪几项只看 v2-server analyze 返回的 `unappliedSettings`，它和运行结果里的 `payload.unapplied` 出自同一段服务端代码；前端只知道每项放在哪个字段旁、原因怎么说，不自己判断。角色、Skill、MCP 与重试已经应用，新分析不再列出它们；历史运行 payload 里保存的 `role`、`skill`、`retry` 标记仍按原样显示。服务端列出某项时提示出现，不再列出时自动消失；列出前端还没有对应字段的项时，在 Agent 设置末尾统一说明。浏览器里的旧工作流库（`local-workflow-backend.ts`）不执行运行，这两项总是空的。工作流页本身不运行工作流，运行在对话页里（见"运行工作流"）。
+Agent 检查器在「必需 Skill」下方提示“运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见”（工作流创建/启动对话框、任务处理/拆分/评论 `@` 工作流和定时任务表单在所选工作流启用了个人 Skill 时同步提示），并在交互模式旁标「暂不生效」和一句原因（`editor/workflow-unapplied-setting-hint.tsx`）。标哪几项只看 v2-server analyze 返回的 `unappliedSettings`，它和运行结果里的 `payload.unapplied` 出自同一段服务端代码；前端只知道每项放在哪个字段旁、原因怎么说，不自己判断。角色、Skill、MCP 与重试已经应用，新分析不再列出它们；历史运行 payload 里保存的 `role`、`skill`、`retry` 标记仍按原样显示。服务端列出某项时提示出现，不再列出时自动消失；列出前端还没有对应字段的项时，在 Agent 设置末尾统一说明。浏览器里的旧工作流库（`local-workflow-backend.ts`）不执行运行，这两项总是空的。工作流页本身不运行工作流，运行在对话页里（见"运行工作流"）。
 
 ### Unapplied settings and start warnings (English)
 

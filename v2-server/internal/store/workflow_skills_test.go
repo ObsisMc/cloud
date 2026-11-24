@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -76,5 +77,12 @@ func TestWorkflowSkillRequiresMatchingProjectReceiptAndUser(t *testing.T) {
 	}
 	if _, err := f.store.ResolveWorkflowSkills(f.ctx, execution.Scope{TenantID: f.tenant, UserID: member}, "selected", []string{"private-review"}); err == nil {
 		t.Fatal("another user's skill accepted")
+	}
+
+	if _, err := f.db.Exec(f.ctx, `ALTER TABLE v2_skill_results RENAME COLUMN installed_version TO broken_installed_version`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolve("selected"); err == nil || errors.Is(err, store.ErrSkillNotFound) {
+		t.Fatalf("plugin skill database error = %v, want non-ErrSkillNotFound error", err)
 	}
 }

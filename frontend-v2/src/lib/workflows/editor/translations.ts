@@ -472,7 +472,7 @@ export const workflowEditorTranslations = {
     "settings.workflow.skillRequirementHint":
       "Skill 会安装到工作区；在此启用表示本节点必须调用，不代表安全隔离。",
     "settings.workflow.skillTeamVisibilityHint":
-      "运行的节点会话对团队可见，所选个人 Skill 的内容也会被看到。",
+      "运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见。",
     "settings.workflow.field.mcps": "允许的 MCP",
     "settings.workflow.addMcp": "添加 MCP",
     "settings.workflow.mcp.loading": "正在加载已安装的 MCP…",
@@ -1157,7 +1157,7 @@ export const workflowEditorTranslations = {
     "settings.workflow.skillRequirementHint":
       "Skills are installed in the workspace. Enabling one here requires this node to invoke it; it is not a security boundary.",
     "settings.workflow.skillTeamVisibilityHint":
-      "Run node sessions are visible to the team, so selected personal Skill contents will also be seen.",
+      "Runs read the starter's personal Skill with the same name, and its contents are visible to the team in node sessions.",
     "settings.workflow.field.mcps": "Allowed MCPs",
     "settings.workflow.addMcp": "Add MCP",
     "settings.workflow.mcp.loading": "Loading installed MCPs…",

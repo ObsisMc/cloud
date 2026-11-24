@@ -49,7 +49,13 @@ func (r scheduleWorkflowRuns) Find(ctx context.Context, scope execution.Scope, t
 
 func (r scheduleWorkflowRuns) Start(ctx context.Context, scope execution.Scope, runID string) (store.WorkflowRun, error) {
 	run, err := r.host.StartRun(ctx, runScope(scope), runID)
-	if errors.Is(err, ErrWorkflowRunNotStartable) {
+	var invalidInput *WorkflowRunInputInvalid
+	switch {
+	case errors.Is(err, ErrWorkflowSkillNotFound):
+		return run, errors.Join(scheduler.ErrWorkflowSkillNotFound, err)
+	case errors.Is(err, ErrWorkflowRoleNotFound):
+		return run, errors.Join(scheduler.ErrWorkflowRoleNotFound, err)
+	case errors.Is(err, ErrWorkflowRunNotStartable), errors.As(err, &invalidInput):
 		return run, errors.Join(scheduler.ErrWorkflowNotStartable, err)
 	}
 	return run, err

@@ -1063,3 +1063,68 @@ it('shows workflow assignee guidance on not_assignee errors in TaskWorkflowDialo
 
   expect(await within(dialog).findByText('任务派给了别人，只有负责人本人或所属小队成员能用工作流处理。')).toBeInTheDocument()
 })
+
+const personalSkillGraph = JSON.stringify({
+  nodes: [
+    { id: 'start', type: 'workflow', position: { x: 0, y: 0 }, data: { kind: 'start', title: '开始' } },
+    { id: 'agent-1', type: 'workflow', position: { x: 200, y: 0 }, data: { kind: 'agent', title: '代码审查', agentConfig: { skills: [{ skillId: 'my-skill', enabled: true }] } } },
+  ],
+  edges: [{ id: 'e1', source: 'start', target: 'agent-1' }],
+})
+
+it('shows the missing skill message and personal Skill hint when @ workflow comment uses a personal Skill', async () => {
+  targets.items.push(workflowTarget)
+  forms.byRef['wf-check'] = workflowForm
+  vi.mocked(workflowsApi.getWorkflow).mockResolvedValue({
+    published: { id: 'snapshot-skill', workflowId: 'wf-check', version: 'v1', graph: personalSkillGraph, createdAt: 0, updatedAt: 0 },
+  } as never)
+  vi.mocked(api.createTaskComment).mockRejectedValueOnce(
+    httpFault(400, 'workflow_skill_not_found', { nodeId: 'agent-1', nodeTitle: '代码审查', skillId: 'my-skill' }),
+  )
+
+  renderPage('?tab=discussion')
+  const box = await screen.findByLabelText('评论或给 Agent 的消息')
+  await userEvent.type(box, '@')
+  await userEvent.click(await screen.findByRole('option', { name: /发布检查/ }))
+
+  expect(await screen.findByText('运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见。')).toBeInTheDocument()
+
+  await userEvent.type(screen.getByLabelText(/目标分支/), 'main')
+  await userEvent.click(screen.getByRole('button', { name: '发送并运行' }))
+
+  expect(await screen.findByText('节点「代码审查」需要的技能 my-skill 不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再启动。')).toBeInTheDocument()
+  expect(screen.getByLabelText('评论或给 Agent 的消息')).toHaveValue('@发布检查 ')
+})
+
+it('shows the missing skill message and personal Skill hint in TaskWorkflowDialog and DecomposeDialog', async () => {
+  const user = userEvent.setup()
+  const human = { type: 'human' as const, id: 'user-me', displayName: '演示用户', identifier: '' }
+  vi.mocked(api.getTask).mockResolvedValue(task({ assignee: human }))
+  vi.mocked(workflowsApi.listWorkflows).mockResolvedValue({
+    workflows: [{ id: 'wf-dev', namespace: 'team', name: '需求开发', publishedVersion: 'v1', createdAt: 1, updatedAt: 1 }],
+  })
+  vi.mocked(decompositionApi.listDecompositionWorkflows).mockResolvedValue({
+    items: [{ id: 'wf-split', name: '需求拆分', publishedVersion: 'v1', canDecompose: true, decompositionBlockedReason: '' }],
+  })
+  vi.mocked(workflowsApi.getWorkflow).mockResolvedValue({
+    published: { id: 'snapshot-skill', workflowId: 'wf-dev', version: 'v1', graph: personalSkillGraph, createdAt: 0, updatedAt: 0 },
+  } as never)
+  vi.mocked(taskWorkflows.startTaskWorkflow).mockRejectedValueOnce(
+    httpFault(400, 'workflow_skill_not_found', { nodeId: 'agent-1', nodeTitle: '代码审查', skillId: 'my-skill' }),
+  )
+
+  renderPage()
+  await user.click(await screen.findByRole('button', { name: '用工作流处理' }))
+  const handleDialog = screen.getByRole('dialog')
+  await screen.findByRole('option', { name: '需求开发（v1）' })
+  await user.selectOptions(within(handleDialog).getByLabelText('工作流'), 'wf-dev')
+  expect(await within(handleDialog).findByText('运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见。')).toBeInTheDocument()
+  await user.click(await within(handleDialog).findByRole('button', { name: '启动工作流' }))
+  expect(await within(handleDialog).findByText('节点「代码审查」需要的技能 my-skill 不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再启动。')).toBeInTheDocument()
+  await user.click(within(handleDialog).getByRole('button', { name: '取消' }))
+
+  await user.click(await screen.findByRole('button', { name: '拆分' }))
+  const splitDialog = screen.getByRole('dialog')
+  await waitFor(() => expect(within(splitDialog).getByLabelText('工作流')).toHaveValue('wf-split'))
+  expect(await within(splitDialog).findByText('运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见。')).toBeInTheDocument()
+})

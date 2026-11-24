@@ -2,11 +2,26 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 )
+
+// MissingWorkflowSkillError reports one enabled Skill binding that is absent from the starter's
+// personal catalog or not yet deployed to the target project. It unwraps to ErrSkillNotFound so
+// callers can separate user-actionable missing dependencies from storage failures.
+type MissingWorkflowSkillError struct {
+	SkillID string
+	Reason  string
+}
+
+func (e *MissingWorkflowSkillError) Error() string { return e.Reason }
+
+func (e *MissingWorkflowSkillError) Unwrap() error { return ErrSkillNotFound }
 
 // projectName returns the display name of a tenant project, falling back to its id when the
 // row has no Name yet (projects are created from repository URLs).
@@ -27,15 +42,15 @@ func (s *Store) ResolveWorkflowSkills(ctx context.Context, scope execution.Scope
 		return result, nil
 	}
 	if _, err := s.GetProject(ctx, scope, project); err != nil {
-		return nil, fmt.Errorf("could not load the project for selected Skills")
+		return nil, fmt.Errorf("could not load the project for selected Skills: %w", err)
 	}
 	projectName, err := s.projectName(ctx, scope.TenantID, project)
 	if err != nil {
-		return nil, fmt.Errorf("could not load the project for selected Skills")
+		return nil, fmt.Errorf("could not load the project for selected Skills: %w", err)
 	}
 	documents, err := s.ListSkills(ctx, scope.TenantID, scope.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("could not load your imported Skills")
+		return nil, fmt.Errorf("could not load your imported Skills: %w", err)
 	}
 	byName := make(map[string]Skill, len(documents))
 	for _, doc := range documents {
@@ -50,7 +65,10 @@ func (s *Store) ResolveWorkflowSkills(ctx context.Context, scope execution.Scope
 		if strings.Contains(name, "/") {
 			namespace, identifier, ok := pluginIdentity(name)
 			if !ok {
-				return nil, fmt.Errorf("invalid Skill plugin identity: %s", name)
+				return nil, &MissingWorkflowSkillError{
+					SkillID: name,
+					Reason:  fmt.Sprintf("invalid Skill plugin identity: %s", name),
+				}
 			}
 			var version string
 			err := s.pool.QueryRow(ctx, `SELECT a.desired_version FROM v2_projects p
@@ -60,14 +78,23 @@ func (s *Store) ResolveWorkflowSkills(ctx context.Context, scope execution.Scope
 			 AND a.kind='skill' AND a.desired_state='installed' AND a.status='active'
 			 AND r.revision=a.version AND r.state='installed' AND r.installed_version=a.desired_version`,
 				project, scope.TenantID, namespace, identifier).Scan(&version)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, &MissingWorkflowSkillError{
+					SkillID: name,
+					Reason:  fmt.Sprintf("技能 %s 还没下发到项目「%s」：请先在技能页确认该技能已下发成功（或等下发中完成）后再重新运行工作流", name, projectName),
+				}
+			}
 			if err != nil {
-				return nil, fmt.Errorf("技能 %s 还没下发到项目「%s」：请先在技能页确认该技能已下发成功（或等下发中完成）后再重新运行工作流", name, projectName)
+				return nil, fmt.Errorf("resolve project Skill %s: %w", name, err)
 			}
 			result.Plugins = append(result.Plugins, execution.SkillPlugin{ID: name, Version: version})
 		} else {
 			doc, ok := byName[name]
 			if !ok {
-				return nil, fmt.Errorf("Skill %s is missing from your imported skills", name)
+				return nil, &MissingWorkflowSkillError{
+					SkillID: name,
+					Reason:  fmt.Sprintf("Skill %s is missing from your imported skills", name),
+				}
 			}
 			result.Documents = append(result.Documents, execution.SkillDocument{Name: doc.Name, Description: doc.Description, Content: doc.Content})
 		}

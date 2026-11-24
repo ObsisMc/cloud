@@ -230,6 +230,34 @@ func TestTaskWorkflowChoiceErrorsHTTP(t *testing.T) {
 	if status, started := c.doHeaders("POST", path, map[string]any{"workflowId": roleWF.ID}, map[string]string{"Idempotency-Key": "role-ready"}); status != 201 || started["workflowRunId"] == "" {
 		t.Fatalf("start after creating role = %d %v", status, started)
 	}
+
+	// Reset task back to pending to verify missing Skill preflight refusal and recovery.
+	c.routes = original
+	_, secondTask := c.do("POST", base, map[string]any{"title": "Skill handling", "projectId": taskProjectID, "assignee": map[string]any{"type": "human", "id": task["createdBy"]}})
+	secondPath := base + "/" + secondTask["id"].(string) + "/workflow-runs"
+	c.routes = routes
+	skillGraph := `{"nodes":[{"id":"start","data":{"kind":"start"}},{"id":"reviewer","data":{"kind":"agent","title":"审查","agentConfig":{"prompt":"Review","skills":[{"skillId":"review-checklist","enabled":true}]}}}],"edges":[{"source":"start","target":"reviewer"}]}`
+	skillWF, _, err := f.store.CreateWorkflow(f.ctx, tid, "Needs skill", skillGraph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.PublishWorkflow(f.ctx, tid, skillWF.ID, "v1", nil); err != nil {
+		t.Fatal(err)
+	}
+	status, got = c.doHeaders("POST", secondPath, map[string]any{"workflowId": skillWF.ID}, map[string]string{"Idempotency-Key": "missing-skill"})
+	if status != 400 || got["code"] != "workflow_skill_not_found" {
+		t.Fatalf("missing skill = %d %v, want 400 workflow_skill_not_found", status, got)
+	}
+	skillParams, _ := got["params"].(map[string]any)
+	if skillParams["nodeId"] != "reviewer" || skillParams["nodeTitle"] != "审查" || skillParams["skillId"] != "review-checklist" {
+		t.Fatalf("missing skill params = %v", skillParams)
+	}
+	if _, err := f.store.CreateSkill(f.ctx, tid, secondTask["createdBy"].(string), store.SkillInput{Name: "review-checklist", Description: "审查清单", Content: "# 清单"}); err != nil {
+		t.Fatal(err)
+	}
+	if status, started := c.doHeaders("POST", secondPath, map[string]any{"workflowId": skillWF.ID}, map[string]string{"Idempotency-Key": "skill-ready"}); status != 201 || started["workflowRunId"] == "" {
+		t.Fatalf("start after creating skill = %d %v", status, started)
+	}
 }
 
 func TestTaskWorkflowListHidesDeletedHandleFailureOnFirstSettlementHTTP(t *testing.T) {

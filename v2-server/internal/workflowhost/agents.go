@@ -197,7 +197,14 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 	}
 	skills, err := h.store.ResolveWorkflowSkills(h.ctx, st.scope, d.ProjectID, cfg.Skills)
 	if err != nil {
-		fail(workflow.Failure{Kind: workflow.FailureMissingAgentConfig, Message: err.Error()})
+		if errors.Is(err, store.ErrSkillNotFound) {
+			fail(workflow.Failure{Kind: workflow.FailureMissingAgentConfig, Message: err.Error()})
+			return
+		}
+		if h.ctx.Err() == nil {
+			h.log.Warn("resolve workflow skills", "run", d.RunID, "node_run", d.NodeRunID, "error", publicReason(err), "error_type", fmt.Sprintf("%T", err))
+		}
+		fail(workflow.Failure{Kind: workflow.FailureSession, Message: "could not resolve selected Skills"})
 		return
 	}
 	mcp, err := h.store.ResolveWorkflowMCP(h.ctx, st.scope, d.ProjectID, cfg.MCPs)

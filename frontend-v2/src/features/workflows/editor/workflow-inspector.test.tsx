@@ -163,11 +163,11 @@ describe("WorkflowInspector layout", () => {
     const addSkill = screen.getByRole("button", { name: "添加 Skill" });
     expect(addSkill).toBeInTheDocument();
     expect(addSkill).toHaveAccessibleDescription(
-      /运行的节点会话对团队可见，所选个人 Skill 的内容也会被看到/,
+      /运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见/,
     );
     expect(
       screen.getByText(
-        "运行的节点会话对团队可见，所选个人 Skill 的内容也会被看到。",
+        "运行时读取发起人同名的个人 Skill，其内容在节点会话中对团队可见。",
       ),
     ).toBeInTheDocument();
     expect(

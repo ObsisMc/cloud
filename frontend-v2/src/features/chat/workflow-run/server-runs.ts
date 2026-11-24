@@ -24,6 +24,7 @@ import {
 } from '@/lib/workflows/api/generated'
 import { ContractError } from '@/lib/workflows/contracts'
 import { contractError, type WorkflowContracts } from '@/lib/workflows/data/contracts-client'
+import { graphHasEnabledPersonalSkills } from '@/lib/workflows/personal-skills'
 import {
   isTerminalRunStatus,
   normalizeWorkflowDefinition,
@@ -45,6 +46,8 @@ export interface PublishedWorkflow {
    * version is deleted, so the run is checked against this, never against the name.
    */
   snapshotId: string
+  /** True when any Agent node in the published snapshot enables a personal Skill. */
+  hasPersonalSkills?: boolean
 }
 
 /**
@@ -74,7 +77,13 @@ export async function listPublishedWorkflows(library: WorkflowContracts, signal?
       .map(async (w): Promise<PublishedWorkflow | null> => {
         try {
           const { workflow, published } = await library.get({ workflowId: w.id }, { signal })
-          return published && { id: workflow.id, name: workflow.name, version: published.version, snapshotId: published.id }
+          return published && {
+            id: workflow.id,
+            name: workflow.name,
+            version: published.version,
+            snapshotId: published.id,
+            hasPersonalSkills: graphHasEnabledPersonalSkills(published.graph),
+          }
         } catch (error) {
           if (error instanceof ContractError && error.code === 'workflow_not_found') return null
           throw error
