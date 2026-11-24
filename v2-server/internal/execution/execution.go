@@ -85,6 +85,9 @@ type StartRequest struct {
 	// Lifetime says when the service may end the session on its own; the zero value is
 	// LifetimeTurn. Only a workflow Agent session may be held.
 	Lifetime Lifetime
+	// Host gives this turn its host tools; nil gives none. It is never recorded, and no part of
+	// the attempt's identity. Only a held workflow session may have it, on every one of its turns.
+	Host HostTools
 }
 
 // Lifetime says when the execution service may end an Agent session without being asked.
@@ -107,6 +110,8 @@ type AppendRequest struct {
 	SessionID string
 	Caller    Caller
 	Prompt    Prompt
+	// Host gives this turn its host tools (see StartRequest.Host).
+	Host HostTools
 }
 
 // Ref identifies an accepted turn. SessionID is stable across Append calls; TurnID is not.
@@ -213,6 +218,8 @@ type Turn struct {
 	StartedAt     time.Time
 	EndedAt       *time.Time
 	Result        *Result
+	// Host is set, never persisted, while the turn executes (see StartRequest.Host).
+	Host HostTools `json:"-"`
 }
 
 // Session is shared execution metadata; page titles, ordering and deletion remain page-owned.

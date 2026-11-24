@@ -55,7 +55,7 @@ func (r scheduleWorkflowRuns) Start(ctx context.Context, scope execution.Scope, 
 		return run, errors.Join(scheduler.ErrWorkflowSkillNotFound, err)
 	case errors.Is(err, ErrWorkflowRoleNotFound):
 		return run, errors.Join(scheduler.ErrWorkflowRoleNotFound, err)
-	case errors.Is(err, ErrWorkflowRunNotStartable), errors.As(err, &invalidInput):
+	case errors.Is(err, ErrWorkflowRunNotStartable), errors.Is(err, ErrWorkflowCompletionToolUnavailable), errors.As(err, &invalidInput):
 		return run, errors.Join(scheduler.ErrWorkflowNotStartable, err)
 	}
 	return run, err

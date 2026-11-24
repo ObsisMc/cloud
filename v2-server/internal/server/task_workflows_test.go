@@ -9,6 +9,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers/legacy"
+	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 	"github.com/wanglongan587/cloud/v2-server/internal/taskworkflow"
@@ -18,6 +19,13 @@ type workflowTaskHTTPPort struct{ finishingRuns }
 
 func (workflowTaskHTTPPort) Prepare(context.Context, string, string, string, *string, map[string]json.RawMessage) error {
 	return nil
+}
+
+// unavailableWorkflowPort cannot start a run for now.
+type unavailableWorkflowPort struct{ workflowTaskHTTPPort }
+
+func (unavailableWorkflowPort) Start(context.Context, string, string, string) error {
+	return execution.ErrUnavailable
 }
 
 func TestTaskWorkflowsHTTP(t *testing.T) {
@@ -200,6 +208,18 @@ func TestTaskWorkflowChoiceErrorsHTTP(t *testing.T) {
 	status, got = c.doHeaders("POST", path, map[string]any{"workflowId": w.ID}, map[string]string{"Idempotency-Key": "conflict"})
 	if status != 409 || got["code"] != "version_conflict" {
 		t.Fatalf("conflict=%d %v", status, got)
+	}
+
+	// Node could not be asked whether it takes the completion tool: try again later.
+	unavailable := taskworkflow.New(f.store, unavailableWorkflowPort{workflowTaskHTTPPort{finishingRuns{store: f.store}}})
+	t.Cleanup(unavailable.Close)
+	f.srv.Close()
+	f.srv = httptest.NewServer(server.New(f.store, server.Options{SessionTTL: time.Hour, TaskWorkflows: unavailable}))
+	t.Cleanup(f.srv.Close)
+	c.base = f.srv.URL
+	status, got = c.doHeaders("POST", path, map[string]any{"workflowId": w.ID}, map[string]string{"Idempotency-Key": "unavailable"})
+	if status != 503 || got["code"] != "execution_unavailable" {
+		t.Fatalf("unavailable=%d %v", status, got)
 	}
 
 	commentWorkflowServer(t, f)

@@ -9,6 +9,7 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/executionwait"
 	"github.com/wanglongan587/cloud/v2-server/internal/pluginmarket"
+	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 	"github.com/wanglongan587/cloud/v2-server/internal/workflow"
 )
@@ -258,6 +259,23 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 		// The session outlives its turns until completion, a stop or the run's end ends it.
 		request.Lifetime = execution.LifetimeHeld
 	}
+	// Only a root-scope interactive attempt whose frozen policy is agent may report completion
+	// (completion signal ADR D1); no other session even sees the tool.
+	policy, tracked := workflow.CompletionSignalEndTurn, false
+	if interactive && cfg.CompletionSignal == workflow.CompletionSignalAgent {
+		if h.tools == nil {
+			fail(workflow.Failure{Kind: workflow.FailureInteractiveSession, Message: server.ErrWorkflowCompletionToolUnavailable.Error()})
+			return
+		}
+		policy = workflow.CompletionSignalAgent
+		request.Host = h.tools.Attempt(d.NodeRunID, caller.AttemptID)
+		// Until the node is tracked nothing else withdraws what its Agent may have been given.
+		defer func() {
+			if !tracked {
+				h.tools.Revoke(d.NodeRunID)
+			}
+		}()
+	}
 	var baseline *fileBaseline
 	if interactive {
 		// Before the Agent can touch the checkout: what a mustChange deliverable is compared with.
@@ -333,7 +351,9 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 	if interactive {
 		// Desktop parks an interactive node after its first turn instead of ending the session.
 		n := st.track(&interactiveNode{d: d, executor: executor, cfg: cfg, task: task, session: ref.SessionID, phase: phaseTurn,
-			lastOrigin: originWorkflow, baseline: baseline, baselineUnwritten: baseline != nil})
+			policy: policy, lastOrigin: originWorkflow, baseline: baseline, baselineUnwritten: baseline != nil})
+		// From here on whoever ends the node's session withdraws its tool.
+		tracked = true
 		h.refreshSummary(st, n, store.WorkflowStatusRunning) // the starter can stop the first turn too
 		result, err := h.awaitTurn(st.scope, ref, caller)
 		h.settleInteractiveTurn(st, a, n, 0, result, err)
@@ -861,6 +881,7 @@ func publicReason(err error) string {
 	for _, known := range []error{
 		execution.ErrUnavailable, execution.ErrNotFound, execution.ErrInvalidRequest, execution.ErrWorkspaceBusy,
 		execution.ErrConflict, execution.ErrUnsupported, execution.ErrStopUnconfirmed, execution.ErrSessionEnded,
+		execution.ErrHostMCPUnavailable,
 		context.Canceled, context.DeadlineExceeded,
 	} {
 		if errors.Is(err, known) {

@@ -39,10 +39,12 @@ var (
 )
 
 // WorkflowNodeCompletion is what the starter decided on one completion request: ConfirmInitialTurn
-// adopts the workflow's own opening turn, Force completes despite every other blocker and leaves
-// an audit (desktop CompleteWorkflowNodeRequest). The requester is always the human starter.
+// adopts the workflow's own opening turn, ConfirmSignalID confirms the Agent's report of that ID,
+// Force completes despite every other blocker and leaves an audit (desktop
+// CompleteWorkflowNodeRequest). Who the completion is attributed to is the host's to say.
 type WorkflowNodeCompletion struct {
 	Force, ConfirmInitialTurn bool
+	ConfirmSignalID           string
 }
 
 // WorkflowNodeBlocker is one reason a parked node cannot complete: a stable kind and, for a
@@ -95,9 +97,24 @@ func (e *WorkflowNodeOutputChanged) Error() string {
 	return fmt.Sprintf("workflow node %s answer changed since it parked", e.NodeID)
 }
 
+// WorkflowNodeSignalChanged refuses a completion naming a report other than the one of the node's
+// settled turn; the page reloads the run and asks again. Force does not cover it.
+type WorkflowNodeSignalChanged struct {
+	NodeID, Expected, Actual string
+}
+
+func (e *WorkflowNodeSignalChanged) Error() string {
+	return fmt.Sprintf("workflow node %s carries another completion report", e.NodeID)
+}
+
 // ErrWorkflowNodeCompletionInvalid refuses a completion asking for both confirmInitialTurn and
-// force: desktop admits the pair only for the Agent completion signal, which v2 does not apply.
+// force, except for an agent policy node whose opening turn ended normally without a report, where
+// the confirmation lifts turn_unconfirmed and force covers the missing report.
 var ErrWorkflowNodeCompletionInvalid = errors.New("confirmInitialTurn and force cannot be combined")
+
+// ErrWorkflowCompletionToolUnavailable refuses a run whose graph has an interactive node with the
+// agent completion policy when its Agent could not be given the completion tool.
+var ErrWorkflowCompletionToolUnavailable = errors.New("the Agent completion tool is not available to this run")
 
 // maxNodeTurnRunes bounds one human turn like a chat message, so a turn cannot carry a document.
 const maxNodeTurnRunes = 16000
@@ -170,6 +187,7 @@ func interactiveNodeFault(w http.ResponseWriter, err error) bool {
 	var incomplete *WorkflowNodeIncomplete
 	var turnChanged *WorkflowNodeTurnChanged
 	var outputChanged *WorkflowNodeOutputChanged
+	var signalChanged *WorkflowNodeSignalChanged
 	switch {
 	case errors.Is(err, ErrWorkflowRunOwned):
 		fault(w, http.StatusConflict, "run_owned")
@@ -193,6 +211,12 @@ func interactiveNodeFault(w http.ResponseWriter, err error) bool {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"code":      "workflow_node_output_changed",
 			"params":    map[string]any{"nodeId": outputChanged.NodeID, "expected": outputChanged.Expected, "actual": outputChanged.Actual},
+			"requestId": requestID(),
+		})
+	case errors.As(err, &signalChanged):
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code":      "workflow_node_signal_changed",
+			"params":    map[string]any{"nodeId": signalChanged.NodeID, "expected": signalChanged.Expected, "actual": signalChanged.Actual},
 			"requestId": requestID(),
 		})
 	case errors.Is(err, ErrWorkflowNodeCompletionInvalid):

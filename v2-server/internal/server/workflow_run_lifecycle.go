@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
@@ -175,6 +176,10 @@ func (h *handler) completeWorkflowNode(w http.ResponseWriter, r *http.Request, a
 		Force              bool   `json:"force"`
 		ConfirmInitialTurn bool   `json:"confirmInitialTurn"`
 		Requester          string `json:"requester"`
+		// ConfirmAgentCompletion names the Agent's report the starter saw.
+		ConfirmAgentCompletion *struct {
+			SignalID string `json:"signalId"`
+		} `json:"confirmAgentCompletion"`
 	}
 	if !decodeWorkflow(w, r, &in) {
 		return
@@ -183,7 +188,14 @@ func (h *handler) completeWorkflowNode(w http.ResponseWriter, r *http.Request, a
 		fault(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	run, err := host.CompleteNode(r.Context(), scope, runID, nodeID, WorkflowNodeCompletion{Force: in.Force, ConfirmInitialTurn: in.ConfirmInitialTurn})
+	completion := WorkflowNodeCompletion{Force: in.Force, ConfirmInitialTurn: in.ConfirmInitialTurn}
+	if in.ConfirmAgentCompletion != nil {
+		if completion.ConfirmSignalID = in.ConfirmAgentCompletion.SignalID; completion.ConfirmSignalID == "" {
+			fault(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+	}
+	run, err := host.CompleteNode(r.Context(), scope, runID, nodeID, completion)
 	if err != nil {
 		workflowRunLifecycleFault(w, err, "complete workflow node")
 		return
@@ -220,6 +232,8 @@ func workflowRunLifecycleFault(w http.ResponseWriter, err error, op string) {
 		})
 	case errors.Is(err, ErrWorkflowSkillNotFound):
 		fault(w, http.StatusBadRequest, "workflow_skill_not_found")
+	case errors.Is(err, ErrWorkflowCompletionToolUnavailable):
+		fault(w, http.StatusBadRequest, "workflow_completion_tool_unavailable")
 	case errors.Is(err, ErrWorkflowRunNotEditable):
 		fault(w, http.StatusConflict, "workflow_run_not_editable")
 	case errors.Is(err, ErrWorkflowNodeNotAwaitingInput):
@@ -236,6 +250,8 @@ func workflowRunLifecycleFault(w http.ResponseWriter, err error, op string) {
 			"params":    map[string]any{"variable": invalid.Variable, "reason": invalid.Reason},
 			"requestId": requestID(),
 		})
+	case errors.Is(err, execution.ErrUnavailable):
+		fault(w, http.StatusServiceUnavailable, "execution_unavailable")
 	default:
 		internal(w, op, err)
 	}

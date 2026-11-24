@@ -331,17 +331,24 @@ export async function stopNodeTurn(tenantId: string, runId: string, nodeId: stri
 
 /**
  * What the starter decided on a completion: `confirmInitialTurn` adopts the workflow's own first
- * turn, `force` completes despite every other blocker and leaves an audit. v2-server refuses both
- * at once.
+ * turn, `confirmSignalId` the Agent's report of that ID, `force` completes despite every other
+ * blocker and leaves an audit. v2-server takes force beside `confirmInitialTurn` only for a first
+ * turn that ended normally while the Agent still owes its report.
  */
 export interface NodeCompletion {
   confirmInitialTurn?: boolean
+  confirmSignalId?: string
   force?: boolean
 }
 
 /** Completes a parked interactive node through v2-server's completion gate. */
 export async function completeNode(tenantId: string, runId: string, nodeId: string, completion: NodeCompletion = {}): Promise<void> {
-  const body = { force: completion.force === true, requester: 'human' as const, ...(completion.confirmInitialTurn === true ? { confirmInitialTurn: true } : {}) }
+  const body = {
+    force: completion.force === true,
+    requester: 'human' as const,
+    ...(completion.confirmInitialTurn === true ? { confirmInitialTurn: true } : {}),
+    ...(completion.confirmSignalId !== undefined ? { confirmAgentCompletion: { signalId: completion.confirmSignalId } } : {}),
+  }
   await call(() => completeWorkflowNode(tenantId, runId, nodeId, body))
 }
 

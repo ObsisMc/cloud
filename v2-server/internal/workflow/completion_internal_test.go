@@ -64,3 +64,38 @@ func TestAgentReadsCompletionSettings(t *testing.T) {
 		t.Fatal("an absent policy must read as end_turn")
 	}
 }
+
+// Only a node v2 parks waits for a report: an interactive Agent of the root graph, spare ones and
+// container members aside.
+func TestUsesAgentCompletionCountsOnlyParkedNodes(t *testing.T) {
+	graph := func(agent string) string {
+		return `{"nodes":[{"id":"start","data":{"kind":"start"}},` + agent + `],"edges":[{"source":"start","target":"a"}]}`
+	}
+	config := func(policy string) string {
+		return `{"schemaVersion":4,"prompt":"x","executor":{"agentCli":"a","modelId":"m"}` + policy + `}`
+	}
+	agent := `{"id":"a","data":{"kind":"agent","agentConfig":`
+	for name, tc := range map[string]struct {
+		graph string
+		want  bool
+	}{
+		"agent policy":    {graph(agent + config(`,"interactive":true,"completionSignal":"agent"`) + `}}`), true},
+		"end_turn policy": {graph(agent + config(`,"interactive":true,"completionSignal":"end_turn"`) + `}}`), false},
+		"not interactive": {graph(agent + config(`,"completionSignal":"agent"`) + `}}`), false},
+		"spare": {graph(agent + config("") + `}},{"id":"spare","data":{"kind":"agent","agentConfig":` +
+			config(`,"interactive":true,"completionSignal":"agent"`) + `}}`), false},
+		"loop member": {`{"schemaVersion":2,"nodes":[{"id":"start","data":{"kind":"start"}},
+			{"id":"loop","data":{"kind":"loop","loopConfig":{"maxIterations":2,"variables":[],"until":{"logic":"and","conditions":[]},"outputs":[]}}},
+			{"id":"entry","parentId":"loop","data":{"kind":"start","containerId":"loop"}},
+			{"id":"a","parentId":"loop","data":{"kind":"agent","containerId":"loop","agentConfig":` + config(`,"interactive":true,"completionSignal":"agent"`) + `}}],
+			"edges":[{"source":"start","target":"loop"},{"source":"entry","target":"a"}]}`, false},
+	} {
+		g, err := ParseGraph(tc.graph)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := g.UsesAgentCompletion(); got != tc.want {
+			t.Errorf("%s = %v, want %v", name, got, tc.want)
+		}
+	}
+}

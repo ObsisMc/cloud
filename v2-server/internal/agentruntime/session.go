@@ -70,6 +70,8 @@ type activeTurn struct {
 	// Node holds no such turn, so a stop ends it here instead of sending CancelTurn. Protected by
 	// agentSession.mu; commandMu orders it with the resubmission.
 	refused bool
+	// instruction is the turn's host instruction once it was issued. Protected by agentSession.mu.
+	instruction *execution.HostInstruction
 }
 
 // requestStop asks Run to stop only this turn; repeated requests coalesce.
@@ -159,6 +161,10 @@ type agentSession struct {
 	mcpWake      chan struct{}            // coalesces committed changes for this selection
 	mcpSync      chan struct{}            // serializes desired delivery and refused-command reconciliation
 	mcpDelivered int64                    // last desired generation confirmed by this Node incarnation
+	// hostBlocks are the blocks only the Agent was sent, hostSecrets the credentials it was given
+	// with its host tools (see host_tools.go). Protected by mu.
+	hostBlocks  map[string]bool
+	hostSecrets []string
 }
 
 // recoveredHistory joins a recovered session's new Node history to the one the page showed
@@ -205,19 +211,11 @@ func (h *recoveredHistory) join(snapshot *execution.HistorySnapshot, full bool) 
 // Node records each block of a user turn as its own user_message_chunk, so the handoff, sent as a
 // separate block, is one record with that exact text.
 func isHandoff(data []byte, handoff string) bool {
-	var line struct {
-		Type   string `json:"type"`
-		Update struct {
-			Kind    string `json:"sessionUpdate"`
-			Content struct {
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"update"`
-	}
-	return json.Unmarshal(data, &line) == nil && line.Type == "update" && line.Update.Kind == "user_message_chunk" && line.Update.Content.Text == handoff
+	return handoff != "" && userBlock(data) == handoff
 }
 
-func (d *Driver) session(ctx context.Context, scope execution.Scope, session execution.Session, config Project, caller execution.CallerKind, timing *preparation) (*agentSession, error) {
+func (d *Driver) session(ctx context.Context, scope execution.Scope, session execution.Session, config Project, turn execution.Turn, timing *preparation) (*agentSession, error) {
+	caller, host := turn.Caller.Kind, turn.Host
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()
@@ -272,6 +270,10 @@ func (d *Driver) session(ctx context.Context, scope execution.Scope, session exe
 				return
 			}
 			if a.prepareErr = a.prepareMCP(prepare, session.MCP); a.prepareErr != nil {
+				return
+			}
+			if host != nil && !p.takesHostTools() {
+				a.prepareErr = execution.ErrHostMCPUnavailable
 				return
 			}
 			p.mu.Lock()
@@ -416,6 +418,16 @@ func (a *agentSession) submit(admitted execution.Turn, text string, fresh bool) 
 		// The recorded conversation goes first, as its own block, so the page can leave it out.
 		content = append([]any{map[string]string{"type": "text", "text": a.recovered.handoff}}, content...)
 	}
+	if admitted.Host != nil {
+		// Last, after the prompt. Sending a command Node refused again repeats it unchanged: the
+		// Agent never got it, and Node may know the command by its ID.
+		instruction := a.instruction(admitted)
+		if len(instruction.Text) > execution.MaxHostInstruction {
+			return execution.ErrInvalidRequest
+		}
+		a.conceal(instruction.Text, instruction.Token)
+		content = append(content, map[string]string{"type": "text", "text": instruction.Text})
+	}
 	if fresh {
 		// Run has already checked that the executor names a known plugin and binding.
 		plugin, _ := findPlugin(a.frozen.Executor.AgentID, a.frozen.Executor.PluginVersion)
@@ -425,6 +437,16 @@ func (a *agentSession) submit(admitted execution.Turn, text string, fresh bool) 
 		}
 		if err := a.project.services.Permit(a.execution, a.frozen.Executor.Model.ID); err != nil {
 			return execution.ErrUnavailable
+		}
+		var hostServers []execution.HostMCPServer
+		if admitted.Host != nil {
+			attached := admitted.Host.Attach(a.frozen.ID)
+			// Node closes the whole control connection on a list it refuses, so it is checked here.
+			if len(attached.Servers) == 0 || execution.ValidateHostMCPServers(attached.Servers) != nil {
+				return execution.ErrInvalidRequest
+			}
+			a.conceal("", attached.Secrets...)
+			hostServers = attached.Servers
 		}
 		// Nothing above reached Node, so a failure there leaves the session not started: its turn
 		// is reported NotStarted and End has no Agent to stop. From here on the write can be
@@ -463,6 +485,9 @@ func (a *agentSession) submit(admitted execution.Turn, text string, fresh bool) 
 			spec["agent_configuration"] = configuration
 		}
 		keep.apply(spec)
+		if len(hostServers) != 0 {
+			spec["host_mcp_servers"] = hostServers
+		}
 		if lifecycle {
 			spec["mcp"] = mcpSpec(a.frozen.MCP)
 			spec["mcp_lifecycle"] = true
@@ -697,6 +722,9 @@ func (a *agentSession) observe(message node.Message) (*turnOutcome, bool) {
 				result = failed(execution.FailureWorkspaceMissing)
 				a.project.forgetCheckout(a.frozen.WorkspaceID, a.checkout)
 			}
+			if ended.Result.Reason == "agent_failed" && ended.Result.Detail == execution.FailureHostMCPAgent {
+				result = failed(ended.Result.Detail)
+			}
 			if ended.Result.Reason == "agent_failed" && execution.IsMCPFailureCode(ended.Result.Detail) {
 				result = failed(ended.Result.Detail)
 				result.MCPFailure = &execution.MCPFailure{Code: ended.Result.Detail, PluginID: ended.Result.PluginID, SettingID: ended.Result.SettingID, Transport: ended.Result.Transport}
@@ -792,7 +820,10 @@ func (a *agentSession) observe(message node.Message) (*turnOutcome, bool) {
 		}
 		return &turnOutcome{call.id, result, errors.New(result.FailureCode)}, true
 	}
-	own := historyOf(observation.Snapshot)
+	own := a.withhold(historyOf(observation.Snapshot))
+	if observation.Turn != nil {
+		observation.Turn.Answer = a.censor(observation.Turn.Answer)
+	}
 	snapshot := a.recovered.join(own, !observation.Preview)
 	a.mu.Lock()
 	timing := a.timing

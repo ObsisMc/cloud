@@ -5,9 +5,8 @@ import {
 
 /**
  * Turns interactive mode on or off. A node turned interactive without a policy is written with
- * `completionSignal: "end_turn"` and `schemaVersion: 4`: v2 cannot apply the agent policy desktop
- * defaults new nodes to, so it defaults to what it runs (circus#1242). An explicit choice already
- * on the config stays. Turning the mode off drops the policy and its auto-accept, which only exist
+ * `completionSignal: "agent"` and `schemaVersion: 4`. A choice already on the config stays, so a
+ * saved `end_turn` is never rewritten. Turning the mode off drops the policy and its auto-accept, which only exist
  * for an interactive node, and returns the node to version 3 when nothing else needs version 4.
  */
 export function withInteractive(
@@ -16,7 +15,7 @@ export function withInteractive(
 ): WorkflowAgentConfig {
   if (interactive) {
     return config.completionSignal == null
-      ? { ...config, interactive, schemaVersion: 4, completionSignal: "end_turn" }
+      ? { ...config, interactive, schemaVersion: 4, completionSignal: "agent" }
       : { ...config, interactive };
   }
   const {

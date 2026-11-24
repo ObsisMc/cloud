@@ -202,7 +202,11 @@ func (d *Driver) run(ctx context.Context, scope execution.Scope, session executi
 		return failed(execution.FailureNodeLost), execution.ErrNodeLost
 	}
 	text, err := turn.Prompt.Text()
-	if err != nil || len(text) > 64*1024 {
+	limit := 64 * 1024
+	if turn.Host != nil {
+		limit -= execution.MaxHostInstruction
+	}
+	if err != nil || len(text) > limit {
 		return failed("agent_request_invalid"), execution.ErrInvalidRequest
 	}
 	plugin, ok := findPlugin(session.Executor.AgentID, session.Executor.PluginVersion)
@@ -223,7 +227,7 @@ func (d *Driver) run(ctx context.Context, scope execution.Scope, session executi
 	timing := newPreparation(turn.Ref, emit)
 	// A session that is already prepared never starts a stage, so later turns publish nothing.
 	defer func() { timing.finish(time.Now()) }()
-	a, err := d.session(ctx, scope, session, project, turn.Caller.Kind, timing)
+	a, err := d.session(ctx, scope, session, project, turn, timing)
 	if err != nil {
 		var mcp *execution.MCPFailure
 		if errors.As(err, &mcp) {
@@ -236,6 +240,9 @@ func (d *Driver) run(ctx context.Context, scope execution.Scope, session executi
 		}
 		if workflowSkillError(err) {
 			return failed(err.Error()), err
+		}
+		if errors.Is(err, execution.ErrHostMCPUnavailable) {
+			return failed(execution.FailureHostMCPNode), err
 		}
 		return failed("agent_prepare_failed"), err
 	}

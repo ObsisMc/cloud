@@ -249,6 +249,9 @@ func (s *Service) Start(ctx context.Context, scope execution.Scope, req executio
 	if req.MCP != nil && req.Caller.Kind != execution.CallerWorkflow {
 		return execution.Ref{}, execution.ErrInvalidRequest
 	}
+	if req.Host != nil && req.Lifetime != execution.LifetimeHeld {
+		return execution.Ref{}, execution.ErrInvalidRequest
+	}
 	if err := req.MCP.Validate(); err != nil {
 		return execution.Ref{}, err
 	}
@@ -261,15 +264,15 @@ func (s *Service) Start(ctx context.Context, scope execution.Scope, req executio
 		}
 	}
 	req.MCP = req.MCP.Clone()
-	return s.start(ctx, scope, req.Caller, req.Prompt, &req.Target, req.ExecutorID, req.AgentID, req.ModelID, req.Skills, req.MCP, req.Lifetime)
+	return s.start(ctx, scope, req.Caller, req.Prompt, &req.Target, req.ExecutorID, req.AgentID, req.ModelID, req.Skills, req.MCP, req.Lifetime, req.Host)
 }
 
 // StartModel starts an independent model conversation without creating a directory or Node.
 func (s *Service) StartModel(ctx context.Context, scope execution.Scope, req execution.ModelStartRequest) (execution.Ref, error) {
-	return s.start(ctx, scope, req.Caller, req.Prompt, nil, "", "", req.ModelID, nil, nil, execution.LifetimeTurn)
+	return s.start(ctx, scope, req.Caller, req.Prompt, nil, "", "", req.ModelID, nil, nil, execution.LifetimeTurn, nil)
 }
 
-func (s *Service) start(ctx context.Context, scope execution.Scope, caller execution.Caller, prompt execution.Prompt, target *execution.Target, executorID, agentID, modelID string, skills *execution.Skills, mcp *execution.MCPSelection, lifetime execution.Lifetime) (execution.Ref, error) {
+func (s *Service) start(ctx context.Context, scope execution.Scope, caller execution.Caller, prompt execution.Prompt, target *execution.Target, executorID, agentID, modelID string, skills *execution.Skills, mcp *execution.MCPSelection, lifetime execution.Lifetime, host execution.HostTools) (execution.Ref, error) {
 	if err := validate(caller, prompt); err != nil {
 		return execution.Ref{}, err
 	}
@@ -357,6 +360,7 @@ func (s *Service) start(ctx context.Context, scope execution.Scope, caller execu
 	if lifetime == execution.LifetimeHeld {
 		s.held[session.ID] = true
 	}
+	turn.Host = host
 	s.launch(scope, session, turn, group)
 	return turn.Ref, nil
 }
@@ -485,9 +489,25 @@ func (s *Service) Append(ctx context.Context, scope execution.Scope, req executi
 		if err != nil {
 			return execution.Ref{}, publicError(err)
 		}
+		turn.Host = req.Host
 		s.launch(scope, session, turn, group)
 		return turn.Ref, nil
 	}
+}
+
+// CheckHostTools reports whether sessions of the project can be given host tools, starting the
+// project's Node if it is not running: its capabilities are known only once it is.
+func (s *Service) CheckHostTools(ctx context.Context, scope execution.Scope, projectID string) error {
+	if s.agent == nil {
+		return execution.ErrUnavailable
+	}
+	driver, ok := s.agent.(interface {
+		CheckHostTools(context.Context, execution.Scope, string) error
+	})
+	if !ok {
+		return execution.ErrHostMCPUnavailable
+	}
+	return driver.CheckHostTools(ctx, scope, projectID)
 }
 
 // launch is called under mu; workers use the backend's lifetime, never an HTTP request context.

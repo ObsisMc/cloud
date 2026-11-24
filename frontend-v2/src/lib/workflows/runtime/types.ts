@@ -473,8 +473,7 @@ export type WorkflowNodeInteractiveTurnError = "not_delivered";
 
 /**
  * v2's summary of an interactive Agent node's session, written as `payload.interactive` each time
- * the node parks, with its completion snapshot (desktop's default mode without the Agent
- * completion signal).
+ * the node parks, with its completion snapshot.
  */
 export interface WorkflowNodeInteractiveSession {
   /** Turns that settled in the node's session. */
@@ -483,7 +482,10 @@ export interface WorkflowNodeInteractiveSession {
   sessionEnded: boolean;
   /** Whether a plain completion would be accepted now (deliverables are checked on completion). */
   completable: boolean;
-  /** What keeps the settled turn from completing; `turn_unconfirmed` alone needs only confirmation. */
+  /**
+   * What keeps the settled turn from completing. `turn_unconfirmed` and `agent_confirmation_pending`
+   * need only the starter's word, `agent_signal_pending` waits for the Agent's report.
+   */
   blockers: WorkflowNodeInteractiveBlocker[];
   /** `awaiting_user` while the starter's participation is due, `abnormal` for any other stop. */
   parkKind?: "awaiting_user" | "abnormal" | string;
@@ -491,6 +493,8 @@ export interface WorkflowNodeInteractiveSession {
   turnOrigin?: "workflow" | "human" | string;
   /** Why the turn stopped when it did not end normally, as desktop records it. */
   stopCause?: string;
+  /** The ID of the Agent's report that the step is done, when it made one in the settled turn. */
+  signalId?: string;
   /** The answer a completion would take: the settled turn's, or what a forced one takes. */
   answer?: string;
   /** Where `answer` comes from: `turn_window` (the settled turn) or `last_completed_turn`. */

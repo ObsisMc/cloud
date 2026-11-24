@@ -59,6 +59,9 @@ function refusedBlockers(error: ContractError): WorkflowNodeInteractiveBlocker[]
   })
 }
 
+/** Blockers that only wait for the Agent's report or the starter's word on a turn that ended normally. */
+const participation: ReadonlySet<string> = new Set(['turn_unconfirmed', 'agent_signal_pending', 'agent_confirmation_pending'])
+
 /** One blocker in words; an unknown kind falls back to its code. */
 function blockerText(blocker: WorkflowNodeInteractiveBlocker, t: (key: string, options?: Record<string, unknown>) => string): string {
   const key = `workflowRun.v2.interactive.blocker.${blocker.kind}`
@@ -68,9 +71,10 @@ function blockerText(blocker: WorkflowNodeInteractiveBlocker, t: (key: string, o
 /**
  * The starter's controls for an interactive Agent node, below its session: a composer while the
  * node waits for input and its session is open, "停止本轮" while it runs a turn, and the completion
- * actions of desktop's step card for the end_turn policy (first-turn ADR D5): "完成" for a turn
- * that ended normally, "确认并完成" for the workflow's own opening turn, "仍然完成" behind a
- * confirmation for any other blocker, including the deliverables a refused completion named. A
+ * actions of desktop's step card (first-turn and completion signal ADRs, D5): "完成" for a turn that
+ * ended normally, "确认并完成" for the workflow's own opening turn and for a step the Agent reported
+ * done, "仍然完成" behind a confirmation for any other blocker: how the turn ended, a report the
+ * Agent still owes, the deliverables a refused completion named. A
  * message v2 accepted and then could not deliver is reported above the composer; the view that
  * sent it, while it still has the text, offers to put it back. Everyone else reads the transcript.
  */
@@ -87,7 +91,8 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
   // Deliverables are checked only when completing, so a refusal names them; it stays shown until
   // the node settles another turn.
   const [refused, setRefused] = useState<{ turns: number; blockers: WorkflowNodeInteractiveBlocker[] }>()
-  const [confirmingForce, setConfirmingForce] = useState(false)
+  // What the open force dialog is about (forceKey); it closes once the node is past that.
+  const [confirmingForce, setConfirmingForce] = useState<string>()
   const { runId, nodeId, status, session } = target
 
   if (!starter) {
@@ -101,12 +106,12 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
       return true
     } catch (error) {
       const blockers = error instanceof ContractError && error.code === 'workflow_node_incomplete' ? refusedBlockers(error) : []
-      if (blockers.some((b) => b.kind !== 'turn_unconfirmed')) {
+      if (blockers.some((b) => !participation.has(b.kind))) {
         // Listed under the conversation instead: a toast would only repeat them, over the
         // "仍然完成" they offer.
         setRefused({ turns: session?.turns ?? 0, blockers })
       } else {
-        // Including a refusal that names only turn_unconfirmed, which the card never lists: the
+        // Including a refusal that names only what the card never lists (participation): the
         // click must still say why nothing happened.
         toast.error(refusal(error, t))
       }
@@ -142,16 +147,30 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
   const restorable = undelivered && !ended && lastSent !== undefined && lastSent.number === session?.sent && draft === ''
   const blockers = session?.blockers ?? []
   const unconfirmed = blockers.some((b) => b.kind === 'turn_unconfirmed')
+  // Under the agent policy a turn that ended normally also waits for the Agent's report, and then
+  // for the starter to confirm that very report.
+  const unreported = blockers.some((b) => b.kind === 'agent_signal_pending')
+  const reported = blockers.some((b) => b.kind === 'agent_confirmation_pending') && session?.signalId !== undefined
   // What a refused completion named that the snapshot does not carry (the deliverables).
   const extra = refused !== undefined && refused.turns === (session?.turns ?? 0)
     ? refused.blockers.filter((b) => !blockers.some((own) => own.kind === b.kind && own.path === b.path))
     : []
-  const shown = [...blockers.filter((b) => b.kind !== 'turn_unconfirmed'), ...extra.filter((b) => b.kind !== 'turn_unconfirmed')]
-  // Force covers every blocker but the opening turn's confirmation, which it never stands in for.
-  const forcible = awaiting && !unconfirmed && shown.length > 0
+  const shown = [...blockers, ...extra].filter((b) => !participation.has(b.kind))
+  // Force covers every blocker but the opening turn's confirmation, which it never stands in for;
+  // with a report still owed, confirming that turn and forcing go together.
+  const forcible = awaiting && (unreported || (!unconfirmed && shown.length > 0))
+  const forced: NodeCompletion = unreported && unconfirmed ? { confirmInitialTurn: true, force: true } : { force: true }
+  const confirmable = awaiting && !unreported && (unconfirmed || reported)
+  const confirmed: NodeCompletion = {
+    ...(unconfirmed ? { confirmInitialTurn: true } : {}),
+    ...(reported ? { confirmSignalId: session.signalId } : {}),
+  }
+  const overridden = [...shown, ...blockers.filter((b) => b.kind === 'agent_signal_pending' || (b.kind === 'agent_confirmation_pending' && shown.length > 0))]
+  const source = session?.answerSource ?? 'none'
+  const forceKey = forcible ? JSON.stringify([session?.turns ?? 0, session?.signalId, source, overridden.map((b) => [b.kind, b.path])]) : undefined
+  if (confirmingForce !== undefined && confirmingForce !== forceKey) setConfirmingForce(undefined)
   const ready = awaiting && blockers.length === 0 && session?.completable === true
   const filesOnly = shown.length > 0 && shown.every((b) => b.kind === 'file_missing' || b.kind === 'file_unchanged')
-  const source = session?.answerSource ?? 'none'
 
   return (
     <div className="flex w-full flex-col gap-2 border-t pt-2" data-interactive-actions="">
@@ -191,8 +210,10 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
       )}
       {/* The undelivered notice already says the session ended, and why it matters here. */}
       {awaiting && ended && !undelivered && <p className="text-xs text-muted-foreground">{t('workflowRun.v2.interactive.sessionEnded')}</p>}
-      {awaiting && unconfirmed && shown.length === 0 && (
-        <p className="text-xs text-muted-foreground" data-interactive-confirm-hint="">{t('workflowRun.v2.interactive.confirmHint')}</p>
+      {awaiting && (unconfirmed || unreported || reported) && shown.length === 0 && (
+        <p className="text-xs text-muted-foreground" data-interactive-confirm-hint="">
+          {t(`workflowRun.v2.interactive.${unreported ? 'unreportedHint' : reported ? 'reportedHint' : 'confirmHint'}`)}
+        </p>
       )}
       {awaiting && shown.length > 0 && (
         <div className="flex flex-col gap-0.5 text-xs text-warning" data-interactive-blockers="">
@@ -211,28 +232,28 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
           </Button>
         )}
         {forcible && (
-          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setConfirmingForce(true)}>
+          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setConfirmingForce(forceKey)}>
             {t('workflowRun.v2.interactive.completeAnyway')}
           </Button>
         )}
-        {awaiting && unconfirmed && (
-          <Button type="button" size="sm" disabled={busy} onClick={() => void complete({ confirmInitialTurn: true })}>
+        {confirmable && (
+          <Button type="button" size="sm" disabled={busy} onClick={() => void complete(confirmed)}>
             {t('workflowRun.v2.interactive.confirmComplete')}
           </Button>
         )}
-        {awaiting && !unconfirmed && !forcible && (
+        {awaiting && !confirmable && !unconfirmed && !forcible && (
           <Button type="button" size="sm" variant={ready ? 'default' : 'outline'} disabled={busy || !ready} onClick={() => void complete({})}>
             {t('workflowRun.v2.interactive.complete')}
           </Button>
         )}
       </div>
-      <AlertDialog open={confirmingForce} onOpenChange={(open) => { if (!open) setConfirmingForce(false) }}>
+      <AlertDialog open={confirmingForce !== undefined} onOpenChange={(open) => { if (!open) setConfirmingForce(undefined) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('workflowRun.v2.interactive.forceTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
               {t('workflowRun.v2.interactive.forceBody', {
-                blockers: shown.map((b) => blockerText(b, t)).join(' '),
+                blockers: overridden.map((b) => blockerText(b, t)).join(' '),
                 source: t(`workflowRun.v2.interactive.forceSource.${source}`, { defaultValue: source }),
               })}
             </AlertDialogDescription>
@@ -243,8 +264,10 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
               variant="destructive"
               disabled={busy}
               onClick={() => {
-                setConfirmingForce(false)
-                void complete({ force: true })
+                // The dialog may still be closing when its node moved on.
+                if (confirmingForce === undefined) return
+                setConfirmingForce(undefined)
+                void complete(forced)
               }}
             >
               {t('workflowRun.v2.interactive.forceConfirm')}

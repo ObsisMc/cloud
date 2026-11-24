@@ -33,17 +33,6 @@ func unappliedAgentSettings(config object, at placement) []string {
 	if interactive && at.loop != "" {
 		unapplied = append(unapplied, "interactive")
 	}
-	// The agent completion policy needs the host completion tool, which the pinned Node cannot
-	// hand to the Agent yet (#1242): v2 completes such a node as end_turn, so the policy and its
-	// auto-accept are saved but not applied. A non-interactive node has no completion gate at all.
-	if interactive && at.loop == "" {
-		if completionSignal(config) == CompletionSignalAgent {
-			unapplied = append(unapplied, "completionSignal")
-		}
-		if auto, _ := config["autoAcceptAgentCompletion"].(bool); auto {
-			unapplied = append(unapplied, "autoAcceptAgentCompletion")
-		}
-	}
 	// Retry is unapplied where desktop would retry and v2 does not. Desktop never retries an
 	// interactive node, which a person drives (node_runtime.rs:373-379 at ebd5b725), so retry is
 	// not listed there; elsewhere retryApplies alone says where v2 retries.

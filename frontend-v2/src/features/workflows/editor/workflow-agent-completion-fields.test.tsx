@@ -11,6 +11,7 @@ import {
 } from "@/lib/workflows/mock";
 import { appI18n } from "@/lib/workflows/test/i18n-instance";
 import { AppI18nProvider } from "@/lib/workflows/test/i18n";
+import { withInteractive } from "./workflow-agent-interactive";
 import { WorkflowInspector } from "./workflow-inspector";
 
 /** Builds an interactive Agent node whose configuration is edited by the inspector. */
@@ -178,7 +179,7 @@ describe("Agent completion files", () => {
     await appI18n.changeLanguage("en-US");
     const user = userEvent.setup();
     const { unmount } = render(<Harness node={agentNode()} />);
-    // v2 defaults to end_turn, where auto-accept does not exist.
+    // A node saved without a policy is end_turn, where auto-accept does not exist.
     expect(
       document.getElementById("workflow-agent-auto-accept-completion"),
     ).toBeNull();
@@ -236,32 +237,7 @@ describe("Agent completion files", () => {
     });
   });
 
-  it("marks the agent policy and auto-accept as not applied where the server says so", async () => {
-    await appI18n.changeLanguage("en-US");
-    render(
-      <Harness
-        node={agentNode({
-          schemaVersion: 4,
-          completionSignal: "agent",
-          autoAcceptAgentCompletion: true,
-        })}
-        unappliedSettings={["completionSignal", "autoAcceptAgentCompletion"]}
-      />,
-    );
-    expect(
-      screen.getByTestId("workflow-unapplied-completionSignal"),
-    ).toHaveTextContent(
-      "Saved; v2 has no agent completion tool yet and judges a normally ended turn instead. It takes effect once the completion tool ships.",
-    );
-    expect(
-      screen.getByTestId("workflow-unapplied-autoAcceptAgentCompletion"),
-    ).toHaveTextContent(
-      "Saved; v2 does not accept completions automatically yet, the starter still confirms. It takes effect once the completion tool ships.",
-    );
-    expect(screen.queryByTestId("workflow-unapplied-other")).toBeNull();
-  });
-
-  it("says in Chinese that the agent policy and auto-accept take effect once the completion tool ships", async () => {
+  it("names no setting of the completion rule as unapplied", async () => {
     await appI18n.changeLanguage("zh-CN");
     render(
       <Harness
@@ -270,22 +246,15 @@ describe("Agent completion files", () => {
           completionSignal: "agent",
           autoAcceptAgentCompletion: true,
         })}
-        unappliedSettings={["completionSignal", "autoAcceptAgentCompletion"]}
       />,
     );
-    expect(
-      screen.getByTestId("workflow-unapplied-completionSignal"),
-    ).toHaveTextContent(
-      "已保存，v2 暂不支持智能体完成工具，运行时按“回合正常结束即可”判定；完成工具上线后会开始生效。",
-    );
-    expect(
-      screen.getByTestId("workflow-unapplied-autoAcceptAgentCompletion"),
-    ).toHaveTextContent(
-      "已保存，v2 暂不自动接受完成，仍由发起人确认；完成工具上线后会开始生效。",
-    );
+    expect(screen.getByRole("switch", { name: "自动接受智能体完成" })).toBeChecked();
+    expect(screen.queryByText(/暂不支持|暂不自动接受/)).toBeNull();
+    expect(screen.queryByTestId("workflow-unapplied-completionSignal")).toBeNull();
+    expect(screen.queryByTestId("workflow-unapplied-other")).toBeNull();
   });
 
-  it("defaults a node turned interactive to end_turn and clears the policy when turned off", async () => {
+  it("defaults a node turned interactive to agent and clears the policy when turned off", async () => {
     await appI18n.changeLanguage("en-US");
     const user = userEvent.setup();
     render(<Harness node={agentNode({ interactive: false })} />);
@@ -294,13 +263,37 @@ describe("Agent completion files", () => {
     expect(persistedConfig()).toMatchObject({
       interactive: true,
       schemaVersion: 4,
-      completionSignal: "end_turn",
+      completionSignal: "agent",
     });
+    expect(persistedConfig()).not.toHaveProperty("autoAcceptAgentCompletion");
     expect(screen.getByRole("combobox", { name: "Completion rule" })).toHaveTextContent(
-      "A normally ended turn",
+      "The agent reports completion explicitly",
     );
     await user.click(toggle);
     expect(persistedConfig()).not.toHaveProperty("completionSignal");
     expect(persistedConfig()).toMatchObject({ interactive: false, schemaVersion: 3 });
+  });
+
+  it.each([
+    { name: "an explicit end_turn", saved: { schemaVersion: 4, completionSignal: "end_turn" } },
+    { name: "no policy", saved: { schemaVersion: 3 } },
+  ] as const)("keeps a saved interactive node with $name as it is", async ({ saved }) => {
+    await appI18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    render(<Harness node={agentNode(saved)} />);
+    expect(screen.getByRole("combobox", { name: "Completion rule" })).toHaveTextContent(
+      "A normally ended turn",
+    );
+    await user.click(screen.getByRole("combobox", { name: "When no progress is reported" }));
+    await user.click(await screen.findByRole("option", { name: "Keep waiting" }));
+    expect(persistedConfig()).toHaveProperty("promptInactivity", "wait");
+    const { completionSignal, schemaVersion } = persistedConfig();
+    expect({ completionSignal, schemaVersion }).toEqual({ completionSignal: undefined, ...saved });
+  });
+
+  it("keeps an explicit end_turn when the mode is turned on", () => {
+    const config = agentNode({ interactive: false, schemaVersion: 4, completionSignal: "end_turn" })
+      .data.agentConfig!;
+    expect(withInteractive(config, true)).toEqual({ ...config, interactive: true });
   });
 });

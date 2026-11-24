@@ -93,11 +93,7 @@ func TestAnalysisReportsUnappliedAgentSettings(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatal("no setting is unapplied any more; replace this fixture with one that still is")
 	}
-	// The agent completion policy needs the host completion tool, which v2 cannot hand out yet.
-	if want := []string{"completionSignal", "autoAcceptAgentCompletion"}; !reflect.DeepEqual(got["agent policy"], want) {
-		t.Errorf("agent policy unapplied = %v, want %v", got["agent policy"], want)
-	}
-	for _, id := range []string{"disabled mcp", "disabled retry", "blank role", "plain", "end_turn policy"} {
+	for _, id := range []string{"agent policy", "disabled mcp", "disabled retry", "blank role", "plain", "end_turn policy"} {
 		if _, listed := got[id]; listed {
 			t.Errorf("node %q configures nothing the run skips, but analysis lists %v", id, got[id])
 		}

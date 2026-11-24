@@ -91,6 +91,7 @@ describe('task errors', () => {
     expect(boardMoveMessageFor(http(409, 'version_conflict'))).toBe('任务刚被其他人改过，看板已刷新，请再拖一次。')
     expect(boardMoveMessageFor(http(400, 'invalid_transition'))).toContain('待处理 → 进行中 → 待验收 → 已完成')
     expect(boardMoveMessageFor(http(403, 'forbidden'))).toBe('只有任务创建人或工作区管理员能确认完成、退回或取消任务。')
+    expect(taskRunMessageFor(http(400, 'workflow_completion_tool_unavailable'))).toContain('完成工具')
     expect(taskRunMessageFor(http(400, 'workflow_role_not_found'))).toBe('工作流引用的角色在工作区角色目录里不存在，请先在设置的角色页新建同名角色再启动。')
     expect(taskRunMessageFor(http(400, 'workflow_skill_not_found'))).toBe('工作流引用的技能不可用，请先在个人技能页导入同名技能或确认市场技能已下发到项目后再启动。')
     expect(taskRunMessageFor({

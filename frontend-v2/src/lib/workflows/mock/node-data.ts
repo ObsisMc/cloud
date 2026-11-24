@@ -90,11 +90,11 @@ export interface WorkflowAgentConfig {
   /** Opt the node into a persistent interactive session that pauses for human input. */
   interactive?: boolean;
   /**
-   * How an interactive node decides its settled turn is complete; absent is `end_turn`. v2 runs
-   * `agent` as `end_turn` until it can hand the Agent its completion tool.
+   * How an interactive node decides its settled turn is complete; absent is `end_turn`. The
+   * editor writes `agent` when it turns a node interactive.
    */
   completionSignal?: "agent" | "end_turn" | null;
-  /** Accept an agent signal after the turn settles without waiting for the user (not applied in v2). */
+  /** Accept an agent signal after the turn settles without waiting for the user. */
   autoAcceptAgentCompletion?: boolean;
   /** Silence handling for this node's prompts; absent or null keeps the default timeout. */
   promptInactivity?: "timeout" | "wait" | null;

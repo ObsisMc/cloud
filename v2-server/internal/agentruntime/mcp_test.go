@@ -388,7 +388,7 @@ func TestMCPPackageInstallationKeepsSettingsOutOfControlFrames(t *testing.T) {
 func TestMCPDispatchRequiresCommittedGeneration(t *testing.T) {
 	h := newIPCHarness(t, nil)
 	session := h.session("dispatch", "workspace")
-	a, err := h.driver.session(ipcContext(t), h.scope, session, h.config, execution.CallerWorkflow, newPreparation(execution.Ref{}, discardIPCEvent))
+	a, err := h.driver.session(ipcContext(t), h.scope, session, h.config, execution.Turn{Caller: execution.Caller{Kind: execution.CallerWorkflow}}, newPreparation(execution.Ref{}, discardIPCEvent))
 	if err != nil {
 		t.Fatal(err)
 	}

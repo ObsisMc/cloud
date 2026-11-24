@@ -9,21 +9,17 @@ import {
 } from "@/lib/workflows/host/ui";
 import type { WorkflowAgentConfig } from "@/lib/workflows/mock";
 import { InspectorField } from "./workflow-node-details";
-import { WorkflowUnappliedSettingHint } from "./workflow-unapplied-setting-hint";
 
 /**
  * Chooses how an interactive node decides its settled turn is complete (desktop
- * `workflow-agent-completion-field.tsx`). v2 cannot hand the Agent its completion tool yet, so an
- * absent policy reads as `end_turn`, the value new interactive nodes are written with, and the
- * server's analysis marks `agent` and its auto-accept as saved but not applied.
+ * `workflow-agent-completion-field.tsx`). An absent policy reads as `end_turn`: only nodes
+ * saved before the policy existed lack one, as new interactive nodes are written with `agent`.
  */
 export function WorkflowAgentCompletionField({
   config,
-  unapplied,
   onChange,
 }: {
   config: WorkflowAgentConfig;
-  unapplied: readonly string[];
   onChange: (config: WorkflowAgentConfig) => void;
 }) {
   const { t } = useTranslation();
@@ -71,10 +67,6 @@ export function WorkflowAgentCompletionField({
         >
           {t("settings.workflow.completionSignal.hint")}
         </p>
-        <WorkflowUnappliedSettingHint
-          setting="completionSignal"
-          unapplied={unapplied}
-        />
       </InspectorField>
       {value === "agent" && (
         <div className="space-y-1.5">
@@ -102,10 +94,6 @@ export function WorkflowAgentCompletionField({
               }
             />
           </div>
-          <WorkflowUnappliedSettingHint
-            setting="autoAcceptAgentCompletion"
-            unapplied={unapplied}
-          />
         </div>
       )}
     </>
