@@ -179,14 +179,68 @@ func TestHostToolsReachTheAgentAndNothingElse(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, text := range map[string]string{"events": string(data), "journal": string(journal)} {
-		for _, secret := range []string{credential, tools.token(1), tools.token(2), "<host>"} {
+		for _, secret := range []string{credential, tools.token(1), tools.token(2)} {
 			if strings.Contains(text, secret) {
 				t.Errorf("%s contain %q", name, secret)
 			}
 		}
 	}
+	// Published events leave the block out altogether; the journal keeps it without its token.
+	if strings.Contains(string(data), `u003chost`) || strings.Contains(string(data), "<host>") {
+		t.Errorf("events contain the block: %s", data)
+	}
 	if !strings.Contains(string(data), `\"attemptToken\":\"[redacted]\"`) && !strings.Contains(string(data), `"attemptToken":"[redacted]"`) {
 		t.Fatalf("the tool call was not published at all: %s", data)
+	}
+}
+
+// Node replays what was not acknowledged to whoever dials next, so events of executions no session
+// of this process runs are journaled as well, without the credentials an earlier process issued.
+func TestTheJournalHasNoCredentialOfAnUnknownExecution(t *testing.T) {
+	h := newIPCHarness(t, nil)
+	done := startIPCRun(h, ipcContext(t), h.session("plain", "workspace"), "first", discardIPCEvent)
+	f := receiveIPC(t, h.created)
+	start := nextIPCCommand(t, f, "start_agent_session")
+	token, credential := strings.Repeat("0123456789abcdef", 2), strings.Repeat("fedcba9876543210", 2)
+	block := "<workflow_completion>\nWhen this step is complete, pass this attemptToken unchanged: " + token + "\n</workflow_completion>"
+	quoted, _ := json.Marshal(map[string]string{"attemptToken": token})
+	for i, u := range []map[string]any{
+		{"sessionUpdate": "user_message_chunk", "content": map[string]string{"type": "text", "text": block}},
+		{"sessionUpdate": "tool_call", "toolCallId": "x", "title": "complete " + token, "rawInput": map[string]string{"attemptToken": token}},
+		{"sessionUpdate": "tool_call_update", "toolCallId": "x", "content": string(quoted)},
+		{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "<b>" + token + "\n" + token + " at http://127.0.0.1:41234/mcp/" + credential}},
+	} {
+		// Node writes these records without escaping < and >; Go's encoder escapes them.
+		record := string(historyLine(i, "update", map[string]any{"update": u}))
+		for _, record := range []string{record, strings.NewReplacer(`\u003c`, "<", `\u003e`, ">").Replace(record)} {
+			f.seq["gone"]++
+			sequence := f.seq["gone"]
+			f.in <- node.Message{Type: "thread_event", Version: 1, ExecutionID: "gone", Sequence: &sequence, Payload: json.RawMessage(`{"turn_id":"old","record":` + record + `}`)}
+			receiveIPC(t, f.acked)
+		}
+	}
+	f.finishTurn(t, start, "first", "done")
+	if got := receiveIPC(t, done); got.err != nil {
+		t.Fatal(got.err)
+	}
+	journal, err := os.ReadFile(filepath.Join(f.project.root, "node-events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(journal), token) || strings.Contains(string(journal), credential) {
+		t.Fatalf("journal = %s", journal)
+	}
+	if strings.Count(string(journal), `"gone"`) != 8 || !strings.Contains(string(journal), "agent_message_chunk") {
+		t.Fatalf("journal lost events: %s", journal)
+	}
+}
+
+// A document the replacement would break is dropped, not written broken.
+func TestAnUnknownDocumentStaysValid(t *testing.T) {
+	for _, data := range []string{`{"n":` + strings.Repeat("1", 40) + `}`, `{"a":"\f` + strings.Repeat("a", 32) + `"}`, `{"a":"\u00e9` + strings.Repeat("a", 32) + `"}`} {
+		if out := censorUnknown([]byte(data)); !json.Valid(out) || strings.Contains(string(out), strings.Repeat("a", 32)) {
+			t.Fatalf("%s = %s", data, out)
+		}
 	}
 }
 

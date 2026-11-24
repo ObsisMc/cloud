@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
@@ -103,6 +104,34 @@ func (a *agentSession) censorLocked(data []byte) []byte {
 		}
 	}
 	return data
+}
+
+// The places a Node record keeps credentials of host tools in: the instruction block and the tool
+// call's argument, also where a record quotes them as JSON text. Every match stays inside one JSON
+// string. unknownRuns finds what else they may be quoted in (an answer, a URL), as any run of at
+// least as many hex digits; it matches escapes only to step over them.
+var (
+	unknownBlock = regexp.MustCompile(`((?:<|\\+u003c)workflow_completion(?:>|\\+u003e))[^"]*?((?:<|\\+u003c)/workflow_completion(?:>|\\+u003e))`)
+	unknownToken = regexp.MustCompile(`(attemptToken\\*"\s*:\s*\\*")[^"\\]*`)
+	unknownRuns  = regexp.MustCompile(`\\u[0-9a-fA-F]{4}|\\.|[0-9a-f]{32,}`)
+)
+
+// censorUnknown replaces the credentials host tools leave in a JSON document nobody remembers them
+// for. It also takes identifiers and digests of that shape: the journal is a diagnostic, and one of
+// an execution that is over.
+func censorUnknown(data []byte) []byte {
+	out := unknownBlock.ReplaceAll(data, []byte("${1}"+hostRedacted+"${2}"))
+	out = unknownToken.ReplaceAll(out, []byte("${1}"+hostRedacted))
+	out = unknownRuns.ReplaceAllFunc(out, func(match []byte) []byte {
+		if match[0] == '\\' {
+			return match
+		}
+		return []byte(hostRedacted)
+	})
+	if len(data) != 0 && !json.Valid(out) {
+		return []byte(`"` + hostRedacted + `"`)
+	}
+	return out
 }
 
 // withhold removes the host blocks from a snapshot and every credential from the rest.
