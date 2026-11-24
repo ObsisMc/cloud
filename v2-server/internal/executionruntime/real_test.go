@@ -26,7 +26,8 @@ import (
 // TestRealServiceAgentPostgresRestartAndConcurrentConversations crosses the public execution
 // port, real Node/Agent/tool filesystem effects and the production PostgreSQL store. Only model
 // responses are fixtures. Run the compiled Linux test on a native Linux filesystem with prepared
-// assets; this is independent of browser/chat HTTP integration and does not claim turn-only Cancel.
+// assets; this is independent of browser/chat HTTP integration. It stops one running turn and
+// continues its session, but TestRealStoppedOpenCodeTurnKeepsTheSession owns that evidence.
 func TestRealServiceAgentPostgresRestartAndConcurrentConversations(t *testing.T) {
 	assets := os.Getenv("V2_NODE_ASSETS_DIR")
 	if assets == "" {
@@ -213,40 +214,37 @@ func TestRealServiceAgentPostgresRestartAndConcurrentConversations(t *testing.T)
 	if newMarkers != 2 || len(markers) != 3 {
 		t.Fatalf("two conversations did not write distinct real checkouts: initial=%v after=%v", initialMarkers, markers)
 	}
-	// #801: the pinned Node ends the whole Agent session when cancelling an active turn.
-	// Hold a real provider request so completion cannot win before Cancel is exercised.
+	// The pinned Node keeps an OpenCode session through a stop of its running turn (circus#1404;
+	// TestRealStoppedOpenCodeTurnKeepsTheSession has the full evidence). Hold a real provider
+	// request so completion cannot win before Cancel is exercised. OpenCode aborts that request
+	// when the stop reaches it, but this fixture never reads the request body, so the server sees
+	// the disconnect only when End revokes the grant; the request's end is not asserted here.
 	blocked := gate.blockNextRequest()
 	aCaller := request("parallel-a", "cancel-active").Caller
 	aActive, err := f.service.Append(ctx, f.scope, execution.AppendRequest{SessionID: a.SessionID, Caller: aCaller, Prompt: execution.TextPrompt("Start another fixture turn and wait for cancellation.")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var providerContext context.Context
 	select {
-	case providerContext = <-blocked.started:
+	case <-blocked:
 	case <-ctx.Done():
 		t.Fatal("active Agent did not reach the cancellation barrier: ", ctx.Err())
 	}
 	cancelled, err := f.service.Cancel(ctx, f.scope, aActive)
-	if err != nil || cancelled.Status != execution.StatusCancelled {
+	if err != nil || cancelled.Status != execution.StatusCancelled || cancelled.AgentLost {
 		t.Fatalf("real active Agent Cancel=%+v err=%v", cancelled, err)
 	}
-	if providerContext.Err() == nil {
-		t.Fatal("Agent Cancel returned before the real provider request was cancelled")
-	}
-	select {
-	case <-blocked.cancelled:
-	case <-ctx.Done():
-		t.Fatal("real provider did not exit after cancellation: ", ctx.Err())
-	}
 	aAfterCancel, err := f.service.ReadSession(ctx, f.scope, a.SessionID)
-	if err != nil || aAfterCancel.EndedAt == nil {
-		t.Fatalf("real Agent Cancel did not end its session: %+v err=%v", aAfterCancel, err)
+	if err != nil || aAfterCancel.EndedAt != nil {
+		t.Fatalf("real Agent Cancel ended its session: %+v err=%v", aAfterCancel, err)
 	}
 	aCaller.AttemptID = "after-cancel"
-	if _, err := f.service.Append(ctx, f.scope, execution.AppendRequest{SessionID: a.SessionID, Caller: aCaller, Prompt: execution.TextPrompt("must not resume")}); !errors.Is(err, execution.ErrSessionEnded) {
-		t.Fatalf("real Agent Append after active Cancel=%v", err)
+	aResumed, err := f.service.Append(ctx, f.scope, execution.AppendRequest{SessionID: a.SessionID, Caller: aCaller, Prompt: execution.TextPrompt("Read README and write the fixture marker after the stop.")})
+	if err != nil || aResumed.SessionID != a.SessionID {
+		t.Fatalf("real Agent Append after a kept stop=%+v err=%v", aResumed, err)
 	}
+	aResumedResult, _ := observeTurn(t, f, aResumed, 0)
+	requireRealFixtureResult(t, aResumedResult)
 	if err := f.service.End(ctx, f.scope, a.SessionID); err != nil {
 		t.Fatal(err)
 	}
@@ -309,20 +307,17 @@ type concurrentRealFixture struct {
 	started, release chan struct{}
 	once             sync.Once
 	mu               sync.Mutex
-	blocked          *realCancellationBarrier
+	blocked          chan struct{}
 }
 
 func (p *concurrentRealFixture) unblock() { p.once.Do(func() { close(p.release) }) }
 
-type realCancellationBarrier struct {
-	started   chan context.Context
-	cancelled chan struct{}
-}
-
-func (p *concurrentRealFixture) blockNextRequest() *realCancellationBarrier {
+// blockNextRequest holds the next model request until its request ends; the returned channel
+// closes once that request has arrived.
+func (p *concurrentRealFixture) blockNextRequest() <-chan struct{} {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.blocked = &realCancellationBarrier{started: make(chan context.Context, 1), cancelled: make(chan struct{})}
+	p.blocked = make(chan struct{})
 	return p.blocked
 }
 
@@ -332,9 +327,8 @@ func (p *concurrentRealFixture) Complete(w http.ResponseWriter, r *http.Request,
 	p.blocked = nil
 	p.mu.Unlock()
 	if blocked != nil {
-		blocked.started <- r.Context()
+		close(blocked)
 		<-r.Context().Done()
-		close(blocked.cancelled)
 		return
 	}
 	select {

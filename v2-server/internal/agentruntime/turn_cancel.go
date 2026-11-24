@@ -13,10 +13,11 @@ import (
 
 // defaultTurnCancelWait is how long Run waits for TurnCancelSettled after sending CancelTurn, or
 // after the last message of the session that arrived meanwhile, before it ends the session as a
-// stop did before turn_cancel. Node settles within G + Q (15 s + 2 s, cancel-turn ADR D2) of the
-// cancel; restarting the window on every message approximates ADR D4's rule of waiting on
-// delivery progress, so a backlog of events is never taken for a Node that does not settle. The
-// whole wait never exceeds execution.TurnStopSettleLimit.
+// stop did before turn_cancel. Node settles within G + F + Q + R of the cancel (cancel-turn ADR
+// D2): the Agent's answer, the turn process fence, the quiet window and its re-check, 15 s + 5 s +
+// 2 s + 1 s = 23 s, below this window. Restarting the window on every message approximates ADR
+// D4's rule of waiting on delivery progress, so a backlog of events is never taken for a Node that
+// does not settle. The whole wait never exceeds execution.TurnStopSettleLimit.
 const defaultTurnCancelWait = 30 * time.Second
 
 // turnStop is what stopTurn did with a caller's stop.

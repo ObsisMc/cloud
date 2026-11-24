@@ -148,11 +148,15 @@ func backgroundJobRuntime(t *testing.T, ctx context.Context, model nodeservices.
 
 // backgroundJobFixture asks the real Agent's shell tool to leave a job running in the
 // background that records its PID and writes a late file after backgroundJobDelay; once the
-// tool returns it answers like FixtureProvider. Only a conversation whose user message asks for
-// a background job gets the tool call; any other is answered like FixtureProvider at once.
+// tool returns it answers like FixtureProvider. Only a turn whose user message asks for a
+// background job gets the tool call; any other is answered like FixtureProvider at once, also in
+// a conversation an earlier turn of which asked.
 type backgroundJobFixture struct {
 	// delay, when set, replaces backgroundJobDelay.
 	delay time.Duration
+	// loop, when set, makes the job append a line to the late file every 200 ms until it is
+	// killed, instead of writing it once after delay, so a job that survives shows as growth.
+	loop bool
 	// hold, when set, keeps the answer after the tool result pending until hold closes or the
 	// request ends, so the turn is still running while the job does.
 	hold <-chan struct{}
@@ -187,9 +191,12 @@ func (fixture backgroundJobFixture) Complete(w http.ResponseWriter, r *http.Requ
 			tool = advertised.Function.Name
 		}
 	}
+	// The latest user message is the turn's own prompt; earlier ones belong to finished turns.
 	asked := false
 	for _, message := range req.Messages {
-		asked = asked || message.Role == "user" && bytes.Contains(message.Content, []byte("background job"))
+		if message.Role == "user" {
+			asked = bytes.Contains(message.Content, []byte("background job"))
+		}
 	}
 	toolReturned := len(req.Messages) != 0 && req.Messages[len(req.Messages)-1].Role == "tool"
 	if asked && toolReturned && fixture.hold != nil {
@@ -214,6 +221,9 @@ func (fixture backgroundJobFixture) Complete(w http.ResponseWriter, r *http.Requ
 	// sh -c makes $$ the job's own PID. Its output goes nowhere, so the tool returns at once
 	// and leaves the job behind, as an Agent starting a development server would.
 	command := "sh -c 'echo $$ > ora-v2-job.pid; sleep " + strconv.Itoa(int(delay/time.Second)) + "; echo late > ora-v2-late.txt' >/dev/null 2>&1 &"
+	if fixture.loop {
+		command = "sh -c 'echo $$ > ora-v2-job.pid; while :; do echo tick >> ora-v2-late.txt; sleep 0.2; done' >/dev/null 2>&1 &"
+	}
 	args, _ := json.Marshal(map[string]string{"command": command, "description": "Start a background job that writes a file later"})
 	message := map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"index": 0, "id": "call_v2_background", "type": "function", "function": map[string]string{"name": tool, "arguments": string(args)}}}}
 	w.Header().Set("Content-Type", "text/event-stream")
