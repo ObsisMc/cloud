@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/nodeservices"
 )
@@ -106,18 +108,31 @@ func TestNewStopsTheNodeOfAnEarlierProcess(t *testing.T) {
 	if err := leftover.Start(); err != nil {
 		t.Fatal(err)
 	}
-	exited := make(chan struct{})
-	go func() { _ = leftover.Wait(); close(exited) }()
-	t.Cleanup(func() { _ = leftover.Process.Kill(); <-exited })
+	t.Cleanup(func() { _ = leftover.Process.Kill(); _ = leftover.Wait() })
+	// A pidfd reads as ready from the exit on, whether or not anyone has waited for the process.
+	pidfd, err := unix.PidfdOpen(leftover.Process.Pid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unix.Close(pidfd) })
+	exited := func() bool {
+		t.Helper()
+		fds := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN}}
+		if _, err := unix.Poll(fds, 0); err != nil {
+			t.Fatal(err)
+		}
+		return fds[0].Revents&unix.POLLIN != 0
+	}
+	if exited() {
+		t.Fatal("the earlier Node did not run")
+	}
 	driver, err := New(Options{Root: root, AssetsDirectory: "/assets", GitBackend: "/bin/false",
 		Bindings:       map[string]nodeservices.Binding{"fixture": {Model: ipcModel(), Protocol: nodeservices.OpenAICompletions, Provider: nodeservices.FixtureProvider{}}},
 		ResolveProject: func(context.Context, execution.Scope, string) (Project, error) { return Project{}, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-exited:
-	default:
+	if !exited() {
 		t.Fatal("the earlier Node outlived New")
 	}
 	if err := driver.Close(t.Context()); err != nil {
