@@ -154,3 +154,41 @@ func TestRecoverySettlesRunningHostExecutions(t *testing.T) {
 		t.Fatalf("the next turn's execution: %v", err)
 	}
 }
+
+// A session that ends while the reason of its execution is still to be written keeps that reason,
+// whichever write comes first.
+func TestEndingASessionKeepsADecidedReason(t *testing.T) {
+	s := storetest.Open(t)
+	user, tenant := storetest.Login(t, s, "host-decided")
+	scope := execution.Scope{TenantID: tenant, UserID: user}
+	ctx := context.Background()
+	project := workflowProject(t, s, user, tenant, "project-host")
+	for _, sid := range []string{"session", "other"} {
+		workflowAgentSession(t, s, scope, project.ID, "run", "node-"+sid, sid)
+	}
+	for id, sid := range map[string]string{"failed": "session", "running": "session", "elsewhere": "other"} {
+		if err := s.RecordHostExecution(ctx, id, sid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The driver's write of "failed" did not succeed; the session ends before it is repeated.
+	if err := s.EndHostExecutionSession(ctx, scope, "session", map[string]string{"failed": "agent_failed", "elsewhere": "agent_failed"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EndHostExecution(ctx, "failed", "agent_failed"); err != nil {
+		t.Fatal(err)
+	}
+	executions, err := s.HostExecutions(ctx, "session")
+	if err != nil || len(executions) != 2 {
+		t.Fatalf("executions = %+v %v", executions, err)
+	}
+	want := map[string]string{"failed": "agent_failed", "running": execution.HostSessionEnded}
+	for _, x := range executions {
+		if x.EndedAt == nil || x.Reason != want[x.ID] {
+			t.Fatalf("%s = %+v, want %s", x.ID, x, want[x.ID])
+		}
+	}
+	if x := hostExecution(t, s, "other"); x.EndedAt != nil {
+		t.Fatalf("another session's execution = %+v", x)
+	}
+}

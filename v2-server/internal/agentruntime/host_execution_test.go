@@ -6,6 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -289,6 +293,135 @@ func TestAHostExecutionsEndIsWrittenOnceTheStoreTakesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	records.none(t)
+}
+
+// Until it is written, an end is known to whoever ends the session.
+func TestAnUnwrittenEndIsKnownUntilItIsWritten(t *testing.T) {
+	h := newIPCHarness(t, nil)
+	h.driver.hostExecutionRetry = 10 * time.Millisecond
+	records := recordExecutions(h)
+	f, start := parkHosted(t, h, h.session("hosted", "workspace"), nil)
+	if ends := h.driver.HostExecutionEnds("hosted"); len(ends) != 0 {
+		t.Fatalf("ends of a running execution = %v", ends)
+	}
+	records.mu.Lock()
+	records.failures = 1 << 30
+	records.mu.Unlock()
+	f.terminalAs(start, "agent_failed", "")
+	for deadline := time.Now().Add(5 * time.Second); len(h.driver.HostExecutionEnds("hosted")) == 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("an unwritten end is not listed")
+		}
+	}
+	if err := h.driver.End(ipcContext(t), "hosted"); err != nil {
+		t.Fatal(err)
+	}
+	if ends := h.driver.HostExecutionEnds("hosted"); len(ends) != 1 || ends[start.ExecutionID] != "agent_failed" {
+		t.Fatalf("ends = %v", ends)
+	}
+	if ends := h.driver.HostExecutionEnds("another"); len(ends) != 0 {
+		t.Fatalf("ends of another session = %v", ends)
+	}
+	records.mu.Lock()
+	records.failures = 0
+	records.mu.Unlock()
+	receiveIPC(t, records.ended)
+	for deadline := time.Now().Add(5 * time.Second); len(h.driver.HostExecutionEnds("hosted")) != 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("a written end is still listed")
+		}
+	}
+}
+
+// The failure that makes the server end a session is the reason its execution ends, not the end it
+// leads to.
+func TestAFailureThatEndsTheSessionIsTheReason(t *testing.T) {
+	t.Run("damaged history", func(t *testing.T) {
+		h := newIPCHarness(t, nil)
+		records := recordExecutions(h)
+		f, start := parkHosted(t, h, h.session("hosted", "workspace"), nil)
+		path := filepath.Join(f.project.root, "w", "n", "sessions", start.ExecutionID[:2], start.ExecutionID[2:4], start.ExecutionID+".jsonl")
+		if err := os.WriteFile(path, []byte("not a history\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.seq[start.ExecutionID]++
+		sequence := f.seq[start.ExecutionID]
+		end := historyLine(9, "turnEnded", map[string]any{"stop_reason": "end_turn"})
+		payload, _ := json.Marshal(map[string]any{"turn_id": "x", "history_sequence": 9, "record": end})
+		f.in <- node.Message{Type: "thread_event", Version: 1, OperationID: start.OperationID, ExecutionID: start.ExecutionID, Sequence: &sequence, Payload: payload}
+		nextIPCCommand(t, f, "end_session")
+		f.terminal(start)
+		if got := receiveIPC(t, records.ended); got[0] != start.ExecutionID || got[1] == execution.HostSessionEnded || !strings.HasPrefix(got[1], "history_") {
+			t.Fatalf("settled %v", got)
+		}
+	})
+	t.Run("changed MCP selection", func(t *testing.T) {
+		h := newIPCHarness(t, nil)
+		records := recordExecutions(h)
+		session := h.session("hosted", "workspace")
+		f, start := parkHosted(t, h, session, nil)
+		session.MCP = &execution.MCPSelection{Bindings: []execution.MCPBinding{{PluginID: "official/other"}}}
+		done := runHosted(h, ipcContext(t), session, "second", &scriptedTools{}, discardIPCEvent)
+		nextIPCCommand(t, f, "end_session")
+		f.terminal(start)
+		receiveIPC(t, done)
+		if got := receiveIPC(t, records.ended); got != [2]string{start.ExecutionID, "mcp_selection_invalid"} {
+			t.Fatalf("settled %v", got)
+		}
+	})
+	t.Run("withdrawn MCP authorization", func(t *testing.T) {
+		h := newIPCHarness(t, nil)
+		records := recordExecutions(h)
+		f, start := parkHosted(t, h, h.session("hosted", "workspace"), nil)
+		h.driver.opts.ReadMCPTarget = func(context.Context, execution.Scope, string, *execution.MCPSelection, int64) (*execution.MCPTarget, error) {
+			return nil, &execution.MCPFailure{Code: "mcp_selection_invalid"}
+		}
+		h.driver.mu.Lock()
+		a := h.driver.sessions["hosted"]
+		h.driver.mu.Unlock()
+		a.mu.Lock()
+		a.mcpWake, a.mcpSync = make(chan struct{}, 1), make(chan struct{}, 1)
+		a.mcpWake <- struct{}{}
+		a.mu.Unlock()
+		a.followMCP(ipcMCP())
+		nextIPCCommand(t, f, "end_session")
+		f.terminal(start)
+		if got := receiveIPC(t, records.ended); got != [2]string{start.ExecutionID, "mcp_selection_invalid"} {
+			t.Fatalf("settled %v", got)
+		}
+	})
+}
+
+// A lost Node's executions are settled at once: the loss is announced after one write's time, not
+// after one per session.
+func TestALostNodeSettlesItsHostExecutionsTogether(t *testing.T) {
+	h := newIPCHarness(t, nil)
+	recordExecutions(h)
+	var writing sync.WaitGroup
+	var f *fakeNodeIPC
+	const sessions = 4
+	writing.Add(sessions)
+	release := make(chan struct{})
+	h.driver.opts.EndHostExecution = func(context.Context, string, string) error {
+		writing.Done()
+		<-release
+		return nil
+	}
+	for i := range sessions {
+		f, _ = parkHosted(t, h, h.session(fmt.Sprint("s", i), fmt.Sprint("workspace-", i)), f)
+	}
+	p := f.project
+	_ = f.Close()
+	together := make(chan struct{})
+	go func() { writing.Wait(); close(together) }()
+	receiveIPC(t, together) // every write has begun while none has returned
+	select {
+	case <-p.dead:
+		t.Fatal("the loss was announced before its executions were settled")
+	default:
+	}
+	close(release)
+	receiveIPC(t, p.dead)
 }
 
 // Node reports how an execution of an earlier process ended to whoever connects next. This process

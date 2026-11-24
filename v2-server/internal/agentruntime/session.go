@@ -823,6 +823,7 @@ func (a *agentSession) observe(message node.Message) (*turnOutcome, bool) {
 	if err != nil {
 		a.mu.Lock()
 		a.broken = true
+		a.decideHostLocked(nodehistory.FailureCode(err))
 		a.mu.Unlock()
 		a.requestEnd()
 		if call == nil {

@@ -174,12 +174,18 @@ func validateTerminalResult(result *execution.Result) error {
 // The runtime must stop and finish active work first; SQL never claims execution has stopped.
 // This runtime write checks admitted ownership, even when current membership has been revoked.
 func (s *Store) EndExecutionSession(ctx context.Context, scope execution.Scope, sid string) error {
+	return s.EndHostExecutionSession(ctx, scope, sid, nil)
+}
+
+// EndHostExecutionSession is EndExecutionSession for a session whose host executions in ends ended
+// for the reason given there, which is not written yet.
+func (s *Store) EndHostExecutionSession(ctx context.Context, scope execution.Scope, sid string, ends map[string]string) error {
 	return s.executionRuntimeTransaction(ctx, scope, sid, func(tx pgx.Tx, session execution.Session) error {
-		return endExecutionSession(ctx, tx, session)
+		return endExecutionSession(ctx, tx, session, ends)
 	})
 }
 
-func endExecutionSession(ctx context.Context, tx pgx.Tx, session execution.Session) error {
+func endExecutionSession(ctx context.Context, tx pgx.Tx, session execution.Session, ends map[string]string) error {
 	if session.EndedAt != nil {
 		return nil
 	}
@@ -202,7 +208,13 @@ func endExecutionSession(ctx context.Context, tx pgx.Tx, session execution.Sessi
 	if _, err := tx.Exec(ctx, `UPDATE v2_execution_sessions SET data=$2,ended_at=$3 WHERE id=$1`, session.ID, raw, now); err != nil {
 		return err
 	}
-	// The driver settles what it knows the end of before; a session never ends with one running.
+	// A session never ends with one running. What the driver knows the end of keeps its reason, also
+	// when its own write has yet to succeed.
+	for id, reason := range ends {
+		if _, err := tx.Exec(ctx, `UPDATE v2_host_executions SET ended_at=$3, reason=$4 WHERE id=$1 AND session_id=$2 AND ended_at IS NULL`, id, session.ID, now, reason); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE v2_host_executions SET ended_at=$2, reason=$3 WHERE session_id=$1 AND ended_at IS NULL`, session.ID, now, execution.HostSessionEnded); err != nil {
 		return err
 	}
@@ -334,7 +346,7 @@ func (s *Store) recoverExecutions(ctx context.Context, deliver bool) ([]Recovere
 					return err
 				}
 			}
-			if err := endExecutionSession(ctx, tx, session); err != nil {
+			if err := endExecutionSession(ctx, tx, session, nil); err != nil {
 				return err
 			}
 		}

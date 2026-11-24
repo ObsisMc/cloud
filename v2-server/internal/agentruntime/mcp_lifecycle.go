@@ -302,6 +302,10 @@ func (a *agentSession) followMCP(selected *execution.MCPSelection) {
 		case <-ticker.C:
 		}
 		if err := a.syncMCP(a.project.ctx, selected, 0); authorizationLost(err) {
+			var failure *execution.MCPFailure
+			if errors.As(err, &failure) {
+				a.decideHost(failure.Code)
+			}
 			a.requestEnd()
 			return
 		}

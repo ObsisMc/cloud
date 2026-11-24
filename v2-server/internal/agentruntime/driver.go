@@ -97,6 +97,9 @@ type Driver struct {
 	turnCancelWait  time.Duration
 	turnCancelLimit time.Duration
 	startProject    func(*projectRuntime) error
+	// unsettled are the ends of host executions that were decided and not written yet (see
+	// HostExecutionEnds).
+	unsettled map[string]hostExecutionEnd
 	// hostExecutionRetry paces the writes of an execution's end that failed (see settleHost); zero
 	// is its default.
 	hostExecutionRetry time.Duration
@@ -262,6 +265,7 @@ func (d *Driver) run(ctx context.Context, scope execution.Scope, session executi
 		a.commandMu.Unlock()
 		var failure *execution.MCPFailure
 		if errors.As(err, &failure) {
+			a.decideHost(failure.Code)
 			a.requestEnd()
 			result := failed(failure.Code)
 			result.MCPFailure, result.AgentLost = failure, true

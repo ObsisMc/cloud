@@ -66,6 +66,13 @@ func (a *agentSession) settleHost(reason string) {
 	a.hostSettled = true
 	reason = a.hostReason
 	a.mu.Unlock()
+	d := a.project.driver
+	d.mu.Lock()
+	if d.unsettled == nil {
+		d.unsettled = map[string]hostExecutionEnd{}
+	}
+	d.unsettled[a.execution] = hostExecutionEnd{session: a.frozen.ID, reason: reason}
+	d.mu.Unlock()
 	if a.endHost(reason) == nil {
 		return
 	}
@@ -89,6 +96,31 @@ func (a *agentSession) endHost(reason string) error {
 	err := a.project.driver.opts.EndHostExecution(ctx, a.execution, reason)
 	if err != nil {
 		slog.Warn("record the end of an Agent execution", "execution", a.execution, "reason", reason, "error", err)
+		return err
 	}
-	return err
+	a.project.driver.mu.Lock()
+	delete(a.project.driver.unsettled, a.execution)
+	a.project.driver.mu.Unlock()
+	return nil
+}
+
+// hostExecutionEnd is why an execution of a session ended.
+type hostExecutionEnd struct{ session, reason string }
+
+// HostExecutionEnds lists, by execution, why the session's host executions ended whose end is not
+// written yet. Whoever ends the session settles them with it: the write repeated here may come later
+// and changes nothing then.
+func (d *Driver) HostExecutionEnds(sid string) map[string]string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var ends map[string]string
+	for id, end := range d.unsettled {
+		if end.session == sid {
+			if ends == nil {
+				ends = map[string]string{}
+			}
+			ends[id] = end.reason
+		}
+	}
+	return ends
 }

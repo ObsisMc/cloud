@@ -674,9 +674,13 @@ func (p *projectRuntime) transportFailed() {
 	p.mu.Unlock()
 	p.deadOnce.Do(func() {
 		// Settled before anyone learns of the loss. A caller that raced this one waits for it here.
+		// All at once: the wait is one write's, however many sessions the Node ran, and stays within
+		// the budget of whoever waits for the Node's stop.
+		var settling sync.WaitGroup
 		for _, a := range agents {
-			a.settleHost(execution.FailureNodeLost)
+			settling.Go(func() { a.settleHost(execution.FailureNodeLost) })
 		}
+		settling.Wait()
 		close(p.dead)
 	})
 	for _, a := range agents {
