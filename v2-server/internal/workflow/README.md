@@ -6,6 +6,7 @@
 ```go
 analysis, err := workflow.AnalyzeWorkflow(graph)
 err = workflow.ValidateWorkflow(graph)
+err = workflow.ValidateImportedWorkflow(graph)
 ```
 
 `AnalyzeWorkflow` 先检查节点身份、边与容器归属，再沿根 Start 和可达 Loop 的入口计算参与集合。
@@ -17,7 +18,8 @@ err = workflow.ValidateWorkflow(graph)
 列表都非 nil。根图缺少 Start 时保留全图参与校验，但 `UnsupportedNodes` 为空：启动会先因缺少入口失败。
 
 `ValidateWorkflow` 继续检查可达图的节点配置、DAG、Start 和全局声明、Aggregator / Iteration 派生类型、
-Loop 配置及作用域，以及对被排除节点的变量引用。备用节点配置不参与检查，但无效身份、边和归属不能被过滤隐藏。
+Loop 配置及作用域，以及对被排除节点的变量引用，并拒绝可达 Agent 节点使用空的 `executor.agentCli` / `executor.modelId`。备用节点配置不参与检查，但无效身份、边和归属不能被过滤隐藏。
+`ValidateImportedWorkflow` 与 `ValidateWorkflow` 共享同一套图、声明和节点配置校验，仅跳过发布期的 Agent 执行器非空检查，供工作流插件导入无预设 `executor` 的市场模板使用（导入后直接运行仍会在执行期因 `missing_agent_ref` 失败，在编辑器中手动发布时再由 `ValidateWorkflow` 校验执行器）。
 已知的历史 `prompt` / `tool` 类型沿用 desktop 的可解析行为；解析通过不代表运行时支持这些节点。
 另外，`ValidateWorkflow` 比 desktop 多拒绝一类引擎永远不会赋值的 Loop 引用（`invalid_loop_reference`，指向引用它的节点）：
 Loop 外（含 Loop 自己的 `initial`）只能读命名输出（没有 `{loop}.output`），循环体内和 Loop 的 `feedback`、`until`、`outputs` 只能读本 Loop 的循环变量，

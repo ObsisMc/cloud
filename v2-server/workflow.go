@@ -17,6 +17,7 @@ func withWorkflowDomain(o server.Options, runs *workflowhost.Host) server.Option
 	o.AnalyzeWorkflow = analyzeWorkflow
 	// Publish already reports a refusal as store.ErrWorkflowDocumentInvalid.
 	o.ValidateWorkflow = workflow.ValidateWorkflow
+	o.ValidateImportedWorkflow = workflow.ValidateImportedWorkflow
 	if runs != nil {
 		o.WorkflowRuns = runs
 		o.WorkflowRunEvents = runs.Hub()

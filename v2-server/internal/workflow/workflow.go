@@ -104,3 +104,16 @@ func ValidateWorkflow(graph string) error {
 	}
 	return validateDocument(doc)
 }
+
+// ValidateImportedWorkflow validates a workflow document imported from a plugin package.
+// It enforces the same topology, declaration, container and node configuration rules as
+// ValidateWorkflow, but allows active Agent nodes without a selected executor so marketplace
+// templates can be imported and configured before running or re-publishing.
+func ValidateImportedWorkflow(graph string) error {
+	doc, err := project(graph)
+	if err != nil {
+		return err
+	}
+	_, err = buildScopes(doc)
+	return err
+}

@@ -33,23 +33,23 @@ func TestNodeConfigurationValidation(t *testing.T) {
 		{"whitespace modelId", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "claude", "modelId": " \t"}}}, false},
 		{"no local catalog required", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "not-installed", "modelId": "not-installed"}, "prompt": ""}}, true},
 		{"agent not object", "agent", obj{"agentConfig": false}, false},
-		{"wrong prompt", "agent", obj{"agentConfig": obj{"prompt": 2}}, false},
+		{"wrong prompt", "agent", obj{"agentConfig": withExecutor(obj{"prompt": 2})}, false},
 		{"wrong executor", "agent", obj{"agentConfig": obj{"executor": "bad"}}, false},
-		{"wrong interactive", "agent", obj{"agentConfig": obj{"interactive": "true"}}, false},
-		{"bad skills shape", "agent", obj{"agentConfig": obj{"skills": nil}}, false},
+		{"wrong interactive", "agent", obj{"agentConfig": withExecutor(obj{"interactive": "true"})}, false},
+		{"bad skills shape", "agent", obj{"agentConfig": withExecutor(obj{"skills": nil})}, false},
 		{"legacy skill", "agent", obj{"agentConfig": withExecutor(obj{"skills": []any{obj{}}})}, true},
 		{"valid mcp", "agent", obj{"agentConfig": withExecutor(obj{"mcps": []any{obj{"mcpId": "official/tools", "enabled": true}}})}, true},
-		{"noncanonical mcp", "agent", obj{"agentConfig": obj{"mcps": []any{obj{"mcpId": "tools", "enabled": true}}}}, false},
-		{"mcp namespace limit", "agent", obj{"agentConfig": obj{"mcps": []any{obj{"mcpId": strings.Repeat("a", 34) + "/tools", "enabled": false}}}}, false},
-		{"duplicate disabled mcp", "agent", obj{"agentConfig": obj{"mcps": []any{obj{"mcpId": "local/tools", "enabled": false}, obj{"mcpId": "local/tools", "enabled": false}}}}, false},
-		{"mcp enabled required", "agent", obj{"agentConfig": obj{"mcps": []any{obj{"mcpId": "local/tools"}}}}, false},
+		{"noncanonical mcp", "agent", obj{"agentConfig": withExecutor(obj{"mcps": []any{obj{"mcpId": "tools", "enabled": true}}})}, false},
+		{"mcp namespace limit", "agent", obj{"agentConfig": withExecutor(obj{"mcps": []any{obj{"mcpId": strings.Repeat("a", 34) + "/tools", "enabled": false}}})}, false},
+		{"duplicate disabled mcp", "agent", obj{"agentConfig": withExecutor(obj{"mcps": []any{obj{"mcpId": "local/tools", "enabled": false}, obj{"mcpId": "local/tools", "enabled": false}}})}, false},
+		{"mcp enabled required", "agent", obj{"agentConfig": withExecutor(obj{"mcps": []any{obj{"mcpId": "local/tools"}}})}, false},
 		{"wait inactivity", "agent", obj{"agentConfig": withExecutor(obj{"promptInactivity": "wait"})}, true},
-		{"unknown inactivity", "agent", obj{"agentConfig": obj{"promptInactivity": "forever"}}, false},
+		{"unknown inactivity", "agent", obj{"agentConfig": withExecutor(obj{"promptInactivity": "forever"})}, false},
 		{"retry limits", "agent", obj{"agentConfig": withExecutor(obj{"retry": obj{"enabled": true, "maxRetries": 5, "initialDelaySeconds": 300}})}, true},
-		{"disabled retry still validated", "agent", obj{"agentConfig": obj{"retry": obj{"enabled": false, "maxRetries": 6, "initialDelaySeconds": 10}}}, false},
-		{"retry missing field", "agent", obj{"agentConfig": obj{"retry": obj{"enabled": true, "maxRetries": 2}}}, false},
-		{"retry fraction", "agent", obj{"agentConfig": obj{"retry": obj{"enabled": true, "maxRetries": 1.5, "initialDelaySeconds": 10}}}, false},
-		{"retry negative", "agent", obj{"agentConfig": obj{"retry": obj{"enabled": true, "maxRetries": 2, "initialDelaySeconds": -1}}}, false},
+		{"disabled retry still validated", "agent", obj{"agentConfig": withExecutor(obj{"retry": obj{"enabled": false, "maxRetries": 6, "initialDelaySeconds": 10}})}, false},
+		{"retry missing field", "agent", obj{"agentConfig": withExecutor(obj{"retry": obj{"enabled": true, "maxRetries": 2}})}, false},
+		{"retry fraction", "agent", obj{"agentConfig": withExecutor(obj{"retry": obj{"enabled": true, "maxRetries": 1.5, "initialDelaySeconds": 10}})}, false},
+		{"retry negative", "agent", obj{"agentConfig": withExecutor(obj{"retry": obj{"enabled": true, "maxRetries": 2, "initialDelaySeconds": -1}})}, false},
 		{"empty condition shell", "condition", obj{}, true},
 		{"condition missing id", "condition", obj{"cases": []any{obj{"conditions": []any{}}}}, false},
 		{"condition empty id is parseable", "condition", obj{"cases": []any{obj{"id": ""}}}, true},
@@ -69,27 +69,27 @@ func TestNodeConfigurationValidation(t *testing.T) {
 		{"aggregator unknown variable", "aggregator", obj{"aggregatorConfig": obj{"variables": []any{[]string{"start", "unknown"}}}}, false},
 		{"bad unrelated wire field", "output", obj{"cases": "unfinished"}, false},
 		{"agent schema version 3", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 3})}, true},
-		{"agent schema version 5", "agent", obj{"agentConfig": obj{"schemaVersion": 5}}, false},
-		{"agent schema version text", "agent", obj{"agentConfig": obj{"schemaVersion": "4"}}, false},
-		{"completion signal needs version 4", "agent", obj{"agentConfig": obj{"schemaVersion": 3, "completionSignal": "end_turn"}}, false},
-		{"completion signal without version", "agent", obj{"agentConfig": obj{"completionSignal": "agent"}}, false},
+		{"agent schema version 5", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 5})}, false},
+		{"agent schema version text", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": "4"})}, false},
+		{"completion signal needs version 4", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 3, "completionSignal": "end_turn"})}, false},
+		{"completion signal without version", "agent", obj{"agentConfig": withExecutor(obj{"completionSignal": "agent"})}, false},
 		{"completion signal end_turn", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "interactive": true, "completionSignal": "end_turn"})}, true},
 		{"completion signal agent", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "interactive": true, "completionSignal": "agent", "autoAcceptAgentCompletion": true})}, true},
-		{"completion signal unknown", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completionSignal": "tool"}}, false},
-		{"auto accept not boolean", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "autoAcceptAgentCompletion": "yes"}}, false},
-		{"auto accept needs version 4", "agent", obj{"agentConfig": obj{"autoAcceptAgentCompletion": false}}, false},
+		{"completion signal unknown", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completionSignal": "tool"})}, false},
+		{"auto accept not boolean", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "autoAcceptAgentCompletion": "yes"})}, false},
+		{"auto accept needs version 4", "agent", obj{"agentConfig": withExecutor(obj{"autoAcceptAgentCompletion": false})}, false},
 		{"completion files", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "reports/plan.md", "mustChange": true}, obj{"path": "docs/**/*.md"}}}})}, true},
-		{"completion files need version 4", "agent", obj{"agentConfig": obj{"completion": obj{"files": []any{obj{"path": "a.md"}}}}}, false},
-		{"completion files empty", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{}}}}, false},
-		{"completion files missing", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{}}}, false},
-		{"completion unknown field", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a.md"}}, "criteria": "x"}}}, false},
-		{"completion file unknown field", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a.md", "checklist": true}}}}}, false},
-		{"completion file without path", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"mustChange": true}}}}}, false},
-		{"completion file null mustChange", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a.md", "mustChange": nil}}}}}, false},
-		{"completion file absolute", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "/etc/passwd"}}}}}, false},
-		{"completion file traversal", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a/../b.md"}}}}}, false},
-		{"completion file class", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a/[ab].md"}}}}}, false},
-		{"completion too many files", "agent", obj{"agentConfig": obj{"schemaVersion": 4, "completion": obj{"files": manyFiles(33)}}}, false},
+		{"completion files need version 4", "agent", obj{"agentConfig": withExecutor(obj{"completion": obj{"files": []any{obj{"path": "a.md"}}}})}, false},
+		{"completion files empty", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{}}})}, false},
+		{"completion files missing", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{}})}, false},
+		{"completion unknown field", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a.md"}}, "criteria": "x"}})}, false},
+		{"completion file unknown field", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a.md", "checklist": true}}}})}, false},
+		{"completion file without path", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"mustChange": true}}}})}, false},
+		{"completion file null mustChange", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a.md", "mustChange": nil}}}})}, false},
+		{"completion file absolute", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "/etc/passwd"}}}})}, false},
+		{"completion file traversal", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a/../b.md"}}}})}, false},
+		{"completion file class", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": []any{obj{"path": "a/[ab].md"}}}})}, false},
+		{"completion too many files", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": manyFiles(33)}})}, false},
 		{"completion 32 files", "agent", obj{"agentConfig": withExecutor(obj{"schemaVersion": 4, "completion": obj{"files": manyFiles(32)}})}, true},
 	}
 	for _, test := range tests {
@@ -322,6 +322,10 @@ func TestPublishValidationRequiresAgentExecutorAndIdentifiesNode(t *testing.T) {
 			if _, err := workflow.ParseGraph(source); err != nil {
 				t.Fatalf("ParseGraph rejected legacy snapshot: %v", err)
 			}
+			// ValidateImportedWorkflow allows marketplace workflow plugins without an executor.
+			if err := workflow.ValidateImportedWorkflow(source); err != nil {
+				t.Fatalf("ValidateImportedWorkflow rejected executorless template: %v", err)
+			}
 		})
 	}
 
@@ -329,4 +333,12 @@ func TestPublishValidationRequiresAgentExecutorAndIdentifiesNode(t *testing.T) {
 	g := flat()
 	addNode(g, "spare", "agent", obj{"agentConfig": obj{"executor": obj{"agentCli": "", "modelId": ""}}})
 	requireValid(t, g)
+
+	// ValidateImportedWorkflow still rejects non-executor configuration defects.
+	invalidImport := flat()
+	addNode(invalidImport, "worker", "agent", obj{"agentConfig": obj{"promptInactivity": "forever"}})
+	connect(invalidImport, "start", "worker")
+	if err := workflow.ValidateImportedWorkflow(encode(t, invalidImport)); err == nil {
+		t.Fatal("ValidateImportedWorkflow accepted invalid promptInactivity")
+	}
 }

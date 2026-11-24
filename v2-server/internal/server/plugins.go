@@ -98,7 +98,11 @@ func (h *handler) installSpacePlugin(w http.ResponseWriter, r *http.Request, a a
 	}
 	var resource store.SpacePlugin
 	if source.Entry.Kind == "workflow" {
-		if h.opts.ValidateWorkflow == nil {
+		validate := h.opts.ValidateImportedWorkflow
+		if validate == nil {
+			validate = h.opts.ValidateWorkflow
+		}
+		if validate == nil {
 			fault(w, http.StatusServiceUnavailable, "workflow_validation_unavailable")
 			return
 		}
@@ -106,19 +110,19 @@ func (h *handler) installSpacePlugin(w http.ResponseWriter, r *http.Request, a a
 		if download == nil {
 			download = pluginmarket.Download
 		}
-		file, e := download(r.Context(), source.Locator, source.Digest, source.Retrieval, source.Credentials)
-		if e != nil {
-			pluginPackageError(w, e)
+		file, err := download(r.Context(), source.Locator, source.Digest, source.Retrieval, source.Credentials)
+		if err != nil {
+			pluginPackageError(w, err)
 			return
 		}
 		defer os.Remove(file)
-		documents, e := pluginmarket.VerifyWorkflowArchive(file, in.Identifier, source.Entry.Version)
-		if e != nil {
+		documents, err := pluginmarket.VerifyWorkflowArchive(file, in.Identifier, source.Entry.Version)
+		if err != nil {
 			fault(w, http.StatusBadRequest, "plugin_package_invalid")
 			return
 		}
 		resource, e = h.store.InstallWorkflowPlugin(
-			r.Context(), tenant, space, a.UserID, r.URL.Path, key, in, documents, h.opts.ValidateWorkflow,
+			r.Context(), tenant, space, a.UserID, r.URL.Path, key, in, documents, validate,
 		)
 	} else if source.Entry.Kind == "skill" {
 		// Record the skill names this package materializes, so the settings page compares user skills
@@ -128,26 +132,26 @@ func (h *handler) installSpacePlugin(w http.ResponseWriter, r *http.Request, a a
 		if download == nil {
 			download = pluginmarket.Download
 		}
-		file, e := download(r.Context(), source.Locator, source.Digest, source.Retrieval, source.Credentials)
-		if e != nil {
-			pluginPackageError(w, e)
+		file, err := download(r.Context(), source.Locator, source.Digest, source.Retrieval, source.Credentials)
+		if err != nil {
+			pluginPackageError(w, err)
 			return
 		}
 		defer os.Remove(file)
-		if e := pluginmarket.VerifySkillArchive(file, in.Identifier, source.Entry.Version); e != nil {
+		if err := pluginmarket.VerifySkillArchive(file, in.Identifier, source.Entry.Version); err != nil {
 			fault(w, http.StatusBadRequest, "plugin_package_invalid")
 			return
 		}
-		names, e := pluginmarket.SkillNamesInArchive(file, in.Identifier, source.Entry.Version)
-		if e != nil {
+		names, err := pluginmarket.SkillNamesInArchive(file, in.Identifier, source.Entry.Version)
+		if err != nil {
 			fault(w, http.StatusBadRequest, "plugin_package_invalid")
 			return
 		}
 		// Names are keyed to the verified package digest and only surface through a selection that
 		// froze that digest, so writing them before the selection leaves nothing visible (and
 		// replaces nothing) if the install itself fails.
-		if e := h.store.UpsertPluginSkills(r.Context(), source.Digest, names); e != nil {
-			pluginError(w, "install plugin", e)
+		if err := h.store.UpsertPluginSkills(r.Context(), source.Digest, names); err != nil {
+			pluginError(w, "install plugin", err)
 			return
 		}
 		resource, e = h.store.InstallSpacePlugin(
