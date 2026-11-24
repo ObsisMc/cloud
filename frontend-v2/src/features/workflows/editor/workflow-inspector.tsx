@@ -1052,7 +1052,6 @@ function AgentConfigurationFields({
       {config.interactive === true && !iterationMember && (
         <WorkflowAgentCompletionField
           config={config}
-          unapplied={unapplied}
           onChange={onChange}
         />
       )}

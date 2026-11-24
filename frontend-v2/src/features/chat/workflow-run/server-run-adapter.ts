@@ -101,6 +101,8 @@ function interactiveSession(payload: Record<string, unknown>): WorkflowNodeInter
     if (text(completion.parkKind) !== '') session.parkKind = text(completion.parkKind)
     if (text(completion.turnOrigin) !== '') session.turnOrigin = text(completion.turnOrigin)
     if (text(completion.stopCause) !== '') session.stopCause = text(completion.stopCause)
+    const signal = text(record(completion.agentSignal)?.signalId)
+    if (signal !== '') session.signalId = signal
   }
   if (typeof i.answer === 'string') session.answer = i.answer
   if (text(i.answer_source) !== '') session.answerSource = text(i.answer_source)

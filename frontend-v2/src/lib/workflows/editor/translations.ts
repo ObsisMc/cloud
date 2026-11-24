@@ -509,7 +509,7 @@ export const workflowEditorTranslations = {
     "settings.workflow.completionSignal.end_turn": "回合正常结束即可",
     "settings.workflow.completionSignal.agent": "智能体显式上报完成",
     "settings.workflow.completionSignal.hint":
-      "选择“智能体显式上报完成”时，回合正常结束后仍需要智能体调用完成工具或由你确认，才会推进工作流。v2 暂不支持完成工具，按“回合正常结束即可”执行。",
+      "选择“智能体显式上报完成”时，回合正常结束后仍需要智能体调用完成工具或由你确认，才会推进工作流。",
     "settings.workflow.field.autoAcceptAgentCompletion": "自动接受智能体完成",
     "settings.workflow.autoAcceptAgentCompletion.hint":
       "回合正常结算且智能体已上报完成时，无需人工确认直接推进；异常停靠和首轮不会自动接受。",
@@ -551,18 +551,14 @@ export const workflowEditorTranslations = {
     "settings.workflow.completion.pathIssue.tooDeep":
       "路径不能超过 32 层目录。",
 
-    "settings.workflow.unapplied.completionSignal":
-      "已保存，v2 暂不支持智能体完成工具，运行时按“回合正常结束即可”判定；完成工具上线后会开始生效。",
-    "settings.workflow.unapplied.autoAcceptAgentCompletion":
-      "已保存，v2 暂不自动接受完成，仍由发起人确认；完成工具上线后会开始生效。",
     "settings.workflow.unapplied.badge": "暂不生效",
     "settings.workflow.unapplied.mcp":
       "已保存，运行时暂不连接已启用的 MCP，节点照常执行。",
     "settings.workflow.unapplied.interactive":
       "已保存，运行时节点暂不等待人工输入，首轮结束即完成。",
-    "settings.workflow.interactivePartial.badge": "简化版",
+    "settings.workflow.interactivePartial.badge": "交互模式",
     "settings.workflow.interactivePartial.note":
-      "首轮结束后等待发起这次运行的人继续对话：首轮要点「确认并完成」，之后的回合正常结束即可「完成」；没有正常结束时可以继续对话或「仍然完成」。Agent 完成信号暂未支持。",
+      "首轮结束后等待发起这次运行的人继续对话：首轮要点「确认并完成」，之后的回合正常结束即可「完成」；没有正常结束时可以继续对话或「仍然完成」。完成判定选“智能体显式上报完成”时，还要等 Agent 上报完成再确认。",
     "settings.workflow.unapplied.retry":
       "已保存，运行失败时暂不自动重试。",
     "settings.workflow.unapplied.other":
@@ -1201,7 +1197,7 @@ export const workflowEditorTranslations = {
     "settings.workflow.completionSignal.agent":
       "The agent reports completion explicitly",
     "settings.workflow.completionSignal.hint":
-      "With explicit reporting, a normally ended turn still needs the agent's completion tool call or your confirmation before the workflow advances. v2 has no completion tool yet and runs it as a normally ended turn.",
+      "With explicit reporting, a normally ended turn still needs the agent's completion tool call or your confirmation before the workflow advances.",
     "settings.workflow.field.autoAcceptAgentCompletion":
       "Accept the agent's completion automatically",
     "settings.workflow.autoAcceptAgentCompletion.hint":
@@ -1246,18 +1242,14 @@ export const workflowEditorTranslations = {
     "settings.workflow.completion.pathIssue.tooDeep":
       "The path must not nest deeper than 32 directories.",
 
-    "settings.workflow.unapplied.completionSignal":
-      "Saved; v2 has no agent completion tool yet and judges a normally ended turn instead. It takes effect once the completion tool ships.",
-    "settings.workflow.unapplied.autoAcceptAgentCompletion":
-      "Saved; v2 does not accept completions automatically yet, the starter still confirms. It takes effect once the completion tool ships.",
     "settings.workflow.unapplied.badge": "Not applied yet",
     "settings.workflow.unapplied.mcp":
       "Saved, but runs do not connect the enabled MCPs yet; the node still runs.",
     "settings.workflow.unapplied.interactive":
       "Saved, but runs do not wait for human input yet; the node finishes after its first turn.",
-    "settings.workflow.interactivePartial.badge": "Simplified",
+    "settings.workflow.interactivePartial.badge": "Interactive",
     "settings.workflow.interactivePartial.note":
-      "After its first turn the node waits for the person who started the run to keep talking: the first turn needs \"Confirm and complete\", later turns that ended normally just \"Complete\"; a turn that did not end normally can be continued or completed anyway. The agent completion signal is not supported yet.",
+      "After its first turn the node waits for the person who started the run to keep talking: the first turn needs \"Confirm and complete\", later turns that ended normally just \"Complete\"; a turn that did not end normally can be continued or completed anyway. With explicit reporting, the agent's report is awaited and confirmed as well.",
     "settings.workflow.unapplied.retry":
       "Saved, but failed runs are not retried automatically yet.",
     "settings.workflow.unapplied.other":

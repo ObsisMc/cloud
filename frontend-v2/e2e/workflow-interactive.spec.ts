@@ -96,7 +96,7 @@ async function startRun(page: Page, graph: string, label: string) {
   return { tenantId, pane, row, runId }
 }
 
-const partialNote = 'Agent 完成信号暂未支持，由发起人确认完成。停止本轮后，会话还在就可以接着对话；没能保留会话时只能完成这一步。'
+const partialNote = '由发起人确认完成。停止本轮后，会话还在就可以接着对话；没能保留会话时只能完成这一步。'
 
 async function screenshot(page: Page, path: string) {
   await page.waitForFunction(() =>
@@ -306,7 +306,7 @@ test('interactive Agent: a missing deliverable blocks completion until the start
   expect(forced.blockers.map((b: { kind: string }) => b.kind)).toEqual(['file_missing', 'file_missing'])
 })
 
-test('the Agent inspector marks interactive mode as the end_turn version', async ({ page }, testInfo) => {
+test('the Agent inspector says how a run applies interactive mode', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/workflows')
@@ -326,7 +326,7 @@ test('the Agent inspector marks interactive mode as the end_turn version', async
   await page.locator('.react-flow__node[data-id="draft"]').click()
   const inspector = page.locator('[data-workflow-inspector]')
   const note = inspector.getByTestId('workflow-interactive-partial')
-  await expect(note).toContainText('简化版')
+  await expect(note).toContainText('交互模式')
   await expect(note).toContainText('首轮要点「确认并完成」')
   await expect(inspector.getByTestId('workflow-unapplied-interactive')).toHaveCount(0)
   await note.scrollIntoViewIfNeeded()
@@ -337,7 +337,7 @@ test('the Agent inspector marks interactive mode as the end_turn version', async
   await expect(note).toHaveCount(0)
 })
 
-test('the Agent inspector edits the completion rule and deliverables, and marks the agent rule as not applied', async ({ page }, testInfo) => {
+test('the Agent inspector edits the completion rule and deliverables, and marks neither as not applied', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 1200 })
   await page.goto('/workflows')
@@ -354,18 +354,17 @@ test('the Agent inspector edits the completion rule and deliverables, and marks 
   await page.locator('.react-flow__node[data-id="draft"]').click()
   const inspector = page.locator('[data-workflow-inspector]')
   await expect(inspector.getByRole('combobox', { name: '完成判定' })).toContainText('智能体显式上报完成')
-  const hint = inspector.getByTestId('workflow-unapplied-completionSignal')
-  await expect(hint).toContainText('v2 暂不支持智能体完成工具')
-  await expect(hint).toContainText('完成工具上线后会开始生效')
+  await expect(inspector.getByRole('switch', { name: '自动接受智能体完成' })).toBeVisible()
+  await expect(inspector.getByTestId('workflow-unapplied-completionSignal')).toHaveCount(0)
   await expect(inspector.getByLabel('文件 1 路径')).toHaveValue('plan.md')
   await expect(inspector.getByLabel('文件 2 路径')).toHaveValue('docs/*.md')
-  await hint.scrollIntoViewIfNeeded()
+  await inspector.getByRole('combobox', { name: '完成判定' }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath('10-editor-completion.png'), animations: 'disabled' })
   await inspector.getByLabel('文件 2 路径').scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath('11-editor-deliverables.png'), animations: 'disabled' })
 
-  // Back to end_turn: the hint goes, as the server stops listing the rule.
+  // Back to end_turn: auto-accept only exists for the agent rule.
   await inspector.getByRole('combobox', { name: '完成判定' }).click()
   await page.getByRole('option', { name: '回合正常结束即可' }).click()
-  await expect(inspector.getByTestId('workflow-unapplied-completionSignal')).toHaveCount(0, { timeout: 15_000 })
+  await expect(inspector.getByRole('switch', { name: '自动接受智能体完成' })).toHaveCount(0)
 })

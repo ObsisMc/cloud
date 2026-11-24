@@ -64,6 +64,10 @@ export const workflowRunTranslations = {
       "本轮对话已变化，请刷新运行后重新确认。",
     "errors.workflow_node_output_changed":
       "本轮产出已变化，请刷新运行后重新确认。",
+    "errors.workflow_node_signal_changed":
+      "Agent 上报的完成已变化，请刷新运行后重新确认。",
+    "errors.workflow_completion_tool_unavailable":
+      "这个工作流有节点要等 Agent 上报完成，但当前无法把完成工具交给它的 Agent，运行没有启动。请联系管理员，或把节点的完成判定改为“回合正常结束即可”。",
     "errors.workflow_node_not_diagnosable":
       "只有失败的智能体节点才能做 AI 分析。",
     "workflowRun.loading": "正在加载运行…",
@@ -552,7 +556,7 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.awaitingBadge": "等待输入",
     "workflowRun.v2.interactive.openHint": "等待输入：打开会话继续对话，或完成这一步",
     "workflowRun.v2.interactive.partialNote":
-      "Agent 完成信号暂未支持，由发起人确认完成。停止本轮后，会话还在就可以接着对话；没能保留会话时只能完成这一步。",
+      "由发起人确认完成。停止本轮后，会话还在就可以接着对话；没能保留会话时只能完成这一步。",
     "workflowRun.v2.interactive.readOnly":
       "只有发起这次运行的人可以继续对话、停止或完成这一步，你可以查看。",
     "workflowRun.v2.interactive.composerLabel": "回复 Agent",
@@ -569,6 +573,10 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.confirmComplete": "确认并完成",
     "workflowRun.v2.interactive.confirmHint":
       "这是工作流发起的首轮：Agent 的回答可能是在提问。确认回答就是这一步要的结果后再完成，否则继续对话。",
+    "workflowRun.v2.interactive.unreportedHint":
+      "Agent 还没有上报这一步已完成，它的回答可能是在提问。继续对话，或者「仍然完成」。",
+    "workflowRun.v2.interactive.reportedHint":
+      "Agent 已上报这一步完成。确认它的结果后「确认并完成」，或者继续对话。",
     "workflowRun.v2.interactive.completeAnyway": "仍然完成",
     "workflowRun.v2.interactive.forceTitle": "仍然完成这一步？",
     "workflowRun.v2.interactive.forceBody":
@@ -579,6 +587,8 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.forceConfirm": "仍然完成",
     "workflowRun.v2.interactive.forceCancel": "取消",
     "workflowRun.v2.interactive.blocker.turn_unconfirmed": "首轮回答待你确认。",
+    "workflowRun.v2.interactive.blocker.agent_signal_pending": "Agent 没有上报这一步已完成。",
+    "workflowRun.v2.interactive.blocker.agent_confirmation_pending": "Agent 上报的完成还没有确认。",
     "workflowRun.v2.interactive.blocker.turn_stopped": "本轮被停止，没有正常结束。",
     "workflowRun.v2.interactive.blocker.turn_truncated": "本轮被截断：达到了输出上限。",
     "workflowRun.v2.interactive.blocker.turn_refused": "Agent 拒绝了本轮请求。",
@@ -668,6 +678,10 @@ export const workflowRunTranslations = {
       "The current turn changed. Refresh the run and try again.",
     "errors.workflow_node_output_changed":
       "This turn's output changed. Refresh the run and try again.",
+    "errors.workflow_node_signal_changed":
+      "The agent's report changed. Refresh the run and confirm again.",
+    "errors.workflow_completion_tool_unavailable":
+      "A node of this workflow waits for its agent to report completion, but the agent cannot be given the completion tool, so the run was not started. Contact an administrator, or change the node's completion rule to a normally ended turn.",
     "errors.workflow_node_not_diagnosable":
       "AI analysis is only available for a failed agent node.",
     "workflowRun.loading": "Loading run…",
@@ -1202,7 +1216,7 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.awaitingBadge": "Awaiting input",
     "workflowRun.v2.interactive.openHint": "Awaiting input: open the session to reply or complete this step",
     "workflowRun.v2.interactive.partialNote":
-      "The agent completion signal is not supported yet, so the starter confirms completion. After stopping a turn you can keep talking while the session lasts; if it could not be kept, the step can only be completed.",
+      "The starter confirms completion. After stopping a turn you can keep talking while the session lasts; if it could not be kept, the step can only be completed.",
     "workflowRun.v2.interactive.readOnly":
       "Only the person who started this run can continue, stop or complete this step; you can read it.",
     "workflowRun.v2.interactive.composerLabel": "Reply to the agent",
@@ -1219,6 +1233,10 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.confirmComplete": "Confirm and complete",
     "workflowRun.v2.interactive.confirmHint":
       "This is the workflow's own first turn: the agent may have ended it with a question. Complete once the answer is what this step needs, or keep talking.",
+    "workflowRun.v2.interactive.unreportedHint":
+      "The agent has not reported this step done; it may have ended with a question. Keep talking, or complete anyway.",
+    "workflowRun.v2.interactive.reportedHint":
+      "The agent reported this step done. Confirm its result to complete, or keep talking.",
     "workflowRun.v2.interactive.completeAnyway": "Complete anyway",
     "workflowRun.v2.interactive.forceTitle": "Complete this step anyway?",
     "workflowRun.v2.interactive.forceBody":
@@ -1229,6 +1247,8 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.forceConfirm": "Complete anyway",
     "workflowRun.v2.interactive.forceCancel": "Cancel",
     "workflowRun.v2.interactive.blocker.turn_unconfirmed": "The first turn's answer awaits your confirmation.",
+    "workflowRun.v2.interactive.blocker.agent_signal_pending": "The agent has not reported this step done.",
+    "workflowRun.v2.interactive.blocker.agent_confirmation_pending": "The agent's report awaits confirmation.",
     "workflowRun.v2.interactive.blocker.turn_stopped": "The turn was stopped before it ended normally.",
     "workflowRun.v2.interactive.blocker.turn_truncated": "The turn was cut at its output limit.",
     "workflowRun.v2.interactive.blocker.turn_refused": "The agent refused this turn.",

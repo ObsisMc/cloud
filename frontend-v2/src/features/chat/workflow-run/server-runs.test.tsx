@@ -97,7 +97,7 @@ describe('completeNode', () => {
   const previous = http.defaults.adapter
   afterEach(() => { http.defaults.adapter = previous })
 
-  it('puts the opening turn\'s confirmation and force on the wire, never both', async () => {
+  it('puts the starter\'s decision on the wire, and nothing they did not decide', async () => {
     const sent: Array<{ url: string; body: unknown }> = []
     http.defaults.adapter = async (config) => {
       sent.push({ url: config.url ?? '', body: typeof config.data === 'string' ? JSON.parse(config.data) : config.data })
@@ -106,10 +106,12 @@ describe('completeNode', () => {
     await completeNode(tenantId, 'run-1', 'a', { confirmInitialTurn: true })
     await completeNode(tenantId, 'run-1', 'a', { force: true })
     await completeNode(tenantId, 'run-1', 'a')
+    await completeNode(tenantId, 'run-1', 'a', { confirmSignalId: 'signal-1' })
     expect(sent).toEqual([
       { url: `/api/v2/tenants/${tenantId}/workflow-runs/run-1/nodes/a/complete`, body: { force: false, requester: 'human', confirmInitialTurn: true } },
       { url: `/api/v2/tenants/${tenantId}/workflow-runs/run-1/nodes/a/complete`, body: { force: true, requester: 'human' } },
       { url: `/api/v2/tenants/${tenantId}/workflow-runs/run-1/nodes/a/complete`, body: { force: false, requester: 'human' } },
+      { url: `/api/v2/tenants/${tenantId}/workflow-runs/run-1/nodes/a/complete`, body: { force: false, requester: 'human', confirmAgentCompletion: { signalId: 'signal-1' } } },
     ])
   })
 })

@@ -64,7 +64,7 @@ describe('RunNodeSessionActions', () => {
     toastError.mockClear()
   })
 
-  it('lets the starter reply in the node session and says the completion is simplified', async () => {
+  it('lets the starter reply in the node session and says who completes the node', async () => {
     view({})
     expect(screen.getByText(zh['workflowRun.v2.interactive.partialNote'])).toBeTruthy()
     const box = screen.getByRole('textbox', { name: zh['workflowRun.v2.interactive.composerLabel'] })
@@ -110,6 +110,60 @@ describe('RunNodeSessionActions', () => {
     expect(await screen.findByText(zh['workflowRun.v2.interactive.forceTitle'])).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: zh['workflowRun.v2.interactive.forceConfirm'] }))
     await waitFor(() => expect(calls.completeNode).toHaveBeenCalledWith('tenant-1', 'run-1', 'a', { force: true }))
+  })
+
+  const reported = { ...parked, completable: false, blockers: [{ kind: 'agent_confirmation_pending' }], parkKind: 'awaiting_user', turnOrigin: 'human', signalId: 'signal-1' }
+  const button = (key: 'complete' | 'completeAnyway' | 'confirmComplete') => screen.queryByRole('button', { name: zh[`workflowRun.v2.interactive.${key}`] })
+
+  it('confirms the very report the Agent made', async () => {
+    view({ session: reported })
+    expect(screen.getByText(zh['workflowRun.v2.interactive.reportedHint'])).toBeTruthy()
+    expect(button('complete')).toBeNull()
+    expect(button('completeAnyway')).toBeNull()
+    expect(screen.getByRole('textbox')).toBeTruthy()
+    fireEvent.click(button('confirmComplete')!)
+    await waitFor(() => expect(calls.completeNode).toHaveBeenCalledWith('tenant-1', 'run-1', 'a', { confirmSignalId: 'signal-1' }))
+  })
+
+  it('confirms a reported first turn and its report at once', async () => {
+    view({ session: { ...reported, turns: 1, turnOrigin: 'workflow', blockers: [{ kind: 'turn_unconfirmed' }, { kind: 'agent_confirmation_pending' }] } })
+    expect(button('completeAnyway')).toBeNull()
+    fireEvent.click(button('confirmComplete')!)
+    await waitFor(() => expect(calls.completeNode).toHaveBeenCalledWith('tenant-1', 'run-1', 'a', { confirmInitialTurn: true, confirmSignalId: 'signal-1' }))
+  })
+
+  it.each([
+    ['a first turn', [{ kind: 'turn_unconfirmed' }, { kind: 'agent_signal_pending' }], { confirmInitialTurn: true, force: true }],
+    ['a later turn', [{ kind: 'agent_signal_pending' }], { force: true }],
+  ])('completes %s the Agent did not report only anyway, behind the confirmation', async (_, blockers, completion) => {
+    view({ session: { ...parked, completable: false, blockers, parkKind: 'awaiting_user' } })
+    expect(screen.getByText(zh['workflowRun.v2.interactive.unreportedHint'])).toBeTruthy()
+    expect(button('complete')).toBeNull()
+    expect(button('confirmComplete')).toBeNull()
+    fireEvent.click(button('completeAnyway')!)
+    expect(calls.completeNode).not.toHaveBeenCalled()
+    expect(await screen.findByText(new RegExp(zh['workflowRun.v2.interactive.blocker.agent_signal_pending']))).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: zh['workflowRun.v2.interactive.forceConfirm'] }))
+    await waitFor(() => expect(calls.completeNode).toHaveBeenCalledWith('tenant-1', 'run-1', 'a', completion))
+  })
+
+  it('offers both the confirmation and force once a reported step misses a deliverable', async () => {
+    calls.completeNode.mockRejectedValueOnce(new ContractError('workflow_node_incomplete', { blockers: [{ kind: 'file_missing', path: 'plan.md' }] }))
+    view({ session: reported })
+    fireEvent.click(button('confirmComplete')!)
+    expect(await screen.findByText('缺少交付文件：plan.md')).toBeTruthy()
+    expect(button('confirmComplete')).toBeTruthy()
+    fireEvent.click(button('completeAnyway')!)
+    expect(await screen.findByText(new RegExp(zh['workflowRun.v2.interactive.blocker.agent_confirmation_pending']))).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: zh['workflowRun.v2.interactive.forceConfirm'] }))
+    await waitFor(() => expect(calls.completeNode).toHaveBeenLastCalledWith('tenant-1', 'run-1', 'a', { force: true }))
+  })
+
+  it('says a confirmed report changed', async () => {
+    calls.completeNode.mockRejectedValueOnce(new ContractError('workflow_node_signal_changed', { nodeId: 'a', expected: 'signal-2', actual: 'signal-1' }))
+    view({ session: reported })
+    fireEvent.click(button('confirmComplete')!)
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(zh['errors.workflow_node_signal_changed']))
   })
 
   it('keeps talking after a stop the session outlived', async () => {

@@ -9,8 +9,6 @@ const PLACED_SETTINGS = {
   mcp: "settings.workflow.unapplied.mcp",
   interactive: "settings.workflow.unapplied.interactive",
   retry: "settings.workflow.unapplied.retry",
-  completionSignal: "settings.workflow.unapplied.completionSignal",
-  autoAcceptAgentCompletion: "settings.workflow.unapplied.autoAcceptAgentCompletion",
 } as const;
 
 /** A setting name with a field of its own in the Agent inspector. */
@@ -56,10 +54,10 @@ export function WorkflowOtherUnappliedSettings({
 }
 
 /**
- * Says which version of interactive mode a run applies: v2 parks the node for its starter and
- * completes it through desktop's gates (the first turn confirmed, force for a turn that did not end
- * normally) without the Agent completion signal. Shown while the mode is on and the server applies
- * it; where the server lists it as unapplied, the unapplied hint says so instead.
+ * Says how a run applies interactive mode: v2 parks the node for its starter and completes it
+ * through desktop's gates (the first turn confirmed, the agent's report where the policy asks for
+ * it, force for a turn that did not end normally). Shown while the mode is on and the server
+ * applies it; where the server lists it as unapplied, the unapplied hint says so instead.
  */
 export function WorkflowInteractivePartialNote({
   enabled,

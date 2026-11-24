@@ -923,7 +923,7 @@ describe("WorkflowInspector unapplied-setting hints", () => {
     expect(screen.queryByTestId("workflow-unapplied-other")).toBeNull();
   });
 
-  it("marks interactive mode as the end_turn version where a run applies it", async () => {
+  it("says how a run applies interactive mode where it does", async () => {
     await appI18n.changeLanguage("zh-CN");
     const user = userEvent.setup();
     const agent = createAgentNode();
@@ -944,9 +944,9 @@ describe("WorkflowInspector unapplied-setting hints", () => {
     // A root Agent parks for its starter: no "not applied" mark, and the note names the version.
     expect(screen.queryByTestId("workflow-unapplied-interactive")).toBeNull();
     const note = screen.getByTestId("workflow-interactive-partial");
-    expect(note).toHaveTextContent("简化版");
+    expect(note).toHaveTextContent("交互模式");
     expect(note).toHaveTextContent("首轮要点「确认并完成」");
-    expect(note).toHaveTextContent("Agent 完成信号暂未支持");
+    expect(note).toHaveTextContent("还要等 Agent 上报完成再确认");
     // Switching the mode off removes the note with it.
     await user.click(screen.getByRole("switch", { name: "交互模式" }));
     expect(screen.queryByTestId("workflow-interactive-partial")).toBeNull();
