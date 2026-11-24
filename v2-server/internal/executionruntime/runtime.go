@@ -498,6 +498,9 @@ func (s *Service) Append(ctx context.Context, scope execution.Scope, req executi
 // CheckHostTools reports whether sessions of the project can be given host tools, starting the
 // project's Node if it is not running: its capabilities are known only once it is.
 func (s *Service) CheckHostTools(ctx context.Context, scope execution.Scope, projectID string) error {
+	if s.agent == nil {
+		return execution.ErrUnavailable
+	}
 	driver, ok := s.agent.(interface {
 		CheckHostTools(context.Context, execution.Scope, string) error
 	})

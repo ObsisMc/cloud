@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
@@ -150,6 +151,7 @@ func TestWorkflowRunLifecycleRefusals(t *testing.T) {
 		body   any
 	}{
 		{"no completion tool", fmt.Errorf("%w: gone", server.ErrWorkflowCompletionToolUnavailable), "workflow_completion_tool_unavailable", 400, "POST", "/start", nil},
+		{"execution unavailable", execution.ErrUnavailable, "execution_unavailable", 503, "POST", "/start", nil},
 		{"not startable", server.ErrWorkflowRunNotStartable, "workflow_run_start_failed", 400, "POST", "/start", nil},
 		{"not editable", server.ErrWorkflowRunNotEditable, "workflow_run_not_editable", 409, "PATCH", "/input", map[string]any{"input": "x"}},
 		{"node not parked", server.ErrWorkflowNodeNotAwaitingInput, "workflow_node_not_awaiting_input", 400, "POST", "/nodes/agent-1/complete", map[string]any{"force": false}},

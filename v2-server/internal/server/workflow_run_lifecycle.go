@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 )
 
@@ -249,6 +250,8 @@ func workflowRunLifecycleFault(w http.ResponseWriter, err error, op string) {
 			"params":    map[string]any{"variable": invalid.Variable, "reason": invalid.Reason},
 			"requestId": requestID(),
 		})
+	case errors.Is(err, execution.ErrUnavailable):
+		fault(w, http.StatusServiceUnavailable, "execution_unavailable")
 	default:
 		internal(w, op, err)
 	}

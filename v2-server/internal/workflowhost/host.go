@@ -553,10 +553,12 @@ func (h *Host) checkCompletionTool(ctx context.Context, scope execution.Scope, r
 	if h.tools == nil {
 		return server.ErrWorkflowCompletionToolUnavailable
 	}
-	if err := h.checkTools(ctx, scope, run.ProjectID); err != nil {
+	err = h.checkTools(ctx, scope, run.ProjectID)
+	if errors.Is(err, execution.ErrHostMCPUnavailable) {
 		return fmt.Errorf("%w: %s", server.ErrWorkflowCompletionToolUnavailable, publicReason(err))
 	}
-	return nil
+	// Anything else (Node did not start, the request was cancelled) says nothing about the tool.
+	return err
 }
 
 // roleCheckError names the missing role while keeping the server sentinel the route maps.

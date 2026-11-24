@@ -66,6 +66,7 @@ export const workflowRunTranslations = {
       "本轮产出已变化，请刷新运行后重新确认。",
     "errors.workflow_node_signal_changed":
       "Agent 上报的完成已变化，请刷新运行后重新确认。",
+    "errors.execution_unavailable": "执行服务暂时不可用，请稍后重试。",
     "errors.workflow_completion_tool_unavailable":
       "这个工作流有节点要等 Agent 上报完成，但当前无法把完成工具交给它的 Agent，运行没有启动。请联系管理员，或把节点的完成判定改为“回合正常结束即可”。",
     "errors.workflow_node_not_diagnosable":
@@ -680,6 +681,7 @@ export const workflowRunTranslations = {
       "This turn's output changed. Refresh the run and try again.",
     "errors.workflow_node_signal_changed":
       "The agent's report changed. Refresh the run and confirm again.",
+    "errors.execution_unavailable": "The execution service is unavailable; try again later.",
     "errors.workflow_completion_tool_unavailable":
       "A node of this workflow waits for its agent to report completion, but the agent cannot be given the completion tool, so the run was not started. Contact an administrator, or change the node's completion rule to a normally ended turn.",
     "errors.workflow_node_not_diagnosable":
