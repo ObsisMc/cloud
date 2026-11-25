@@ -22,6 +22,10 @@ import {
   type WorkflowVariableCatalogEntry,
   type WorkflowGlobalVariable,
   deriveWorkflowVariableCatalog,
+  loopInitialText,
+  loopUntil,
+  loopVariableType,
+  namedEntries,
   normalizeWorkflowGlobalVariables,
 } from "@/lib/workflows/mock";
 import {
@@ -1037,13 +1041,13 @@ function LoopNodeDetails({
         )?.data.title,
       }),
     ),
-    ...(loopConfig?.variables ?? []).map((variable) => ({
+    ...namedEntries(loopConfig?.variables).map((variable) => ({
       selector: [node.id, variable.name],
       sourceNodeId: node.id,
       sourceNodeTitle: node.data.title,
       scope: "node" as const,
       variableName: variable.name,
-      valueType: variable.valueType,
+      valueType: loopVariableType(variable),
     })),
   ].filter(
     (entry, index, entries) =>
@@ -1052,11 +1056,10 @@ function LoopNodeDetails({
           candidate.selector.join(".") === entry.selector.join("."),
       ) === index,
   );
-  const carriedVariable = loopConfig?.variables[0];
-  const initialValue =
-    carriedVariable?.initial.kind === "constant"
-      ? String(carriedVariable.initial.value ?? "")
-      : "";
+  const carriedVariable = namedEntries(loopConfig?.variables)[0];
+  const initial = loopInitialText(carriedVariable);
+  const initialValue = initial?.kind === "constant" ? initial.text : "";
+  const until = loopConfig && loopUntil(loopConfig);
   return (
     <>
       <WorkflowNodeDetailsHeader
@@ -1084,23 +1087,24 @@ function LoopNodeDetails({
                   ...node.data,
                   loopConfig: {
                     ...loopConfig,
-                    variables: [
-                      {
-                        ...carriedVariable,
-                        initial: {
-                          kind: "constant",
-                          value: event.target.value,
-                        },
-                      },
-                      ...loopConfig.variables.slice(1),
-                    ],
+                    variables: loopConfig.variables.map((variable) =>
+                      variable === carriedVariable
+                        ? {
+                            ...variable,
+                            initial: {
+                              kind: "constant",
+                              value: event.target.value,
+                            },
+                          }
+                        : variable,
+                    ),
                   },
                 },
               });
             }}
           />
         </InspectorField>
-        {loopConfig !== undefined && (
+        {loopConfig !== undefined && until !== undefined && (
           <section
             className="space-y-3"
             aria-label={t("settings.workflow.loop.until")}
@@ -1109,12 +1113,15 @@ function LoopNodeDetails({
               {t("settings.workflow.loop.until")}
             </h3>
             <WorkflowConditionRules
-              conditions={loopConfig.until.conditions}
-              logic={loopConfig.until.logic}
-              onChange={(until) =>
+              conditions={until.conditions}
+              logic={until.logic}
+              onChange={(next) =>
                 onUpdate({
                   ...node,
-                  data: { ...node.data, loopConfig: { ...loopConfig, until } },
+                  data: {
+                    ...node.data,
+                    loopConfig: { ...loopConfig, until: next },
+                  },
                 })
               }
               operators={capabilities.conditionOperators}

@@ -13,6 +13,7 @@ export * from "./normalize-agent-config";
 export * from "./structured-output-schema";
 export * from "./start-input";
 export * from "./validation";
+export * from "./loop-config";
 export * from "./variable-catalog";
 export * from "./variable-value";
 export * from "./version-history";

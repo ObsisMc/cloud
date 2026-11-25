@@ -6,7 +6,7 @@ import { UserContext } from "@/app/auth/user";
 import { createContractsClient } from "@/lib/workflows/data/contracts-client";
 import { ContractsClientProvider } from "@/lib/workflows/data/contracts-client-provider";
 import { LocalWorkflowBackend } from "@/lib/workflows/data/local-workflow-backend";
-import type { WorkflowNodeData } from "@/lib/workflows/mock";
+import type { WorkflowLoopConfig, WorkflowNodeData } from "@/lib/workflows/mock";
 import { AppI18nProvider } from "@/lib/workflows/test/i18n";
 import { appI18n } from "@/lib/workflows/test/i18n-instance";
 import { localWorkflowContracts, memoryWorkflowStorage } from "@/lib/workflows/test/workflow-server";
@@ -30,6 +30,13 @@ function renderSummary(data: WorkflowNodeData) {
     </QueryClientProvider>,
   );
 }
+
+const carried = {
+  name: "value",
+  valueType: "string",
+  initial: { kind: "constant", value: "KEEP" },
+  feedback: ["loop", "value"],
+};
 
 describe("WorkflowNodeParameterSummary", () => {
   it("labels an empty Agent executor as no Agent selected in both languages", async () => {
@@ -90,5 +97,42 @@ describe("WorkflowNodeParameterSummary", () => {
       },
     });
     expect(screen.getByText("official/ora-space.opencode · —")).toBeInTheDocument();
+  });
+
+  it.each<[string, object, string | undefined, string | undefined]>([
+    ["is complete", {}, "3", "KEEP"],
+    ["starts from another variable", { variables: [{ ...carried, initial: { kind: "variable", selector: ["a", "b"] } }] }, "3", "a.b"],
+    ["has no variables", { variables: undefined }, "3", undefined],
+    ["has null variables", { variables: null }, "3", undefined],
+    ["has variables that are no list", { variables: {} }, "3", undefined],
+    ["has no named variable", { variables: [null, {}, { name: 1 }] }, "3", undefined],
+    ["has an unnamed variable first", { variables: [null, {}, carried] }, "3", "KEEP"],
+    ["has a variable without an initial value", { variables: [{ ...carried, initial: undefined }] }, "3", undefined],
+    ["has a variable with a null initial value", { variables: [{ ...carried, initial: null }] }, "3", undefined],
+    ["has a variable that reads no selector", { variables: [{ ...carried, initial: { kind: "variable" } }] }, "3", undefined],
+    ["has no limit", { maxIterations: undefined }, undefined, "KEEP"],
+    ["has a null limit", { maxIterations: null }, undefined, "KEEP"],
+  ])("summarizes a Loop that %s", async (_, changed, limit, initial) => {
+    await appI18n.changeLanguage("zh-CN");
+    renderSummary({
+      kind: "loop",
+      title: "循环",
+      description: "",
+      loopConfig: {
+        maxIterations: 3,
+        variables: [carried],
+        until: { logic: "and", conditions: [] },
+        outputs: [],
+        ...changed,
+      } as unknown as WorkflowLoopConfig,
+    });
+    for (const [label, value] of [["最大轮次", limit], ["初始值", initial]] as const) {
+      if (value === undefined) {
+        expect(screen.queryByText(label)).not.toBeInTheDocument();
+      } else {
+        expect(screen.getByText(label)).toBeInTheDocument();
+        expect(screen.getByText(value)).toBeInTheDocument();
+      }
+    }
   });
 });

@@ -1,5 +1,9 @@
 import { useTranslation } from "react-i18next";
-import { type WorkflowNodeData } from "@/lib/workflows/mock";
+import {
+  loopInitialText,
+  namedEntries,
+  type WorkflowNodeData,
+} from "@/lib/workflows/mock";
 import {
   conditionBranchesSummary,
   createWorkflowSummaryLabels,
@@ -185,15 +189,13 @@ function configuredParameters(
     appendParameter(
       parameters,
       t("settings.workflow.field.maxIterations"),
-      data.loopConfig?.maxIterations.toString(),
+      // An imported draft may lack any of this; what is missing is not shown.
+      String(data.loopConfig?.maxIterations ?? ""),
     );
-    const carriedVariable = data.loopConfig?.variables[0];
     appendParameter(
       parameters,
       t("settings.workflow.field.loopInitialValue"),
-      carriedVariable?.initial.kind === "constant"
-        ? String(carriedVariable.initial.value ?? "")
-        : carriedVariable?.initial.selector.join("."),
+      loopInitialText(namedEntries(data.loopConfig?.variables)[0])?.text,
     );
     return parameters;
   }
