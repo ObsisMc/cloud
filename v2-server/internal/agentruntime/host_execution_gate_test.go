@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -251,6 +252,7 @@ func TestAnExecutionThatStoppedRunningVoidsItsCredential(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			emit, held, release := Emit(discardIPCEvent), make(chan struct{}, 1), make(chan struct{})
+			proceed := sync.OnceFunc(func() { close(release) })
 			if tc.happen == nil {
 				emit = func(_ context.Context, e execution.Event) error {
 					if e.Kind == execution.EventTurnEnded {
@@ -262,10 +264,11 @@ func TestAnExecutionThatStoppedRunningVoidsItsCredential(t *testing.T) {
 				tc.happen = func(t *testing.T, x *hostedTurn) func() {
 					x.f.terminalAs(x.start, tc.reason, "")
 					receiveIPC(t, held)
-					return func() { close(release); receiveIPC(t, x.done) }
+					return func() { proceed(); receiveIPC(t, x.done) }
 				}
 			}
 			x := startHostedTurn(t, emit, storedOnly)
+			t.Cleanup(proceed) // a failure must not leave the receive loop held while the driver closes
 			then := tc.happen(t, x)
 			if got := x.recorded(); got != tc.reason {
 				t.Errorf("recorded %q, want %q", got, tc.reason)
@@ -298,6 +301,8 @@ func TestAnEndIsWrittenBeforeNodeIsAskedForIt(t *testing.T) {
 	t.Run("while it is written", func(t *testing.T) {
 		x := startHostedTurn(t, discardIPCEvent, withDriver)
 		release := make(chan struct{})
+		proceed := sync.OnceFunc(func() { close(release) })
+		t.Cleanup(proceed)
 		x.blocking.Store(&release)
 		ended := make(chan error, 1)
 		go func() { ended <- x.h.driver.End(ipcContext(t), "hosted") }()
@@ -311,7 +316,7 @@ func TestAnEndIsWrittenBeforeNodeIsAskedForIt(t *testing.T) {
 			t.Fatal("Node was asked to end the session before its end was written")
 		}
 		x.blocking.Store(nil)
-		close(release)
+		proceed()
 		nextIPCCommand(t, x.f, "end_session")
 		if got := x.recorded(); got != execution.HostSessionEnded {
 			t.Fatalf("recorded %q", got)
