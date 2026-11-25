@@ -431,12 +431,12 @@ describe('RunNodeSessionActions', () => {
     expect(box.value).toBe('再改一版')
   })
 
-  it.each(['zh-CN', 'en-US'] as const)('tells the starter and everyone else that the completion tool is not connected (%s)', async (locale) => {
+  it.each(['zh-CN', 'en-US'] as const)('tells the starter and everyone else that the completion tool was not connected when the node last parked (%s)', async (locale) => {
     const strings = workflowRunTranslations[locale]
     const notice = strings['workflowRun.v2.interactive.toolUnconnected']
     expect(notice).toBe(locale === 'zh-CN'
-      ? '完成工具没有连上，Agent 可能没法上报这一步完成。这只是提示，这一步仍可以照常继续或完成。'
-      : 'The completion tool is not connected, so the agent may be unable to report this step done. This is only a notice: the step can still be continued or completed as usual.')
+      ? '上次停住时，完成工具没有连上，Agent 可能没法上报这一步完成。这只是提示，不改变完成条件。'
+      : 'When this node last stopped, the completion tool was not connected, so the agent may be unable to report this step done. This is only a notice and does not change what completes the step.')
     const i18n = createWorkflowI18n(['zh-CN', 'en-US'], workflowRunTranslations)
     await i18n.changeLanguage(locale)
     const pending: WorkflowNodeInteractiveSession = { ...parked, completable: false, blockers: [{ kind: 'agent_signal_pending' }] }
