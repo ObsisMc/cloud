@@ -108,6 +108,7 @@ function interactiveSession(payload: Record<string, unknown>): WorkflowNodeInter
   if (text(i.answer_source) !== '') session.answerSource = text(i.answer_source)
   if (typeof i.sent === 'number') session.sent = i.sent
   if (text(i.last_turn_error) !== '') session.lastTurnError = text(i.last_turn_error)
+  if (i.completion_tool_unconnected === true) session.completionToolUnconnected = true
   return session
 }
 

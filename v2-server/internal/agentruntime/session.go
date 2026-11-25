@@ -505,6 +505,9 @@ func (a *agentSession) submit(admitted execution.Turn, text string, fresh bool) 
 			spec["mcp_lifecycle"] = true
 		}
 		err = a.project.send("start_agent_session", a.execution, map[string]any{"spec": spec})
+		if err == nil && admitted.Host != nil {
+			admitted.Host.Started()
+		}
 		if err == nil && lifecycle && a.project.driver.opts.ReadMCPTarget != nil {
 			// The watcher needs only the original authorization identities.
 			ids := &execution.MCPSelection{Bindings: make([]execution.MCPBinding, len(a.frozen.MCP.Bindings))}

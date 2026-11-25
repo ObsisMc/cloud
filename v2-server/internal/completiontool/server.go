@@ -132,11 +132,13 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (r *Registry) answer(ctx context.Context, credential, nodeRun, session string, message rpcMessage) (any, *rpcError) {
 	switch message.Method {
 	case "initialize":
+		r.connect(credential)
 		return map[string]any{"protocolVersion": protocolVersion, "capabilities": map[string]any{"tools": map[string]any{}},
 			"serverInfo": map[string]string{"name": ServerName, "version": "0.1.0"}}, nil
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
+		r.connect(credential)
 		return map[string]any{"tools": []any{map[string]any{
 			"name":        ToolName,
 			"description": "Report that this workflow step is complete. Pass the attempt token from the step boundary.",

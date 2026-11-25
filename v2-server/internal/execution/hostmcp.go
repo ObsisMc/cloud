@@ -45,6 +45,9 @@ type HostTools interface {
 	// one physical Agent and withdrawing those of an earlier one. It is called only when the turn
 	// starts the Agent; the servers then stay with it for its whole life.
 	Attach(sessionID string) HostServers
+	// Started says the start carrying the servers of the last Attach was sent to Node: only then is
+	// there an execution whose Agent may connect to them.
+	Started()
 	// Instruct returns the turn's block, issued for one sending of the prompt: sending it again
 	// withdraws the earlier token.
 	Instruct() HostInstruction

@@ -661,4 +661,5 @@ func TestRecoveredSessionOnACheckoutWithoutACloneExecutionEnds(t *testing.T) {
 type instructing struct{}
 
 func (instructing) Attach(string) execution.HostServers { return execution.HostServers{} }
+func (instructing) Started()                            {}
 func (instructing) Instruct() execution.HostInstruction { return execution.HostInstruction{} }

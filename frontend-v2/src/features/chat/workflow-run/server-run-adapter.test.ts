@@ -150,6 +150,16 @@ describe('toGraphWorkflowRun', () => {
     expect(parked(summary)).toEqual({ turns: 1, sessionEnded: false, completable: true, blockers: [], answer: '初稿' })
   })
 
+  it('reads that the Agent of a parked node did not connect to its completion tool', () => {
+    const summary = { turns: 1, session_ended: false, completable: false, answer: '初稿' }
+    const read = (interactive: Record<string, unknown>) =>
+      toGraphWorkflowRun(detail({ status: 'awaitingInput' }, [nodeRun({ id: 'nr-a', nodeId: 'a', nodeType: 'agent', status: 'pending', sessionId: 's', finishedAt: null, payload: JSON.stringify({ interactive }) })]), definition).nodeStates.a!.interactiveSession
+    expect(read({ ...summary, completion_tool_unconnected: true })?.completionToolUnconnected).toBe(true)
+    for (const other of [{}, { completion_tool_unconnected: false }, { completion_tool_unconnected: 'true' }]) {
+      expect(read({ ...summary, ...other })).not.toHaveProperty('completionToolUnconnected')
+    }
+  })
+
   it('reads a failure detail written with the engine\'s snake_case keys', () => {
     const run = toGraphWorkflowRun(
       detail({ status: 'failed', error: '会话失败' }, [

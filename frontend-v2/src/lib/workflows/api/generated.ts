@@ -543,7 +543,10 @@ export interface WorkflowNodeRun {
   output: string | null;
   /** @nullable */
   error: string | null;
-  /** @nullable */
+  /**
+     * JSON text. v2-only: on an interactive Agent node, interactive.completion_tool_unconnected (boolean, present only when true) says that the node's Agent had not asked the completion tool's endpoint to initialize or list its tools when the node last parked. It is a notice: neither the node's status nor its blockers depend on it.
+     * @nullable
+     */
   payload: string | null;
   /** @nullable */
   iteration: number | null;

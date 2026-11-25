@@ -31,10 +31,10 @@ const runI18n = createWorkflowI18n(['zh-CN'], { 'zh-CN': zh })
 const parked: WorkflowNodeInteractiveSession = { turns: 2, sessionEnded: false, completable: true, blockers: [], answer: '初稿', answerSource: 'turn_window' }
 
 /** Renders the actions for target; `show` renders a later state of the same node in the same view. */
-function view(target: Partial<InteractiveNodeTarget>, starter = true, beside?: ReactNode) {
+function view(target: Partial<InteractiveNodeTarget>, starter = true, beside?: ReactNode, i18n = runI18n) {
   const client = new QueryClient()
   const tree = (next: Partial<InteractiveNodeTarget>) => (
-    <I18nextProvider i18n={runI18n}>
+    <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={client}>
         <RunTenantContext.Provider value="tenant-1">
           <RunStarterContext.Provider value={starter}>
@@ -429,5 +429,38 @@ describe('RunNodeSessionActions', () => {
     await waitFor(() => expect(reads).toHaveBeenCalledTimes(4))
     // A refused send keeps the text for another try.
     expect(box.value).toBe('再改一版')
+  })
+
+  it.each(['zh-CN', 'en-US'] as const)('tells the starter and everyone else that the completion tool was not connected when the node last parked (%s)', async (locale) => {
+    const strings = workflowRunTranslations[locale]
+    const notice = strings['workflowRun.v2.interactive.toolUnconnected']
+    expect(notice).toBe(locale === 'zh-CN'
+      ? '上次停住时，完成工具没有连上，Agent 可能没法上报这一步完成。这只是提示，不改变完成条件。'
+      : 'When this node last stopped, the completion tool was not connected, so the agent may be unable to report this step done. This is only a notice and does not change what completes the step.')
+    const i18n = createWorkflowI18n(['zh-CN', 'en-US'], workflowRunTranslations)
+    await i18n.changeLanguage(locale)
+    const pending: WorkflowNodeInteractiveSession = { ...parked, completable: false, blockers: [{ kind: 'agent_signal_pending' }] }
+    for (const starter of [true, false]) {
+      for (const status of ['awaiting_input', 'running'] as const) {
+        const shown = view({ status, session: { ...pending, completionToolUnconnected: true } }, starter, undefined, i18n)
+        expect(shown.getByRole('status').textContent).toBe(notice)
+        shown.show({ status, session: pending })
+        expect(shown.queryByText(notice)).toBeNull()
+        shown.unmount()
+      }
+    }
+  })
+
+  it('offers the same actions with the completion tool connected or not', async () => {
+    const pending: WorkflowNodeInteractiveSession = { ...parked, completable: false, blockers: [{ kind: 'agent_signal_pending' }] }
+    const buttons = () => screen.getAllByRole('button').map((b) => [b.textContent, (b as HTMLButtonElement).disabled])
+    const shown = view({ session: pending })
+    const connected = buttons()
+    shown.show({ session: { ...pending, completionToolUnconnected: true } })
+    expect(buttons()).toEqual(connected)
+    expect(screen.getByText(zh['workflowRun.v2.interactive.unreportedHint'])).toBeTruthy()
+    await sendFromComposer('继续')
+    expect(calls.sendNodeTurn).toHaveBeenCalledWith('tenant-1', 'run-1', 'a', '继续')
+    expect(screen.getByRole('button', { name: zh['workflowRun.v2.interactive.completeAnyway'] })).toBeTruthy()
   })
 })
