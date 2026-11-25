@@ -31,6 +31,9 @@ type reportingDriver struct {
 	tokens  []string
 }
 
+// execution is the one execution this driver runs a session in.
+func (d *reportingDriver) execution(sid string) string { return fmt.Sprintf("%p-%s", d, sid) }
+
 func (d *reportingDriver) Run(ctx context.Context, _ execution.Scope, s execution.Session, turn execution.Turn, _ func(context.Context, execution.Event) error) (execution.Result, error) {
 	done := execution.Result{Status: execution.StatusCompleted, AnswerComplete: true, Answer: "做完了", StopReason: "end_turn"}
 	if turn.Host == nil {
@@ -39,9 +42,9 @@ func (d *reportingDriver) Run(ctx context.Context, _ execution.Scope, s executio
 	d.mu.Lock()
 	agent := d.agents[s.ID]
 	if agent == nil {
-		agent = &fakeAgent{t: d.t, url: turn.Host.Attach(s.ID).Servers[0].URL}
+		agent = &fakeAgent{t: d.t, url: turn.Host.Attach(s.ID, d.execution(s.ID)).Servers[0].URL}
 		d.agents[s.ID] = agent
-		if err := d.db.RecordHostExecution(ctx, fmt.Sprintf("%p-%s", d, s.ID), s.ID); err != nil {
+		if err := d.db.RecordHostExecution(ctx, d.execution(s.ID), s.ID); err != nil {
 			d.t.Error(err)
 		}
 		turn.Host.Started()
@@ -51,7 +54,7 @@ func (d *reportingDriver) Run(ctx context.Context, _ execution.Scope, s executio
 	// The node is bound to its session right after Start returned, long before a real Agent calls.
 	nodeRun, _, _ := strings.Cut(turn.Caller.AttemptID, "/")
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
-		if live, err := d.db.WorkflowNodeTurnLive(ctx, nodeRun, s.ID); err != nil {
+		if live, err := d.db.WorkflowNodeTurnLive(ctx, nodeRun, s.ID, d.execution(s.ID)); err != nil {
 			d.t.Error(err)
 			break
 		} else if live {
@@ -82,7 +85,7 @@ func TestTheToolFollowsStoredExecutionState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tools := completiontool.NewRegistry(f.s.WorkflowNodeTurnLive)
+	tools := completiontool.NewRegistry(f.s, runtime.HostExecutionEnding)
 	served, err := completiontool.Serve(tools)
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +114,7 @@ func TestTheToolFollowsStoredExecutionState(t *testing.T) {
 	row := node(nodes, "a")
 	live := func(nodeRun, session string) bool {
 		t.Helper()
-		ok, err := f.s.WorkflowNodeTurnLive(ctx, nodeRun, session)
+		ok, err := f.s.WorkflowNodeTurnLive(ctx, nodeRun, session, driver.execution(session))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -171,7 +174,7 @@ func TestARestartSettlesTheExecutionOfAParkedNode(t *testing.T) {
 			t.Fatal(err)
 		}
 		check()
-		tools := completiontool.NewRegistry(f.s.WorkflowNodeTurnLive)
+		tools := completiontool.NewRegistry(f.s, runtime.HostExecutionEnding)
 		served, err := completiontool.Serve(tools)
 		if err != nil {
 			t.Fatal(err)

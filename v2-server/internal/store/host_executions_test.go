@@ -241,3 +241,37 @@ func TestARecordWaitsForTheEndOfItsSession(t *testing.T) {
 		t.Fatalf("executions of an ended session = %+v", executions)
 	}
 }
+
+// An execution runs from its record to its end, and one without a record never does.
+func TestAHostExecutionRunsUntilItIsSettled(t *testing.T) {
+	s := storetest.Open(t)
+	user, tenant := storetest.Login(t, s, "host-running")
+	scope := execution.Scope{TenantID: tenant, UserID: user}
+	ctx := context.Background()
+	project := workflowProject(t, s, user, tenant, "project-host")
+	workflowAgentSession(t, s, scope, project.ID, "run", "node", "session")
+	running := func(id string, want bool) {
+		t.Helper()
+		if got, err := s.HostExecutionRunning(ctx, id); err != nil || got != want {
+			t.Fatalf("%q: running = %v %v, want %v", id, got, err, want)
+		}
+	}
+	running("x-1", false)
+	running("", false)
+	for _, id := range []string{"x-1", "x-2"} {
+		if err := s.RecordHostExecution(ctx, id, "session"); err != nil {
+			t.Fatal(err)
+		}
+		running(id, true)
+	}
+	if err := s.EndHostExecution(ctx, "x-1", "agent_failed"); err != nil {
+		t.Fatal(err)
+	}
+	running("x-1", false)
+	running("x-2", true)
+	done, cancel := context.WithCancel(ctx)
+	cancel()
+	if got, err := s.HostExecutionRunning(done, "x-2"); err == nil || got {
+		t.Fatalf("unreadable: running = %v %v", got, err)
+	}
+}

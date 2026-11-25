@@ -445,7 +445,7 @@ func (a *agentSession) submit(admitted execution.Turn, text string, fresh bool) 
 		}
 		var hostServers []execution.HostMCPServer
 		if admitted.Host != nil {
-			attached := admitted.Host.Attach(a.frozen.ID)
+			attached := admitted.Host.Attach(a.frozen.ID, a.execution)
 			// Node closes the whole control connection on a list it refuses, so it is checked here.
 			if len(attached.Servers) == 0 || execution.ValidateHostMCPServers(attached.Servers) != nil {
 				return execution.ErrInvalidRequest

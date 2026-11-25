@@ -50,7 +50,7 @@ func (f *fixture) agentOf(t *testing.T, session string) (*fakeAgent, string) {
 	if host == nil {
 		t.Fatal("the session was not given the completion tool")
 	}
-	a := &fakeAgent{t: t, url: host.Attach(session).Servers[0].URL}
+	a := &fakeAgent{t: t, url: host.Attach(session, "x-"+session).Servers[0].URL}
 	host.Started()
 	return a, host.Instruct().Token
 }
@@ -595,7 +595,7 @@ func TestAReportSurvivesARestartButItsCredentialsDoNot(t *testing.T) {
 	f.exec.mu.Lock()
 	host := f.exec.appended[len(f.exec.appended)-1].Host
 	f.exec.mu.Unlock()
-	fresh := &fakeAgent{t: t, url: host.Attach(a).Servers[0].URL}
+	fresh := &fakeAgent{t: t, url: host.Attach(a, "x-"+a).Servers[0].URL}
 	if text := fresh.report(token); text != "unknown attempt token" {
 		t.Fatalf("the old token = %s", text)
 	}

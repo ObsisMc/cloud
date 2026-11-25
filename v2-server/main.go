@@ -351,7 +351,7 @@ func runWithListener(addr, dbURL string, cleanup, fixture, testFixtures bool, li
 	// agentruntime.New or Recover above has stopped the Nodes of earlier processes, and the
 	// execution runtime has ended their executions: no credential of theirs is left to honor
 	// (package completiontool).
-	completionTool := completiontool.NewRegistry(db.WorkflowNodeTurnLive)
+	completionTool := completiontool.NewRegistry(db, runtime.HostExecutionEnding)
 	completionServer, e := completiontool.Serve(completionTool)
 	if e != nil {
 		return fmt.Errorf("serve the Agent completion tool: %w", e)

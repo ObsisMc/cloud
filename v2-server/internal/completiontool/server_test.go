@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,18 +22,34 @@ type harness struct {
 	r     *Registry
 	live  atomic.Bool
 	broke atomic.Bool
+	// settled are the executions whose stored record ended, ending those this process only knows
+	// the end of. Both are sets of execution IDs.
+	settled, ending sync.Map
+}
+
+func (h *harness) HostExecutionRunning(_ context.Context, id string) (bool, error) {
+	if h.broke.Load() {
+		return false, errors.New("down")
+	}
+	_, settled := h.settled.Load(id)
+	return !settled, nil
+}
+
+func (h *harness) WorkflowNodeTurnLive(ctx context.Context, _, _, executionID string) (bool, error) {
+	running, err := h.HostExecutionRunning(ctx, executionID)
+	return running && h.live.Load(), err
+}
+
+func (h *harness) isEnding(_, executionID string) bool {
+	_, ending := h.ending.Load(executionID)
+	return ending
 }
 
 func serve(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{}
 	h.live.Store(true)
-	h.r = NewRegistry(func(context.Context, string, string) (bool, error) {
-		if h.broke.Load() {
-			return false, errors.New("down")
-		}
-		return h.live.Load(), nil
-	})
+	h.r = NewRegistry(h, h.isEnding)
 	s, err := Serve(h.r)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +91,7 @@ func call(t *testing.T, url, token string) (string, bool) {
 
 func attach(t *testing.T, a *Attempt, session string) string {
 	t.Helper()
-	servers := a.Attach(session)
+	servers := a.Attach(session, "x-"+session)
 	if err := execution.ValidateHostMCPServers(servers.Servers); err != nil || len(servers.Servers) != 1 {
 		t.Fatalf("servers = %v: %v", servers.Servers, err)
 	}
@@ -254,6 +271,65 @@ func TestStoredStateDecidesACall(t *testing.T) {
 	}
 }
 
+// A credential whose execution ended, stored or only known to this process, gets nothing: no handshake,
+// which does not count as a connection either, and no call. An unreadable state refuses too, and the
+// Agent may try again.
+func TestAnEndedExecutionsCredentialIsRefused(t *testing.T) {
+	for name, set := range map[string]func(*harness, bool){
+		"settled":    func(h *harness, on bool) { mark(&h.settled, "x-s1", on) },
+		"ending":     func(h *harness, on bool) { mark(&h.ending, "x-s1", on) },
+		"unreadable": func(h *harness, on bool) { h.broke.Store(on) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := serve(t)
+			a, other := h.r.Attempt("n1", "n1"), h.r.Attempt("n2", "n2")
+			url, otherURL := attach(t, a, "s1"), attach(t, other, "s2")
+			a.Started()
+			token := a.Instruct().Token
+			set(h, true)
+			status, why := http.StatusUnauthorized, RefusedNotAwaiting
+			if name == "unreadable" {
+				status, why = http.StatusServiceUnavailable, RefusedUnavailable
+			}
+			for _, method := range []string{"initialize", "tools/list", "ping", "resources/list"} {
+				if got, out := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"`+method+`"}`); got != status || out != nil {
+					t.Fatalf("%s = %d %v, want %d", method, got, out, status)
+				}
+			}
+			if unconnected, known := h.r.Unconnected("n1"); !unconnected || !known {
+				t.Fatalf("a refused handshake: unconnected = %v, known %v", unconnected, known)
+			}
+			if text, refused := call(t, url, token); !refused || text != string(why) {
+				t.Fatalf("call = %q", text)
+			}
+			if name != "unreadable" {
+				if got, _ := post(t, otherURL, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`); got != http.StatusOK {
+					t.Fatalf("another execution's handshake = %d", got)
+				}
+			}
+			// Nothing was withdrawn: it is what is stored that refuses.
+			set(h, false)
+			if got, _ := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`); got != http.StatusOK {
+				t.Fatalf("initialize = %d", got)
+			}
+			if unconnected, _ := h.r.Unconnected("n1"); unconnected {
+				t.Fatal("a handshake was not recorded")
+			}
+			if text, refused := call(t, url, token); refused {
+				t.Fatalf("call = %q", text)
+			}
+		})
+	}
+}
+
+func mark(set *sync.Map, id string, on bool) {
+	if on {
+		set.Store(id, true)
+	} else {
+		set.Delete(id)
+	}
+}
+
 func TestAMissingRegistryHasNoTool(t *testing.T) {
 	var r *Registry
 	if r.Take("n", "a") != nil {
@@ -272,7 +348,7 @@ func TestALateConnectionIsNotTheNewAgents(t *testing.T) {
 	// The server asks for the body once the handler reads it, which is after it was authorized.
 	replaced := false
 	trace := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{Got100Continue: func() {
-		a.Attach("s1")
+		a.Attach("s1", "x-s1")
 		a.Started()
 		replaced = true
 	}})

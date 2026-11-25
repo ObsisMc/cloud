@@ -21,6 +21,15 @@ func (s *Store) RecordHostExecution(ctx context.Context, id, sessionID string) e
 	return nil
 }
 
+// HostExecutionRunning reports whether the execution is on record and not settled.
+func (s *Store) HostExecutionRunning(ctx context.Context, id string) (bool, error) {
+	var running bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM v2_host_executions WHERE id = $1 AND ended_at IS NULL)`, id).Scan(&running); err != nil {
+		return false, fmt.Errorf("read host execution %s: %w", id, err)
+	}
+	return running, nil
+}
+
 // EndHostExecution settles a running execution with the reason it ended. One already settled keeps
 // its reason, and an unknown one stays unknown.
 func (s *Store) EndHostExecution(ctx context.Context, id, reason string) error {

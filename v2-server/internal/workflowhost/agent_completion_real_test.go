@@ -165,7 +165,7 @@ func TestRealAgentReportsCompletionThroughNode(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	tools := completiontool.NewRegistry(db.WorkflowNodeTurnLive)
+	tools := completiontool.NewRegistry(db, service.HostExecutionEnding)
 	served, err := completiontool.Serve(tools)
 	if err != nil {
 		t.Fatal(err)
