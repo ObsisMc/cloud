@@ -246,7 +246,10 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 		return // shutting down; the next start interrupts the run
 	}
 	st.mu.Lock()
-	h.judgeTool(n)
+	if !result.NotStarted {
+		// Otherwise the execution the tool still knows is an earlier one, over with its Agent.
+		h.judgeTool(n)
+	}
 	// A turn the starter stopped is never a setup failure, even when the stop caught the session
 	// still being prepared: it parks like any stopped turn.
 	if err == nil && n.turns == 0 && !n.stopping && result.AgentLost &&

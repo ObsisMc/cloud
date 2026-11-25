@@ -212,8 +212,8 @@ func TestAnExecutionThatWasNotStartedIsNotJudged(t *testing.T) {
 			f.stopFirst(t, runID, a, r)
 			said(t, "park", f.settledTurns(t, runID, 1), false)
 		})
-		for _, connected := range []bool{true, false} {
-			t.Run("later execution "+name, func(t *testing.T) {
+		for when, connected := range map[string]bool{"connected": true, "not connected": false, "connected too late": false} {
+			t.Run("later execution "+name+", the earlier one "+when, func(t *testing.T) {
 				f := newFixture(t)
 				runID, a, agent, _ := f.startAgentNode(t, agentChain)
 				if connected {
@@ -221,6 +221,9 @@ func TestAnExecutionThatWasNotStartedIsNotJudged(t *testing.T) {
 				}
 				f.exec.finish(a, completed("初稿"))
 				said(t, "first park", f.settledTurns(t, runID, 1), !connected)
+				if when == "connected too late" {
+					agent.asks("initialize") // then its Node was lost
+				}
 				f.send(t, runID)
 				if attach {
 					f.followTools(t).Attach(a)
