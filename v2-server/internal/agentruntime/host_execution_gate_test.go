@@ -382,14 +382,16 @@ func TestAnUnwrittenEndOutlivesItsSession(t *testing.T) {
 	ended := h.driver.sessions["hosted"]
 	h.driver.sessions["hosted"] = &agentSession{execution: "x-next"}
 	h.driver.mu.Unlock()
+	t.Cleanup(func() { // before the driver closes, which waits for its sessions
+		h.driver.mu.Lock()
+		h.driver.sessions["hosted"] = ended
+		h.driver.mu.Unlock()
+	})
 	ending("replaced")
 	h.driver.mu.Lock()
 	delete(h.driver.sessions, "hosted")
 	h.driver.mu.Unlock()
 	ending("gone")
-	h.driver.mu.Lock()
-	h.driver.sessions["hosted"] = ended
-	h.driver.mu.Unlock()
 }
 
 // Only an execution whose end was decided is said to be ending, and only under its own session.
