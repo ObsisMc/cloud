@@ -512,6 +512,15 @@ func (s *Service) CheckHostTools(ctx context.Context, scope execution.Scope, pro
 	return driver.CheckHostTools(ctx, scope, projectID)
 }
 
+// HostExecutionEnding reports whether the driver already decided why the host execution of the
+// session ended, which may be stored only later.
+func (s *Service) HostExecutionEnding(sid, executionID string) bool {
+	driver, ok := s.agent.(interface {
+		HostExecutionEnding(sid, executionID string) bool
+	})
+	return ok && driver.HostExecutionEnding(sid, executionID)
+}
+
 // launch is called under mu; workers use the backend's lifetime, never an HTTP request context.
 func (s *Service) launch(scope execution.Scope, session execution.Session, turn execution.Turn, group string) {
 	ctx, cancel := context.WithCancel(s.ctx)

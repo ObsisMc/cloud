@@ -12,7 +12,8 @@ import (
 
 // A session given host tools has its Node execution recorded (Options.RecordHostExecution) before
 // its start is sent, and settled once with why it ended. The first reason decided stands: what made
-// this driver end the session, what Node reported, or the loss of its Node. A server that shuts down
+// this driver end the session, which settles it before Node is asked to, what Node reported, or the
+// loss of its Node. A server that shuts down
 // settles nothing: the next start settles what is still running, as it does after a crash.
 
 const (
@@ -128,4 +129,21 @@ func (d *Driver) HostExecutionEnds(sid string) map[string]string {
 		}
 	}
 	return ends
+}
+
+// HostExecutionEnding reports whether why that execution of the session ended was decided, written
+// or not. Its credentials are void from then on.
+func (d *Driver) HostExecutionEnding(sid, executionID string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, unwritten := d.unsettled[executionID]; unwritten {
+		return true
+	}
+	a := d.sessions[sid]
+	if a == nil || a.execution != executionID {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.hostReason != ""
 }

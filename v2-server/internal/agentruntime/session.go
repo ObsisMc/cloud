@@ -560,6 +560,10 @@ func (a *agentSession) requestEnd() {
 	a.decideHostLocked(execution.HostSessionEnded)
 	a.mu.Unlock()
 	go func() {
+		// Settled before Node learns of the end: from the decision on, its credentials are void. An
+		// end that could not be written keeps no Agent running (HostExecutionEnding has it, and
+		// settleHost repeats the write).
+		a.settleHost("")
 		a.commandMu.Lock()
 		defer a.commandMu.Unlock()
 		if a.project.send("end_session", a.execution, map[string]string{"node_id": a.project.nodeID(), "command_id": "end-" + digest(a.frozen.ID), "reason": "user_ended"}) != nil {
