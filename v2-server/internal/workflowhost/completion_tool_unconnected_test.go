@@ -151,21 +151,41 @@ func TestAConnectionOfTheSameExecutionEndsTheNotice(t *testing.T) {
 }
 
 // So does one that came before a message the execution service refused: the node parks again, in the
-// same execution.
+// same execution. When the session turned out to have ended, that execution is over, and the last
+// conclusion stands.
 func TestARefusedMessageParksWithWhatIsKnownByThen(t *testing.T) {
-	f := newFixture(t)
-	runID, a, agent, _ := f.startAgentNode(t, agentChain)
-	f.exec.finish(a, completed("初稿"))
-	said(t, "first park", f.settledTurns(t, runID, 1), true)
-	agent.asks("initialize")
-	f.refuseAppendsOf(a, execution.ErrConflict)
-	if _, err := f.host.SendNodeTurn(context.Background(), f.scope, runID, "a", "继续"); err != nil {
-		t.Fatal(err)
+	for name, tc := range map[string]struct {
+		refusal   error
+		connected bool // by the first park; otherwise only after it
+		want      bool
+	}{
+		"in the same execution":                {execution.ErrConflict, false, false},
+		"session ended, connected too late":    {execution.ErrSessionEnded, false, true},
+		"session ended, connected by the park": {execution.ErrSessionEnded, true, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			runID, a, agent, _ := f.startAgentNode(t, agentChain)
+			if tc.connected {
+				agent.asks("initialize")
+			}
+			f.exec.finish(a, completed("初稿"))
+			said(t, "first park", f.settledTurns(t, runID, 1), !tc.connected)
+			agent.asks("initialize")
+			f.refuseAppendsOf(a, tc.refusal)
+			if _, err := f.host.SendNodeTurn(context.Background(), f.scope, runID, "a", "继续"); err != nil {
+				t.Fatal(err)
+			}
+			_, nodes := f.await(t, runID, func(run store.WorkflowRun, n []store.WorkflowNodeRun) bool {
+				return parked("a")(run, n) && interactivePayload(t, node(n, "a"))["last_turn_error"] == turnErrorNotDelivered
+			})
+			p := interactivePayload(t, node(nodes, "a"))
+			said(t, "after the refused message", p, tc.want)
+			if ended := tc.refusal == execution.ErrSessionEnded; p["session_ended"] != ended {
+				t.Fatalf("summary = %v, want session_ended %v", p, ended)
+			}
+		})
 	}
-	_, nodes := f.await(t, runID, func(run store.WorkflowRun, n []store.WorkflowNodeRun) bool {
-		return parked("a")(run, n) && interactivePayload(t, node(n, "a"))["last_turn_error"] == turnErrorNotDelivered
-	})
-	said(t, "after the refused message", interactivePayload(t, node(nodes, "a")), false)
 }
 
 // A new execution is judged at its own first park; until then the last conclusion stands.

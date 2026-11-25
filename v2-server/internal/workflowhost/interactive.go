@@ -627,11 +627,13 @@ func (h *Host) runFollowUp(st *runState, a *attemptState, f followUp) {
 		// the starter, so the summary is the only place that can say the message was lost.
 		h.log.Warn("send interactive workflow turn", "run", n.d.RunID, "node_run", n.d.NodeRunID, "error", publicReason(err))
 		st.mu.Lock()
-		h.judgeTool(n)
 		n.undelivered = true
 		if errors.Is(err, execution.ErrSessionEnded) {
+			// As for a turn that started nothing, the execution the tool still knows is over.
 			n.sessionEnded, n.sessionGone = true, true
 			st.slotsMayHaveChanged()
+		} else {
+			h.judgeTool(n)
 		}
 		st.mu.Unlock()
 		h.park(st, n)

@@ -7,9 +7,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 )
@@ -260,6 +262,39 @@ func TestAMissingRegistryHasNoTool(t *testing.T) {
 	r.Revoke("n")
 }
 
+// A request that was authorized before its credential was withdrawn says nothing about the Agent that
+// replaced the one it came from.
+func TestALateConnectionIsNotTheNewAgents(t *testing.T) {
+	h := serve(t)
+	a := h.r.Attempt("n1", "n1")
+	url := attach(t, a, "s1")
+	a.Started()
+	// The server asks for the body once the handler reads it, which is after it was authorized.
+	replaced := false
+	trace := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{Got100Continue: func() {
+		a.Attach("s1")
+		a.Started()
+		replaced = true
+	}})
+	req, err := http.NewRequestWithContext(trace, http.MethodPost, url, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Expect", "100-continue")
+	client := &http.Client{Transport: &http.Transport{ExpectContinueTimeout: time.Minute, DisableKeepAlives: true}}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !replaced {
+		t.Fatalf("status %d, replaced %v", resp.StatusCode, replaced)
+	}
+	if unconnected, known := h.r.Unconnected("n1"); !unconnected || !known {
+		t.Fatalf("the new Agent: unconnected = %v, known %v", unconnected, known)
+	}
+}
+
 // A connection counts for the Agent whose endpoint was asked, once its start was sent: any method but
 // initialize and tools/list, and a withdrawn credential, say nothing.
 func TestAConnectionIsRecordedForTheStartedAgent(t *testing.T) {
@@ -306,8 +341,6 @@ func TestAConnectionIsRecordedForTheStartedAgent(t *testing.T) {
 	if status := ask(url, "initialize"); status != http.StatusUnauthorized {
 		t.Fatalf("the old endpoint = %d", status)
 	}
-	h.r.connect(url[strings.LastIndex(url, "/")+1:]) // authorized before it was withdrawn
-	said("the old Agent's request", "n1", true, true)
 	ask(fresh, "tools/list")
 	said("the new Agent's request", "n1", false, true)
 	h.r.Revoke("n1")
