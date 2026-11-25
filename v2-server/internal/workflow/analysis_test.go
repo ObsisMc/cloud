@@ -18,11 +18,14 @@ func TestAnalysisReportsUnappliedAgentSettings(t *testing.T) {
 		"retry":       {"retry": obj{"enabled": true, "maxRetries": 2, "initialDelaySeconds": 5}},
 		"everything": {"roleId": "reviewer", "interactive": true, "mcps": []any{obj{"mcpId": "official/tools", "enabled": true}},
 			"retry": obj{"enabled": true, "maxRetries": 2, "initialDelaySeconds": 5}},
-		"disabled mcp":   {"mcps": []any{obj{"mcpId": "official/tools", "enabled": false}}},
-		"disabled retry": {"retry": obj{"enabled": false, "maxRetries": 2, "initialDelaySeconds": 5}},
-		"blank role":     {"roleId": "  "},
-		"plain":          {"prompt": "x"},
-		"agent policy":   {"schemaVersion": 4, "interactive": true, "completionSignal": "agent", "autoAcceptAgentCompletion": true},
+		"disabled mcp":        {"mcps": []any{obj{"mcpId": "official/tools", "enabled": false}}},
+		"disabled retry":      {"retry": obj{"enabled": false, "maxRetries": 2, "initialDelaySeconds": 5}},
+		"blank role":          {"roleId": "  "},
+		"plain":               {"prompt": "x"},
+		"agent policy":        {"schemaVersion": 4, "interactive": true, "completionSignal": "agent", "autoAcceptAgentCompletion": true},
+		"wait inactivity":     {"promptInactivity": "wait"},
+		"timeout inactivity":  {"promptInactivity": "timeout"},
+		"agent policy + wait": {"schemaVersion": 4, "interactive": true, "completionSignal": "agent", "autoAcceptAgentCompletion": true, "promptInactivity": "wait"},
 		"end_turn policy": {"schemaVersion": 4, "interactive": true, "completionSignal": "end_turn",
 			"completion": obj{"files": []any{obj{"path": "plan.md"}}}},
 	}
@@ -93,7 +96,13 @@ func TestAnalysisReportsUnappliedAgentSettings(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatal("no setting is unapplied any more; replace this fixture with one that still is")
 	}
-	for _, id := range []string{"agent policy", "disabled mcp", "disabled retry", "blank role", "plain", "end_turn policy"} {
+	if want := []string{"promptInactivity"}; !reflect.DeepEqual(got["wait inactivity"], want) {
+		t.Errorf("wait inactivity unapplied = %v, want %v", got["wait inactivity"], want)
+	}
+	if want := []string{"promptInactivity"}; !reflect.DeepEqual(got["agent policy + wait"], want) {
+		t.Errorf("agent policy + wait unapplied = %v, want %v", got["agent policy + wait"], want)
+	}
+	for _, id := range []string{"agent policy", "disabled mcp", "disabled retry", "blank role", "plain", "end_turn policy", "timeout inactivity"} {
 		if _, listed := got[id]; listed {
 			t.Errorf("node %q configures nothing the run skips, but analysis lists %v", id, got[id])
 		}

@@ -603,6 +603,7 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.filesHint": "补齐或修改文件后可以再次完成。",
     "workflowRun.v2.setting.completionSignal": "智能体显式上报完成",
     "workflowRun.v2.setting.autoAcceptAgentCompletion": "自动接受智能体完成",
+    "workflowRun.v2.setting.promptInactivity": "长时间无进展时持续等待",
     "workflowRun.v2.sessionWaiting": "正在等待 Agent 的会话…",
     "workflowRun.v2.sessionRefused":
       "无法读取这个节点的实时会话；节点完成后会显示任务和回答。",
@@ -1264,6 +1265,7 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.filesHint": "Add or change the files, then complete again.",
     "workflowRun.v2.setting.completionSignal": "Agent reports completion",
     "workflowRun.v2.setting.autoAcceptAgentCompletion": "Auto-accept agent completion",
+    "workflowRun.v2.setting.promptInactivity": "Keep waiting on inactivity",
     "workflowRun.v2.sessionWaiting": "Waiting for the Agent's session…",
     "workflowRun.v2.sessionRefused":
       "Could not follow this node's live session; the task and answer show once the node finishes.",

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,6 +20,7 @@ import (
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/execution/executiontest"
+	"github.com/wanglongan587/cloud/v2-server/internal/pluginmarket"
 	"github.com/wanglongan587/cloud/v2-server/internal/server"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
 	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
@@ -233,5 +237,202 @@ func TestWorkflowRunStarterMapsPreflightRefusalsForDecomposition(t *testing.T) {
 			t.Fatalf("retried decomposition never settled: %+v", items)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func buildWorkflowArchiveBytes(t *testing.T, manifest string, docs map[string]string) ([]byte, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	z := zip.NewWriter(&buf)
+	mw, err := z.Create("orax.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mw.Write([]byte(manifest)); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range docs {
+		w, err := z.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	sum := sha256.Sum256(raw)
+	return raw, hex.EncodeToString(sum[:])
+}
+
+// TestWorkflowPluginImportAllowsExecutorlessAgentAndRejectsInvalidGraph wires the real
+// workflow domain validators into the HTTP plugin install route and verifies that:
+//  1. Workflow packages with executor-less Agents (like ora-space.workflow-examples) install cleanly.
+//  2. Manually publishing one of those unmodified templates still fails on missing executor.
+//  3. Packages containing genuine non-executor graph defects still fail with plugin_workflow_invalid.
+func TestWorkflowPluginImportAllowsExecutorlessAgentAndRejectsInvalidGraph(t *testing.T) {
+	examplesBytes, examplesSHA := buildWorkflowArchiveBytes(t, `resolver = 1
+title = "Workflow Examples"
+identifier = "ora-space.workflow-examples"
+namespace = "official"
+kind = "workflow"
+version = "0.1.0"
+description = "Starter workflows"
+`, map[string]string{
+		"assets/workflows/hello-agent.json": `{"name":"Hello Agent","nodes":[{"id":"start","data":{"kind":"start"}},{"id":"agent","data":{"kind":"agent","agentConfig":{"prompt":"hello"}}},{"id":"out","data":{"kind":"output"}}],"edges":[{"source":"start","target":"agent"},{"source":"agent","target":"out"}]}`,
+		"assets/workflows/named-slot.json":  `{"name":"Named Slot","nodes":[{"id":"start","data":{"kind":"start"}},{"id":"agent","data":{"kind":"agent","agentConfig":{"prompt":"slot","executorSlot":"coder"}}},{"id":"out","data":{"kind":"output"}}],"edges":[{"source":"start","target":"agent"},{"source":"agent","target":"out"}]}`,
+	})
+	brokenBytes, brokenSHA := buildWorkflowArchiveBytes(t, `resolver = 1
+title = "Broken Workflow"
+identifier = "ora-space.broken-workflow"
+namespace = "official"
+kind = "workflow"
+version = "0.1.0"
+description = "Invalid workflow"
+`, map[string]string{
+		"assets/workflows/broken.json": `{"name":"Broken","nodes":[{"id":"start","data":{"kind":"start"}},{"id":"agent","data":{"kind":"agent","agentConfig":{"promptInactivity":"forever"}}}],"edges":[{"source":"start","target":"agent"}]}`,
+	})
+	archives := map[string][]byte{
+		"https://example.org/workflow-examples.orax": examplesBytes,
+		"https://example.org/broken-workflow.orax":   brokenBytes,
+	}
+
+	s := storetest.Open(t)
+	storetest.SignIn(t, s, "plugin-import-owner", "Owner", store.RoleOwner)
+	opts := withWorkflowDomain(server.Options{
+		SessionTTL: time.Hour,
+		DownloadPluginPackage: func(_ context.Context, locator, _ string, _ pluginmarket.Retrieval, _ pluginmarket.Credentials) (string, error) {
+			raw, ok := archives[locator]
+			if !ok {
+				return "", os.ErrNotExist
+			}
+			f, err := os.CreateTemp(t.TempDir(), "plugin-*.orax")
+			if err != nil {
+				return "", err
+			}
+			if _, err := f.Write(raw); err != nil {
+				_ = f.Close()
+				return "", err
+			}
+			if err := f.Close(); err != nil {
+				return "", err
+			}
+			return f.Name(), nil
+		},
+	}, nil)
+	srv := httptest.NewServer(server.New(s, opts))
+	t.Cleanup(srv.Close)
+
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar}
+	call := func(method, path string, input any, headers map[string]string) (int, map[string]any) {
+		t.Helper()
+		var body io.Reader
+		if input != nil {
+			b, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = bytes.NewReader(b)
+		}
+		req, err := http.NewRequest(method, srv.URL+path, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		out := map[string]any{}
+		if err := json.NewDecoder(res.Body).Decode(&out); err != nil && err != io.EOF {
+			t.Fatalf("decode %s %s: %v", method, path, err)
+		}
+		return res.StatusCode, out
+	}
+
+	status, _ := call("POST", "/auth/login", map[string]string{"provider": "email", "email": storetest.Email("plugin-import-owner")}, nil)
+	if status != http.StatusOK {
+		t.Fatalf("login = %d", status)
+	}
+	_, tenants := call("GET", "/api/v1/me/tenants", nil, nil)
+	tid := tenants["items"].([]any)[0].(map[string]any)["id"].(string)
+	_, spaces := call("GET", "/api/v1/tenants/"+tid+"/spaces", nil, nil)
+	sid := spaces["items"].([]any)[0].(map[string]any)["id"].(string)
+
+	if err := s.ReplacePluginCatalog(context.Background(), []pluginmarket.Entry{
+		{
+			Namespace: "official", Identifier: "ora-space.workflow-examples", Title: "Workflow Examples",
+			Kind: "workflow", Version: "0.1.0", Description: "Starter workflows",
+			URL: "https://example.org/workflow-examples.orax", SHA256: examplesSHA,
+			MarketplaceVisible: true, SourceURL: "https://github.com/ora-space/marketplace",
+		},
+		{
+			Namespace: "official", Identifier: "ora-space.broken-workflow", Title: "Broken Workflow",
+			Kind: "workflow", Version: "0.1.0", Description: "Invalid workflow",
+			URL: "https://example.org/broken-workflow.orax", SHA256: brokenSHA,
+			MarketplaceVisible: true, SourceURL: "https://github.com/ora-space/marketplace",
+		},
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	pluginsPath := "/api/v1/tenants/" + tid + "/spaces/" + sid + "/plugins"
+	status, body := call("POST", pluginsPath, map[string]any{
+		"identifier":    "official/ora-space.workflow-examples",
+		"pluginVersion": "0.1.0",
+		"version":       0,
+	}, map[string]string{"Idempotency-Key": "install-examples"})
+	if status != http.StatusOK {
+		t.Fatalf("install executorless examples = %d %v", status, body)
+	}
+	resource := body["resource"].(map[string]any)
+	if resource["observedState"] != "installed" {
+		t.Fatalf("installed resource = %v", resource)
+	}
+
+	workflows, err := s.Workflows(context.Background(), tid)
+	if err != nil || len(workflows) != 2 {
+		t.Fatalf("imported workflows = %+v %v, want 2", workflows, err)
+	}
+
+	// Manually publishing an unmodified imported template must still enforce executor validation.
+	status, pubErr := call("POST", "/api/v2/tenants/"+tid+"/workflows/"+workflows[0].ID+"/publish", map[string]any{"version": "v2"}, nil)
+	if status != http.StatusBadRequest || pubErr["code"] != "workflow_run_graph_parse" {
+		t.Fatalf("manual publish of executorless template = %d %v", status, pubErr)
+	}
+	params, _ := pubErr["params"].(map[string]any)
+	if params["nodeId"] != "agent" || params["field"] != "data.agentConfig.executor" {
+		t.Fatalf("publish refusal params = %v", params)
+	}
+
+	// Non-executor validation defects must still fail import and roll back cleanly.
+	status, brokenBody := call("POST", pluginsPath, map[string]any{
+		"identifier":    "official/ora-space.broken-workflow",
+		"pluginVersion": "0.1.0",
+		"version":       0,
+	}, map[string]string{"Idempotency-Key": "install-broken"})
+	if status != http.StatusBadRequest || brokenBody["code"] != "plugin_workflow_invalid" {
+		t.Fatalf("install invalid workflow = %d %v, want 400 plugin_workflow_invalid", status, brokenBody)
+	}
+	afterWorkflows, err := s.Workflows(context.Background(), tid)
+	if err != nil || len(afterWorkflows) != 2 {
+		t.Fatalf("failed install altered workflows: %+v %v", afterWorkflows, err)
+	}
+	status, installedList := call("GET", pluginsPath, nil, nil)
+	if status != http.StatusOK {
+		t.Fatalf("list plugins = %d %v", status, installedList)
+	}
+	for _, raw := range installedList["items"].([]any) {
+		if raw.(map[string]any)["identifier"] == "ora-space.broken-workflow" {
+			t.Fatalf("failed install left plugin selection: %v", raw)
+		}
 	}
 }

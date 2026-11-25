@@ -123,7 +123,7 @@ test('comment @ workflow validates per field, runs as commenter, updates output 
   await publishWorkflow(page, base, missingRoleName, {
     nodes: [
       { id: 'start', type: 'workflow', position: { x: 0, y: 100 }, data: { kind: 'start', title: 'start', inputVariables: [] } },
-      { id: 'agent', type: 'workflow', position: { x: 340, y: 100 }, data: { kind: 'agent', title: 'agent', agentConfig: { prompt: 'Check', roleId: `missing-role-${suffix}` } } },
+      { id: 'agent', type: 'workflow', position: { x: 340, y: 100 }, data: { kind: 'agent', title: 'agent', agentConfig: { executor: { agentCli: 'official/ora-space.opencode', modelId: 'fixture' }, prompt: 'Check', roleId: `missing-role-${suffix}` } } },
     ],
     edges: [{ id: 'start-agent', source: 'start', target: 'agent' }],
   })

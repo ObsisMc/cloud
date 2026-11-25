@@ -33,6 +33,11 @@ func unappliedAgentSettings(config object, at placement) []string {
 	if interactive && at.loop != "" {
 		unapplied = append(unapplied, "interactive")
 	}
+	// v2 does not pass promptInactivity to Node yet (circus#1424 C): the default "timeout"
+	// matches Node's current behavior, while "wait" is saved but still runs under the default timeout.
+	if policy, _ := config["promptInactivity"].(string); policy == "wait" {
+		unapplied = append(unapplied, "promptInactivity")
+	}
 	// Retry is unapplied where desktop would retry and v2 does not. Desktop never retries an
 	// interactive node, which a person drives (node_runtime.rs:373-379 at ebd5b725), so retry is
 	// not listed there; elsewhere retryApplies alone says where v2 retries.

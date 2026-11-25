@@ -1055,7 +1055,7 @@ function AgentConfigurationFields({
           onChange={onChange}
         />
       )}
-      <WorkflowAgentInactivityField config={config} onChange={onChange} />
+      <WorkflowAgentInactivityField config={config} unapplied={unapplied} onChange={onChange} />
       <div className="min-w-0 space-y-1.5">
         <div className="flex items-center justify-between gap-3">
           <Label

@@ -113,6 +113,11 @@ type Options struct {
 	// ValidateWorkflow reports whether a document can execute, so publish freezes only a runnable
 	// version. Nil keeps publish unavailable instead of accepting a document nothing can run.
 	ValidateWorkflow func(graph string) error
+	// ValidateImportedWorkflow checks workflow documents imported from a plugin package.
+	// Unlike ValidateWorkflow (used at publish), it allows Agent nodes without a selected
+	// executor so marketplace templates can be imported and configured later.
+	// Nil falls back to ValidateWorkflow when set.
+	ValidateImportedWorkflow func(graph string) error
 	// Now reads the clock automatic publish versions use; nil uses the process clock.
 	Now func() time.Time
 	// WorkflowRuns is the execution bridge's run lifecycle. Nil keeps start, cancel, input and

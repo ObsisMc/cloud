@@ -55,8 +55,8 @@ describe('RunActV2Execution', () => {
   })
 
   it('names exactly what the attempt recorded, in the server order', () => {
-    view(<RunActV2Execution attempt={{ unapplied: ['mcp', 'interactive', 'role'] }} />)
-    expect(screen.getByRole('note', { name: 'v2 未应用的设置' })).toHaveTextContent('v2 未应用：MCP、交互模式、角色')
+    view(<RunActV2Execution attempt={{ unapplied: ['mcp', 'interactive', 'promptInactivity', 'role'] }} />)
+    expect(screen.getByRole('note', { name: 'v2 未应用的设置' })).toHaveTextContent('v2 未应用：MCP、交互模式、长时间无进展时持续等待、角色')
   })
 
   it('names nothing the attempt did not record', () => {

@@ -373,6 +373,45 @@ export function WorkflowEditor(props: WorkflowEditorProps = {}) {
 
 /** Keeps the selected CLI stable and only substitutes a discovered model, or fills a blank pair with the first catalog entry. */
 type WorkflowNodeExecutor = { agentCli: string; modelId: string };
+type WorkflowNodeExecutorRepair = {
+  from: WorkflowNodeExecutor;
+  to: WorkflowNodeExecutor;
+};
+
+function applyWorkflowNodeExecutorRepairs(
+  nodes: Node<WorkflowNodeData, "workflow">[],
+  repairs: ReadonlyMap<string, WorkflowNodeExecutorRepair>,
+): { nodes: Node<WorkflowNodeData, "workflow">[]; changed: boolean } {
+  let changed = false;
+  const nextNodes = nodes.map((node) => {
+    if (node.data.kind !== "agent" || node.data.agentConfig === undefined) {
+      return node;
+    }
+    const repair = repairs.get(node.id);
+    if (repair === undefined) {
+      return node;
+    }
+    const exec = node.data.agentConfig.executor;
+    if (
+      exec.agentCli !== repair.from.agentCli ||
+      exec.modelId !== repair.from.modelId
+    ) {
+      return node;
+    }
+    changed = true;
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        agentConfig: {
+          ...node.data.agentConfig,
+          executor: repair.to,
+        },
+      },
+    };
+  });
+  return changed ? { nodes: nextNodes, changed: true } : { nodes, changed: false };
+}
 
 function repairWorkflowAgentExecutor(
   executor: WorkflowNodeExecutor,
@@ -541,11 +580,16 @@ function WorkflowEditorContent({
   /** Set when late catalog arrival repaired an already-mounted workflow, to refresh clean history. */
   const [lateModelRepairedWorkflowId, setLateModelRepairedWorkflowId] =
     useState<string | null>(null);
+  /** Node executor pairs replaced during the latest late-catalog repair pass, to preserve across undo. */
+  const lateModelRepairsRef = useRef<
+    Map<string, WorkflowNodeExecutorRepair> | null
+  >(null);
   const clearHydratedWorkflow = useCallback(() => {
     setHydratedWorkflowId(null);
     setModelHydratedWorkflowId(null);
     setHydratedNodeExecutors({});
     setLateModelRepairedWorkflowId(null);
+    lateModelRepairsRef.current = null;
   }, []);
   const [previewedVersion, setPreviewedVersion] =
     useState<MockWorkflowVersion | null>(null);
@@ -613,6 +657,7 @@ function WorkflowEditorContent({
   );
   const workflowHistory = useWorkflowHistory(restoreHistorySnapshot);
   const resetWorkflowHistory = workflowHistory.reset;
+  const rewriteWorkflowHistorySnapshots = workflowHistory.rewriteSnapshots;
 
   /** Names one canvas element for the history panel without exposing internal IDs. */
   function historySubjectForNode(node: WorkflowCanvasNode): string {
@@ -747,6 +792,8 @@ function WorkflowEditorContent({
         : null,
     );
     setLateModelRepairedWorkflowId(null);
+    // eslint-disable-next-line react-hooks/refs -- render-phase hydrate pairs this with setState
+    lateModelRepairsRef.current = null;
     // Capture the server name in the same hydrate turn so autosave can skip no-op renames.
     // eslint-disable-next-line react-hooks/refs -- render-phase hydrate pairs this with setState
     persistedNameRef.current = draftQuery.data.workflow.name;
@@ -765,6 +812,23 @@ function WorkflowEditorContent({
     capabilitiesOverride === undefined &&
     availableAgentModels.length > 0
   ) {
+    // Derive repairs from all hydrated Agent nodes first so undoing deletions or
+    // user executor edits also restores the repaired model instead of the stale one.
+    const repairs = new Map<string, WorkflowNodeExecutorRepair>();
+    for (const [nodeId, hydratedExecutor] of Object.entries(
+      hydratedNodeExecutors,
+    )) {
+      const repairedExecutor = repairWorkflowAgentExecutor(
+        hydratedExecutor,
+        availableAgentModels,
+      );
+      if (
+        repairedExecutor.agentCli !== hydratedExecutor.agentCli ||
+        repairedExecutor.modelId !== hydratedExecutor.modelId
+      ) {
+        repairs.set(nodeId, { from: hydratedExecutor, to: repairedExecutor });
+      }
+    }
     const nextNodes = workflow.nodes.map((node) => {
       if (node.data.kind !== "agent" || node.data.agentConfig === undefined) {
         return node;
@@ -790,6 +854,7 @@ function WorkflowEditorContent({
       ) {
         return node;
       }
+      repairs.set(node.id, { from: currentExecutor, to: repairedExecutor });
       return {
         ...node,
         data: {
@@ -804,12 +869,15 @@ function WorkflowEditorContent({
     const repairedAny = nextNodes.some((node, index) => node !== workflow.nodes[index]);
     if (repairedAny) {
       setWorkflow({ ...workflow, nodes: nextNodes });
+    }
+    if (repairs.size > 0) {
+      // eslint-disable-next-line react-hooks/refs -- render-phase reconcile pairs this with setState
+      lateModelRepairsRef.current = repairs;
       setLateModelRepairedWorkflowId(resolvedWorkflowId);
     }
     setModelHydratedWorkflowId(resolvedWorkflowId);
   }
 
-  const historyHydrateEditGenerationRef = useRef<number | null>(null);
   // History belongs to the mounted draft session, so a workflow switch or
   // activation starts at a clean baseline while ordinary edits keep the stack.
   useEffect(() => {
@@ -819,7 +887,6 @@ function WorkflowEditorContent({
       hydratedWorkflowId === resolvedWorkflowId &&
       workflowRef.current !== null
     ) {
-      historyHydrateEditGenerationRef.current = editGenerationRef.current;
       resetWorkflowHistory(workflowRef.current);
     }
   }, [hydratedWorkflowId, resetWorkflowHistory, resolvedWorkflowId]);
@@ -832,14 +899,39 @@ function WorkflowEditorContent({
     ) {
       return;
     }
-    if (historyHydrateEditGenerationRef.current === editGenerationRef.current) {
-      resetWorkflowHistory(workflowRef.current);
+    const repairs = lateModelRepairsRef.current;
+    lateModelRepairsRef.current = null;
+    if (repairs === null || repairs.size === 0) {
+      return;
     }
+    if (dragStartWorkflowRef.current !== null) {
+      const repairedLive = applyWorkflowNodeExecutorRepairs(
+        workflowRef.current.nodes,
+        repairs,
+      );
+      if (repairedLive.changed) {
+        workflowRef.current = { ...workflowRef.current, nodes: repairedLive.nodes };
+      }
+      const repairedDragStart = applyWorkflowNodeExecutorRepairs(
+        dragStartWorkflowRef.current.nodes,
+        repairs,
+      );
+      if (repairedDragStart.changed) {
+        dragStartWorkflowRef.current = {
+          ...dragStartWorkflowRef.current,
+          nodes: repairedDragStart.nodes,
+        };
+      }
+    }
+    rewriteWorkflowHistorySnapshots((snapshot) => {
+      const repaired = applyWorkflowNodeExecutorRepairs(snapshot.nodes, repairs);
+      return repaired.changed ? { ...snapshot, nodes: repaired.nodes } : snapshot;
+    });
   }, [
     hydratedWorkflowId,
     lateModelRepairedWorkflowId,
-    resetWorkflowHistory,
     resolvedWorkflowId,
+    rewriteWorkflowHistorySnapshots,
   ]);
 
   // Explain the nodes the hydrate had to drop, once the draft carrying them has committed.
@@ -2532,6 +2624,14 @@ function WorkflowEditorContent({
       (change) => change.type === "dimensions" && change.resizing !== true,
     );
     const nonAuthoring = isNonAuthoringNodeChanges(appliedChanges);
+    // The final drop tick (dragging:false) arrives just before onNodeDragStop. When it leaves the
+    // authored graph untouched (a drop back at the start), let stopNodeDrag own the dirty decision
+    // instead of marking the draft unsaved for a gesture that changed nothing.
+    const dragStopOnly =
+      appliedChanges.length > 0 &&
+      appliedChanges.every(
+        (change) => change.type === "position" && change.dragging === false,
+      );
     beginIterationResizeHistory(appliedChanges);
     updateWorkflow(
       (current) => {
@@ -2593,9 +2693,10 @@ function WorkflowEditorContent({
           };
         }
         // Drop any remaining non-persistable churn that did not change authored
-        // geometry/data (e.g. measured-only writes mixed with other RF noise).
+        // geometry/data (e.g. measured-only writes mixed with other RF noise), and a no-op drop
+        // tick whose dirty decision belongs to stopNodeDrag.
         if (
-          !persistable &&
+          (!persistable || dragStopOnly) &&
           removedNodeIds.size === 0 &&
           authoredWorkflowNodesEqual(current.nodes, nextWorkflow.nodes) &&
           workflowSelectionEqual(current.nodes, nextWorkflow.nodes) &&

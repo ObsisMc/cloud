@@ -10,8 +10,10 @@ type scope struct {
 }
 
 func validateDocument(d *document) error {
-	_, err := buildScopes(d)
-	return err
+	if _, err := buildScopes(d); err != nil {
+		return err
+	}
+	return validatePublishExecutors(d)
 }
 
 // buildScopes validates the reachable projection and returns each scope's checked topology:

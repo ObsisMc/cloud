@@ -6,7 +6,9 @@ import {
   commitWorkflowHistory,
   createWorkflowHistoryState,
   redoWorkflowHistory,
+  rewriteWorkflowHistory,
   undoWorkflowHistory,
+  workflowHistoryFingerprint,
 } from "./workflow-history";
 
 /** Builds the smallest valid workflow used by the history reducer tests. */
@@ -153,6 +155,44 @@ describe("workflow history", () => {
 
     expect(undoWorkflowHistory(committed, deletedSnapshot).snapshot).toEqual(
       initialSnapshot,
+    );
+  });
+
+  it("rewrites past and future snapshots with updated fingerprints", () => {
+    const base = createWorkflow({ x: 0, y: 0 });
+    const first = createWorkflow({ x: 50, y: 0 });
+    const second = createWorkflow({ x: 100, y: 0 });
+    const baseSnapshot = captureWorkflowHistorySnapshot(base);
+    const firstSnapshot = captureWorkflowHistorySnapshot(first);
+    const secondSnapshot = captureWorkflowHistorySnapshot(second);
+
+    let state = commitWorkflowHistory(
+      createWorkflowHistoryState(),
+      baseSnapshot,
+      firstSnapshot,
+      "node.move",
+      undefined,
+      "1",
+    );
+    state = commitWorkflowHistory(state, firstSnapshot, secondSnapshot, "node.move", undefined, "2");
+    const undone = undoWorkflowHistory(state, secondSnapshot);
+
+    const rewritten = rewriteWorkflowHistory(undone.state, (snapshot) => ({
+      ...snapshot,
+      name: "Hydrated",
+    }));
+
+    expect(rewritten.past).toHaveLength(1);
+    expect(rewritten.future).toHaveLength(1);
+    expect(rewritten.past[0]?.id).toBe("1");
+    expect(rewritten.past[0]?.snapshot.name).toBe("Hydrated");
+    expect(rewritten.past[0]?.fingerprint).toBe(
+      workflowHistoryFingerprint(rewritten.past[0]!.snapshot),
+    );
+    expect(rewritten.future[0]?.id).toBe("2");
+    expect(rewritten.future[0]?.snapshot.name).toBe("Hydrated");
+    expect(rewritten.future[0]?.fingerprint).toBe(
+      workflowHistoryFingerprint(rewritten.future[0]!.snapshot),
     );
   });
 });

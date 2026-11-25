@@ -9,12 +9,16 @@ import {
 import type { WorkflowAgentConfig } from "@/lib/workflows/mock";
 import { InspectorField } from "./workflow-node-details";
 
+import { WorkflowUnappliedSettingHint } from "./workflow-unapplied-setting-hint";
+
 /** Edits silence handling independently of node failure retries, including interactive nodes. */
 export function WorkflowAgentInactivityField({
   config,
+  unapplied = [],
   onChange,
 }: {
   config: WorkflowAgentConfig;
+  unapplied?: readonly string[];
   onChange: (config: WorkflowAgentConfig) => void;
 }) {
   const { t } = useTranslation();
@@ -57,6 +61,7 @@ export function WorkflowAgentInactivityField({
       >
         {t("settings.workflow.promptInactivity.hint")}
       </p>
+      <WorkflowUnappliedSettingHint setting="promptInactivity" unapplied={unapplied} />
     </InspectorField>
   );
 }

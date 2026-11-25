@@ -433,6 +433,7 @@ export const workflowEditorTranslations = {
     "settings.workflow.publishField.container": "所属容器",
     "settings.workflow.publishField.iteration": "迭代配置",
     "settings.workflow.publishField.loop": "循环配置",
+    "settings.workflow.publishField.executor": "Agent 模型",
     "settings.workflow.publishField.agent": "Agent 配置",
     "settings.workflow.publishField.outputs": "输出结果",
     "settings.workflow.publishField.inputs": "开始变量",
@@ -457,6 +458,7 @@ export const workflowEditorTranslations = {
     "settings.workflow.nodeParameters": "配置参数",
     "settings.workflow.searchAvailableAgentModels": "搜索可用 Agent 模型",
     "settings.workflow.noAvailableAgentModels": "没有可用 Agent 模型",
+    "settings.workflow.noAgentSelected": "未选择智能体",
     "settings.workflow.selectAvailableAgentModel": "请选择当前可用的 Agent 和模型。",
     "settings.workflow.searchAvailableRoles": "搜索可用角色",
     "settings.workflow.noAvailableRoles": "没有可用角色",
@@ -551,6 +553,8 @@ export const workflowEditorTranslations = {
     "settings.workflow.completion.pathIssue.tooDeep":
       "路径不能超过 32 层目录。",
 
+    "settings.workflow.unapplied.promptInactivity":
+      "已保存，v2 暂未把等待策略传给执行节点，运行时仍按默认超时规则处理。",
     "settings.workflow.unapplied.badge": "暂不生效",
     "settings.workflow.unapplied.mcp":
       "已保存，运行时暂不连接已启用的 MCP，节点照常执行。",
@@ -1112,6 +1116,7 @@ export const workflowEditorTranslations = {
     "settings.workflow.publishField.container": "container",
     "settings.workflow.publishField.iteration": "iteration settings",
     "settings.workflow.publishField.loop": "loop settings",
+    "settings.workflow.publishField.executor": "Agent model",
     "settings.workflow.publishField.agent": "Agent settings",
     "settings.workflow.publishField.outputs": "results",
     "settings.workflow.publishField.inputs": "start variables",
@@ -1137,6 +1142,7 @@ export const workflowEditorTranslations = {
     "settings.workflow.searchAvailableAgentModels":
       "Search available Agent models",
     "settings.workflow.noAvailableAgentModels": "No available Agent models",
+    "settings.workflow.noAgentSelected": "No Agent selected",
     "settings.workflow.selectAvailableAgentModel": "Select an available Agent and model.",
     "settings.workflow.searchAvailableRoles": "Search available Roles",
     "settings.workflow.noAvailableRoles": "No available Roles",
@@ -1242,6 +1248,8 @@ export const workflowEditorTranslations = {
     "settings.workflow.completion.pathIssue.tooDeep":
       "The path must not nest deeper than 32 directories.",
 
+    "settings.workflow.unapplied.promptInactivity":
+      "Saved; v2 does not pass the silence policy to the execution node yet, so runs still use the default timeout.",
     "settings.workflow.unapplied.badge": "Not applied yet",
     "settings.workflow.unapplied.mcp":
       "Saved, but runs do not connect the enabled MCPs yet; the node still runs.",

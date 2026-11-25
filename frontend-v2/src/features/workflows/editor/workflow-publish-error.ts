@@ -25,6 +25,7 @@ const FIELD_LABELS: ReadonlyArray<readonly [prefix: string, key: string]> = [
   ["loopConfig.until", "settings.workflow.publishField.loopUntil"],
   ["loopConfig.outputs", "settings.workflow.publishField.loopOutputs"],
   ["loopConfig", "settings.workflow.publishField.loop"],
+  ["agentConfig.executor", "settings.workflow.publishField.executor"],
   ["agentConfig.prompt", "settings.workflow.publishField.prompt"],
   ["agentConfig", "settings.workflow.publishField.agent"],
   ["outputs", "settings.workflow.publishField.outputs"],

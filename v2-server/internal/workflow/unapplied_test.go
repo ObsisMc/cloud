@@ -15,10 +15,12 @@ import (
 // with the context they are authored in.
 func placedAgents(wire bool) (obj, []string) {
 	variants := map[string]obj{
-		"retry":             {"retry": obj{"enabled": true, "maxRetries": 2, "initialDelaySeconds": 5}},
-		"interactive":       {"interactive": true},
-		"mcp":               {"mcps": []any{obj{"mcpId": "official/tools", "enabled": true}}},
-		"interactive-retry": {"interactive": true, "retry": obj{"enabled": true, "maxRetries": 1, "initialDelaySeconds": 1}},
+		"retry":              {"retry": obj{"enabled": true, "maxRetries": 2, "initialDelaySeconds": 5}},
+		"interactive":        {"interactive": true},
+		"inactivity-wait":    {"promptInactivity": "wait"},
+		"inactivity-timeout": {"promptInactivity": "timeout"},
+		"mcp":                {"mcps": []any{obj{"mcpId": "official/tools", "enabled": true}}},
+		"interactive-retry":  {"interactive": true, "retry": obj{"enabled": true, "maxRetries": 1, "initialDelaySeconds": 1}},
 		// plain and null-retry carry desktop's default policy, absent and explicitly null.
 		"plain":      {},
 		"null-retry": {"retry": nil},
@@ -208,6 +210,10 @@ func TestUnappliedAgentSettingsRule(t *testing.T) {
 		"every setting but interactive, in the payload order": {obj{"retry": obj{"enabled": true, "maxRetries": 1, "initialDelaySeconds": 1},
 			"mcps": []any{obj{"mcpId": "official/tools", "enabled": true}}, "roleId": "reviewer"},
 			nil, false},
+		"promptInactivity wait":    {obj{"promptInactivity": "wait"}, []string{"promptInactivity"}, false},
+		"promptInactivity timeout": {obj{"promptInactivity": "timeout"}, nil, false},
+		"promptInactivity null":    {obj{"promptInactivity": nil}, nil, false},
+		"interactive with wait":    {obj{"interactive": true, "promptInactivity": "wait"}, []string{"promptInactivity"}, false},
 	} {
 		for _, inLoop := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/loop=%v", name, inLoop), func(t *testing.T) {
@@ -218,7 +224,7 @@ func TestUnappliedAgentSettingsRule(t *testing.T) {
 				}
 				want := tc.want
 				if inLoop && tc.config["interactive"] == true {
-					want = append(append([]string{}, want...), "interactive")
+					want = append([]string{"interactive"}, want...)
 				}
 				g := obj{"schemaVersion": 2, "nodes": []any{
 					obj{"id": "start", "data": obj{"kind": "start"}},
