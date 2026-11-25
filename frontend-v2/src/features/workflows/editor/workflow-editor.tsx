@@ -2624,6 +2624,14 @@ function WorkflowEditorContent({
       (change) => change.type === "dimensions" && change.resizing !== true,
     );
     const nonAuthoring = isNonAuthoringNodeChanges(appliedChanges);
+    // The final drop tick (dragging:false) arrives just before onNodeDragStop. When it leaves the
+    // authored graph untouched (a drop back at the start), let stopNodeDrag own the dirty decision
+    // instead of marking the draft unsaved for a gesture that changed nothing.
+    const dragStopOnly =
+      appliedChanges.length > 0 &&
+      appliedChanges.every(
+        (change) => change.type === "position" && change.dragging === false,
+      );
     beginIterationResizeHistory(appliedChanges);
     updateWorkflow(
       (current) => {
@@ -2685,9 +2693,10 @@ function WorkflowEditorContent({
           };
         }
         // Drop any remaining non-persistable churn that did not change authored
-        // geometry/data (e.g. measured-only writes mixed with other RF noise).
+        // geometry/data (e.g. measured-only writes mixed with other RF noise), and a no-op drop
+        // tick whose dirty decision belongs to stopNodeDrag.
         if (
-          !persistable &&
+          (!persistable || dragStopOnly) &&
           removedNodeIds.size === 0 &&
           authoredWorkflowNodesEqual(current.nodes, nextWorkflow.nodes) &&
           workflowSelectionEqual(current.nodes, nextWorkflow.nodes) &&

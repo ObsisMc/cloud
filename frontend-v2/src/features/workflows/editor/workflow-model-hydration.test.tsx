@@ -575,4 +575,67 @@ describe("editor model hydration", () => {
       delete (HTMLElement.prototype as { offsetHeight?: unknown }).offsetHeight;
     }
   });
+
+  it("keeps the draft clean when a mid-drag late catalog repair is followed by a drop back at the start", async () => {
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get: () => 240,
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get: () => 80,
+    });
+    try {
+      const state = await openEditor("deepseek/deepseek-v4-flash", { models: null });
+      const nodeCard = document.querySelector<HTMLElement>('.react-flow__node[data-id="agent"]');
+      expect(nodeCard).not.toBeNull();
+
+      // Drag without opening the inspector: mounting its prompt editor emits one text change
+      // that dirties the draft on its own, which would hide what this test pins down. The first
+      // small move starts the gesture (nodeDragThreshold), fixing the drag's coordinate frame.
+      await act(async () => {
+        nodeCard!.dispatchEvent(
+          windowedMouseEvent("mousedown", { button: 0, clientX: 320, clientY: 100 }),
+        );
+      });
+      await act(async () => {
+        window.dispatchEvent(
+          windowedMouseEvent("mousemove", { button: 0, clientX: 330, clientY: 110 }),
+        );
+      });
+      await act(async () => {
+        window.dispatchEvent(
+          windowedMouseEvent("mousemove", { button: 0, clientX: 440, clientY: 180 }),
+        );
+      });
+
+      // Catalog arrives mid-drag; the repair must reach the drag-start snapshot too, or the drop
+      // below compares a stale baseline against the repaired live graph and dirties the draft.
+      state.queries.setQueryData(["workflow-catalog", "executors", tenantId], { items: catalog });
+      await act(async () => {});
+      await act(async () => {});
+
+      // Drag back to the exact start and drop: nothing authored changed, so the draft stays clean.
+      await act(async () => {
+        window.dispatchEvent(
+          windowedMouseEvent("mousemove", { button: 0, clientX: 330, clientY: 110 }),
+        );
+      });
+      await act(async () => {
+        window.dispatchEvent(
+          windowedMouseEvent("mouseup", { button: 0, clientX: 330, clientY: 110 }),
+        );
+      });
+
+      expect(screen.queryByText("未保存")).not.toBeInTheDocument();
+      expect(state.update).not.toHaveBeenCalled();
+      await state.flushDraft();
+      const saved = state.savedNode();
+      expect(saved!.position).toEqual({ x: 320, y: 0 });
+      expect(saved!.data.agentConfig.executor).toEqual({ agentCli: agent, modelId: "configured" });
+    } finally {
+      delete (HTMLElement.prototype as { offsetWidth?: unknown }).offsetWidth;
+      delete (HTMLElement.prototype as { offsetHeight?: unknown }).offsetHeight;
+    }
+  });
 });
