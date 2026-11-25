@@ -145,18 +145,18 @@ func (a hostedAgent) HostExecutionEnding(sid, id string) bool {
 
 // What is ending is what the driver says is; without a driver that knows, nothing is.
 func TestRuntimeAsksItsDriverWhatIsEnding(t *testing.T) {
-	f, a, _ := heldFixture(t)
+	a := &failureAgent{}
+	s := &Service{}
 	for name, agent := range map[string]AgentDriver{"no driver": nil, "a driver that does not know": a} {
-		f.service.agent = agent
-		if f.service.HostExecutionEnding("s", "x-lost") {
+		s.agent = agent
+		if s.HostExecutionEnding("s", "x-lost") {
 			t.Fatalf("%s: ending", name)
 		}
 	}
-	f.service.agent = hostedAgent{a, map[string]string{"x-lost": "agent_failed"}}
-	if !f.service.HostExecutionEnding("s", "x-lost") || f.service.HostExecutionEnding("s", "x") || f.service.HostExecutionEnding("t", "x-lost") {
+	s.agent = hostedAgent{a, map[string]string{"x-lost": "agent_failed"}}
+	if !s.HostExecutionEnding("s", "x-lost") || s.HostExecutionEnding("s", "x") || s.HostExecutionEnding("t", "x-lost") {
 		t.Fatal("not what the driver says")
 	}
-	f.service.agent = a
 }
 
 // A session ended while its driver still has to write why its execution ended keeps that reason, and
