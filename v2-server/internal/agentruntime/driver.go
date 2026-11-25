@@ -52,6 +52,12 @@ type Options struct {
 	// ForgetCheckout drops the record of a reattached checkout whose clone execution Node no
 	// longer knows, so a later process does not reattach it again. Nil forgets nothing.
 	ForgetCheckout func(ctx context.Context, workspaceID, cloneExecution string) error
+	// RecordHostExecution records the Node execution of a session given host tools before its start
+	// is sent; on its failure the start is not sent. EndHostExecution settles that record with why
+	// the execution ended, and must leave a settled one alone. Without both, sessions given host
+	// tools do not start.
+	RecordHostExecution func(ctx context.Context, executionID, sessionID string) error
+	EndHostExecution    func(ctx context.Context, executionID, reason string) error
 }
 
 // Checkout is a workspace's directory on this host and the commit it was cloned at.
@@ -74,6 +80,7 @@ type Driver struct {
 	boot     string
 	mu       sync.Mutex
 	closed   bool
+	closing  atomic.Bool // closed, for readers that hold a session's lock
 	projects map[string]*projectRuntime
 	sessions map[string]*agentSession
 	// recorded are workflow checkouts an earlier Node incarnation prepared, by workspace (see
@@ -90,6 +97,12 @@ type Driver struct {
 	turnCancelWait  time.Duration
 	turnCancelLimit time.Duration
 	startProject    func(*projectRuntime) error
+	// unsettled are the ends of host executions that were decided and not written yet (see
+	// HostExecutionEnds).
+	unsettled map[string]hostExecutionEnd
+	// hostExecutionRetry paces the writes of an execution's end that failed (see settleHost); zero
+	// is its default.
+	hostExecutionRetry time.Duration
 	// wrapClient lets real-Node tests interpose on IPC before the receiver starts.
 	wrapClient func(nodeClient) nodeClient
 }
@@ -252,6 +265,7 @@ func (d *Driver) run(ctx context.Context, scope execution.Scope, session executi
 		a.commandMu.Unlock()
 		var failure *execution.MCPFailure
 		if errors.As(err, &failure) {
+			a.decideHost(failure.Code)
 			a.requestEnd()
 			result := failed(failure.Code)
 			result.MCPFailure, result.AgentLost = failure, true
@@ -511,6 +525,7 @@ func (d *Driver) Rebuild(sid string) {
 func (d *Driver) Close(ctx context.Context) error {
 	d.mu.Lock()
 	d.closed = true
+	d.closing.Store(true)
 	projects := make([]*projectRuntime, 0, len(d.projects))
 	for _, p := range d.projects {
 		projects = append(projects, p)

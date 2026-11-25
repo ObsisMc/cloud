@@ -173,7 +173,8 @@ func newIPCHarnessWith(t *testing.T, bindings map[string]nodeservices.Binding, h
 	root := t.TempDir()
 	config := Project{MirrorPath: filepath.Join(root, "mirror.git"), Commit: "0123456789012345678901234567890123456789", SnapshotRef: "refs/snapshots/demo"}
 	h := &ipcHarness{created: make(chan *fakeNodeIPC, 16), config: config, scope: execution.Scope{TenantID: "tenant", UserID: "user"}}
-	d := &Driver{opts: Options{Root: filepath.Join(root, "projects"), Bindings: bindings, ResolveProject: func(context.Context, execution.Scope, string) (Project, error) { return config, nil }}, boot: "fake", projects: map[string]*projectRuntime{}, sessions: map[string]*agentSession{}, recorded: map[string]Checkout{}, controlTimeout: time.Second, mcpRefreshWait: 5 * time.Minute, turnCancelWait: defaultTurnCancelWait, turnCancelLimit: execution.TurnStopSettleLimit}
+	d := &Driver{opts: Options{Root: filepath.Join(root, "projects"), Bindings: bindings, ResolveProject: func(context.Context, execution.Scope, string) (Project, error) { return config, nil },
+		RecordHostExecution: func(context.Context, string, string) error { return nil }, EndHostExecution: func(context.Context, string, string) error { return nil }}, boot: "fake", projects: map[string]*projectRuntime{}, sessions: map[string]*agentSession{}, recorded: map[string]Checkout{}, controlTimeout: time.Second, mcpRefreshWait: 5 * time.Minute, turnCancelWait: defaultTurnCancelWait, turnCancelLimit: execution.TurnStopSettleLimit}
 	h.driver = d
 	d.startProject = func(p *projectRuntime) error {
 		if err := os.MkdirAll(filepath.Join(p.root, "w", "n"), 0700); err != nil {

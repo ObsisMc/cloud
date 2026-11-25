@@ -146,6 +146,7 @@ func TestRealAgentReportsCompletionThroughNode(t *testing.T) {
 		RecordWorkspace: func(c context.Context, id string, at agentruntime.Checkout) error {
 			return db.RecordWorkspace(c, id, store.WorkspaceLocation{Path: at.Path, BaseCommit: at.BaseCommit, CloneExecution: at.CloneExecution})
 		},
+		RecordHostExecution: db.RecordHostExecution, EndHostExecution: db.EndHostExecution,
 	})
 	if err != nil {
 		t.Fatal(err)

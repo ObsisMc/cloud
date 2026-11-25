@@ -747,7 +747,13 @@ func (s *Service) conclude(ctx context.Context, scope execution.Scope, sid strin
 		// The Node is marked for rebuild; only an End that obtains stop proof ends the session.
 		return nil
 	}
-	if err := s.db.EndExecutionSession(ctx, scope, sid); err != nil {
+	var ends map[string]string
+	if driver, ok := s.agent.(interface {
+		HostExecutionEnds(string) map[string]string
+	}); ok {
+		ends = driver.HostExecutionEnds(sid)
+	}
+	if err := s.db.EndHostExecutionSession(ctx, scope, sid, ends); err != nil {
 		return err
 	}
 	s.mu.Lock()

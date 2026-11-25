@@ -5,8 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
 	"github.com/wanglongan587/cloud/v2-server/internal/store"
+	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
 // heldFixture starts held workflow sessions on an Agent that refuses every turn, which leaves a
@@ -125,5 +128,43 @@ func TestRuntimeEndForgetsAHeldSession(t *testing.T) {
 	}
 	if isHeld(f, ref.SessionID) {
 		t.Fatal("an ended session is still listed as held")
+	}
+}
+
+// hostedAgent is a driver that knows why executions ended whose end it has not written yet.
+type hostedAgent struct {
+	*failureAgent
+	ends map[string]string
+}
+
+func (a hostedAgent) HostExecutionEnds(string) map[string]string { return a.ends }
+
+// A session ended while its driver still has to write why its execution ended keeps that reason, and
+// the driver's later write changes nothing.
+func TestRuntimeEndsASessionWithItsDriversReason(t *testing.T) {
+	f, a, req := heldFixture(t)
+	f.service.agent = hostedAgent{a, map[string]string{"x-lost": "agent_failed"}}
+	ref, err := f.service.Start(f.ctx, f.scope, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observeTurn(t, f, ref, 0)
+	if err := f.db.RecordHostExecution(f.ctx, "x-lost", ref.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.End(f.ctx, f.scope, ref.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.EndHostExecution(f.ctx, "x-lost", "agent_failed"); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.ConnectConfig(f.ctx, f.config.ConnConfig.Copy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(f.ctx)
+	executions := storetest.HostExecutions(t, conn, ref.SessionID)
+	if len(executions) != 1 || executions[0].EndedAt == nil || executions[0].Reason != "agent_failed" {
+		t.Fatalf("executions = %+v", executions)
 	}
 }

@@ -672,7 +672,17 @@ func (p *projectRuntime) transportFailed() {
 		agents = append(agents, a)
 	}
 	p.mu.Unlock()
-	p.deadOnce.Do(func() { close(p.dead) })
+	p.deadOnce.Do(func() {
+		// Settled before anyone learns of the loss. A caller that raced this one waits for it here.
+		// All at once: the wait is one write's, however many sessions the Node ran, and stays within
+		// the budget of whoever waits for the Node's stop.
+		var settling sync.WaitGroup
+		for _, a := range agents {
+			settling.Go(func() { a.settleHost(execution.FailureNodeLost) })
+		}
+		settling.Wait()
+		close(p.dead)
+	})
 	for _, a := range agents {
 		a.fail(execution.FailureNodeLost, execution.ErrUnavailable)
 	}
@@ -720,6 +730,8 @@ func (p *projectRuntime) closeResources(ctx context.Context) error {
 	}
 	p.mu.Unlock()
 	for _, a := range agents {
+		// Whoever asked for a session's end decided its reason before; the others lose their Node.
+		a.decideHost(execution.FailureNodeLost)
 		a.requestEnd()
 	}
 	// Stop supplies the final process-tree proof even when transport or cooperative End failed.
@@ -743,6 +755,7 @@ func (p *projectRuntime) closeResources(ctx context.Context) error {
 		}
 	}
 	for _, a := range agents {
+		a.settleHost(execution.FailureNodeLost)
 		a.markStopped()
 	}
 	if p.services != nil && !p.serviceClosed {

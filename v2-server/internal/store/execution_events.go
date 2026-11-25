@@ -174,12 +174,18 @@ func validateTerminalResult(result *execution.Result) error {
 // The runtime must stop and finish active work first; SQL never claims execution has stopped.
 // This runtime write checks admitted ownership, even when current membership has been revoked.
 func (s *Store) EndExecutionSession(ctx context.Context, scope execution.Scope, sid string) error {
+	return s.EndHostExecutionSession(ctx, scope, sid, nil)
+}
+
+// EndHostExecutionSession is EndExecutionSession for a session whose host executions in ends ended
+// for the reason given there, which is not written yet.
+func (s *Store) EndHostExecutionSession(ctx context.Context, scope execution.Scope, sid string, ends map[string]string) error {
 	return s.executionRuntimeTransaction(ctx, scope, sid, func(tx pgx.Tx, session execution.Session) error {
-		return endExecutionSession(ctx, tx, session)
+		return endExecutionSession(ctx, tx, session, ends)
 	})
 }
 
-func endExecutionSession(ctx context.Context, tx pgx.Tx, session execution.Session) error {
+func endExecutionSession(ctx context.Context, tx pgx.Tx, session execution.Session, ends map[string]string) error {
 	if session.EndedAt != nil {
 		return nil
 	}
@@ -200,6 +206,16 @@ func endExecutionSession(ctx context.Context, tx pgx.Tx, session execution.Sessi
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE v2_execution_sessions SET data=$2,ended_at=$3 WHERE id=$1`, session.ID, raw, now); err != nil {
+		return err
+	}
+	// A session never ends with one running. What the driver knows the end of keeps its reason, also
+	// when its own write has yet to succeed.
+	for id, reason := range ends {
+		if _, err := tx.Exec(ctx, `UPDATE v2_host_executions SET ended_at=$3, reason=$4 WHERE id=$1 AND session_id=$2 AND ended_at IS NULL`, id, session.ID, now, reason); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE v2_host_executions SET ended_at=$2, reason=$3 WHERE session_id=$1 AND ended_at IS NULL`, session.ID, now, execution.HostSessionEnded); err != nil {
 		return err
 	}
 	_, err = insertExecutionEvent(ctx, tx, execution.Event{Ref: execution.Ref{SessionID: session.ID}, Kind: execution.EventSessionEnded, OccurredAt: now})
@@ -247,6 +263,12 @@ func (s *Store) recoverExecutions(ctx context.Context, deliver bool) ([]Recovere
 	var kept []RecoveredSession
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		kept = nil
+		// Every Node of the previous process has been stopped, so no execution it recorded still runs,
+		// also that of a session kept below: the session's next turn starts a new one. In this
+		// transaction, so a start that cannot settle them recovers nothing and serves nothing.
+		if _, err := tx.Exec(ctx, `UPDATE v2_host_executions SET ended_at = now(), reason = $1 WHERE ended_at IS NULL`, execution.FailureServerRestarted); err != nil {
+			return fmt.Errorf("settle host executions: %w", err)
+		}
 		rows, err := tx.Query(ctx, `SELECT s.data, s.tenant_id::text, s.user_id::text, `+parkedInteractiveSession+`
 			AND NOT EXISTS (SELECT 1 FROM v2_execution_turns t WHERE t.session_id = s.id AND t.ended_at IS NULL)
 			FROM v2_execution_sessions s WHERE s.ended_at IS NULL ORDER BY s.id FOR UPDATE OF s`)
@@ -305,7 +327,7 @@ func (s *Store) recoverExecutions(ctx context.Context, deliver bool) ([]Recovere
 			}
 			if err == nil {
 				ref := execution.Ref{SessionID: session.ID, TurnID: tid}
-				result := execution.Result{Status: execution.StatusInterrupted, FailureCode: "server_restarted"}
+				result := execution.Result{Status: execution.StatusInterrupted, FailureCode: execution.FailureServerRestarted}
 				if deliver {
 					staged, err := recoverDeliveryWork(ctx, tx, session, ref)
 					if err != nil {
@@ -324,7 +346,7 @@ func (s *Store) recoverExecutions(ctx context.Context, deliver bool) ([]Recovere
 					return err
 				}
 			}
-			if err := endExecutionSession(ctx, tx, session); err != nil {
+			if err := endExecutionSession(ctx, tx, session, nil); err != nil {
 				return err
 			}
 		}
