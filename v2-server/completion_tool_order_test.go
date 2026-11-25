@@ -22,3 +22,15 @@ func TestTheCompletionToolIsServedAfterEarlierNodesStopped(t *testing.T) {
 		last = at
 	}
 }
+
+// The tool is also refused to an execution whose end this process decided and has yet to write; the
+// wiring has no test of its own beyond this one, which pins that the registry is given it.
+func TestTheCompletionToolKnowsWhatThisProcessDecided(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(source), "completiontool.NewRegistry(db, runtime.HostExecutionEnding)") != 1 {
+		t.Fatal("the completion tool is not given the ends this process decided")
+	}
+}

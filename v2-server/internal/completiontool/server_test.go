@@ -106,7 +106,13 @@ func call(t *testing.T, url, token string) (string, bool) {
 
 func attach(t *testing.T, a *Attempt, session string) string {
 	t.Helper()
-	servers := a.Attach(session, "x-"+session)
+	return attachIn(t, a, session, "x-"+session)
+}
+
+// attachIn starts the Agent of a session in the given host execution.
+func attachIn(t *testing.T, a *Attempt, session, executionID string) string {
+	t.Helper()
+	servers := a.Attach(session, executionID)
 	if err := execution.ValidateHostMCPServers(servers.Servers); err != nil || len(servers.Servers) != 1 {
 		t.Fatalf("servers = %v: %v", servers.Servers, err)
 	}
@@ -332,6 +338,50 @@ func TestAnEndedExecutionsCredentialIsRefused(t *testing.T) {
 			}
 			if text, refused := call(t, url, token); refused {
 				t.Fatalf("call = %q", text)
+			}
+		})
+	}
+}
+
+// The Agent that comes back to a session after its Node was lost runs in a new execution, and its
+// credential stands for that one: the end of the earlier execution does not void it, its own does.
+func TestACredentialStandsForTheExecutionItWasIssuedFor(t *testing.T) {
+	for name, set := range map[string]func(*harness) *sync.Map{
+		"settled": func(h *harness) *sync.Map { return &h.settled },
+		"ending":  func(h *harness) *sync.Map { return &h.ending },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := serve(t)
+			a := h.r.Attempt("n1", "n1")
+			old := attachIn(t, a, "s1", "x1")
+			mark(set(h), "x1", true)
+			fresh := attachIn(t, a, "s1", "x2")
+			a.Started()
+			token := a.Instruct().Token
+			handshake := func(url string) int {
+				t.Helper()
+				status, _ := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
+				return status
+			}
+			if status := handshake(fresh); status != http.StatusOK {
+				t.Fatalf("the new execution's handshake = %d", status)
+			}
+			if unconnected, known := h.r.Unconnected("n1"); unconnected || !known {
+				t.Fatalf("unconnected = %v, known %v", unconnected, known)
+			}
+			if text, refused := call(t, fresh, token); refused {
+				t.Fatalf("the new execution's call = %q", text)
+			}
+			if status := handshake(old); status != http.StatusUnauthorized {
+				t.Fatalf("the earlier execution's handshake = %d", status)
+			}
+			mark(set(h), "x1", false)
+			mark(set(h), "x2", true)
+			if status := handshake(fresh); status != http.StatusUnauthorized {
+				t.Fatalf("the ended execution's handshake = %d", status)
+			}
+			if text, refused := call(t, fresh, token); !refused || text != string(RefusedNotAwaiting) {
+				t.Fatalf("the ended execution's call = %q", text)
 			}
 		})
 	}

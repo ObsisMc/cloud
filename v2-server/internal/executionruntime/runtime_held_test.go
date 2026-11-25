@@ -138,6 +138,26 @@ type hostedAgent struct {
 }
 
 func (a hostedAgent) HostExecutionEnds(string) map[string]string { return a.ends }
+func (a hostedAgent) HostExecutionEnding(sid, id string) bool {
+	_, ok := a.ends[id]
+	return ok && sid == "s"
+}
+
+// What is ending is what the driver says is; without a driver that knows, nothing is.
+func TestRuntimeAsksItsDriverWhatIsEnding(t *testing.T) {
+	f, a, _ := heldFixture(t)
+	for name, agent := range map[string]AgentDriver{"no driver": nil, "a driver that does not know": a} {
+		f.service.agent = agent
+		if f.service.HostExecutionEnding("s", "x-lost") {
+			t.Fatalf("%s: ending", name)
+		}
+	}
+	f.service.agent = hostedAgent{a, map[string]string{"x-lost": "agent_failed"}}
+	if !f.service.HostExecutionEnding("s", "x-lost") || f.service.HostExecutionEnding("s", "x") || f.service.HostExecutionEnding("t", "x-lost") {
+		t.Fatal("not what the driver says")
+	}
+	f.service.agent = a
+}
 
 // A session ended while its driver still has to write why its execution ended keeps that reason, and
 // the driver's later write changes nothing.

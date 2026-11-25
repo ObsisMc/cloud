@@ -354,6 +354,44 @@ func TestAnEndIsWrittenBeforeNodeIsAskedForIt(t *testing.T) {
 	})
 }
 
+// An execution whose end is not written yet stays ending when its session no longer has it: another one
+// replaced it, or the session is gone.
+func TestAnUnwrittenEndOutlivesItsSession(t *testing.T) {
+	h := newIPCHarness(t, nil)
+	records := recordExecutions(h)
+	f, start := parkHosted(t, h, h.session("hosted", "workspace"), nil)
+	records.mu.Lock()
+	records.failures = 1 << 30
+	records.mu.Unlock()
+	f.terminalAs(start, "idle_timeout", "")
+	for deadline := time.Now().Add(5 * time.Second); len(h.driver.HostExecutionEnds("hosted")) == 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the end was not decided")
+		}
+	}
+	ending := func(when string) {
+		t.Helper()
+		if !h.driver.HostExecutionEnding("hosted", start.ExecutionID) {
+			t.Fatalf("%s: an unwritten end is not ending", when)
+		}
+		if h.driver.HostExecutionEnding("hosted", "x-next") {
+			t.Fatalf("%s: the next execution is ending", when)
+		}
+	}
+	h.driver.mu.Lock()
+	ended := h.driver.sessions["hosted"]
+	h.driver.sessions["hosted"] = &agentSession{execution: "x-next"}
+	h.driver.mu.Unlock()
+	ending("replaced")
+	h.driver.mu.Lock()
+	delete(h.driver.sessions, "hosted")
+	h.driver.mu.Unlock()
+	ending("gone")
+	h.driver.mu.Lock()
+	h.driver.sessions["hosted"] = ended
+	h.driver.mu.Unlock()
+}
+
 // Only an execution whose end was decided is said to be ending, and only under its own session.
 func TestOnlyADecidedEndIsEnding(t *testing.T) {
 	h := newIPCHarness(t, nil)
