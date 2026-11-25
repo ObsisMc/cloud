@@ -54,16 +54,26 @@ const (
 // maxRevoked bounds the remembered reasons of withdrawn tokens, dropped wholesale when full.
 const maxRevoked = 4096
 
-// Live reports, from stored state, whether the node run executes a turn of the open session.
-// Credentials and tokens count only while it holds, whatever this process remembers.
-type Live func(ctx context.Context, nodeRunID, sessionID string) (bool, error)
+// State is the stored state credentials and tokens depend on, whatever this process remembers.
+type State interface {
+	// HostExecutionRunning reports whether the execution is on record and not settled. A credential
+	// counts only while the execution it was issued for is (host MCP ADR D6).
+	HostExecutionRunning(ctx context.Context, executionID string) (bool, error)
+	// WorkflowNodeTurnLive reports whether the node run executes a turn of the open session while
+	// that execution of the session runs. The tool may be called only while it does.
+	WorkflowNodeTurnLive(ctx context.Context, nodeRunID, sessionID, executionID string) (bool, error)
+}
+
+// Ending reports whether this process already decided why an execution of the session ended, which
+// may be stored only later. It only refuses more than stored state does.
+type Ending func(sessionID, executionID string) bool
 
 // node is one interactive node run whose Agent may hold the tool.
 type node struct {
 	id string
 	// credential names the endpoint of the node's current physical Agent, session the execution
-	// session it belongs to.
-	credential, session string
+	// session it belongs to, execution the host execution it runs in.
+	credential, session, execution string
 	// started says that Agent's start was sent to Node, connected that its endpoint was asked to
 	// initialize or to list its tools.
 	started, connected bool
@@ -74,8 +84,11 @@ type node struct {
 // Registry issues the credentials and tokens of every node of this process. A nil Registry is a
 // deployment without the tool.
 type Registry struct {
-	live Live
-	now  func() time.Time
+	state  State
+	ending Ending
+	now    func() time.Time
+	// deadline bounds one read of state.
+	deadline time.Duration
 
 	mu          sync.Mutex
 	url         string // the endpoint without its credential, set by Serve
@@ -85,9 +98,9 @@ type Registry struct {
 	revoked     map[string]Refusal
 }
 
-// NewRegistry returns an empty registry that checks stored state through live.
-func NewRegistry(live Live) *Registry {
-	return &Registry{live: live, now: time.Now, nodes: map[string]*node{}, credentials: map[string]*node{},
+// NewRegistry returns an empty registry that checks state, and what ending already knows.
+func NewRegistry(state State, ending Ending) *Registry {
+	return &Registry{state: state, ending: ending, now: time.Now, deadline: stateDeadline, nodes: map[string]*node{}, credentials: map[string]*node{},
 		tokens: map[string]*Attempt{}, revoked: map[string]Refusal{}}
 }
 
@@ -119,14 +132,14 @@ func (r *Registry) Attempt(nodeRunID, attempt string) *Attempt {
 
 // Attach issues the endpoint credential of the node's new physical Agent, withdrawing the one its
 // earlier Agent had.
-func (a *Attempt) Attach(sessionID string) execution.HostServers {
+func (a *Attempt) Attach(sessionID, executionID string) execution.HostServers {
 	r := a.r
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	credential := secret()
 	if a.open() {
 		delete(r.credentials, a.node.credential)
-		a.node.credential, a.node.session = credential, sessionID
+		a.node.credential, a.node.session, a.node.execution = credential, sessionID, executionID
 		a.node.started, a.node.connected = false, false
 		r.credentials[credential] = a.node
 	}
@@ -239,15 +252,36 @@ func (r *Registry) Revoke(nodeRunID string) {
 	delete(r.nodes, nodeRunID)
 }
 
-// authorize returns the session and node run a credential stands for.
-func (r *Registry) authorize(credential string) (nodeRunID, sessionID string, ok bool) {
+// holder is what a credential stands for: a node run's Agent, its session and its execution.
+type holder struct{ credential, nodeRun, session, execution string }
+
+// authorize returns what a credential stands for.
+func (r *Registry) authorize(credential string) (holder, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := r.credentials[credential]
 	if n == nil || credential == "" {
-		return "", "", false
+		return holder{}, false
 	}
-	return n.id, n.session, true
+	return holder{credential, n.id, n.session, n.execution}, true
+}
+
+// valid reports whether the execution the credential was issued for still runs. Like live, it asks what
+// this process decided after it read what is stored, so an end decided in between refuses too.
+func (r *Registry) valid(ctx context.Context, h holder) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.deadline)
+	defer cancel()
+	running, err := r.state.HostExecutionRunning(ctx, h.execution)
+	return running && !r.ending(h.session, h.execution), err
+}
+
+// live reports whether the holder may call the tool: its credential is valid and its node executes a
+// turn of its session.
+func (r *Registry) live(ctx context.Context, h holder) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.deadline)
+	defer cancel()
+	live, err := r.state.WorkflowNodeTurnLive(ctx, h.nodeRun, h.session, h.execution)
+	return live && !r.ending(h.session, h.execution), err
 }
 
 // accept records the completion request a token authorizes. The token must be the current one of a

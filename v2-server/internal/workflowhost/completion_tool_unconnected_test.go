@@ -32,7 +32,7 @@ func (a *fakeAgent) asks(method string) {
 func (f *fixture) restarted(t *testing.T, session string) *fakeAgent {
 	t.Helper()
 	tools := f.followTools(t)
-	a := &fakeAgent{t: t, url: tools.Attach(session).Servers[0].URL}
+	a := &fakeAgent{t: t, url: tools.Attach(session, "x-"+session).Servers[0].URL}
 	tools.Started()
 	return a
 }
@@ -225,7 +225,7 @@ func TestAnExecutionThatWasNotStartedIsNotJudged(t *testing.T) {
 			}
 			a := f.exec.awaitStart(t)
 			if attach {
-				f.exec.request(a).Host.Attach(a)
+				f.exec.request(a).Host.Attach(a, "x-"+a)
 			}
 			r := notStarted
 			r.Status, r.FailureCode, r.StopReason, r.AgentLost = execution.StatusCancelled, "", "cancelled", true
@@ -246,7 +246,7 @@ func TestAnExecutionThatWasNotStartedIsNotJudged(t *testing.T) {
 				}
 				f.send(t, runID)
 				if attach {
-					f.followTools(t).Attach(a)
+					f.followTools(t).Attach(a, "x-"+a)
 				}
 				f.exec.finish(a, notStarted)
 				_, nodes := f.await(t, runID, func(run store.WorkflowRun, n []store.WorkflowNodeRun) bool {

@@ -19,7 +19,10 @@ const (
 	maxRequestBytes = 64 << 10
 	// connectionDeadline bounds one request, so a slow client holds nothing.
 	connectionDeadline = 10 * time.Second
-	pathPrefix         = "/mcp/"
+	// stateDeadline bounds reading stored state for a request: half of what the connection has to
+	// write its answer, so that a state that cannot be read in time is still answered.
+	stateDeadline = connectionDeadline / 2
+	pathPrefix    = "/mcp/"
 )
 
 // Server is the running loopback endpoint.
@@ -90,7 +93,7 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	nodeRun, session, ok := r.authorize(credential)
+	h, ok := r.authorize(credential)
 	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
@@ -123,22 +126,31 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusAccepted) // a notification has no answer
 		return
 	}
+	if message.Method != "tools/call" { // which answers its refusals itself
+		if valid, err := r.valid(req.Context(), h); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		} else if !valid {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	response := rpcResponse{JSONRPC: "2.0", ID: message.ID}
-	response.Result, response.Error = r.answer(req.Context(), credential, nodeRun, session, message)
+	response.Result, response.Error = r.answer(req.Context(), h, message)
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-func (r *Registry) answer(ctx context.Context, credential, nodeRun, session string, message rpcMessage) (any, *rpcError) {
+func (r *Registry) answer(ctx context.Context, h holder, message rpcMessage) (any, *rpcError) {
 	switch message.Method {
 	case "initialize":
-		r.connect(credential)
+		r.connect(h.credential)
 		return map[string]any{"protocolVersion": protocolVersion, "capabilities": map[string]any{"tools": map[string]any{}},
 			"serverInfo": map[string]string{"name": ServerName, "version": "0.1.0"}}, nil
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		r.connect(credential)
+		r.connect(h.credential)
 		return map[string]any{"tools": []any{map[string]any{
 			"name":        ToolName,
 			"description": "Report that this workflow step is complete. Pass the attempt token from the step boundary.",
@@ -153,17 +165,19 @@ func (r *Registry) answer(ctx context.Context, credential, nodeRun, session stri
 		if json.Unmarshal(message.Params.Arguments["attemptToken"], &token) != nil || token == "" {
 			return nil, &rpcError{-32602, "attemptToken is required"}
 		}
-		text, refused := r.call(ctx, credential, nodeRun, session, token)
+		text, refused := r.call(ctx, h, token)
 		return map[string]any{"content": []any{map[string]string{"type": "text", "text": text}}, "isError": refused}, nil
 	}
 	return nil, &rpcError{-32601, "method not found"}
 }
 
 // call answers one tool call. Stored state is read first, so a node that left its turn refuses even
-// when this process has not caught up; accept then decides under the registry's lock, so a turn
-// settling meanwhile either takes the signal or refuses it as stale.
-func (r *Registry) call(ctx context.Context, credential, nodeRun, session, token string) (text string, refused bool) {
-	live, err := r.live(ctx, nodeRun, session)
+// when this process has not caught up, and so does one whose execution ended; accept then decides
+// under the registry's lock, so a turn settling meanwhile either takes the signal or refuses it as
+// stale. Nothing is read again: an execution that ends after it was checked changes nothing here, its
+// turn does not end normally, which drops the signal.
+func (r *Registry) call(ctx context.Context, h holder, token string) (text string, refused bool) {
+	live, err := r.live(ctx, h)
 	if err != nil {
 		return string(RefusedUnavailable), true
 	}
@@ -177,7 +191,7 @@ func (r *Registry) call(ctx context.Context, credential, nodeRun, session, token
 		}
 		return string(why), true
 	}
-	signal, why := r.accept(credential, token)
+	signal, why := r.accept(h.credential, token)
 	if why != "" {
 		return string(why), true
 	}

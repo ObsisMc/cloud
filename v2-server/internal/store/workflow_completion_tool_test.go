@@ -9,8 +9,8 @@ import (
 	"github.com/wanglongan587/cloud/v2-server/internal/store/storetest"
 )
 
-// A node's turn is live only while its row runs and a turn of its session has not ended; each
-// condition refuses on its own.
+// A node's turn is live only while its row runs, a turn of its session has not ended and the execution
+// that asks runs; each condition refuses on its own.
 func TestWorkflowNodeTurnLive(t *testing.T) {
 	s := storetest.Open(t)
 	user, tenant := storetest.Login(t, s, "turn-live")
@@ -22,9 +22,12 @@ func TestWorkflowNodeTurnLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflowAgentSession(t, s, scope, project, run.ID, node.ID, "live")
+	if err := s.RecordHostExecution(ctx, "x-live", "live"); err != nil {
+		t.Fatal(err)
+	}
 	live := func(want bool, when string) {
 		t.Helper()
-		if got, err := s.WorkflowNodeTurnLive(ctx, node.ID, "live"); err != nil || got != want {
+		if got, err := s.WorkflowNodeTurnLive(ctx, node.ID, "live", "x-live"); err != nil || got != want {
 			t.Fatalf("%s: live = %v %v, want %v", when, got, err, want)
 		}
 	}
@@ -60,8 +63,31 @@ func TestWorkflowNodeTurnLive(t *testing.T) {
 	live(false, "the turn ended while the node still runs")
 	begin("turn-2")
 	live(true, "the next turn runs")
+	workflowAgentSession(t, s, scope, project, run.ID, "another-attempt", "other")
+	if err := s.RecordHostExecution(ctx, "x-other", "other"); err != nil {
+		t.Fatal(err)
+	}
+	for id, what := range map[string]string{"x-none": "an execution without a record", "x-other": "an execution of another session", "": "no execution"} {
+		if got, err := s.WorkflowNodeTurnLive(ctx, node.ID, "live", id); err != nil || got {
+			t.Fatalf("%s: live = %v %v", what, got, err)
+		}
+	}
+	// What an Agent that ended or lost its Node leaves until its turn ends.
+	if err := s.EndHostExecution(ctx, "x-live", "agent_failed"); err != nil {
+		t.Fatal(err)
+	}
+	live(false, "the execution ended while its turn still runs")
+	if err := s.RecordHostExecution(ctx, "x-next", "live"); err != nil {
+		t.Fatal(err)
+	}
+	live(false, "another execution of the session runs")
+	if got, err := s.WorkflowNodeTurnLive(ctx, node.ID, "live", "x-next"); err != nil || !got {
+		t.Fatalf("the next execution: live = %v %v", got, err)
+	}
 	if _, err := s.CancelWorkflowRun(ctx, tenant, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	live(false, "the run is over")
+	if got, err := s.WorkflowNodeTurnLive(ctx, node.ID, "live", "x-next"); err != nil || got {
+		t.Fatalf("the run is over: live = %v %v", got, err)
+	}
 }

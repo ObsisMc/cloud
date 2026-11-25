@@ -20,15 +20,15 @@ import (
 type scriptedTools struct {
 	mu                 sync.Mutex
 	attached, instruct int
-	session            string
+	session, execution string
 	started            int
 }
 
-func (s *scriptedTools) Attach(session string) execution.HostServers {
+func (s *scriptedTools) Attach(session, executionID string) execution.HostServers {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.attached++
-	s.session = session
+	s.session, s.execution = session, executionID
 	credential := strings.Repeat("c", 31) + string(rune('0'+s.attached))
 	return execution.HostServers{Servers: []execution.HostMCPServer{{Name: "ora-test", URL: "http://127.0.0.1:41234/mcp/" + credential, Headers: map[string]string{}}}, Secrets: []string{credential}}
 }
@@ -376,7 +376,7 @@ func TestAnInvalidHostListIsNotSent(t *testing.T) {
 
 type invalidTools struct{}
 
-func (invalidTools) Attach(string) execution.HostServers {
+func (invalidTools) Attach(string, string) execution.HostServers {
 	return execution.HostServers{Servers: []execution.HostMCPServer{{Name: "ora-test", URL: "http://localhost/mcp", Headers: map[string]string{}}}}
 }
 func (invalidTools) Started() {}

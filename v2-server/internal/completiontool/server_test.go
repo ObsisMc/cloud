@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,18 +22,49 @@ type harness struct {
 	r     *Registry
 	live  atomic.Bool
 	broke atomic.Bool
+	// settled are the executions whose stored record ended, ending those this process only knows
+	// the end of. Both are sets of execution IDs.
+	settled, ending sync.Map
+	// onRead runs once stored state was read, before its answer is used; hung makes reads wait until
+	// they are given up.
+	onRead atomic.Pointer[func()]
+	hung   atomic.Bool
+}
+
+func (h *harness) HostExecutionRunning(ctx context.Context, id string) (bool, error) {
+	if h.hung.Load() {
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(2 * time.Second): // nothing gave it up: the request goes through
+			return true, nil
+		}
+	}
+	if h.broke.Load() {
+		return false, errors.New("down")
+	}
+	_, settled := h.settled.Load(id)
+	if f := h.onRead.Load(); f != nil {
+		(*f)()
+	}
+	return !settled, nil
+}
+
+func (h *harness) WorkflowNodeTurnLive(ctx context.Context, _, _, executionID string) (bool, error) {
+	running, err := h.HostExecutionRunning(ctx, executionID)
+	return running && h.live.Load(), err
+}
+
+func (h *harness) isEnding(_, executionID string) bool {
+	_, ending := h.ending.Load(executionID)
+	return ending
 }
 
 func serve(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{}
 	h.live.Store(true)
-	h.r = NewRegistry(func(context.Context, string, string) (bool, error) {
-		if h.broke.Load() {
-			return false, errors.New("down")
-		}
-		return h.live.Load(), nil
-	})
+	h.r = NewRegistry(h, h.isEnding)
 	s, err := Serve(h.r)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +106,13 @@ func call(t *testing.T, url, token string) (string, bool) {
 
 func attach(t *testing.T, a *Attempt, session string) string {
 	t.Helper()
-	servers := a.Attach(session)
+	return attachIn(t, a, session, "x-"+session)
+}
+
+// attachIn starts the Agent of a session in the given host execution.
+func attachIn(t *testing.T, a *Attempt, session, executionID string) string {
+	t.Helper()
+	servers := a.Attach(session, executionID)
 	if err := execution.ValidateHostMCPServers(servers.Servers); err != nil || len(servers.Servers) != 1 {
 		t.Fatalf("servers = %v: %v", servers.Servers, err)
 	}
@@ -254,6 +292,188 @@ func TestStoredStateDecidesACall(t *testing.T) {
 	}
 }
 
+// A credential whose execution ended, stored or only known to this process, gets nothing: no handshake,
+// which does not count as a connection either, and no call. An unreadable state refuses too, and the
+// Agent may try again.
+func TestAnEndedExecutionsCredentialIsRefused(t *testing.T) {
+	for name, set := range map[string]func(*harness, bool){
+		"settled":    func(h *harness, on bool) { mark(&h.settled, "x-s1", on) },
+		"ending":     func(h *harness, on bool) { mark(&h.ending, "x-s1", on) },
+		"unreadable": func(h *harness, on bool) { h.broke.Store(on) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := serve(t)
+			a, other := h.r.Attempt("n1", "n1"), h.r.Attempt("n2", "n2")
+			url, otherURL := attach(t, a, "s1"), attach(t, other, "s2")
+			a.Started()
+			token := a.Instruct().Token
+			set(h, true)
+			status, why := http.StatusUnauthorized, RefusedNotAwaiting
+			if name == "unreadable" {
+				status, why = http.StatusServiceUnavailable, RefusedUnavailable
+			}
+			for _, method := range []string{"initialize", "tools/list", "ping", "resources/list"} {
+				if got, out := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"`+method+`"}`); got != status || out != nil {
+					t.Fatalf("%s = %d %v, want %d", method, got, out, status)
+				}
+			}
+			if unconnected, known := h.r.Unconnected("n1"); !unconnected || !known {
+				t.Fatalf("a refused handshake: unconnected = %v, known %v", unconnected, known)
+			}
+			if text, refused := call(t, url, token); !refused || text != string(why) {
+				t.Fatalf("call = %q", text)
+			}
+			if name != "unreadable" {
+				if got, _ := post(t, otherURL, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`); got != http.StatusOK {
+					t.Fatalf("another execution's handshake = %d", got)
+				}
+			}
+			// Nothing was withdrawn: it is what is stored that refuses.
+			set(h, false)
+			if got, _ := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`); got != http.StatusOK {
+				t.Fatalf("initialize = %d", got)
+			}
+			if unconnected, _ := h.r.Unconnected("n1"); unconnected {
+				t.Fatal("a handshake was not recorded")
+			}
+			if text, refused := call(t, url, token); refused {
+				t.Fatalf("call = %q", text)
+			}
+		})
+	}
+}
+
+// The Agent that comes back to a session after its Node was lost runs in a new execution, and its
+// credential stands for that one: the end of the earlier execution does not void it, its own does.
+func TestACredentialStandsForTheExecutionItWasIssuedFor(t *testing.T) {
+	for name, set := range map[string]func(*harness) *sync.Map{
+		"settled": func(h *harness) *sync.Map { return &h.settled },
+		"ending":  func(h *harness) *sync.Map { return &h.ending },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := serve(t)
+			a := h.r.Attempt("n1", "n1")
+			old := attachIn(t, a, "s1", "x1")
+			mark(set(h), "x1", true)
+			fresh := attachIn(t, a, "s1", "x2")
+			a.Started()
+			token := a.Instruct().Token
+			handshake := func(url string) int {
+				t.Helper()
+				status, _ := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
+				return status
+			}
+			if status := handshake(fresh); status != http.StatusOK {
+				t.Fatalf("the new execution's handshake = %d", status)
+			}
+			if unconnected, known := h.r.Unconnected("n1"); unconnected || !known {
+				t.Fatalf("unconnected = %v, known %v", unconnected, known)
+			}
+			if text, refused := call(t, fresh, token); refused {
+				t.Fatalf("the new execution's call = %q", text)
+			}
+			if status := handshake(old); status != http.StatusUnauthorized {
+				t.Fatalf("the earlier execution's handshake = %d", status)
+			}
+			mark(set(h), "x1", false)
+			mark(set(h), "x2", true)
+			if status := handshake(fresh); status != http.StatusUnauthorized {
+				t.Fatalf("the ended execution's handshake = %d", status)
+			}
+			if text, refused := call(t, fresh, token); !refused || text != string(RefusedNotAwaiting) {
+				t.Fatalf("the ended execution's call = %q", text)
+			}
+		})
+	}
+}
+
+// What is stored is read once, and what this process decided is asked after it: an execution that is
+// settled in between is no reason to refuse, one whose end this process decided in between is. The
+// latter only refuses more, and once both were asked nothing is asked again.
+func TestAnEndBetweenTheReadAndTheAnswer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		happen func(*harness)
+		refuse bool
+	}{
+		"settled":        {func(h *harness) { h.settled.Store("x-s1", true) }, false},
+		"decided":        {func(h *harness) { h.ending.Store("x-s1", true) }, true},
+		"of another one": {func(h *harness) { h.ending.Store("x-s2", true) }, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := serve(t)
+			a := h.r.Attempt("n1", "n1")
+			url := attach(t, a, "s1")
+			a.Started()
+			token := a.Instruct().Token
+			arm := func() {
+				h.settled.Clear()
+				h.ending.Clear()
+				happen := func() { tc.happen(h) }
+				h.onRead.Store(&happen)
+			}
+			arm()
+			want := http.StatusOK
+			if tc.refuse {
+				want = http.StatusUnauthorized
+			}
+			if status, _ := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`); status != want {
+				t.Fatalf("initialize = %d, want %d", status, want)
+			}
+			if unconnected, _ := h.r.Unconnected("n1"); unconnected != tc.refuse {
+				t.Fatalf("unconnected = %v", unconnected)
+			}
+			arm()
+			if text, refused := call(t, url, token); refused != tc.refuse || refused && text != string(RefusedNotAwaiting) {
+				t.Fatalf("call = %q, refused %v", text, refused)
+			}
+			if signal := h.r.Take("n1", "n1"); (signal == nil) != tc.refuse {
+				t.Fatalf("signal = %v", signal)
+			}
+		})
+	}
+}
+
+// State that cannot be read in time is unreadable: the request is answered while its connection still
+// takes an answer.
+func TestAStateThatIsNotReadInTimeIsUnavailable(t *testing.T) {
+	if stateDeadline >= connectionDeadline {
+		t.Fatal("no time is left to answer")
+	}
+	h := serve(t)
+	if h.r.deadline != stateDeadline {
+		t.Fatalf("deadline = %v", h.r.deadline)
+	}
+	h.r.deadline = 20 * time.Millisecond
+	a := h.r.Attempt("n1", "n1")
+	url := attach(t, a, "s1")
+	a.Started()
+	token := a.Instruct().Token
+	h.hung.Store(true)
+	for _, method := range []string{"initialize", "tools/list"} {
+		if status, _ := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"`+method+`"}`); status != http.StatusServiceUnavailable {
+			t.Fatalf("%s = %d", method, status)
+		}
+	}
+	if unconnected, known := h.r.Unconnected("n1"); !unconnected || !known {
+		t.Fatalf("unconnected = %v, known %v", unconnected, known)
+	}
+	if text, refused := call(t, url, token); !refused || text != string(RefusedUnavailable) {
+		t.Fatalf("call = %q", text)
+	}
+	h.hung.Store(false)
+	if text, refused := call(t, url, token); refused {
+		t.Fatalf("call = %q", text)
+	}
+}
+
+func mark(set *sync.Map, id string, on bool) {
+	if on {
+		set.Store(id, true)
+	} else {
+		set.Delete(id)
+	}
+}
+
 func TestAMissingRegistryHasNoTool(t *testing.T) {
 	var r *Registry
 	if r.Take("n", "a") != nil {
@@ -272,7 +492,7 @@ func TestALateConnectionIsNotTheNewAgents(t *testing.T) {
 	// The server asks for the body once the handler reads it, which is after it was authorized.
 	replaced := false
 	trace := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{Got100Continue: func() {
-		a.Attach("s1")
+		a.Attach("s1", "x-s1")
 		a.Started()
 		replaced = true
 	}})

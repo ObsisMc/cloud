@@ -42,9 +42,10 @@ type HostInstruction struct {
 // persisted, and one value serves one turn.
 type HostTools interface {
 	// Attach returns the servers the session's Agent is started with, issuing credentials for that
-	// one physical Agent and withdrawing those of an earlier one. It is called only when the turn
-	// starts the Agent; the servers then stay with it for its whole life.
-	Attach(sessionID string) HostServers
+	// one physical Agent, which runs in the host execution executionID, and withdrawing those of an
+	// earlier one. It is called only when the turn starts the Agent; the servers then stay with it
+	// for its whole life.
+	Attach(sessionID, executionID string) HostServers
 	// Started says the start carrying the servers of the last Attach was sent to Node: only then is
 	// there an execution whose Agent may connect to them.
 	Started()

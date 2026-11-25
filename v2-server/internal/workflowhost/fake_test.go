@@ -388,9 +388,22 @@ func newFixtureOnStore(t *testing.T, s *store.Store) *fixture {
 	return f
 }
 
+// toolState is the stored state the fixture's completion tool reads: every execution runs, and its
+// node's turn does until turnOver.
+type toolState struct{ f *fixture }
+
+func (toolState) HostExecutionRunning(context.Context, string) (bool, error) { return true, nil }
+
+func (s toolState) WorkflowNodeTurnLive(context.Context, string, string, string) (bool, error) {
+	return !s.f.turnOver.Load(), nil
+}
+
+// notEnding is a process that knows no more of its executions than stored state does.
+func notEnding(string, string) bool { return false }
+
 func (f *fixture) newHost(t *testing.T) *Host {
 	t.Helper()
-	f.tools = completiontool.NewRegistry(func(context.Context, string, string) (bool, error) { return !f.turnOver.Load(), nil })
+	f.tools = completiontool.NewRegistry(toolState{f}, notEnding)
 	served, err := completiontool.Serve(f.tools)
 	if err != nil {
 		t.Fatal(err)
