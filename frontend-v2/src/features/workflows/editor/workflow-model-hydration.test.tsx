@@ -638,4 +638,58 @@ describe("editor model hydration", () => {
       delete (HTMLElement.prototype as { offsetHeight?: unknown }).offsetHeight;
     }
   });
+
+  it("marks the draft unsaved after a real node drag and persists the new position on save", async () => {
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get: () => 240,
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get: () => 80,
+    });
+    try {
+      // Catalog is present from the start and the inspector stays closed, so the only
+      // thing that can dirty the draft is the drag itself (not a late repair, not the
+      // inspector's prompt editor).
+      const state = await openEditor("configured");
+      const nodeCard = document.querySelector<HTMLElement>('.react-flow__node[data-id="agent"]');
+      expect(nodeCard).not.toBeNull();
+      expect(state.savedNode()!.position).toEqual({ x: 320, y: 0 });
+      expect(screen.queryByText("未保存")).not.toBeInTheDocument();
+      expect(state.update).not.toHaveBeenCalled();
+
+      await act(async () => {
+        nodeCard!.dispatchEvent(
+          windowedMouseEvent("mousedown", { button: 0, clientX: 320, clientY: 100 }),
+        );
+      });
+      await act(async () => {
+        window.dispatchEvent(
+          windowedMouseEvent("mousemove", { button: 0, clientX: 330, clientY: 110 }),
+        );
+      });
+      await act(async () => {
+        window.dispatchEvent(
+          windowedMouseEvent("mousemove", { button: 0, clientX: 440, clientY: 180 }),
+        );
+      });
+      await act(async () => {
+        window.dispatchEvent(
+          windowedMouseEvent("mouseup", { button: 0, clientX: 440, clientY: 180 }),
+        );
+      });
+
+      expect(await screen.findByText("未保存")).toBeInTheDocument();
+      await state.flushDraft();
+      const saved = state.savedNode();
+      expect(saved).toBeDefined();
+      expect(saved!.position).not.toEqual({ x: 320, y: 0 });
+      expect(saved!.position).toEqual({ x: 440, y: 80 });
+      expect(saved!.data.agentConfig.executor).toEqual({ agentCli: agent, modelId: "configured" });
+    } finally {
+      delete (HTMLElement.prototype as { offsetWidth?: unknown }).offsetWidth;
+      delete (HTMLElement.prototype as { offsetHeight?: unknown }).offsetHeight;
+    }
+  });
 });
