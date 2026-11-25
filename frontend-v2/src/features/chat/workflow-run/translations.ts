@@ -569,6 +569,8 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.undeliveredEnded":
       "上一条消息未送达，会话也已结束，不能重发。可以用上一轮的回答完成这一步；要重新开始这一步，请先停止运行，再「从失败处继续」。",
     "workflowRun.v2.interactive.restoreDraft": "重新填入",
+    "workflowRun.v2.interactive.toolUnconnected":
+      "完成工具没有连上，Agent 可能没法上报这一步完成。这只是提示，这一步仍可以照常继续或完成。",
     "workflowRun.v2.interactive.sessionEnded":
       "会话已结束（停止时没能保留会话，或 Agent 断开），不能继续对话。",
     "workflowRun.v2.interactive.confirmComplete": "确认并完成",
@@ -1230,6 +1232,8 @@ export const workflowRunTranslations = {
     "workflowRun.v2.interactive.undeliveredEnded":
       "Your last message was not delivered, and the session has also ended, so it cannot be sent again. You can complete this step with the previous answer; to start this step again, stop the run, then resume from the failure.",
     "workflowRun.v2.interactive.restoreDraft": "Put it back",
+    "workflowRun.v2.interactive.toolUnconnected":
+      "The completion tool is not connected, so the agent may be unable to report this step done. This is only a notice: the step can still be continued or completed as usual.",
     "workflowRun.v2.interactive.sessionEnded":
       "The session has ended (it could not be kept when the turn was stopped, or the agent disconnected), so the conversation cannot continue.",
     "workflowRun.v2.interactive.confirmComplete": "Confirm and complete",

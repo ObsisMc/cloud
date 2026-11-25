@@ -1386,7 +1386,7 @@
           "input": {"type": "string", "nullable": true},
           "output": {"type": "string", "nullable": true},
           "error": {"type": "string", "nullable": true},
-          "payload": {"type": "string", "nullable": true},
+          "payload": {"type": "string", "nullable": true, "description": "JSON text. v2-only: on an interactive Agent node, interactive.completion_tool_unconnected (boolean, present only when true) says that the node's Agent had not asked the completion tool's endpoint to initialize or list its tools when the node last parked. It is a notice: neither the node's status nor its blockers depend on it."},
           "iteration": {"type": "integer", "nullable": true},
           "startedAt": {"type": "integer", "format": "int64", "nullable": true},
           "finishedAt": {"type": "integer", "format": "int64", "nullable": true},

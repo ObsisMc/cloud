@@ -124,7 +124,8 @@ func TestAnAgentThatDidNotConnectIsSaidOnTheNode(t *testing.T) {
 			if _, err := f.host.CompleteNode(ctx, f.scope, runID, "a", server.WorkflowNodeCompletion{Force: true}); err != nil {
 				t.Fatal(err)
 			}
-			row, _ := f.succeeded(t, runID)
+			row, payload := f.succeeded(t, runID)
+			said(t, "completed", payload["interactive"].(map[string]any), false)
 			if row.Output == nil || *row.Output != "定稿" {
 				t.Fatalf("A = %+v", row)
 			}

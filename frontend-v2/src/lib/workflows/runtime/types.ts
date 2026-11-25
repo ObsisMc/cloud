@@ -506,6 +506,11 @@ export interface WorkflowNodeInteractiveSession {
    * v2 clears it when the next message is accepted.
    */
   lastTurnError?: WorkflowNodeInteractiveTurnError | string;
+  /**
+   * The Agent had not connected to its completion tool when the node last parked, so it may be
+   * unable to report the step done. A notice only: the gate and the node's status are unaffected.
+   */
+  completionToolUnconnected?: boolean;
 }
 
 /** Structured failure persisted on a node run as `payload.error_detail`. */

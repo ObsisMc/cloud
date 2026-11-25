@@ -77,6 +77,7 @@ function blockerText(blocker: WorkflowNodeInteractiveBlocker, t: (key: string, o
  * Agent still owes, the deliverables a refused completion named. A
  * message v2 accepted and then could not deliver is reported above the composer; the view that
  * sent it, while it still has the text, offers to put it back. Everyone else reads the transcript.
+ * Whoever reads the node is told when its Agent had not connected to the completion tool.
  */
 export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarget }) {
   const { t } = useTranslation()
@@ -95,8 +96,17 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
   const [confirmingForce, setConfirmingForce] = useState<string>()
   const { runId, nodeId, status, session } = target
 
+  // Every member sees it: it explains why a node waits for a report that may never come.
+  const unconnected = session?.completionToolUnconnected === true && (
+    <p role="status" className="text-xs text-warning" data-interactive-unconnected="">{t('workflowRun.v2.interactive.toolUnconnected')}</p>
+  )
   if (!starter) {
-    return <p className="px-1 py-2 text-xs text-muted-foreground">{t('workflowRun.v2.interactive.readOnly')}</p>
+    return (
+      <div className="flex flex-col gap-1 px-1 py-2">
+        {unconnected}
+        <p className="text-xs text-muted-foreground">{t('workflowRun.v2.interactive.readOnly')}</p>
+      </div>
+    )
   }
 
   const act = async (action: () => Promise<void>): Promise<boolean> => {
@@ -175,6 +185,7 @@ export function RunNodeSessionActions({ target }: { target: InteractiveNodeTarge
   return (
     <div className="flex w-full flex-col gap-2 border-t pt-2" data-interactive-actions="">
       <p className="text-[11px] leading-4 text-muted-foreground">{t('workflowRun.v2.interactive.partialNote')}</p>
+      {unconnected}
       {undelivered && (
         <div role="status" className="flex items-center justify-between gap-2 text-xs text-warning" data-interactive-undelivered="">
           <span>{t(ended ? 'workflowRun.v2.interactive.undeliveredEnded' : 'workflowRun.v2.interactive.undelivered')}</span>
