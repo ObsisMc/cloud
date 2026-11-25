@@ -60,12 +60,16 @@ func TestTheCompletionToolIsServedOnceParkedExecutionsAreSettled(t *testing.T) {
 	must(err)
 
 	// The held session of a parked interactive node, whose Agent the earlier process started.
-	w, _, err := db.CreateWorkflow(ctx, scope.TenantID, "启动", `{"nodes":[{"id":"start","data":{"kind":"start"}}],"edges":[]}`)
+	w, _, err := db.CreateWorkflow(ctx, scope.TenantID, "启动", `{"nodes":[
+ {"id":"start","data":{"kind":"start"}},
+ {"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"official/ora-space.opencode","modelId":"fixture"},"prompt":"起草","interactive":true}}}
+],"edges":[{"source":"start","target":"a"}]}`)
 	must(err)
 	published, err := db.PublishWorkflow(ctx, scope.TenantID, w.ID, "v1", nil)
 	must(err)
 	run, err := db.CreateWorkflowRun(ctx, scope.TenantID, w.ID, published.ID, store.WorkflowRunInput{ProjectID: project.ID})
 	must(err)
+	must(db.SetWorkflowStarter(ctx, scope.TenantID, run.ID, scope.UserID))
 	_, err = db.StartWorkflowRun(ctx, scope.TenantID, run.ID)
 	must(err)
 	row, err := db.CreateWorkflowNodeRun(ctx, scope.TenantID, run.ID, store.WorkflowNodeRunInput{NodeID: "a", NodeType: "agent"})
@@ -91,8 +95,8 @@ func TestTheCompletionToolIsServedOnceParkedExecutionsAreSettled(t *testing.T) {
 	}
 	_, err = admin.Exec(ctx, "SET search_path TO "+schema)
 	must(err)
-	// Recovering the parked node comes after the endpoint. It waits there for the test, then is refused,
-	// which ends the start.
+	// Recovering the parked node comes after the endpoint: without an Agent runtime its executor is gone
+	// and it fails. It waits there for the test, then is refused, which ends the start.
 	later := time.Now().UnixNano() // an advisory lock of this test alone
 	_, err = admin.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION refuse_node() RETURNS trigger LANGUAGE plpgsql AS $$
 		BEGIN PERFORM pg_advisory_xact_lock(%d); RAISE EXCEPTION 'node refused'; END $$;
@@ -177,7 +181,7 @@ func TestTheCompletionToolIsServedOnceParkedExecutionsAreSettled(t *testing.T) {
 	}
 	if len(at) != 1 || at[0].Addr() != netip.MustParseAddr("127.0.0.1") {
 		t.Errorf("the start listens on %v", at)
-	} else if resp, err := http.Post("http://"+at[0].String()+"/mcp/unknown", "application/json", strings.NewReader(`{}`)); err != nil {
+	} else if resp, err := (&http.Client{Timeout: 5 * time.Second}).Post("http://"+at[0].String()+"/mcp/unknown", "application/json", strings.NewReader(`{}`)); err != nil {
 		t.Error(err)
 	} else {
 		// It is the completion tool's, which knows no credential yet.
@@ -186,7 +190,8 @@ func TestTheCompletionToolIsServedOnceParkedExecutionsAreSettled(t *testing.T) {
 			t.Errorf("the endpoint answers %d", resp.StatusCode)
 		}
 	}
-	if err := stop(); err == nil || !strings.Contains(err.Error(), "node refused") {
+	// It ended where it recovers the parked node, not where the sweep fails what does not wait.
+	if err := stop(); err == nil || !strings.Contains(err.Error(), "recover the interactive nodes") || !strings.Contains(err.Error(), "node refused") {
 		t.Fatalf("start: %v", err)
 	}
 }
