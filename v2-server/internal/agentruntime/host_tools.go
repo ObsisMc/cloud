@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/wanglongan587/cloud/v2-server/internal/execution"
+	"github.com/wanglongan587/cloud/v2-server/internal/node"
 )
 
 // Host tools reach an Agent as host MCP servers in its session's start and as a block after each
@@ -116,9 +117,17 @@ var (
 	unknownRuns  = regexp.MustCompile(`\\u[0-9a-fA-F]{4}|\\.|[0-9a-f]{32,}`)
 )
 
+// preparationResult reports whether message is the result of a clone or a plugin installation. No
+// Agent runs in those executions, so no host tool ever reached one, and their commits and
+// plugin versions are what the journal keeps them for. Any other message of an unknown execution may be an Agent
+// session's.
+func preparationResult(message node.Message) bool {
+	return message.Type == "clone_result" || message.Type == "plugins_result"
+}
+
 // censorUnknown replaces the credentials host tools leave in a JSON document nobody remembers them
-// for. It also takes identifiers and digests of that shape: the journal is a diagnostic, and one of
-// an execution that is over.
+// for. It also takes identifiers and digests of that shape: the journal is a diagnostic, and this one
+// of an Agent session that is over.
 func censorUnknown(data []byte) []byte {
 	out := unknownBlock.ReplaceAll(data, []byte("${1}"+hostRedacted+"${2}"))
 	out = unknownToken.ReplaceAll(out, []byte("${1}"+hostRedacted))

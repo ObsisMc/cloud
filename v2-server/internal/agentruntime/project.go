@@ -655,7 +655,7 @@ func (p *projectRuntime) journaled(message node.Message) node.Message {
 	p.mu.Unlock()
 	if agent != nil {
 		message.Payload = agent.censorRecord(message.Payload)
-	} else {
+	} else if !preparationResult(message) {
 		// A replayed event of an execution this process has no session for: it ended, or an earlier
 		// process or Node ran it, so nobody here remembers its credentials.
 		message.Payload = censorUnknown(message.Payload)

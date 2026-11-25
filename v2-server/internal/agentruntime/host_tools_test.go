@@ -235,6 +235,54 @@ func TestTheJournalHasNoCredentialOfAnUnknownExecution(t *testing.T) {
 	}
 }
 
+// A clone or plugin installation has no Agent, so its result keeps the clone commit and the plugin
+// version the journal is read for, whether this process or an earlier one asked for it, also when
+// they hold a long run of hex digits. An Agent session's message nobody knows loses such runs,
+// whatever its kind.
+func TestTheJournalKeepsThePreparationResults(t *testing.T) {
+	h := newIPCHarness(t, nil)
+	done := startIPCRun(h, ipcContext(t), h.session("plain", "workspace"), "first", discardIPCEvent)
+	f := receiveIPC(t, h.created)
+	start := nextIPCCommand(t, f, "start_agent_session")
+	commit, version, token := strings.Repeat("c0", 20), "1.0.0+"+strings.Repeat("d1", 20), strings.Repeat("0123456789abcdef", 2)
+	live := &controlWait{kind: "clone_result", done: make(chan node.Message, 1)}
+	f.project.mu.Lock()
+	f.project.controls["asked"] = live
+	f.project.mu.Unlock()
+	clone := `{"kind":"clone_ready","result":{"path":"/checkout","commit":"` + commit + `"}}`
+	plugins := `{"kind":"plugins_completed","result":{"node":{"node_id":"node-1","incarnation_id":"incarnation-1"},"items":[{"plugin_id":"official/x","outcome":{"kind":"installed","version":"` + version + `"}}]}}`
+	for _, m := range []node.Message{
+		{Type: "clone_result", ExecutionID: "asked", Payload: json.RawMessage(clone)},
+		{Type: "clone_result", ExecutionID: "earlier", Payload: json.RawMessage(clone)},
+		{Type: "plugins_result", ExecutionID: "earlier-plugins", Payload: json.RawMessage(plugins)},
+		{Type: "agent_session_ended", ExecutionID: "gone", Payload: json.RawMessage(`{"reason":"agent_failed","detail":"` + token + `"}`)},
+		{Type: "session_turn_failed", ExecutionID: "gone-turn", Payload: json.RawMessage(`{"detail":"` + token + `"}`)},
+	} {
+		sequence := uint64(1)
+		m.Version, m.Sequence = 1, &sequence
+		f.in <- m
+		receiveIPC(t, f.acked)
+	}
+	f.finishTurn(t, start, "first", "done")
+	if got := receiveIPC(t, done); got.err != nil {
+		t.Fatal(got.err)
+	}
+	if got := <-live.done; string(got.Payload) != clone {
+		t.Fatalf("the waiting preparation got %s", got.Payload)
+	}
+	data, err := os.ReadFile(filepath.Join(f.project.root, "node-events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := string(data)
+	if strings.Count(journal, commit) != 2 || strings.Count(journal, version) != 1 {
+		t.Fatalf("the journal lost a commit or plugin version: %s", journal)
+	}
+	if strings.Contains(journal, token) || !strings.Contains(journal, `"gone"`) || !strings.Contains(journal, `"gone-turn"`) {
+		t.Fatalf("journal = %s", journal)
+	}
+}
+
 // A document the replacement would break is dropped, not written broken.
 func TestAnUnknownDocumentStaysValid(t *testing.T) {
 	for _, data := range []string{`{"n":` + strings.Repeat("1", 40) + `}`, `{"a":"\f` + strings.Repeat("a", 32) + `"}`, `{"a":"\u00e9` + strings.Repeat("a", 32) + `"}`} {

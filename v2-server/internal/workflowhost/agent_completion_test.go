@@ -713,6 +713,49 @@ func TestARunIsRefusedAtItsStartWithoutTheTool(t *testing.T) {
 	f.exec.awaitStart(t)
 }
 
+// Resuming a run from its failure is admitted as a start is: without the tool nothing changes, and a
+// Node that could not be asked says nothing about it.
+func TestAResumeIsRefusedWithoutTheTool(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	runID, first, _, _ := f.startAgentNode(t, agentChain)
+	f.exec.finish(first, execution.Result{Status: execution.StatusFailed, FailureCode: execution.FailureHostMCPAgent, AgentLost: true})
+	failed, before := f.await(t, runID, terminal)
+	if failed.Status != store.WorkflowStatusFailed || node(before, "a").Status != store.WorkflowStatusFailed {
+		t.Fatalf("run %s, A = %+v", failed.Status, node(before, "a"))
+	}
+	sessions := f.startedSessions()
+	for _, tc := range []struct{ answer, want error }{
+		{execution.ErrHostMCPUnavailable, server.ErrWorkflowCompletionToolUnavailable},
+		{execution.ErrUnavailable, execution.ErrUnavailable},
+		{context.Canceled, context.Canceled},
+	} {
+		f.hostTools = tc.answer
+		_, err := f.host.ResumeRun(ctx, f.scope, runID)
+		if !errors.Is(err, tc.want) || tc.want != server.ErrWorkflowCompletionToolUnavailable && errors.Is(err, server.ErrWorkflowCompletionToolUnavailable) {
+			t.Fatalf("resume = %v, want %v", err, tc.want)
+		}
+		run, err := f.s.WorkflowRun(ctx, f.scope.TenantID, runID)
+		if err != nil || !reflect.DeepEqual(run, failed) {
+			t.Fatalf("run = %+v %v, want %+v", run, err, failed)
+		}
+		after, err := f.s.WorkflowEngineNodeRuns(ctx, runID)
+		if err != nil || !reflect.DeepEqual(after, before) {
+			t.Fatalf("nodes = %+v %v, want %+v", after, err, before)
+		}
+		if f.startedSessions() != sessions {
+			t.Fatal("a refused resume started a session")
+		}
+	}
+	f.hostTools = nil
+	if run, err := f.host.ResumeRun(ctx, f.scope, runID); err != nil || run.Status != store.WorkflowStatusRunning {
+		t.Fatalf("resume once the tool is there = %+v %v", run, err)
+	}
+	if session := f.exec.awaitStart(t); session == first || f.exec.request(session).Host == nil {
+		t.Fatal("the resumed node was not started with the tool")
+	}
+}
+
 // An Agent that cannot take the tool fails the node instead of running it under another policy.
 func TestAnAgentWithoutHTTPMCPFailsTheNode(t *testing.T) {
 	for _, code := range []string{execution.FailureHostMCPAgent, execution.FailureHostMCPNode} {

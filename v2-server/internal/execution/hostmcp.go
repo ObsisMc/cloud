@@ -67,8 +67,9 @@ func HostMCPFailure(code string) bool {
 	return code == FailureHostMCPNode || code == FailureHostMCPAgent
 }
 
-// ErrHostMCPUnavailable reports a Node that does not take host MCP servers.
-var ErrHostMCPUnavailable = errors.New("the Node does not take host MCP servers")
+// ErrHostMCPUnavailable reports a deployment whose sessions cannot be given host MCP servers: its
+// Node does not take them, or it has no Agent runtime at all.
+var ErrHostMCPUnavailable = errors.New("the Node does not take host MCP servers, or there is none")
 
 // Limits of the wire grammar (D1 of the host MCP ADR); all are inclusive.
 const (
