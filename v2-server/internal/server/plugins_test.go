@@ -574,18 +574,25 @@ func TestWorkflowPluginHTTPInstallAndRemoveKeepWorkflow(t *testing.T) {
 }
 
 // A Skill install that cannot read its package fails without leaving a selection behind: an
-// unreachable market is retryable (503), a package without discoverable skills is invalid (400).
+// unreachable market is retryable (503), a package without discoverable skills is invalid (400),
+// and a stale selection version is a conflict (409). The last case fails inside the store install,
+// after the package verified, so it also proves the branch reports that error instead of swallowing
+// it as a 200 with an empty resource.
 func TestSkillInstallFailsWithoutPartialSelection(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		download func(t *testing.T) (string, error)
+		version  int64
 		status   int
 		code     string
 	}{
-		{"unreachable market", func(*testing.T) (string, error) { return "", pluginmarket.ErrTransient }, 503, "plugin_package_unavailable"},
+		{"unreachable market", func(*testing.T) (string, error) { return "", pluginmarket.ErrTransient }, 0, 503, "plugin_package_unavailable"},
 		{"no discoverable skills", func(t *testing.T) (string, error) {
 			return skillPluginArchive(t, "mattpocock.skills", "1.3.1"), nil
-		}, 400, "plugin_package_invalid"},
+		}, 0, 400, "plugin_package_invalid"},
+		{"stale selection version", func(t *testing.T) (string, error) {
+			return skillPluginArchive(t, "mattpocock.skills", "1.3.1", "tdd"), nil
+		}, 1, 409, "version_conflict"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSquadServerWith(t, server.Options{
@@ -601,7 +608,7 @@ func TestSkillInstallFailsWithoutPartialSelection(t *testing.T) {
 			space := body["items"].([]any)[0].(map[string]any)["id"].(string)
 			base := "/api/v1/tenants/" + tenant + "/spaces/" + space + "/plugins"
 			status, body := c.doHeaders("POST", base, map[string]any{
-				"identifier": "official/mattpocock.skills", "pluginVersion": "1.3.1", "version": 0,
+				"identifier": "official/mattpocock.skills", "pluginVersion": "1.3.1", "version": tc.version,
 			}, map[string]string{"Idempotency-Key": "install-skill"})
 			if status != tc.status || body["code"] != tc.code {
 				t.Fatalf("install = %d %v, want %d %s", status, body, tc.status, tc.code)
