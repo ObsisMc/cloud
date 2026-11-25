@@ -25,13 +25,28 @@ type harness struct {
 	// settled are the executions whose stored record ended, ending those this process only knows
 	// the end of. Both are sets of execution IDs.
 	settled, ending sync.Map
+	// onRead runs once stored state was read, before its answer is used; hung makes reads wait until
+	// they are given up.
+	onRead atomic.Pointer[func()]
+	hung   atomic.Bool
 }
 
-func (h *harness) HostExecutionRunning(_ context.Context, id string) (bool, error) {
+func (h *harness) HostExecutionRunning(ctx context.Context, id string) (bool, error) {
+	if h.hung.Load() {
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(2 * time.Second): // nothing gave it up: the request goes through
+			return true, nil
+		}
+	}
 	if h.broke.Load() {
 		return false, errors.New("down")
 	}
 	_, settled := h.settled.Load(id)
+	if f := h.onRead.Load(); f != nil {
+		(*f)()
+	}
 	return !settled, nil
 }
 
@@ -319,6 +334,85 @@ func TestAnEndedExecutionsCredentialIsRefused(t *testing.T) {
 				t.Fatalf("call = %q", text)
 			}
 		})
+	}
+}
+
+// What is stored is read once, and what this process decided is asked after it: an execution that is
+// settled in between is no reason to refuse, one whose end this process decided in between is. The
+// latter only refuses more, and once both were asked nothing is asked again.
+func TestAnEndBetweenTheReadAndTheAnswer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		happen func(*harness)
+		refuse bool
+	}{
+		"settled":        {func(h *harness) { h.settled.Store("x-s1", true) }, false},
+		"decided":        {func(h *harness) { h.ending.Store("x-s1", true) }, true},
+		"of another one": {func(h *harness) { h.ending.Store("x-s2", true) }, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := serve(t)
+			a := h.r.Attempt("n1", "n1")
+			url := attach(t, a, "s1")
+			a.Started()
+			token := a.Instruct().Token
+			arm := func() {
+				h.settled.Clear()
+				h.ending.Clear()
+				happen := func() { tc.happen(h) }
+				h.onRead.Store(&happen)
+			}
+			arm()
+			want := http.StatusOK
+			if tc.refuse {
+				want = http.StatusUnauthorized
+			}
+			if status, _ := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`); status != want {
+				t.Fatalf("initialize = %d, want %d", status, want)
+			}
+			if unconnected, _ := h.r.Unconnected("n1"); unconnected != tc.refuse {
+				t.Fatalf("unconnected = %v", unconnected)
+			}
+			arm()
+			if text, refused := call(t, url, token); refused != tc.refuse || refused && text != string(RefusedNotAwaiting) {
+				t.Fatalf("call = %q, refused %v", text, refused)
+			}
+			if signal := h.r.Take("n1", "n1"); (signal == nil) != tc.refuse {
+				t.Fatalf("signal = %v", signal)
+			}
+		})
+	}
+}
+
+// State that cannot be read in time is unreadable: the request is answered while its connection still
+// takes an answer.
+func TestAStateThatIsNotReadInTimeIsUnavailable(t *testing.T) {
+	if stateDeadline >= connectionDeadline {
+		t.Fatal("no time is left to answer")
+	}
+	h := serve(t)
+	if h.r.deadline != stateDeadline {
+		t.Fatalf("deadline = %v", h.r.deadline)
+	}
+	h.r.deadline = 20 * time.Millisecond
+	a := h.r.Attempt("n1", "n1")
+	url := attach(t, a, "s1")
+	a.Started()
+	token := a.Instruct().Token
+	h.hung.Store(true)
+	for _, method := range []string{"initialize", "tools/list"} {
+		if status, _ := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"`+method+`"}`); status != http.StatusServiceUnavailable {
+			t.Fatalf("%s = %d", method, status)
+		}
+	}
+	if unconnected, known := h.r.Unconnected("n1"); !unconnected || !known {
+		t.Fatalf("unconnected = %v, known %v", unconnected, known)
+	}
+	if text, refused := call(t, url, token); !refused || text != string(RefusedUnavailable) {
+		t.Fatalf("call = %q", text)
+	}
+	h.hung.Store(false)
+	if text, refused := call(t, url, token); refused {
+		t.Fatalf("call = %q", text)
 	}
 }
 

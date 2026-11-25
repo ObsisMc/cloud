@@ -19,7 +19,10 @@ const (
 	maxRequestBytes = 64 << 10
 	// connectionDeadline bounds one request, so a slow client holds nothing.
 	connectionDeadline = 10 * time.Second
-	pathPrefix         = "/mcp/"
+	// stateDeadline bounds reading stored state for a request: half of what the connection has to
+	// write its answer, so that a state that cannot be read in time is still answered.
+	stateDeadline = connectionDeadline / 2
+	pathPrefix    = "/mcp/"
 )
 
 // Server is the running loopback endpoint.
@@ -124,7 +127,6 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if message.Method != "tools/call" { // which answers its refusals itself
-		// Read when the request came, so an execution that ended meanwhile is no reason to refuse.
 		if valid, err := r.valid(req.Context(), h); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
@@ -172,8 +174,8 @@ func (r *Registry) answer(ctx context.Context, h holder, message rpcMessage) (an
 // call answers one tool call. Stored state is read first, so a node that left its turn refuses even
 // when this process has not caught up, and so does one whose execution ended; accept then decides
 // under the registry's lock, so a turn settling meanwhile either takes the signal or refuses it as
-// stale. An execution settled after that read changes nothing here: its turn does not end normally,
-// which drops the signal.
+// stale. Nothing is read again: an execution that ends after it was checked changes nothing here, its
+// turn does not end normally, which drops the signal.
 func (r *Registry) call(ctx context.Context, h holder, token string) (text string, refused bool) {
 	live, err := r.live(ctx, h)
 	if err != nil {

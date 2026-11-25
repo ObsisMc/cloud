@@ -87,6 +87,8 @@ type Registry struct {
 	state  State
 	ending Ending
 	now    func() time.Time
+	// deadline bounds one read of state.
+	deadline time.Duration
 
 	mu          sync.Mutex
 	url         string // the endpoint without its credential, set by Serve
@@ -98,7 +100,7 @@ type Registry struct {
 
 // NewRegistry returns an empty registry that checks state, and what ending already knows.
 func NewRegistry(state State, ending Ending) *Registry {
-	return &Registry{state: state, ending: ending, now: time.Now, nodes: map[string]*node{}, credentials: map[string]*node{},
+	return &Registry{state: state, ending: ending, now: time.Now, deadline: stateDeadline, nodes: map[string]*node{}, credentials: map[string]*node{},
 		tokens: map[string]*Attempt{}, revoked: map[string]Refusal{}}
 }
 
@@ -264,8 +266,11 @@ func (r *Registry) authorize(credential string) (holder, bool) {
 	return holder{credential, n.id, n.session, n.execution}, true
 }
 
-// valid reports whether the execution the credential was issued for still runs.
+// valid reports whether the execution the credential was issued for still runs. Like live, it asks what
+// this process decided after it read what is stored, so an end decided in between refuses too.
 func (r *Registry) valid(ctx context.Context, h holder) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.deadline)
+	defer cancel()
 	running, err := r.state.HostExecutionRunning(ctx, h.execution)
 	return running && !r.ending(h.session, h.execution), err
 }
@@ -273,6 +278,8 @@ func (r *Registry) valid(ctx context.Context, h holder) (bool, error) {
 // live reports whether the holder may call the tool: its credential is valid and its node executes a
 // turn of its session.
 func (r *Registry) live(ctx context.Context, h holder) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.deadline)
+	defer cancel()
 	live, err := r.state.WorkflowNodeTurnLive(ctx, h.nodeRun, h.session, h.execution)
 	return live && !r.ending(h.session, h.execution), err
 }
