@@ -259,3 +259,61 @@ func TestAMissingRegistryHasNoTool(t *testing.T) {
 	}
 	r.Revoke("n")
 }
+
+// A connection counts for the Agent whose endpoint was asked, once its start was sent: any method but
+// initialize and tools/list, and a withdrawn credential, say nothing.
+func TestAConnectionIsRecordedForTheStartedAgent(t *testing.T) {
+	h := serve(t)
+	ask := func(url, method string) int {
+		t.Helper()
+		status, _ := post(t, url, `{"jsonrpc":"2.0","id":1,"method":"`+method+`"}`)
+		return status
+	}
+	said := func(when, nodeRun string, unconnected, known bool) {
+		t.Helper()
+		if u, k := h.r.Unconnected(nodeRun); u != unconnected || k != known {
+			t.Fatalf("%s: unconnected = %v, known %v; want %v, %v", when, u, k, unconnected, known)
+		}
+	}
+	said("no such node", "n1", false, false)
+	a, other := h.r.Attempt("n1", "n1"), h.r.Attempt("n2", "n2")
+	said("no Agent", "n1", false, false)
+	url, otherURL := attach(t, a, "s1"), attach(t, other, "s2")
+	said("no start", "n1", false, false)
+	a.Started()
+	other.Started()
+	said("started", "n1", true, true)
+	ask(url, "ping")
+	ask(url, "resources/list")
+	call(t, url, a.Instruct().Token)
+	if status, _ := post(t, url, `{"jsonrpc":"2.0","method":"initialize"}`); status != http.StatusAccepted {
+		t.Fatalf("notification = %d", status)
+	}
+	said("other methods", "n1", true, true)
+	ask(url, "initialize")
+	said("initialize", "n1", false, true)
+	said("another node", "n2", true, true)
+	ask(otherURL, "tools/list")
+	said("tools/list", "n2", false, true)
+	h.r.Take("n1", "n1")
+	said("between turns", "n1", false, true)
+
+	next := h.r.Attempt("n1", "n1/turn-1")
+	fresh := attach(t, next, "s1")
+	said("a new Agent that was not started", "n1", false, false)
+	next.Started()
+	said("a new Agent", "n1", true, true)
+	if status := ask(url, "initialize"); status != http.StatusUnauthorized {
+		t.Fatalf("the old endpoint = %d", status)
+	}
+	h.r.connect(url[strings.LastIndex(url, "/")+1:]) // authorized before it was withdrawn
+	said("the old Agent's request", "n1", true, true)
+	ask(fresh, "tools/list")
+	said("the new Agent's request", "n1", false, true)
+	h.r.Revoke("n1")
+	next.Started()
+	said("revoked", "n1", false, false)
+	if u, k := (*Registry)(nil).Unconnected("n1"); u || k {
+		t.Fatal("a deployment without the tool said something")
+	}
+}

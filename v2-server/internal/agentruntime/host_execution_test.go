@@ -75,7 +75,8 @@ func (r *executionRecords) none(t *testing.T) {
 // parkHosted runs the first turn of a session given host tools and returns its start.
 func parkHosted(t *testing.T, h *ipcHarness, session execution.Session, f *fakeNodeIPC) (*fakeNodeIPC, node.Message) {
 	t.Helper()
-	done := runHosted(h, ipcContext(t), session, session.ID+"-first", &scriptedTools{}, discardIPCEvent)
+	tools := &scriptedTools{}
+	done := runHosted(h, ipcContext(t), session, session.ID+"-first", tools, discardIPCEvent)
 	if f == nil {
 		f = receiveIPC(t, h.created)
 	}
@@ -83,6 +84,9 @@ func parkHosted(t *testing.T, h *ipcHarness, session execution.Session, f *fakeN
 	f.finishTurn(t, start, session.ID+"-first", "done")
 	if got := receiveIPC(t, done); got.err != nil {
 		t.Fatalf("first turn: %+v", got)
+	}
+	if tools.starts() != 1 {
+		t.Fatalf("the start was said to be sent %d times", tools.starts())
 	}
 	return f, start
 }
@@ -98,15 +102,19 @@ func TestAHostExecutionIsRecordedBeforeItsStart(t *testing.T) {
 		return false
 	})
 	records = recordExecutions(h)
+	tools := &scriptedTools{}
 	f, start := parkHosted(t, h, h.session("hosted", "workspace"), nil)
 	if early || records.session(start.ExecutionID) != "hosted" {
 		t.Fatalf("the start went out before its record: %v", records.sessions)
 	}
 	// Further turns run in the same execution.
-	done := runHosted(h, ipcContext(t), h.session("hosted", "workspace"), "second", &scriptedTools{}, discardIPCEvent)
+	done := runHosted(h, ipcContext(t), h.session("hosted", "workspace"), "second", tools, discardIPCEvent)
 	f.finishTurn(t, nextIPCCommand(t, f, "submit_user_turn"), "second", "again")
 	if got := receiveIPC(t, done); got.err != nil {
 		t.Fatal(got.err)
+	}
+	if tools.starts() != 0 {
+		t.Fatal("a turn of a running execution was said to start one")
 	}
 	plain := startIPCRun(h, ipcContext(t), h.session("plain", "workspace-2"), "first", discardIPCEvent)
 	f.finishTurn(t, nextIPCCommand(t, f, "start_agent_session"), "first", "done")
@@ -135,9 +143,10 @@ func TestAStartIsNotSentWithoutItsRecord(t *testing.T) {
 			h := newIPCHarness(t, nil)
 			records := recordExecutions(h)
 			set(h, records)
-			got := receiveIPC(t, runHosted(h, ipcContext(t), h.session("hosted", "workspace"), "first", &scriptedTools{}, discardIPCEvent))
-			if got.err == nil || got.result.Status != execution.StatusFailed || !got.result.NotStarted || !got.result.NotDelivered {
-				t.Fatalf("outcome = %+v", got)
+			tools := &scriptedTools{}
+			got := receiveIPC(t, runHosted(h, ipcContext(t), h.session("hosted", "workspace"), "first", tools, discardIPCEvent))
+			if got.err == nil || got.result.Status != execution.StatusFailed || !got.result.NotStarted || !got.result.NotDelivered || tools.starts() != 0 {
+				t.Fatalf("outcome = %+v, starts = %d", got, tools.starts())
 			}
 			if sentCommand(receiveIPC(t, h.created), "start_agent_session") {
 				t.Fatal("a start was sent without its record")
@@ -148,6 +157,25 @@ func TestAStartIsNotSentWithoutItsRecord(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A start whose write failed was not sent, though the session counts as started.
+func TestAStartThatCouldNotBeSentIsNotSaidToBe(t *testing.T) {
+	h := newIPCHarness(t, nil)
+	recordExecutions(h)
+	f, _ := parkHosted(t, h, h.session("other", "workspace-2"), nil)
+	fail := func(m node.Message) error {
+		if m.Type != "start_agent_session" {
+			return nil
+		}
+		return net.ErrClosed
+	}
+	f.failSend.Store(&fail)
+	tools := &scriptedTools{}
+	got := receiveIPC(t, runHosted(h, ipcContext(t), h.session("hosted", "workspace"), "first", tools, discardIPCEvent))
+	if got.err == nil || got.result.Status != execution.StatusFailed || got.result.NotStarted || tools.attached != 1 || tools.starts() != 0 {
+		t.Fatalf("outcome = %+v, attached %d, starts %d", got, tools.attached, tools.starts())
 	}
 }
 

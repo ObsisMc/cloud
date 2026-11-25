@@ -51,11 +51,18 @@ func (f *fixture) agentOf(t *testing.T, session string) (*fakeAgent, string) {
 		t.Fatal("the session was not given the completion tool")
 	}
 	a := &fakeAgent{t: t, url: host.Attach(session).Servers[0].URL}
+	host.Started()
 	return a, host.Instruct().Token
 }
 
 // follow is the token the latest appended turn was sent with.
 func (f *fixture) follow(t *testing.T) string {
+	t.Helper()
+	return f.followTools(t).Instruct().Token
+}
+
+// followTools is the completion tool of the latest appended turn.
+func (f *fixture) followTools(t *testing.T) execution.HostTools {
 	t.Helper()
 	f.exec.mu.Lock()
 	defer f.exec.mu.Unlock()
@@ -63,7 +70,7 @@ func (f *fixture) follow(t *testing.T) string {
 	if host == nil {
 		t.Fatal("the follow-up turn was not given the completion tool")
 	}
-	return host.Instruct().Token
+	return host
 }
 
 // report calls the tool and returns its answer.

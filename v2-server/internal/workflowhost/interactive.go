@@ -103,6 +103,9 @@ type interactiveNode struct {
 	// Agent driver refused it (execution.Result.NotDelivered). The summary says so until the next
 	// message is claimed; nothing else records the lost message as such.
 	undelivered bool
+	// toolUnconnected means the node's Agent had not connected to its completion tool when the node
+	// last parked. It says so on the node and changes nothing else (host completion tool ADR D8).
+	toolUnconnected bool
 }
 
 // followUp is one human turn of an interactive node.
@@ -175,6 +178,9 @@ func (n *interactiveNode) summary() map[string]any {
 	if n.undelivered {
 		s["last_turn_error"] = turnErrorNotDelivered
 	}
+	if n.toolUnconnected {
+		s["completion_tool_unconnected"] = true
+	}
 	// Members who cannot read the starter's session still see what completing would take: the
 	// settled turn's answer, or what a forced completion would take instead.
 	if answer, source := n.candidate(snap); source != outputWithoutTurn {
@@ -240,6 +246,7 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 		return // shutting down; the next start interrupts the run
 	}
 	st.mu.Lock()
+	h.judgeTool(n)
 	// A turn the starter stopped is never a setup failure, even when the stop caught the session
 	// still being prepared: it parks like any stopped turn.
 	if err == nil && n.turns == 0 && !n.stopping && result.AgentLost &&
@@ -368,6 +375,16 @@ func (h *Host) settleInteractiveTurn(st *runState, a *attemptState, n *interacti
 	}
 	if h.park(st, n) {
 		h.autoAccept(st, n)
+	}
+}
+
+// judgeTool concludes whether the node's Agent connected to its completion tool, as a turn ends and
+// before anything withdraws the tool with the session; the park that follows writes it. It speaks of
+// the execution the node has now: without one (its start was never sent, or the server restarted
+// since) the last conclusion stands until the next execution first parks. Callers hold st.mu.
+func (h *Host) judgeTool(n *interactiveNode) {
+	if unconnected, known := h.tools.Unconnected(n.d.NodeRunID); known {
+		n.toolUnconnected = unconnected
 	}
 }
 
@@ -607,6 +624,7 @@ func (h *Host) runFollowUp(st *runState, a *attemptState, f followUp) {
 		// the starter, so the summary is the only place that can say the message was lost.
 		h.log.Warn("send interactive workflow turn", "run", n.d.RunID, "node_run", n.d.NodeRunID, "error", publicReason(err))
 		st.mu.Lock()
+		h.judgeTool(n)
 		n.undelivered = true
 		if errors.Is(err, execution.ErrSessionEnded) {
 			n.sessionEnded, n.sessionGone = true, true

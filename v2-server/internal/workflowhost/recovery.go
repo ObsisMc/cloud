@@ -108,6 +108,7 @@ func (h *Host) parkedNode(ctx context.Context, st *runState, d workflow.AgentDis
 			SessionEnded  bool                `json:"session_ended"`
 			Sent          int                 `json:"sent"`
 			LastTurnError string              `json:"last_turn_error"`
+			Unconnected   bool                `json:"completion_tool_unconnected"`
 			Completion    *completionSnapshot `json:"completion"`
 		} `json:"interactive"`
 		Baseline *fileBaseline `json:"completion_baseline"`
@@ -147,6 +148,8 @@ func (h *Host) parkedNode(ctx context.Context, st *runState, d workflow.AgentDis
 	// left no turn, so the turns below neither count its number nor tell that it was lost. Keep
 	// both, or rewriting the summary after the recovery would hide the notice and reuse its number.
 	n.undelivered = payload.Interactive.LastTurnError == turnErrorNotDelivered
+	// The Agent it was said of is gone; the next one is judged when it first parks.
+	n.toolUnconnected = payload.Interactive.Unconnected
 	n.seq = payload.Interactive.Sent
 	prefix := d.NodeRunID + "/turn-"
 	for cursor := ""; ; {

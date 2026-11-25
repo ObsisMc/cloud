@@ -21,6 +21,7 @@ type scriptedTools struct {
 	mu                 sync.Mutex
 	attached, instruct int
 	session            string
+	started            int
 }
 
 func (s *scriptedTools) Attach(session string) execution.HostServers {
@@ -30,6 +31,19 @@ func (s *scriptedTools) Attach(session string) execution.HostServers {
 	s.session = session
 	credential := strings.Repeat("c", 31) + string(rune('0'+s.attached))
 	return execution.HostServers{Servers: []execution.HostMCPServer{{Name: "ora-test", URL: "http://127.0.0.1:41234/mcp/" + credential, Headers: map[string]string{}}}, Secrets: []string{credential}}
+}
+
+func (s *scriptedTools) Started() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.started++
+}
+
+// starts is how often a start was said to be sent.
+func (s *scriptedTools) starts() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.started
 }
 
 func (s *scriptedTools) token(n int) string { return strings.Repeat("d", 31) + string(rune('0'+n)) }
@@ -317,6 +331,7 @@ type invalidTools struct{}
 func (invalidTools) Attach(string) execution.HostServers {
 	return execution.HostServers{Servers: []execution.HostMCPServer{{Name: "ora-test", URL: "http://localhost/mcp", Headers: map[string]string{}}}}
 }
+func (invalidTools) Started() {}
 func (invalidTools) Instruct() execution.HostInstruction {
 	return execution.HostInstruction{Text: "x", Token: "x"}
 }

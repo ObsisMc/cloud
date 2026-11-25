@@ -43,6 +43,7 @@ func (d *reportingDriver) Run(ctx context.Context, _ execution.Scope, s executio
 		if err := d.db.RecordHostExecution(ctx, fmt.Sprintf("%p-%s", d, s.ID), s.ID); err != nil {
 			d.t.Error(err)
 		}
+		turn.Host.Started()
 	}
 	d.mu.Unlock()
 	instruction := turn.Host.Instruct()

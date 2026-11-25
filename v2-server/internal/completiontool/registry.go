@@ -64,6 +64,9 @@ type node struct {
 	// credential names the endpoint of the node's current physical Agent, session the execution
 	// session it belongs to.
 	credential, session string
+	// started says that Agent's start was sent to Node, connected that its endpoint was asked to
+	// initialize or to list its tools.
+	started, connected bool
 	// attempts are the turns whose token may still be used, by attempt.
 	attempts map[string]*Attempt
 }
@@ -124,11 +127,47 @@ func (a *Attempt) Attach(sessionID string) execution.HostServers {
 	if a.open() {
 		delete(r.credentials, a.node.credential)
 		a.node.credential, a.node.session = credential, sessionID
+		a.node.started, a.node.connected = false, false
 		r.credentials[credential] = a.node
 	}
 	return execution.HostServers{
 		Servers: []execution.HostMCPServer{{Name: ServerName, URL: r.url + credential, Headers: map[string]string{}}},
 		Secrets: []string{credential},
+	}
+}
+
+// Started records that the Agent Attach issued the credential for was sent its start.
+func (a *Attempt) Started() {
+	a.r.mu.Lock()
+	defer a.r.mu.Unlock()
+	if a.open() {
+		a.node.started = true
+	}
+}
+
+// Unconnected reports whether the node run's current Agent has not asked its endpoint to initialize
+// or to list its tools yet. known is false without an Agent that was sent its start: nothing can be
+// said about its connection then.
+func (r *Registry) Unconnected(nodeRunID string) (unconnected, known bool) {
+	if r == nil {
+		return false, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := r.nodes[nodeRunID]
+	if n == nil || !n.started {
+		return false, false
+	}
+	return !n.connected, true
+}
+
+// connect records that the Agent holding credential reached its endpoint. One whose credential was
+// withdrawn meanwhile says nothing about the Agent that replaced it.
+func (r *Registry) connect(credential string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n := r.credentials[credential]; n != nil {
+		n.connected = true
 	}
 }
 
