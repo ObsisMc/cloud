@@ -261,8 +261,9 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 	}
 	// The first prompt reaches the Agent only once the node is bound to its session: an Agent
 	// reporting through the completion tool right away must find its node bound. Every path after
-	// a started session lets it through or ends the session, which ends the held-back turn.
-	release := make(chan struct{})
+	// a started session lets it through (a value) or abandons it (closing the channel), which
+	// ends the held-back turn at once, also when the session cannot be ended then.
+	release := make(chan struct{}, 1)
 	request.Release = release
 	// Only a root-scope interactive attempt whose frozen policy is agent may report completion
 	// (completion signal ADR D1); no other session even sees the tool.
@@ -323,20 +324,23 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 		return
 	}
 
-	// Neither let through nor ended (an unforeseen return or a panic below): end the session
-	// rather than leave its first turn waiting.
+	// Neither let through nor abandoned (an unforeseen return or a panic below): abandon the
+	// first turn and end the session rather than leave the turn waiting.
 	held := true
 	defer func() {
 		if held {
+			close(release)
 			_ = h.end(st.scope, ref.SessionID)
 		}
 	}()
 	// Desktop publishes the binding only after the owning prompt is accepted; Start returning a
 	// Ref is that acceptance here, and the prompt waits for the binding before it reaches the
-	// Agent. A refused binding (the attempt was cancelled or already bound elsewhere) ends the
-	// session, whose held-back turn then never reaches an Agent.
+	// Agent. A refused binding (the attempt was cancelled or already bound elsewhere) abandons
+	// the held-back turn, which never reaches an Agent, before the session is ended: the turn
+	// ends even when the End cannot read the session.
 	if _, err := h.store.BindWorkflowNodeSession(h.ctx, st.scope.TenantID, d.RunID, d.NodeRunID, ref.SessionID); err != nil {
 		held = false
+		close(release)
 		endErr := h.end(st.scope, ref.SessionID)
 		cancelling, last := h.endTurn(st, d.RunID, a, endErr)
 		if cancelling {
@@ -350,16 +354,18 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 	}
 	held = false
 	// Decided under mu, which CancelRun holds to set cancelling: a cancellation either comes
-	// first and the prompt is never let through, or comes after and stops a released turn.
+	// first and the prompt is abandoned, or comes after and stops a released turn.
 	st.mu.Lock()
 	cancelling = st.cancelling
-	if !cancelling {
+	if cancelling {
 		close(release)
+	} else {
+		release <- struct{}{}
 	}
 	st.mu.Unlock()
 	if cancelling {
 		// The run is being cancelled while the first prompt waits: like an attempt abandoned
-		// before its Start, no Agent ever sees it. Ending the session ends the held-back turn.
+		// before its Start, no Agent ever sees it, and the session is ended after.
 		endErr := h.end(st.scope, ref.SessionID)
 		if _, last := h.endTurn(st, d.RunID, a, endErr); last {
 			h.finishCancel(st, d.RunID)

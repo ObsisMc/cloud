@@ -566,7 +566,8 @@ func (s *Service) launch(scope execution.Scope, session execution.Session, turn 
 		lifecycle := turn.MCPGeneration != nil || session.MCP != nil && len(session.MCP.Bindings) != 0
 		if session.Target != nil {
 			// A first turn the caller holds back (StartRequest.Release) reaches no Agent until it
-			// is let through; an End, a stop or shutdown cancels ctx and ends it as never started.
+			// is let through; the caller abandoning it, an End, a stop or shutdown ends it as never
+			// started.
 			released := awaitRelease(ctx, release)
 			for attempt := 0; ; attempt++ {
 				s.mu.Lock()
@@ -579,8 +580,7 @@ func (s *Service) launch(scope execution.Scope, session execution.Session, turn 
 				}
 				switch {
 				case !released:
-					result = failedResult(ctx, context.Canceled)
-					result.NotStarted = true
+					result = execution.Result{Status: execution.StatusCancelled, StopReason: "cancelled", NotStarted: true}
 				case gone:
 					// The checkout the Agent worked in no longer exists: nothing can continue it.
 					result = failedResult(ctx, agentErr)
@@ -1251,17 +1251,20 @@ func newID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
-// awaitRelease waits until release is closed and reports whether the turn may go on: a ctx that
-// ended first, even together with the release, holds it back. A nil release never holds back.
+// awaitRelease waits for the caller's decision on a held-back turn (StartRequest.Release) and
+// reports whether the turn may go on: only a value lets it through, while the channel's closing
+// abandons it. A ctx that ended first, even together with the release, holds it back. A nil
+// release never holds back.
 func awaitRelease(ctx context.Context, release <-chan struct{}) bool {
 	if release == nil {
 		return true
 	}
+	var released bool
 	select {
-	case <-release:
+	case _, released = <-release:
 	case <-ctx.Done():
 	}
-	return ctx.Err() == nil
+	return released && ctx.Err() == nil
 }
 
 func failedResult(ctx context.Context, err error) execution.Result {

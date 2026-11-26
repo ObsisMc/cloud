@@ -242,3 +242,73 @@ func assertNeverStarted(t *testing.T, driver *reportingDriver, runtime *executio
 		t.Errorf("turns = %+v, want one that never started", turns.Items)
 	}
 }
+
+// A refused binding abandons the held-back first turn before the session is ended, so the turn
+// ends as never started even when that End cannot read the session.
+func TestARefusedBindingEndsTheFirstTurnWhenTheSessionCannotBeEnded(t *testing.T) {
+	f, admin := newFixtureWithAdmin(t)
+	ctx := t.Context()
+	var session string
+	locked := make(chan pgx.Tx, 1)
+	driver, runtime := releaseFixture(t, f, func(ctx context.Context, scope execution.Scope, req execution.StartRequest, ref execution.Ref) {
+		session = ref.SessionID
+		// Nothing reads execution sessions while this lock is held: the End after the refused
+		// binding below gives up.
+		tx, err := admin.Begin(ctx)
+		if err != nil {
+			t.Error(err)
+			close(locked)
+			return
+		}
+		if _, err := tx.Exec(ctx, `LOCK TABLE v2_execution_sessions IN ACCESS EXCLUSIVE MODE`); err != nil {
+			t.Error(err)
+			_ = tx.Rollback(ctx)
+			close(locked)
+			return
+		}
+		locked <- tx
+		if _, err := f.s.BindWorkflowNodeSession(ctx, scope.TenantID, req.Caller.ID, req.Caller.AttemptID, "another-session"); err != nil {
+			t.Error(err)
+		}
+	}, nil)
+	f.host.stopTimeout = time.Second
+	runID := f.run(t, agentChain, str("支付重构"))
+	if _, err := f.host.StartRun(ctx, f.scope, runID); err != nil {
+		t.Fatal(err)
+	}
+	tx, ok := <-locked
+	if !ok {
+		t.FailNow()
+	}
+	run, nodes := f.await(t, runID, terminal)
+	if run.Status != store.WorkflowStatusFailed || node(nodes, "a").Status != store.WorkflowStatusFailed {
+		t.Fatalf("run %s, node %s, want both failed", run.Status, node(nodes, "a").Status)
+	}
+	// The End gave up and nothing ends the session again for a failed run; only the abandoned
+	// release has ended the turn.
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	scope := executionScope(f.scope)
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		turns, err := runtime.ReadTurns(ctx, scope, session, "", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(turns.Items) == 1 && turns.Items[0].Result != nil {
+			if !turns.Items[0].Result.NotStarted {
+				t.Fatalf("first turn = %+v, want one that never started", turns.Items[0])
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the first turn still waits: %+v", turns.Items)
+		}
+	}
+	driver.mu.Lock()
+	runs := driver.runs
+	driver.mu.Unlock()
+	if runs != 0 {
+		t.Errorf("%d turns reached the Agent driver", runs)
+	}
+}
