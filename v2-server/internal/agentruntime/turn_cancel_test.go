@@ -570,6 +570,7 @@ func TestDriverIPCNodeLostDuringTheSettlementWaitIsTheCallersStop(t *testing.T) 
 func TestDriverIPCStopOfARefusedSubmissionKeepsTheSession(t *testing.T) {
 	var refuse atomic.Bool
 	failedRead := make(chan struct{}, 1)
+	followed := make(chan struct{}, 1)
 	h := newIPCHarness(t, func(f *fakeNodeIPC, m node.Message) bool {
 		if m.Type == "submit_user_turn" && refuse.Load() {
 			var command struct {
@@ -593,6 +594,7 @@ func TestDriverIPCStopOfARefusedSubmissionKeepsTheSession(t *testing.T) {
 			signal(failedRead)
 			return nil, execution.ErrUnavailable
 		}
+		signal(followed)
 		return nil, nil
 	}
 	ctx := ipcContext(t)
@@ -614,6 +616,12 @@ func TestDriverIPCStopOfARefusedSubmissionKeepsTheSession(t *testing.T) {
 	if got := receiveIPC(t, first); got.err != nil {
 		t.Fatal(got.err)
 	}
+	// The session's MCP watcher (followMCP) reads the target once as it starts, in the
+	// background. Let that read pass before refusing: had it come after, its failed read would
+	// be taken for the refused submission's, and the stop below would reach the turn before the
+	// driver knew Node refused it. Until the watcher's next tick, five seconds on, only the
+	// refused submission reads.
+	receiveIPC(t, followed)
 	refuse.Store(true)
 	refused := run("refused")
 	nextIPCCommand(t, f, "submit_user_turn")
