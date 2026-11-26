@@ -100,3 +100,36 @@ describe('RunActInspector injectedFailureContext', () => {
     expect(screen.queryByText('本次尝试注入的上次失败信息')).toBeNull()
   })
 })
+
+describe('RunActInspector interrupted_by_restart', () => {
+  // A node can fail this way while it was executing or while it was parked awaiting input (for
+  // instance a start without an Agent runtime), so the hint must not claim it was running.
+  const restarted = (message: string): GraphWorkflowNodeState => ({
+    status: 'failed',
+    errorMessage: message,
+    errorDetail: {
+      kind: 'interrupted_by_restart',
+      message,
+      sourceChain: [],
+      attempt: 1,
+      resumable: true,
+      recordedAt: 0,
+    },
+  })
+
+  it('says the restart interrupted the node, not that it was running, in zh-CN', () => {
+    renderInspector('zh-CN', restarted('this start has no Agent runtime, so the node\'s conversation is not kept'))
+
+    expect(screen.getByText('被应用重启打断')).toBeInTheDocument()
+    expect(screen.getByText('应用重启打断了该节点，可直接续跑，该节点会重新执行')).toBeInTheDocument()
+    expect(screen.queryByText(/仍在运行/)).toBeNull()
+  })
+
+  it('says the restart interrupted the node, not that it was running, in en-US', () => {
+    renderInspector('en-US', restarted('workflow run interrupted by server restart'))
+
+    expect(screen.getByText('Interrupted by app restart')).toBeInTheDocument()
+    expect(screen.getByText('The app restart interrupted this node; resume directly to run it again')).toBeInTheDocument()
+    expect(screen.queryByText(/was running/)).toBeNull()
+  })
+})

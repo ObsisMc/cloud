@@ -493,7 +493,7 @@ export const workflowRunTranslations = {
       "智能体以本版本 Ora 不认识的方式停止，请升级 Ora 或更换智能体",
     "workflowRun.errorKind.interrupted_by_restart": "被应用重启打断",
     "workflowRun.errorHint.interrupted_by_restart":
-      "应用重启时该节点仍在运行，可直接续跑",
+      "应用重启打断了该节点，可直接续跑，该节点会重新执行",
     "workflowRun.errorKind.multiple_outputs": "多个输出节点同时完成",
     "workflowRun.errorHint.multiple_outputs":
       "工作流结构有误，修正分支后发布新版本",
@@ -1146,7 +1146,7 @@ export const workflowRunTranslations = {
     "workflowRun.errorKind.interrupted_by_restart":
       "Interrupted by app restart",
     "workflowRun.errorHint.interrupted_by_restart":
-      "The node was running when the app restarted; resume directly",
+      "The app restart interrupted this node; resume directly to run it again",
     "workflowRun.errorKind.multiple_outputs": "Multiple output nodes completed",
     "workflowRun.errorHint.multiple_outputs":
       "The workflow graph is wrong; fix the branches and publish a new version",
