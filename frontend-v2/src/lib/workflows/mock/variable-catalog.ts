@@ -1,4 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
+import { loopVariableType, namedEntries } from "./loop-config";
 import type {
   WorkflowGlobalVariable,
   WorkflowIterationConfig,
@@ -240,14 +241,8 @@ function appendLoopVariables(
   const config = node.data.loopConfig;
   if (consumerLoopId === node.id) {
     for (const variable of namedEntries(config?.variables)) {
-      // Consumers read the type as text; a draft may hold anything there.
-      const valueType: unknown = variable.valueType;
       entries.push(
-        nodeVariable(
-          node,
-          variable.name,
-          typeof valueType === "string" ? variable.valueType : "any",
-        ),
+        nodeVariable(node, variable.name, loopVariableType(variable)),
       );
     }
     return;
@@ -258,22 +253,6 @@ function appendLoopVariables(
   for (const output of namedEntries(config?.outputs)) {
     entries.push(nodeVariable(node, output.name, "any"));
   }
-}
-
-/**
- * The entries that declare a variable. An imported draft keeps `loopConfig` as it was written,
- * and the editor derives the catalog before anyone can repair it, so an incomplete list must
- * not throw.
- */
-function namedEntries<T extends { name: string }>(
-  list: readonly T[] | undefined,
-): T[] {
-  return Array.isArray(list)
-    ? list.filter(
-        (entry: T | null | undefined) =>
-          typeof entry?.name === "string" && entry.name.trim() !== "",
-      )
-    : [];
 }
 
 /** Adds one iteration node's round bindings and exposed results by consumer scope. */
