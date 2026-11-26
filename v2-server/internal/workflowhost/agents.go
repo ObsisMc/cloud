@@ -259,6 +259,11 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 		// The session outlives its turns until completion, a stop or the run's end ends it.
 		request.Lifetime = execution.LifetimeHeld
 	}
+	// The first prompt reaches the Agent only once the node is bound to its session: an Agent
+	// reporting through the completion tool right away must find its node bound. Every path after
+	// a started session lets it through or ends the session, which ends the held-back turn.
+	release := make(chan struct{})
+	request.Release = release
 	// Only a root-scope interactive attempt whose frozen policy is agent may report completion
 	// (completion signal ADR D1); no other session even sees the tool.
 	policy, tracked := workflow.CompletionSignalEndTurn, false
@@ -318,10 +323,20 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 		return
 	}
 
+	// Neither let through nor ended (an unforeseen return or a panic below): end the session
+	// rather than leave its first turn waiting.
+	held := true
+	defer func() {
+		if held {
+			_ = h.end(st.scope, ref.SessionID)
+		}
+	}()
 	// Desktop publishes the binding only after the owning prompt is accepted; Start returning a
-	// Ref is that acceptance here. A refused binding (the attempt was cancelled or already
-	// bound elsewhere) must not leave the new session running unowned.
+	// Ref is that acceptance here, and the prompt waits for the binding before it reaches the
+	// Agent. A refused binding (the attempt was cancelled or already bound elsewhere) ends the
+	// session, whose held-back turn then never reaches an Agent.
 	if _, err := h.store.BindWorkflowNodeSession(h.ctx, st.scope.TenantID, d.RunID, d.NodeRunID, ref.SessionID); err != nil {
+		held = false
 		endErr := h.end(st.scope, ref.SessionID)
 		cancelling, last := h.endTurn(st, d.RunID, a, endErr)
 		if cancelling {
@@ -333,6 +348,20 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 		fail(workflow.Failure{Kind: workflow.FailureSessionBindingRejected, Message: "the attempt refused its session binding"})
 		return
 	}
+	held = false
+	st.mu.Lock()
+	cancelling = st.cancelling
+	st.mu.Unlock()
+	if cancelling {
+		// The run is being cancelled while the first prompt waits: like an attempt abandoned
+		// before its Start, no Agent ever sees it. Ending the session ends the held-back turn.
+		endErr := h.end(st.scope, ref.SessionID)
+		if _, last := h.endTurn(st, d.RunID, a, endErr); last {
+			h.finishCancel(st, d.RunID)
+		}
+		return
+	}
+	close(release)
 	h.hub.Publish(d.RunID)
 	if unstopped {
 		// The run's cancellation gave up waiting for this Start: stop the turn it returned. The
