@@ -38,6 +38,11 @@ type Config struct {
 	// CheckHostTools reports whether a project's sessions can be given host tools. Required with
 	// CompletionTool.
 	CheckHostTools func(context.Context, execution.Scope, string) error
+	// NoAgentRuntime says this start has no Agent runtime (no V2_NODE_ASSETS_DIR or no model, so
+	// only the model path is served). Recovering a parked interactive node then draws no conclusion
+	// about its executor: the node fails as interrupted by the restart, not as a missing Agent (see
+	// recoverParked).
+	NoAgentRuntime bool
 }
 
 // Host executes workflow runs in this process and implements server.WorkflowRunHost. Every run
@@ -66,6 +71,8 @@ type Host struct {
 	// Node can give it to an Agent.
 	tools      *completiontool.Registry
 	checkTools func(context.Context, execution.Scope, string) error
+	// noAgentRuntime is Config.NoAgentRuntime.
+	noAgentRuntime bool
 
 	ctx     context.Context
 	stop    context.CancelFunc
@@ -155,7 +162,7 @@ func NewHost(c Config) (*Host, error) {
 	}
 	h := &Host{
 		store: c.Store, exec: c.Execution, catalog: c.Catalog, hub: c.Hub, log: c.Logger, now: c.Now,
-		tools: c.CompletionTool, checkTools: c.CheckHostTools,
+		tools: c.CompletionTool, checkTools: c.CheckHostTools, noAgentRuntime: c.NoAgentRuntime,
 		stopTimeout: c.StopTimeout, busyRetry: c.BusyRetry, runs: map[string]*runState{}, lifecycles: map[string]*lifecycleLock{},
 	}
 	if h.hub == nil {

@@ -44,7 +44,9 @@ func parkedInteractive(g *workflow.Graph, row store.WorkflowNodeRun) bool {
 // recoverParked rebuilds the process-local state of the run's parked interactive nodes, so the
 // starter can send a turn, stop it or complete the node again. A node whose executor the catalog
 // no longer offers, or whose session is gone, cannot continue and fails like a lost session; a
-// catalog or session that cannot be read aborts startup instead (see recoveredExecutor).
+// catalog or session that cannot be read aborts startup instead (see recoveredExecutor). A start
+// without an Agent runtime offers no executor at all, which says nothing about the node's: the
+// node fails as interrupted by the restart instead, which a resume from the failure continues.
 func (h *Host) recoverParked(ctx context.Context, st *runState, run store.WorkflowEngineRun) error {
 	g, err := workflow.ParseGraph(run.Graph)
 	if err != nil {
@@ -94,6 +96,10 @@ func (h *Host) recoverParked(ctx context.Context, st *runState, run store.Workfl
 // parkedNode rebuilds one parked node from its row and its session's recorded turns, or fails
 // the node and returns nil when it cannot continue.
 func (h *Host) parkedNode(ctx context.Context, st *runState, d workflow.AgentDispatch, row store.WorkflowNodeRun) (*interactiveNode, error) {
+	if h.noAgentRuntime {
+		return nil, h.failParked(st, d, *row.SessionID, workflow.Failure{Kind: workflow.FailureInterruptedByRestart,
+			Message: "this start has no Agent runtime, so the node's conversation is not kept"})
+	}
 	cfg := d.Node.Agent()
 	executor, failure, err := h.recoveredExecutor(ctx, st.scope, cfg)
 	if err != nil {
