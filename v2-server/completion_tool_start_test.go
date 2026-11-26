@@ -95,8 +95,8 @@ func TestTheCompletionToolIsServedOnceParkedExecutionsAreSettled(t *testing.T) {
 	}
 	_, err = admin.Exec(ctx, "SET search_path TO "+schema)
 	must(err)
-	// Recovering the parked node comes after the endpoint: without an Agent runtime its executor is gone
-	// and it fails. It waits there for the test, then is refused, which ends the start.
+	// Recovering the parked node comes after the endpoint: without an Agent runtime it fails as
+	// interrupted by the restart. It waits there for the test, then is refused, which ends the start.
 	later := time.Now().UnixNano() // an advisory lock of this test alone
 	_, err = admin.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION refuse_node() RETURNS trigger LANGUAGE plpgsql AS $$
 		BEGIN PERFORM pg_advisory_xact_lock(%d); RAISE EXCEPTION 'node refused'; END $$;

@@ -357,7 +357,8 @@ func runWithListener(addr, dbURL string, cleanup, fixture, testFixtures bool, li
 		return fmt.Errorf("serve the Agent completion tool: %w", e)
 	}
 	defer completionServer.Close()
-	workflowRuns, e := workflowhost.NewHost(workflowhost.Config{Store: db, Execution: runtime, Catalog: runtime, CompletionTool: completionTool, CheckHostTools: runtime.CheckHostTools})
+	workflowRuns, e := workflowhost.NewHost(workflowhost.Config{Store: db, Execution: runtime, Catalog: runtime, CompletionTool: completionTool, CheckHostTools: runtime.CheckHostTools,
+		NoAgentRuntime: driver == nil})
 	if e != nil {
 		return e
 	}

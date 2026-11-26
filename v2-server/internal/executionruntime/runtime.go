@@ -803,7 +803,15 @@ func (s *Service) concludeLater(scope execution.Scope, sid string, stopped bool)
 // deadline never waits forever, and a stop the Node does not confirm within the budget marks
 // only that project's Node for rebuild. Close joins every attempt, and none starts once it has.
 // The caller must not hold mu.
+//
+// Without an Agent runtime there is no Agent to stop, and it returns at once without End: this
+// process started none, and its start already stopped every Node of earlier processes, or did not
+// start at all when it could not (agentruntime.Recover in main). A session that execution recovery
+// kept for a parked node (store.RecoverExecutions) is then only ended in the store.
 func (s *Service) stopAgent(ctx context.Context, sid string) error {
+	if s.agent == nil {
+		return nil
+	}
 	s.mu.Lock()
 	call := s.stops[sid]
 	if call == nil {
