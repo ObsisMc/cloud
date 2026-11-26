@@ -88,6 +88,13 @@ type StartRequest struct {
 	// Host gives this turn its host tools; nil gives none. It is never recorded, and no part of
 	// the attempt's identity. Only a held workflow session may have it, on every one of its turns.
 	Host HostTools
+	// Release, when not nil, holds the first turn back from the Agent until it is closed: the
+	// session and its turn are recorded and Start returns, but no Agent sees the prompt before
+	// the caller has done what must precede it (a workflow binds its node to the session). Ending
+	// the session, stopping the turn or closing the service while it waits ends the turn as never
+	// started. A caller that sets it must close it or end the session on every path. Only a
+	// workflow session may have it; it is no part of the attempt's identity.
+	Release <-chan struct{}
 }
 
 // Lifetime says when the execution service may end an Agent session without being asked.
