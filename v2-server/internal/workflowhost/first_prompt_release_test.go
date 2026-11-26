@@ -84,12 +84,12 @@ func TestTheFirstReportIsAcceptedWhileTheBindingWaits(t *testing.T) {
 		// The Start has returned; the attempt binds next, behind this lock on the run's row.
 		tx, err := admin.Begin(ctx)
 		if err != nil {
-			t.Error(err)
+			unlocked <- err
 			return
 		}
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM v2_workflow_runs WHERE id = $1 FOR UPDATE`, req.Caller.ID); err != nil {
-			t.Error(err)
 			_ = tx.Rollback(ctx)
+			unlocked <- err
 			return
 		}
 		go func() { unlocked <- holdUntilBlocked(ctx, tx, driver) }()

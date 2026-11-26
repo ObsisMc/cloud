@@ -349,8 +349,13 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 		return
 	}
 	held = false
+	// Decided under mu, which CancelRun holds to set cancelling: a cancellation either comes
+	// first and the prompt is never let through, or comes after and stops a released turn.
 	st.mu.Lock()
 	cancelling = st.cancelling
+	if !cancelling {
+		close(release)
+	}
 	st.mu.Unlock()
 	if cancelling {
 		// The run is being cancelled while the first prompt waits: like an attempt abandoned
@@ -361,7 +366,6 @@ func (h *Host) runAgent(st *runState, d workflow.AgentDispatch, generation uint6
 		}
 		return
 	}
-	close(release)
 	h.hub.Publish(d.RunID)
 	if unstopped {
 		// The run's cancellation gave up waiting for this Start: stop the turn it returned. The
